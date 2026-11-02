@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
 test("ws-server deploy workflow keeps only the exact production restart privileged", () => {
   const text = fs.readFileSync(".github/workflows/ws-server-deploy.yml", "utf8");
@@ -213,9 +214,22 @@ test("root staging accepts a symlinked psql only when it resolves to a root-owne
   fs.symlinkSync("/usr/bin/env", `${dir}/link-to-env`);
   if (process.getuid() !== 0) assert.equal(trusted(`${dir}/link-to-env`), false, "link in a non-root directory");
 
-  const system = ["/usr/bin/psql", "/bin/sh", "/usr/bin/awk"].find((candidate) => {
-    try { return fs.lstatSync(candidate).isSymbolicLink() && fs.statSync(candidate).uid === 0; } catch { return false; }
+  // Real system symlinks: the shell check must agree with an independent reading of the same rule.
+  const describe = (candidate) => {
+    const target = fs.realpathSync(candidate);
+    const entries = [fs.realpathSync(path.dirname(candidate)), target, path.dirname(target)].map((entry) => {
+      const st = fs.statSync(entry);
+      return { entry, uid: st.uid, gid: st.gid, mode: (st.mode & 0o7777).toString(8), ok: st.uid === 0 && st.gid === 0 && (st.mode & 0o022) === 0 };
+    });
+    const st = fs.statSync(target);
+    return { expected: st.isFile() && (st.mode & 0o111) !== 0 && entries.every((entry) => entry.ok), entries };
+  };
+  const systemLinks = ["/usr/bin/psql", "/bin/sh", "/usr/bin/awk"].filter((candidate) => {
+    try { return fs.lstatSync(candidate).isSymbolicLink() && fs.existsSync(candidate); } catch { return false; }
   });
-  if (!system) return t.skip("no root-owned system symlink available");
-  assert.equal(trusted(system), true, `standard system symlink ${system}`);
+  for (const candidate of systemLinks) {
+    const { expected, entries } = describe(candidate);
+    assert.equal(trusted(candidate), expected, `${candidate}: ${JSON.stringify(entries)}`);
+  }
+  if (!systemLinks.some((candidate) => describe(candidate).expected)) t.skip("no root-owned system symlink available");
 });
