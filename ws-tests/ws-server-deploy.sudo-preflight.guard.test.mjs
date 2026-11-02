@@ -233,3 +233,30 @@ test("root staging accepts a symlinked psql only when it resolves to a root-owne
   }
   if (!systemLinks.some((candidate) => describe(candidate).expected)) t.skip("no root-owned system symlink available");
 });
+
+test("restart gate runbook commands parse and keep the first-deployment safety rules", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const doc = fs.readFileSync("docs/ws-production-restart-gate.md", "utf8");
+  const commands = [...doc.matchAll(/`([^`\n]+)`/g)].map((match) => match[1])
+    .filter((span) => /^(T4_DIR=|git |ls |grep |diff |install |bash |stat |systemctl |cp |iptables |curl |ss |umask |P=|tar |test |rm |sudo |cmp |printf |ln |readlink |visudo |id )/.test(span));
+  assert.ok(commands.length >= 40);
+  for (const command of commands) {
+    const parsed = spawnSync("bash", ["-n", "-c", command.replaceAll("<SHA>", "sha").replaceAll("<PREV_SHA>", "prev")], { encoding: "utf8" });
+    assert.equal(parsed.status, 0, `${command}\n${parsed.stderr}`);
+  }
+  // The operator queries run inside one single-quoted node script, so they must not contain a single quote.
+  for (const command of commands.filter((span) => span.startsWith("T4_DIR="))) {
+    assert.doesNotMatch(command.slice(command.indexOf(" -e '") + 5, -1), /'/);
+  }
+  assert.match(doc, /Returning to the previous release is covered by this runbook only before C6\.1/);
+  assert.match(doc, /iptables -S INPUT \| grep -n t4-ws-block-new/);
+  const beforeStop = doc.slice(doc.indexOf("4. Immediately before the stop"), doc.indexOf("5. `systemctl stop ws-server.service"));
+  assert.match(beforeStop, /C-M1 position and effect again/);
+  const recovery = doc.slice(doc.indexOf("**C7. Recovery (root)**"));
+  // Restoring the old release starts WS only when the link points exactly to it; a rollback is proven by the running process.
+  assert.match(recovery, /test "\$\(readlink -f \/opt\/ws-server\/current\)" = \/opt\/ws-server\/releases\/<PREV_SHA>\/ws-server && systemctl reset-failed ws-server\.service && systemctl start ws-server\.service/);
+  assert.match(recovery, /readlink -f \/proc\/\$\(systemctl show ws-server\.service -p MainPID --value\)\/cwd/);
+  // The manual rollback restarts only after the release check and the link switch succeeded.
+  assert.match(recovery, /test -f \/opt\/ws-server\/releases\/<PREV_SHA>\/ws-server\/server\.mjs && ln -sfn [^`]* && systemctl reset-failed ws-server\.service && systemctl restart ws-server\.service/);
+  assert.doesNotMatch(recovery, /; systemctl restart ws-server\.service/);
+});
