@@ -4,13 +4,15 @@ import path from "node:path";
 import { isStateStorageValid as realIsStateStorageValid } from "../../netlify/functions/_shared/poker-state-utils.mjs";
 import { applyLeaveTable as realApplyLeaveTable } from "../../netlify/functions/_shared/poker-reducer.mjs";
 import { requireAuthoritativeHumanStack as realRequireAuthoritativeHumanStack } from "./human-stack-accounting.mjs";
+import { materializeShowdownAndPayout as realMaterializeShowdownAndPayout } from "../../netlify/functions/_shared/poker-materialize-showdown.mjs";
+import { maybeWriteSettlementAudit } from "../../ws-server/poker/persistence/persisted-state-writer.mjs";
 
 const root = process.cwd();
 const loadExecutePokerLeave = (mocks) => {
   const source = fs.readFileSync(path.join(root, "shared/poker-domain/leave.mjs"), "utf8");
   const withoutImports = source.replace(/^\s*import[\s\S]*?;\s*$/gm, "");
   const rewritten = withoutImports.replace(/export\s+async\s+function\s+/g, "async function ");
-  const factory = new Function("mocks", `"use strict"; const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop, requireAuthoritativeHumanStack, executeTerminalPokerCloseInTx } = mocks; ${rewritten}; return executePokerLeave;`);
+  const factory = new Function("mocks", `"use strict"; const { postTransaction, deletePokerRequest, ensurePokerRequest, storePokerRequestResult, updatePokerStateOptimistic, advanceIfNeeded, applyLeaveTable, isStateStorageValid, withoutPrivateState, buildSeatBotMap, isBotTurn, deriveCommunityCards, deriveRemainingDeck, isHoleCardsTableMissing, loadHoleCardsByUserId, hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop, requireAuthoritativeHumanStack, executeTerminalPokerCloseInTx, materializeShowdownAndPayout } = mocks; ${rewritten}; return executePokerLeave;`);
   return factory(mocks);
 };
 
@@ -102,6 +104,7 @@ const makeMocks = () => {
       runAdvanceLoop: (s) => ({ nextState: s }),
       runBotAutoplayLoop: async () => ({ responseFinalState: state.value, loopVersion: state.version, botActionCount: 0, botStopReason: "not_applicable" }),
       requireAuthoritativeHumanStack: realRequireAuthoritativeHumanStack,
+      materializeShowdownAndPayout: realMaterializeShowdownAndPayout,
       executeTerminalPokerCloseInTx: async () => {
         calls.terminalCloses += 1;
         calls.closeTable += 1;
@@ -348,6 +351,74 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(result.viewState.seats.some((seat) => seat.userId === userId), false);
   assert.equal(ctx.calls.cashouts, 0);
   assert.equal(ctx.calls.deleteSeat, 0);
+}
+
+{
+  // WS hand (potTotal only) ended by a human Leave after earlier folds: the remaining bot
+  // wins the pot, escrow is conserved and the shared HAND_SETTLED audit row is written.
+  const ctx = makeMocks();
+  const humanSeat1 = "human-seat-1";
+  const botSeat2 = "bot-seat-2";
+  const botSeat3 = "bot-seat-3";
+  const seats = [
+    { userId: humanSeat1, seatNo: 1 },
+    { userId: botSeat2, seatNo: 2, isBot: true },
+    { userId: botSeat3, seatNo: 3, isBot: true },
+    { userId, seatNo: 4 },
+  ];
+  const stacks = { [humanSeat1]: 112, [botSeat2]: 96, [botSeat3]: 94, [userId]: 94 };
+  ctx.state.value = {
+    tableId,
+    phase: "PREFLOP",
+    handId: "hand-leave-bot-wins",
+    handSeed: "seed-leave-bot-wins",
+    seats,
+    handSeats: seats.map(({ userId: seatUserId, seatNo }) => ({ userId: seatUserId, seatNo })),
+    stacks,
+    handStartStacksByUserId: { [humanSeat1]: 112, [botSeat2]: 96, [botSeat3]: 96, [userId]: 96 },
+    potTotal: 4,
+    sidePots: [],
+    leftTableByUserId: {},
+    foldedByUserId: { [humanSeat1]: true, [botSeat2]: true, [botSeat3]: false, [userId]: false },
+    actedThisRoundByUserId: { [humanSeat1]: true, [botSeat2]: true, [botSeat3]: false, [userId]: true },
+    betThisRoundByUserId: { [humanSeat1]: 0, [botSeat2]: 0, [botSeat3]: 2, [userId]: 2 },
+    toCallByUserId: { [humanSeat1]: 0, [botSeat2]: 0, [botSeat3]: 0, [userId]: 0 },
+    contributionsByUserId: { [humanSeat1]: 0, [botSeat2]: 0, [botSeat3]: 2, [userId]: 2 },
+    currentBet: 2,
+    communityDealt: 0,
+    community: [],
+    turnUserId: botSeat3,
+  };
+  const escrowBefore = Object.values(stacks).reduce((sum, amount) => sum + amount, 0) + 4;
+  ctx.mocks.isStateStorageValid = realIsStateStorageValid;
+  ctx.mocks.applyLeaveTable = realApplyLeaveTable;
+  const auditInserts = [];
+  const beginSql = (fn) => ctx.beginSql((tx) => fn({ unsafe: async (query, params) => {
+    if (String(query).includes("HAND_SETTLED")) auditInserts.push(params);
+    return tx.unsafe(query, params);
+  } }));
+  const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+  const result = await executePokerLeave({
+    beginSql, tableId, userId, requestId: "r5b", includeState: true, klog: () => {},
+    writeSettlementAudit: maybeWriteSettlementAudit,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.cashedOut, 94);
+  const persisted = ctx.state.value;
+  assert.equal(persisted.phase, "SETTLED");
+  assert.equal(persisted.pot, 0);
+  assert.equal(persisted.potTotal, 0);
+  assert.deepEqual(persisted.stacks, { [humanSeat1]: 112, [botSeat2]: 96, [botSeat3]: 98 });
+  assert.deepEqual(persisted.handSettlement.payouts, { [botSeat3]: 4 });
+  assert.equal(Object.values(persisted.stacks).reduce((sum, amount) => sum + amount, 0) + result.cashedOut, escrowBefore);
+  assert.equal(auditInserts.length, 1);
+  const [, , , auditActionType, , auditHandId, , , auditPhaseTo, auditMeta] = auditInserts[0];
+  assert.equal(auditActionType, "HAND_SETTLED");
+  assert.equal(auditHandId, "hand-leave-bot-wins");
+  assert.equal(auditPhaseTo, "SETTLED");
+  assert.deepEqual(auditMeta.payoutByUserId, { [botSeat3]: 4 });
+  assert.equal(auditMeta.integrity.status, "OK");
+  assert.equal(ctx.calls.terminalCloses, 0);
 }
 
 {
