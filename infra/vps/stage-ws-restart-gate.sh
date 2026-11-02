@@ -19,12 +19,30 @@ DROPIN_SRC="$REPO_ROOT/infra/vps/ws-server.service.d/50-new-hands-hold.conf"
 DROPIN_DEST="/etc/systemd/system/ws-server.service.d/50-new-hands-hold.conf"
 PROD_ENV="/etc/arcadeplatform/ws-server.env"
 
-for required in "$HELPER_SRC" "$SUDOERS_SRC" "$DROPIN_SRC" /usr/bin/node /usr/bin/psql "$PROD_ENV"; do
+for required in "$HELPER_SRC" "$SUDOERS_SRC" "$DROPIN_SRC" /usr/bin/node "$PROD_ENV"; do
   if [[ ! -e "$required" || -L "$required" ]]; then
     echo "refusing staging: missing or symlinked prerequisite: $required" >&2
     exit 1
   fi
 done
+
+# Ubuntu ships /usr/bin/psql as a symlink to pg_wrapper: accept it only when the link's directory, the resolved
+# executable and that executable's directory are all root-owned and not writable by group or others.
+trusted_root_executable() {
+  local target entry mode
+  target="$(readlink -e -- "$1")" || return 1
+  [[ -f "$target" && -x "$target" ]] || return 1
+  for entry in "$(readlink -e -- "$(dirname -- "$1")")" "$target" "$(dirname -- "$target")"; do
+    [[ -n "$entry" && "$(stat -c '%u:%g' -- "$entry")" == "0:0" ]] || return 1
+    mode="$(stat -c '%a' -- "$entry")"
+    (( (8#$mode & 8#022) == 0 )) || return 1
+  done
+}
+
+if ! trusted_root_executable /usr/bin/psql; then
+  echo "refusing staging: /usr/bin/psql does not resolve to a root-owned, non-writable executable" >&2
+  exit 1
+fi
 
 # EnvironmentFile= would override the drop-in; the attested env must not carry the hold variable.
 if grep -q '^WS_POKER_NEW_HANDS_HOLD_FILE=' "$PROD_ENV"; then

@@ -191,3 +191,31 @@ test("an uncertain gated restart stops without touching the release link, a refu
   ]);
   assert.doesNotMatch(refused.stdout + run("RESTART_FAILED systemctl").stdout, /reached_health_gate/);
 });
+
+test("root staging accepts a symlinked psql only when it resolves to a root-owned, non-writable executable", async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const stage = fs.readFileSync("infra/vps/stage-ws-restart-gate.sh", "utf8");
+  // The other prerequisites keep refusing any symlink; psql is checked before anything is installed.
+  assert.match(stage, /for required in "\$HELPER_SRC" "\$SUDOERS_SRC" "\$DROPIN_SRC" \/usr\/bin\/node "\$PROD_ENV"; do\n\s+if \[\[ ! -e "\$required" \|\| -L "\$required" \]\]; then/);
+  const psqlCheckIdx = stage.indexOf("if ! trusted_root_executable /usr/bin/psql; then");
+  assert.ok(psqlCheckIdx !== -1 && psqlCheckIdx < stage.indexOf("install -D -o root -g root -m 0755"));
+  const fn = stage.match(/trusted_root_executable\(\) \{[\s\S]*?\n\}\n/)?.[0];
+  assert.ok(fn);
+  const trusted = (candidate) => spawnSync("bash", ["-c", `set -Eeuo pipefail\n${fn}trusted_root_executable "$1"`, "check", candidate]).status === 0;
+
+  const dir = fs.mkdtempSync(`${os.tmpdir()}/ws-stage-psql-`);
+  fs.symlinkSync(`${dir}/missing`, `${dir}/dangling`);
+  fs.writeFileSync(`${dir}/writable`, "#!/bin/sh\n");
+  fs.chmodSync(`${dir}/writable`, 0o777);
+  fs.symlinkSync(`${dir}/writable`, `${dir}/psql`);
+  assert.equal(trusted(`${dir}/dangling`), false);
+  assert.equal(trusted(`${dir}/psql`), false, "world-writable target");
+  fs.symlinkSync("/usr/bin/env", `${dir}/link-to-env`);
+  if (process.getuid() !== 0) assert.equal(trusted(`${dir}/link-to-env`), false, "link in a non-root directory");
+
+  const system = ["/usr/bin/psql", "/bin/sh", "/usr/bin/awk"].find((candidate) => {
+    try { return fs.lstatSync(candidate).isSymbolicLink() && fs.statSync(candidate).uid === 0; } catch { return false; }
+  });
+  if (!system) return t.skip("no root-owned system symlink available");
+  assert.equal(trusted(system), true, `standard system symlink ${system}`);
+});
