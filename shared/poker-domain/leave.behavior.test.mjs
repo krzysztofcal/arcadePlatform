@@ -353,9 +353,8 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.equal(ctx.calls.deleteSeat, 0);
 }
 
-{
-  // WS hand (potTotal only) ended by a human Leave after earlier folds: the remaining bot
-  // wins the pot, escrow is conserved and the shared HAND_SETTLED audit row is written.
+// WS hand (potTotal only) where the human Leave ends the hand after earlier folds.
+const setupLeaveEndsHandByFold = () => {
   const ctx = makeMocks();
   const humanSeat1 = "human-seat-1";
   const botSeat2 = "bot-seat-2";
@@ -392,6 +391,12 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   const escrowBefore = Object.values(stacks).reduce((sum, amount) => sum + amount, 0) + 4;
   ctx.mocks.isStateStorageValid = realIsStateStorageValid;
   ctx.mocks.applyLeaveTable = realApplyLeaveTable;
+  return { ctx, humanSeat1, botSeat2, botSeat3, escrowBefore };
+};
+
+{
+  // The remaining bot wins the pot, escrow is conserved and the shared HAND_SETTLED audit row is written.
+  const { ctx, humanSeat1, botSeat2, botSeat3, escrowBefore } = setupLeaveEndsHandByFold();
   const auditInserts = [];
   const beginSql = (fn) => ctx.beginSql((tx) => fn({ unsafe: async (query, params) => {
     if (String(query).includes("HAND_SETTLED")) auditInserts.push(params);
@@ -404,6 +409,7 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   });
   assert.equal(result.ok, true);
   assert.equal(result.cashedOut, 94);
+  assert.equal(ctx.calls.cashouts, 1);
   const persisted = ctx.state.value;
   assert.equal(persisted.phase, "SETTLED");
   assert.equal(persisted.pot, 0);
@@ -419,6 +425,25 @@ for (const settledPhase of ["SETTLED", "HAND_DONE"]) {
   assert.deepEqual(auditMeta.payoutByUserId, { [botSeat3]: 4 });
   assert.equal(auditMeta.integrity.status, "OK");
   assert.equal(ctx.calls.terminalCloses, 0);
+}
+
+{
+  // A failed or skipped HAND_SETTLED write rejects Leave inside beginSql before cash-out, so the
+  // transaction (sql.begin) rolls back the SETTLED state write as well.
+  for (const writeSettlementAudit of [
+    async () => { throw new Error("audit_insert_failed"); },
+    async () => ({ ok: true, skipped: true }),
+  ]) {
+    const { ctx } = setupLeaveEndsHandByFold();
+    const executePokerLeave = loadExecutePokerLeave(ctx.mocks);
+    await assert.rejects(
+      () => executePokerLeave({ beginSql: ctx.beginSql, tableId, userId, requestId: "r5c", klog: () => {}, writeSettlementAudit }),
+      /audit_insert_failed|settlement_audit_unavailable/
+    );
+    assert.equal(ctx.calls.cashouts, 0);
+    assert.equal(ctx.calls.deleteSeat, 0);
+    assert.equal(ctx.calls.storeResult, 0);
+  }
 }
 
 {

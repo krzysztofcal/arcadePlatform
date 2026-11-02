@@ -781,7 +781,9 @@ export async function executePokerLeave({
         mutated = true;
         if (handSettledByLeave) {
           // Same HAND_SETTLED row as the WS writer, so action and hole-card retention can complete.
-          await writeSettlementAudit({ tx, tableId, stateVersion: updateResult.newVersion, state: updatedState, klog });
+          // A throw or a skipped row rejects the whole Leave transaction, cash-out included.
+          const audit = await writeSettlementAudit({ tx, tableId, stateVersion: updateResult.newVersion, state: updatedState, klog });
+          if (audit?.ok !== true || audit.skipped) throw makeError(409, "settlement_audit_unavailable");
         }
 
         let latestState = updatedState;
