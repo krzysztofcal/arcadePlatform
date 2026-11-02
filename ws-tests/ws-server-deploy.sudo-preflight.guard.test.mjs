@@ -254,5 +254,7 @@ test("restart gate runbook commands parse and keep the first-deployment safety r
   assert.match(beforeStop, /C-M1 position and effect again/);
   const recovery = doc.slice(doc.indexOf("**C7. Recovery (root)**"));
   assert.match(recovery, /systemctl reset-failed ws-server\.service; systemctl start ws-server\.service/);
-  assert.match(recovery, /systemctl reset-failed ws-server\.service; systemctl restart ws-server\.service/);
+  // The manual rollback restarts only after the release check and the link switch succeeded.
+  assert.match(recovery, /test -f \/opt\/ws-server\/releases\/<PREV_SHA>\/ws-server\/server\.mjs && ln -sfn [^`]* && systemctl reset-failed ws-server\.service && systemctl restart ws-server\.service/);
+  assert.doesNotMatch(recovery, /; systemctl restart ws-server\.service/);
 });

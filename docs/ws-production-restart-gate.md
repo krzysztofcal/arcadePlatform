@@ -207,10 +207,15 @@ C6.1 ends the rollback boundary.
 3. **Restarted, then the health checks failed.** The workflow attempts an automatic rollback through the gate. That attempt passes the gate when the new process is up, drained and on a quiet database. It is blocked when the process is down or crash-looping, because the evidence was used. Read its output:
    - `RESTARTED …`: the workflow switched back to `<PREV_SHA>` and restarted it. Verify the link, `MainPID`, `is-active` and `/healthz`, then C1.1 and A0.7. The old release ignores the hold, so play can resume immediately; decide with the owner whether to keep it running.
    - `ROLLBACK_BLOCKED …`: the link was put back to the new release and nothing was restarted. Manual rollback (C7.4).
-   - `RESTART_UNCERTAIN …`: the service state is unknown. Check `systemctl show ws-server.service -p ActiveState,SubState,MainPID,NRestarts` and `readlink -f /opt/ws-server/current`, then manual rollback (C7.4).
-4. **Manual rollback to `<PREV_SHA>`**, only before C6.1:
-   `test -f /opt/ws-server/releases/<PREV_SHA>/ws-server/server.mjs && ln -sfn /opt/ws-server/releases/<PREV_SHA>/ws-server /opt/ws-server/current.tmp && mv -Tf /opt/ws-server/current.tmp /opt/ws-server/current && readlink -f /opt/ws-server/current && systemctl reset-failed ws-server.service; systemctl restart ws-server.service && sleep 5 && systemctl is-active ws-server.service && curl -fsS http://127.0.0.1:3000/healthz`
-   If the release directory is missing, first restore it from the C1.3 archive: `tar -C /opt/ws-server/releases -xf /root/t4-backup/release-<PREV_SHA>.tar`. Then verify as in C7.3 `RESTARTED`.
+   - `RESTART_UNCERTAIN …`: the service state is unknown. Check `systemctl show ws-server.service -p ActiveState,SubState,MainPID,NRestarts` and `readlink -f /opt/ws-server/current`.
+     - If the link already points to `<PREV_SHA>` and the service is `active`/`running`, the gated rollback did restart the old release: do **not** restart it again (clients may already be playing). Verify as for `RESTARTED`.
+     - Only if the link still points to `<SHA>`, or the service is not active: manual rollback (C7.4).
+4. **Manual rollback to `<PREV_SHA>`**, only before C6.1 and only when the old release is not already running (C7.3):
+   1. Precondition: `test -f /opt/ws-server/releases/<PREV_SHA>/ws-server/server.mjs && echo PREV_PRESENT`
+      If nothing is printed, restore the directory from the C1.3 archive first, then repeat the precondition: `tar -C /opt/ws-server/releases -xf /root/t4-backup/release-<PREV_SHA>.tar`
+   2. Rollback (every step must succeed; nothing restarts if one fails): `test -f /opt/ws-server/releases/<PREV_SHA>/ws-server/server.mjs && ln -sfn /opt/ws-server/releases/<PREV_SHA>/ws-server /opt/ws-server/current.tmp && mv -Tf /opt/ws-server/current.tmp /opt/ws-server/current && readlink -f /opt/ws-server/current && systemctl reset-failed ws-server.service && systemctl restart ws-server.service && sleep 5 && systemctl is-active ws-server.service && curl -fsS http://127.0.0.1:3000/healthz`
+      If it stops early, nothing was restarted: report the output and do not retry blindly.
+   3. Verify as for C7.3 `RESTARTED`.
 5. **After C6.1:** no rollback to `<PREV_SHA>` from this runbook. Keep the new release, hold new hands again if needed (C6.1 file without drain), and get a compatibility analysis and a separate GO before any rollback.
 6. **Firewall:**
    - block left on by mistake: C-M1 off;
