@@ -337,9 +337,12 @@ The control does not read journald, store logs in Supabase, change poker state, 
 
 The narrow sudoers contract is versioned in `infra/vps/arcade-deploy.sudoers`.
 After Phase B staging it grants `copilot` only the exact Preview restart,
-Production restart, Caddy reload, and fixed env-preflight commands
+Caddy reload, fixed env-preflight commands
 (`/usr/local/sbin/arcade-ws-preview-env-preflight` and
-`/usr/local/sbin/arcade-ws-production-env-preflight`). It grants
+`/usr/local/sbin/arcade-ws-production-env-preflight`) and the Production
+restart gate (`/usr/local/sbin/arcade-ws-restart-gate check|restart`); a plain
+Production restart is not granted. Installation of the gate and the first gated
+Production deployment: `docs/ws-production-restart-gate.md`. It grants
 no shell, interpreter, archive, copy, remove, rsync, generic `systemctl`, or
 wildcard command. Production release filesystem operations and Caddy backup,
 write, and validation run as `copilot`; only the exact service restart/reload

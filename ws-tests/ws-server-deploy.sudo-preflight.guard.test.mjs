@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
 test("ws-server deploy workflow keeps only the exact production restart privileged", () => {
   const text = fs.readFileSync(".github/workflows/ws-server-deploy.yml", "utf8");
@@ -190,4 +191,45 @@ test("an uncertain gated restart stops without touching the release link, a refu
     "mv -Tf /opt/current.tmp /opt/current"
   ]);
   assert.doesNotMatch(refused.stdout + run("RESTART_FAILED systemctl").stdout, /reached_health_gate/);
+});
+
+test("root staging accepts a symlinked psql only when it resolves to a root-owned, non-writable executable", async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const stage = fs.readFileSync("infra/vps/stage-ws-restart-gate.sh", "utf8");
+  // The other prerequisites keep refusing any symlink; psql is checked before anything is installed.
+  assert.match(stage, /for required in "\$HELPER_SRC" "\$SUDOERS_SRC" "\$DROPIN_SRC" \/usr\/bin\/node "\$PROD_ENV"; do\n\s+if \[\[ ! -e "\$required" \|\| -L "\$required" \]\]; then/);
+  const psqlCheckIdx = stage.indexOf("if ! trusted_root_executable /usr/bin/psql; then");
+  assert.ok(psqlCheckIdx !== -1 && psqlCheckIdx < stage.indexOf("install -D -o root -g root -m 0755"));
+  const fn = stage.match(/trusted_root_executable\(\) \{[\s\S]*?\n\}\n/)?.[0];
+  assert.ok(fn);
+  const trusted = (candidate) => spawnSync("bash", ["-c", `set -Eeuo pipefail\n${fn}trusted_root_executable "$1"`, "check", candidate]).status === 0;
+
+  const dir = fs.mkdtempSync(`${os.tmpdir()}/ws-stage-psql-`);
+  fs.symlinkSync(`${dir}/missing`, `${dir}/dangling`);
+  fs.writeFileSync(`${dir}/writable`, "#!/bin/sh\n");
+  fs.chmodSync(`${dir}/writable`, 0o777);
+  fs.symlinkSync(`${dir}/writable`, `${dir}/psql`);
+  assert.equal(trusted(`${dir}/dangling`), false);
+  assert.equal(trusted(`${dir}/psql`), false, "world-writable target");
+  fs.symlinkSync("/usr/bin/env", `${dir}/link-to-env`);
+  if (process.getuid() !== 0) assert.equal(trusted(`${dir}/link-to-env`), false, "link in a non-root directory");
+
+  // Real system symlinks: the shell check must agree with an independent reading of the same rule.
+  const describe = (candidate) => {
+    const target = fs.realpathSync(candidate);
+    const entries = [fs.realpathSync(path.dirname(candidate)), target, path.dirname(target)].map((entry) => {
+      const st = fs.statSync(entry);
+      return { entry, uid: st.uid, gid: st.gid, mode: (st.mode & 0o7777).toString(8), ok: st.uid === 0 && st.gid === 0 && (st.mode & 0o022) === 0 };
+    });
+    const st = fs.statSync(target);
+    return { expected: st.isFile() && (st.mode & 0o111) !== 0 && entries.every((entry) => entry.ok), entries };
+  };
+  const systemLinks = ["/usr/bin/psql", "/bin/sh", "/usr/bin/awk"].filter((candidate) => {
+    try { return fs.lstatSync(candidate).isSymbolicLink() && fs.existsSync(candidate); } catch { return false; }
+  });
+  for (const candidate of systemLinks) {
+    const { expected, entries } = describe(candidate);
+    assert.equal(trusted(candidate), expected, `${candidate}: ${JSON.stringify(entries)}`);
+  }
+  if (!systemLinks.some((candidate) => describe(candidate).expected)) t.skip("no root-owned system symlink available");
 });
