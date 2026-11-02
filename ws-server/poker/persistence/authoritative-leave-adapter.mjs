@@ -109,6 +109,7 @@ export function createAuthoritativeLeaveExecutor({
   env = process.env,
   klog = () => {},
   hasConnectedHumanPresence = () => false,
+  writeSettlementAudit = null,
   loadAuthoritativeLeaveModule = () => {
     const configuredPath = typeof env?.WS_AUTHORITATIVE_LEAVE_MODULE_PATH === "string"
       ? env.WS_AUTHORITATIVE_LEAVE_MODULE_PATH.trim()
@@ -160,6 +161,7 @@ export function createAuthoritativeLeaveExecutor({
           inactivityEjection,
           runPostLeaveBotAutoplay: false,
           hasConnectedHumanPresence,
+          writeSettlementAudit,
           klog,
           klogVerbose: (kind, createPayload) => klogVerbose(kind, createPayload, { tableId }),
           verboseLogsEnabled: staticVerboseBotAutoplayLogs
