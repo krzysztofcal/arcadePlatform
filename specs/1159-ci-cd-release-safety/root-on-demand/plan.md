@@ -30,8 +30,8 @@ admin key, and admin operations must not hold the release key.
   catalog operation (`<operation> *`, the helper rejects anything but one run id).
 - `infra/vps/stage-vps-admin.sh`: creates `arcade-admin` or refuses an existing account that differs (system uid,
   only its own group, no other members, home/shell, owner and modes of home, `.ssh`, `authorized_keys`), refuses
-  if `copilot` is in its group, installs helper and sudoers, `visudo -c`, refuses any sudo right beyond the helper
-  operations, verifies the read-only status operation and that `copilot` cannot run the helper.
+  if `copilot` is in its group, installs helper and sudoers, `visudo -c`, `verify_admin_sudo` (exit code, exactly
+  one "may run" section, only `(root) NOPASSWD:` helper operations; anything else is a STOP), verifies the read-only status operation and that `copilot` cannot run the helper.
 - `infra/vps/bootstrap.sh`: same account, helper and sudoers for new hosts.
 - `.github/workflows/vps-admin-operation.yml`: `workflow_dispatch` (`operation` choice, `reason`,
   `confirmation`), concurrency `vps-admin`. Job `request` (identity `if:`, no environment, no secret): confirmation
@@ -43,13 +43,14 @@ admin key, and admin operations must not hold the release key.
 ## Tests (extend `ws-tests/infra-vps-workflow.guard.test.mjs`, run by Infra VPS)
 
 - helper: unknown operation and bad run id are refused and audited without any systemctl call; a failed or
-  unexpected read blocks the status; pause waits until idle and stops at the bound; resume refuses a pending
-  `daemon-reload`; no start entry means no work, no end entry means no success; a request during another is busy
+  unexpected read blocks the status; pause has one deadline for both dispatchers including `systemctl` time and
+  never resumes timers; resume refuses a pending `daemon-reload` on any service or timer; no start entry means no work, no end entry means no success; a request during another is busy
   and the lock is released afterwards;
 - consistency: workflow choice list = `OPERATIONS` = sudoers aliases; no shell in the helper;
 - workflow: summary in the unprivileged `request` job, `operate` behind `vps-admin` with the only secrets, the
   reason pattern refuses newlines, markdown and HTML, identity expression for every actor pair, `main` only, no
-  `always()`; staging script checks the existing account.
+  `always()`; staging script checks the existing account, and its real `verify_admin_sudo` refuses a sudo error and
+  every unknown or incomplete listing.
 
 ## Risks
 

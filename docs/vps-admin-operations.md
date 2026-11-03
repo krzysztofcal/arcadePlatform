@@ -18,8 +18,8 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | Operation | Effect |
 |---|---|
 | `ledger-dispatchers-status` | Read-only: user, state, timer state and pending `daemon-reload` of both ledger dispatchers |
-| `ledger-dispatchers-pause` | Stops both dispatcher timers, then waits up to 5 minutes until no dispatcher runs |
-| `ledger-dispatchers-resume` | Refuses while a dispatcher unit needs `daemon-reload`; otherwise starts both timers and checks they are active |
+| `ledger-dispatchers-pause` | Stops both dispatcher timers, then waits until no dispatcher runs. One 5-minute deadline covers both dispatchers and every `systemctl` call; on timeout it reports `timeout_timers_left_stopped` with each service state and leaves the timers stopped for the owner's decision (no automatic resume) |
+| `ledger-dispatchers-resume` | Refuses while any of the two services or two timers needs `daemon-reload`; otherwise starts both timers and checks they are active |
 | `systemd-daemon-reload` | `systemctl daemon-reload` |
 
 Every operation uses fixed absolute commands with fixed arguments and no shell. There is no free command, file
@@ -69,8 +69,8 @@ available on the VPS only after the helper and sudoers file are reinstalled with
 3. Run `infra/vps/stage-vps-admin.sh` as root from the merged `main`: it creates `arcade-admin`, or refuses an
    existing one that is not a system account, belongs to any other group, has other group members, another home
    or shell, or a home, `.ssh` or `authorized_keys` not owned by it or group/other writable. It installs the helper
-   and `/etc/sudoers.d/arcade-admin`, refuses if `sudo -l -U arcade-admin` lists anything but the helper
-   operations, and verifies the read-only status operation and that `copilot` cannot run the helper.
+   and `/etc/sudoers.d/arcade-admin`, and refuses unless `sudo -l -U arcade-admin` exits 0, has exactly one
+   "may run" section and lists only `(root) NOPASSWD:` helper operations (an error or unknown format is a STOP), and verifies the read-only status operation and that `copilot` cannot run the helper.
 4. Generate a new ed25519 key, put its public part in `/home/arcade-admin/.ssh/authorized_keys`
    (`arcade-admin:arcade-admin 0600`), and add `VPS_ADMIN_HOST`, `VPS_ADMIN_USER=arcade-admin` and
    `VPS_ADMIN_SSH_KEY` as `vps-admin` environment secrets.

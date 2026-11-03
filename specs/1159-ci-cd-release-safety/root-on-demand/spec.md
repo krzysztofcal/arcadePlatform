@@ -33,7 +33,8 @@ root-helper approach as `ws-production` / `arcade-release` / `arcade-ws-restart-
 - **R-SAFE.** Requests are serialized (workflow concurrency group and `flock(1)`). Every outcome is one line
   `ADMIN_OK|ADMIN_BLOCKED|ADMIN_FAILED`; only `ADMIN_OK` passes the job. A failed or unverifiable systemd read
   blocks. No operation without a recorded start; an unrecorded end is a failure. No automatic retry. Long waits are
-  bounded.
+  bounded by one shared deadline that includes the `systemctl` calls; a pause timeout leaves the timers stopped for
+  the owner. Resume checks `NeedDaemonReload` on both services and both timers.
 - **R-TESTS.** Fundamental tests only, in existing test files.
 
 ## Initial catalog

@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 const RUN_ID = /^[1-9][0-9]{0,19}$/;
 const LEDGER = ["arcade-chips-ledger-dispatch", "arcade-chips-ledger-production-dispatch"];
 const IDLE = new Set(["inactive", "failed"]);
+const UNITS = LEDGER.flatMap((u) => [`${u}.service`, `${u}.timer`]);
+const PAUSE_DEADLINE_MS = 300000;
 // Only values systemd documents for these properties are accepted; anything else is unverifiable.
 const EXPECTED = {
   User: /^[a-z_][a-z0-9_-]{0,31}$/,
@@ -27,6 +29,7 @@ const HOST = {
     return { status: result.status, stdout: (result.stdout || "").trim() };
   },
   sleep: (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
+  now: () => Date.now(),
   lockFile: "/run/arcade-vps-admin.lock",
   requester: process.env.SUDO_USER || "root",
 };
@@ -45,22 +48,24 @@ export const OPERATIONS = Object.freeze({
     details: LEDGER.map((u) => `${u}=${read(host, `${u}.service`, "User")}/${read(host, `${u}.service`, "ActiveState")}`
       + `/timer:${read(host, `${u}.timer`, "ActiveState")}/reload:${read(host, `${u}.service`, "NeedDaemonReload")}`).join(" "),
   }),
-  // Stop both timers first so no dispatcher starts, then wait (at most 5 min) until none runs.
+  // Stop both timers first so no dispatcher starts, then wait until none runs. One 5-minute deadline covers both
+  // dispatchers and every systemctl call. On timeout the timers stay stopped: the owner decides what comes next.
   "ledger-dispatchers-pause": (host) => {
+    const deadline = host.now() + PAUSE_DEADLINE_MS;
     for (const u of LEDGER) {
       if (host.run(["/usr/bin/systemctl", "stop", `${u}.timer`]).status !== 0) return { ok: false, failed: `stop_${u}.timer` };
     }
-    for (const u of LEDGER) {
-      for (let polls = 0; !IDLE.has(read(host, `${u}.service`, "ActiveState")); polls += 1) {
-        if (polls >= 60) return { ok: false, blocked: `${u}.service_still_running` };
-        host.sleep(5000);
-      }
+    for (;;) {
+      const states = LEDGER.map((u) => `${u}.service=${read(host, `${u}.service`, "ActiveState")}`);
+      if (states.every((state) => IDLE.has(state.split("=")[1]))) return { ok: true, details: "timers_stopped dispatchers_idle" };
+      const left = deadline - host.now();
+      if (left <= 0) return { ok: false, blocked: `timeout_timers_left_stopped ${states.join(" ")}` };
+      host.sleep(Math.min(5000, left));
     }
-    return { ok: true, details: "timers_stopped dispatchers_idle" };
   },
   "ledger-dispatchers-resume": (host) => {
-    for (const u of LEDGER) {
-      if (read(host, `${u}.service`, "NeedDaemonReload") !== "no") return { ok: false, blocked: `${u}_needs_daemon_reload` };
+    for (const unit of UNITS) {
+      if (read(host, unit, "NeedDaemonReload") !== "no") return { ok: false, blocked: `${unit}_needs_daemon_reload` };
     }
     for (const u of LEDGER) {
       if (host.run(["/usr/bin/systemctl", "start", `${u}.timer`]).status !== 0

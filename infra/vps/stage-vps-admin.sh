@@ -30,6 +30,38 @@ fi
 getent group arcade-admin >/dev/null || groupadd --system arcade-admin
 id arcade-admin >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-admin --shell /bin/bash --gid arcade-admin arcade-admin
 refuse() { echo "refusing staging: $*" >&2; exit 1; }
+# Succeeds only if "sudo -l -U arcade-admin" exits 0, has exactly one "may run" section, and every entry in it is
+# "(root) NOPASSWD:" with commands that are each "/usr/local/sbin/arcade-vps-admin <operation> *". Anything else,
+# including an unreadable or unknown format, fails.
+verify_admin_sudo() {
+  local listing line item section=0 items=0
+  local -a parts
+  listing="$(sudo -n -l -U arcade-admin)" || return 1
+  while IFS= read -r line; do
+    if [[ "$line" == "User arcade-admin may run the following commands on "* ]]; then
+      (( section == 0 )) || return 1
+      section=1
+      continue
+    fi
+    (( section == 1 )) || continue
+    [[ -n "${line//[[:space:]]/}" ]] || continue
+    [[ "$line" =~ ^[[:space:]]+[^[:space:]] ]] || return 1
+    line="${line#"${line%%[![:space:]]*}"}"
+    if [[ "$line" == "("* ]]; then
+      [[ "$line" == "(root) NOPASSWD: "* ]] || return 1
+      line="${line#"(root) NOPASSWD: "}"
+    fi
+    IFS=',' read -ra parts <<<"$line"
+    for item in "${parts[@]}"; do
+      item="${item#"${item%%[![:space:]]*}"}"
+      item="${item%"${item##*[![:space:]]}"}"
+      [[ -n "$item" ]] || continue
+      [[ "$item" =~ ^/usr/local/sbin/arcade-vps-admin\ [a-z0-9-]+\ \*$ ]] || return 1
+      items=$((items + 1))
+    done
+  done <<<"$listing"
+  (( section == 1 && items > 0 ))
+}
 if id -nG copilot | tr ' ' '\n' | grep -qx arcade-admin; then refuse "copilot is a member of arcade-admin"; fi
 # An already existing account must be exactly the reviewed one; it is never repaired silently.
 (( "$(id -u arcade-admin)" < 1000 )) || refuse "arcade-admin is not a system account"
@@ -47,11 +79,7 @@ install -D -o root -g root -m 0755 "$HELPER_SRC" "$HELPER_DEST"
 install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_DEST"
 visudo -c
 # The account's only sudo rights are the helper operations.
-# Every listed command (after the run-as spec and tags, comma separated) must be the helper with an operation.
-EXTRA_SUDO="$(sudo -l -U arcade-admin | sed -n '/may run the following commands/,$p' | tail -n +2 \
-  | sed -E 's/^[[:space:]]*\([^)]*\)[[:space:]]*([A-Z_]+:[[:space:]]*)*//' | tr ',' '\n' | sed -E 's/^[[:space:]]+//' \
-  | grep -v '^$' | grep -Ev '^/usr/local/sbin/arcade-vps-admin [a-z0-9-]+ \*$' || true)"
-[[ -z "$EXTRA_SUDO" ]] || refuse "arcade-admin has sudo rights beyond /usr/local/sbin/arcade-vps-admin operations"
+verify_admin_sudo || refuse "sudo -l -U arcade-admin failed, is unrecognized or lists more than the helper operations"
 
 STATUS="$(sudo -u arcade-admin sudo -n "$HELPER_DEST" ledger-dispatchers-status 1 || true)"
 if [[ "$STATUS" != "ADMIN_OK ledger-dispatchers-status "* ]]; then
