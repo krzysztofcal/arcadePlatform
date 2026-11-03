@@ -278,7 +278,7 @@ assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(
   stageJobIf,
-  /if: \$\{\{ \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-selector-diagnostic' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner && github\.ref == 'refs\/heads\/main'\) \|\| \(vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' &&/,
+  /if: \$\{\{ github\.ref == 'refs\/heads\/main' && github\.triggering_actor == github\.repository_owner && \(github\.event_name == 'schedule' \|\| github\.actor == github\.repository_owner\) && \(\(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-selector-diagnostic' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner && github\.ref == 'refs\/heads\/main'\) \|\| \(vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' &&/,
 );
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
 assert.match(stageJobIf, /github\.actor == github\.repository_owner/);
@@ -665,3 +665,44 @@ fi
     assert.doesNotMatch(fs.readFileSync(file, "utf8"), /production-retention\/|production-retention-dispatch/);
   }
 } finally { fs.rmSync(schedulerFixture, { recursive: true, force: true }); }
+
+// #1159 T004-3: evaluate the real owner-gated Stage job conditions. A re-run keeps
+// github.actor, so dispatch and re-run both require the owner and refs/heads/main.
+function evaluateStageCondition(condition, { event = "workflow_dispatch", ref = "refs/heads/main", actor = "krzysztofcal",
+  triggeringActor = actor, mode = "external-scheduled-automatic", enabled = "1" } = {}) {
+  const js = condition.replace(/^\$\{\{ | \}\}$/g, "")
+    .replaceAll("github.event.repository.fork", "false")
+    .replaceAll("github.event_name", JSON.stringify(event))
+    .replaceAll("github.ref", JSON.stringify(ref))
+    .replaceAll("github.triggering_actor", JSON.stringify(triggeringActor))
+    .replaceAll("github.actor", JSON.stringify(actor))
+    .replaceAll("github.repository_owner", JSON.stringify("krzysztofcal"))
+    .replaceAll("github.repository", JSON.stringify("krzysztofcal/arcadePlatform"))
+    .replaceAll("vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED", JSON.stringify(enabled))
+    .replaceAll("inputs.mode", JSON.stringify(mode))
+    .replaceAll("'", "\"").replaceAll(" == ", " === ").replaceAll(" != ", " !== ");
+  assert.match(js, /^[\s"a-z0-9_\-/[\].()|&=!]+$/i, js);
+  return Function(`return (${js});`)();
+}
+const stageOwnerConditions = {
+  "stage-archive": stageJobIfExpression,
+  "stage-supabase-resource-health": YAML.parse(fs.readFileSync(".github/workflows/stage-supabase-resource-health.yml", "utf8")).jobs.monitor.if,
+  "stage-bonus-campaigns": YAML.parse(fs.readFileSync(".github/workflows/stage-bonus-campaigns.yml", "utf8")).jobs["stage-operator"].if,
+};
+for (const [name, condition] of Object.entries(stageOwnerConditions)) {
+  assert.equal(evaluateStageCondition(condition), true, `${name}: owner main dispatch`);
+  assert.equal(evaluateStageCondition(condition, { ref: "refs/heads/feature" }), false, `${name}: other branch`);
+  assert.equal(evaluateStageCondition(condition, { triggeringActor: "release-agent[bot]" }), false, `${name}: foreign re-run of an owner run`);
+  assert.equal(evaluateStageCondition(condition, { actor: "release-agent[bot]" }), false, `${name}: foreign dispatch`);
+}
+for (const name of ["stage-archive", "stage-supabase-resource-health"]) {
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule" }), true, `${name}: schedule keeps running`);
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule", triggeringActor: "release-agent[bot]" }), false, `${name}: foreign re-run of a schedule run`);
+}
+for (const mode of RETAINED_MODES) {
+  assert.equal(evaluateStageCondition(stageJobIfExpression, { mode, ref: "refs/heads/feature" }), false, `${mode}: other branch`);
+  assert.equal(evaluateStageCondition(stageJobIfExpression, { mode, triggeringActor: "release-agent[bot]" }), false, `${mode}: foreign re-run`);
+}
+assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "external-existing-30d" }), true, "VPS daily dispatch");
+assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "missing-table-bot-retirement-canary", enabled: "0" }), true, "owner canary without automation");
+assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "external-scheduled-automatic", enabled: "0" }), false, "automation switch still applies");

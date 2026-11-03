@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   stage-operator:
-    if: ${{ github.repository == 'krzysztofcal/arcadePlatform' && github.ref == 'refs/heads/main' && github.actor == 'krzysztofcal' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.repository == 'krzysztofcal/arcadePlatform' && github.ref == 'refs/heads/main' && github.actor == 'krzysztofcal' && github.triggering_actor == 'krzysztofcal' && github.event_name == 'workflow_dispatch' }}
     runs-on: [self-hosted, linux, x64, stage-db-ipv6]
     timeout-minutes: 10
     steps:
