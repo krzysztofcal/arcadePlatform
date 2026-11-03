@@ -27,16 +27,20 @@ path, package name or unit name input.
 
 ## Request
 
-1. Dispatch `VPS Admin Operation` from `main` with `operation`, `reason` (10–200 characters) and
-   `confirmation` exactly `RUN <operation>`.
-2. The owner reads the reason, operation and requester in the pending run and approves the `vps-admin`
-   environment. Before that approval the job has no VPS secret. A re-run needs a new approval.
-3. The job checks the confirmation, records operation, run, requester and reason in the run summary, connects as
-   `arcade-admin` (the step fails for any other account) and runs the helper once.
+1. Dispatch `VPS Admin Operation` from `main` with `operation`, `reason` and `confirmation` exactly
+   `RUN <operation>`. The reason is one plain line of 10–200 letters, digits, spaces or `.,:;()/+=_-`, so it
+   cannot add lines, markdown or HTML to the summary.
+2. The unprivileged job `request` (no environment, no secret) checks the inputs and writes operation, reason,
+   `main` revision, requester and triggering actor to its summary. It finishes before the approval request.
+3. The owner reads that summary in the pending run and approves the `vps-admin` environment for the job
+   `operate`. Before that approval no job has a VPS secret. A re-run needs a new approval.
+4. `operate` connects as `arcade-admin` (the step fails for any other account) and runs the helper once.
 
 `ADMIN_OK <operation> <details>` is success. `ADMIN_BLOCKED <operation> <reason>` (for example `busy`,
-`unexpected_arguments`, `…_still_running`) and `ADMIN_FAILED <operation> <step>` fail the job. Nothing is
-retried automatically; the owner decides the next step.
+`unexpected_arguments`, `unverifiable_<unit>_<property>`, `audit_unavailable`, `…_still_running`) and
+`ADMIN_FAILED <operation> <step>` fail the job. A systemd read that fails or returns an undocumented value blocks
+the operation; a status is never reported from unverified data. Nothing is retried automatically; the owner
+decides the next step.
 
 ## Audit
 
@@ -44,8 +48,12 @@ retried automatically; the owner decides the next step.
   time).
 - VPS: the journal entries tagged `arcade-vps-admin` (`journalctl -t arcade-vps-admin`) before and after each
   request: operation, run id, sudo caller, result and detail. Blocked requests are recorded too.
-- Requests are serialized by the workflow concurrency group `vps-admin` and by the helper lock
-  `/run/arcade-vps-admin.lock`; a lock left by a dead process is taken over, a live one blocks (`busy`).
+- No operation starts without a recorded start entry (`ADMIN_BLOCKED … audit_unavailable`). If the end entry
+  cannot be written, the result is `ADMIN_FAILED <operation> audit_end_after_<outcome>`, never success; the
+  operation is not repeated.
+- Requests are serialized by the workflow concurrency group `vps-admin` and by `flock(1)` on
+  `/run/arcade-vps-admin.lock`. The kernel releases the lock when the helper exits or dies, so there is no stale
+  lock to clean up; a second request while one runs is `busy`.
 
 ## Adding an operation
 
@@ -58,9 +66,11 @@ available on the VPS only after the helper and sudoers file are reinstalled with
 1. Create the `vps-admin` environment: required reviewer owner, prevent self-review, deployment branches `main`
    only, no admin bypass, no secrets yet. Verify it read-only.
 2. Merge the PR.
-3. Run `infra/vps/stage-vps-admin.sh` as root from the merged `main`: it creates `arcade-admin`, installs the
-   helper and `/etc/sudoers.d/arcade-admin`, and verifies the read-only status operation and that `copilot`
-   cannot run the helper.
+3. Run `infra/vps/stage-vps-admin.sh` as root from the merged `main`: it creates `arcade-admin`, or refuses an
+   existing one that is not a system account, belongs to any other group, has other group members, another home
+   or shell, or a home, `.ssh` or `authorized_keys` not owned by it or group/other writable. It installs the helper
+   and `/etc/sudoers.d/arcade-admin`, refuses if `sudo -l -U arcade-admin` lists anything but the helper
+   operations, and verifies the read-only status operation and that `copilot` cannot run the helper.
 4. Generate a new ed25519 key, put its public part in `/home/arcade-admin/.ssh/authorized_keys`
    (`arcade-admin:arcade-admin 0600`), and add `VPS_ADMIN_HOST`, `VPS_ADMIN_USER=arcade-admin` and
    `VPS_ADMIN_SSH_KEY` as `vps-admin` environment secrets.

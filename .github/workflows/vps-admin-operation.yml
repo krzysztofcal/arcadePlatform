@@ -16,7 +16,7 @@ on:
           - ledger-dispatchers-resume
           - systemd-daemon-reload
       reason:
-        description: Why the operation is needed (10-200 characters, shown to the approver in the run summary)
+        description: One line, 10-200 letters, digits, spaces or .,:;()/+=_- (shown to the approver before approval)
         required: true
         type: string
       confirmation:
@@ -32,14 +32,14 @@ permissions:
   contents: read
 
 jobs:
-  operate:
-    # Same identities as the WS Production release: only the same identity may dispatch and re-run (no owner/agent mix).
+  # Unprivileged: no environment and no secret. It finishes before the approval request, so the owner sees the
+  # operation, reason, revision and requester in this job's summary while approving the operate job.
+  request:
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
     runs-on: ubuntu-latest
-    environment: vps-admin
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - name: Authorize the requested operation
+      - name: Validate and show the request before approval
         env:
           OPERATION: ${{ inputs.operation }}
           CONFIRMATION: ${{ inputs.confirmation }}
@@ -48,15 +48,27 @@ jobs:
           set -euo pipefail
           [[ "$OPERATION" =~ ^[a-z0-9-]{1,64}$ ]] || { echo "invalid operation name"; exit 1; }
           [[ "$CONFIRMATION" == "RUN $OPERATION" ]] || { echo "confirmation phrase mismatch"; exit 1; }
-          [[ ${#REASON} -ge 10 && ${#REASON} -le 200 ]] || { echo "reason must be 10-200 characters"; exit 1; }
+          # One plain line: no newline, markdown, HTML or backtick can shape the summary the owner approves.
+          REASON_RE='^[A-Za-z0-9 .,:;()/+=_-]{10,200}$'
+          [[ "$REASON" =~ $REASON_RE ]] || { echo "reason must be one line of 10-200 letters, digits, spaces or .,:;()/+=_-"; exit 1; }
           {
-            echo "### VPS admin operation"
+            echo "### VPS admin operation request (approve the operate job only if this is expected)"
             echo "- operation: \`$OPERATION\`"
-            echo "- run: $GITHUB_RUN_ID (attempt $GITHUB_RUN_ATTEMPT), main $GITHUB_SHA"
-            echo "- requested by: $GITHUB_ACTOR, triggered by $GITHUB_TRIGGERING_ACTOR"
-            printf -- '- reason: %s\n' "$REASON"
+            echo "- reason: \`$REASON\`"
+            echo "- revision: \`$GITHUB_SHA\` (main)"
+            echo "- requested by: \`$GITHUB_ACTOR\`, triggered by \`$GITHUB_TRIGGERING_ACTOR\`"
+            echo "- run: $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # The vps-admin environment holds the only credential that reaches arcade-admin; its secrets exist only after
+  # the owner approves this job.
+  operate:
+    needs: request
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    runs-on: ubuntu-latest
+    environment: vps-admin
+    timeout-minutes: 15
+    steps:
       - name: Run the operation on the VPS as arcade-admin
         id: operate
         uses: appleboy/ssh-action@v1.0.3

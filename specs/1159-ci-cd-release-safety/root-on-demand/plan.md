@@ -18,31 +18,38 @@ admin key, and admin operations must not hold the release key.
 ## Files
 
 - `infra/vps/vps-admin.mjs` → `/usr/local/sbin/arcade-vps-admin`:
-  - `OPERATIONS`: catalog, each a function of an injectable `host` (`run`, `sleep`, `isAlive`, `lockDir`,
+  - `OPERATIONS`: catalog, each a function of an injectable `host` (`run`, `sleep`, `lockFile`,
     `requester`);
   - `runOperation(operation, runId, overrides)`: validates the name against the catalog and `runId`
-    (`^[1-9][0-9]{0,19}$`), takes `/run/arcade-vps-admin.lock` (stale lock of a dead pid taken over), writes
-    start/result journal entries with `/usr/bin/logger -t arcade-vps-admin`, returns one line;
+    (`^[1-9][0-9]{0,19}$`), locks `/run/arcade-vps-admin.lock` with `flock -n` on an inherited descriptor
+    (released by the kernel on exit), requires the start journal entry (`/usr/bin/logger -t arcade-vps-admin`)
+    before running and the end entry for success; `read()` blocks on a failed or unexpected `systemctl show`;
+    returns one line;
   - CLI: exactly two arguments, otherwise `ADMIN_BLOCKED invalid unexpected_arguments`.
 - `infra/vps/arcade-admin.sudoers` → `/etc/sudoers.d/arcade-admin`: `arcade-admin` may run the helper with each
   catalog operation (`<operation> *`, the helper rejects anything but one run id).
-- `infra/vps/stage-vps-admin.sh`: creates `arcade-admin` (refuses if `copilot` is in its group), installs helper
-  and sudoers, `visudo -c`, verifies the read-only status operation and that `copilot` cannot run the helper.
+- `infra/vps/stage-vps-admin.sh`: creates `arcade-admin` or refuses an existing account that differs (system uid,
+  only its own group, no other members, home/shell, owner and modes of home, `.ssh`, `authorized_keys`), refuses
+  if `copilot` is in its group, installs helper and sudoers, `visudo -c`, refuses any sudo right beyond the helper
+  operations, verifies the read-only status operation and that `copilot` cannot run the helper.
 - `infra/vps/bootstrap.sh`: same account, helper and sudoers for new hosts.
 - `.github/workflows/vps-admin-operation.yml`: `workflow_dispatch` (`operation` choice, `reason`,
-  `confirmation`), concurrency `vps-admin`, job `operate` with the identity `if:`, `environment: vps-admin`,
-  authorize step (confirmation `RUN <operation>`, reason 10–200 characters, summary), SSH step as `arcade-admin`
-  with secrets `VPS_ADMIN_HOST`, `VPS_ADMIN_USER`, `VPS_ADMIN_SSH_KEY`; only `ADMIN_OK <operation>` passes.
+  `confirmation`), concurrency `vps-admin`. Job `request` (identity `if:`, no environment, no secret): confirmation
+  `RUN <operation>`, reason one plain line, summary shown before approval. Job `operate` (`needs: request`, same
+  `if:`, `environment: vps-admin`): SSH step as `arcade-admin` with `VPS_ADMIN_HOST`, `VPS_ADMIN_USER`,
+  `VPS_ADMIN_SSH_KEY`; only `ADMIN_OK <operation>` passes.
 - `docs/vps-admin-operations.md`, `agents.md`, `infra/vps/README.md`: request/approve/audit rules and activation.
 
 ## Tests (extend `ws-tests/infra-vps-workflow.guard.test.mjs`, run by Infra VPS)
 
-- helper: unknown operation and bad run id are refused and audited without any systemctl call; pause waits until
-  idle and stops at the bound; resume refuses a pending `daemon-reload`; a busy lock blocks; a stale lock is taken
-  over;
+- helper: unknown operation and bad run id are refused and audited without any systemctl call; a failed or
+  unexpected read blocks the status; pause waits until idle and stops at the bound; resume refuses a pending
+  `daemon-reload`; no start entry means no work, no end entry means no success; a request during another is busy
+  and the lock is released afterwards;
 - consistency: workflow choice list = `OPERATIONS` = sudoers aliases; no shell in the helper;
-- workflow: identity expression for every actor pair, `main` only, `environment: vps-admin`, secrets only in the
-  SSH step, no `always()`.
+- workflow: summary in the unprivileged `request` job, `operate` behind `vps-admin` with the only secrets, the
+  reason pattern refuses newlines, markdown and HTML, identity expression for every actor pair, `main` only, no
+  `always()`; staging script checks the existing account.
 
 ## Risks
 
@@ -50,4 +57,4 @@ admin key, and admin operations must not hold the release key.
   T004-3 (owner token removed from `copilot`) and the release agent App before any agent request.
 - **Catalog growth into a shell**: each new operation is a reviewed PR with fixed argv; the guard test keeps the
   three lists identical.
-- **Stuck lock**: only a lock of a dead process is taken over; `/run` is cleared on reboot.
+- **Stuck lock**: `flock` is released by the kernel when the helper exits or dies; no PID file.

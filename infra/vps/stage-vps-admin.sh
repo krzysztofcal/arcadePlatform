@@ -29,15 +29,29 @@ fi
 # The admin account must not share a group with the agent account copilot.
 getent group arcade-admin >/dev/null || groupadd --system arcade-admin
 id arcade-admin >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-admin --shell /bin/bash --gid arcade-admin arcade-admin
-if id -nG copilot | tr ' ' '\n' | grep -qx arcade-admin; then
-  echo "refusing staging: copilot is a member of arcade-admin" >&2
-  exit 1
-fi
+refuse() { echo "refusing staging: $*" >&2; exit 1; }
+if id -nG copilot | tr ' ' '\n' | grep -qx arcade-admin; then refuse "copilot is a member of arcade-admin"; fi
+# An already existing account must be exactly the reviewed one; it is never repaired silently.
+(( "$(id -u arcade-admin)" < 1000 )) || refuse "arcade-admin is not a system account"
+[[ "$(id -nG arcade-admin)" == "arcade-admin" ]] || refuse "arcade-admin must belong only to its own group"
+[[ -z "$(getent group arcade-admin | cut -d: -f4)" ]] || refuse "group arcade-admin must have no other members"
+[[ "$(getent passwd arcade-admin | cut -d: -f6-7)" == "/home/arcade-admin:/bin/bash" ]] || refuse "unexpected arcade-admin home or shell"
+for entry in /home/arcade-admin /home/arcade-admin/.ssh /home/arcade-admin/.ssh/authorized_keys; do
+  [[ -e "$entry" ]] || continue
+  [[ ! -L "$entry" && "$(stat -c %U:%G "$entry")" == "arcade-admin:arcade-admin" ]] || refuse "$entry must be owned by arcade-admin and not a symlink"
+  (( (8#$(stat -c %a "$entry") & 8#022) == 0 )) || refuse "$entry must not be group or other writable"
+done
 install -d -o arcade-admin -g arcade-admin -m 0700 /home/arcade-admin/.ssh
 
 install -D -o root -g root -m 0755 "$HELPER_SRC" "$HELPER_DEST"
 install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_DEST"
 visudo -c
+# The account's only sudo rights are the helper operations.
+# Every listed command (after the run-as spec and tags, comma separated) must be the helper with an operation.
+EXTRA_SUDO="$(sudo -l -U arcade-admin | sed -n '/may run the following commands/,$p' | tail -n +2 \
+  | sed -E 's/^[[:space:]]*\([^)]*\)[[:space:]]*([A-Z_]+:[[:space:]]*)*//' | tr ',' '\n' | sed -E 's/^[[:space:]]+//' \
+  | grep -v '^$' | grep -Ev '^/usr/local/sbin/arcade-vps-admin [a-z0-9-]+ \*$' || true)"
+[[ -z "$EXTRA_SUDO" ]] || refuse "arcade-admin has sudo rights beyond /usr/local/sbin/arcade-vps-admin operations"
 
 STATUS="$(sudo -u arcade-admin sudo -n "$HELPER_DEST" ledger-dispatchers-status 1 || true)"
 if [[ "$STATUS" != "ADMIN_OK ledger-dispatchers-status "* ]]; then
