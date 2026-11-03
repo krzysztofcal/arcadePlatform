@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { parseBuildInfo } from './www-production-release.mjs';
+import { githubWsRelease, parseBuildInfo } from './www-production-release.mjs';
 
 // GitHub Release manifest for WWW, WS and Android (#1159 Addendum B). A release is an audited record of what is
 // already running: it never deploys, restarts WS, migrates, publishes WWW or publishes to Google Play. Each record
@@ -28,8 +28,11 @@ export function wwwEvidence(buildInfoJs, deployId) {
   return { sha: info.commitHash, netlifyDeployId: deployId, buildTime: String(info.buildTime || '') };
 }
 
-// WS: a successful owner-approved WS Server Deploy dispatch on main, and the receipt its deploy job uploaded.
-export function wsEvidence(run, jobs, receipt) {
+// WS: a successful owner-approved WS Server Deploy dispatch on main, the receipt its deploy job uploaded, and GitHub
+// evidence that it is still the latest deploy (githubWsRelease: newest deploy job on main, nothing unfinished).
+// Release Record does not read the VPS, so this is the last confirmed deployment, not a runtime check
+// (scripts/www-production-release.mjs checks the VPS `current` release with SSH).
+export function wsEvidence(run, jobs, receipt, recentRuns) {
   if (!run || run.path !== '.github/workflows/ws-server-deploy.yml' || run.event !== 'workflow_dispatch'
     || run.head_branch !== 'main' || run.status !== 'completed' || run.conclusion !== 'success') fail('ws_run_not_successful_main_dispatch');
   const deploy = (jobs?.jobs || []).filter((job) => job.name === 'deploy');
@@ -38,18 +41,20 @@ export function wsEvidence(run, jobs, receipt) {
     || String(receipt.runId) !== String(run.id) || receipt.environment !== 'ws-production' || !SHA256.test(String(receipt.distSha256))) {
     fail('ws_receipt_mismatch');
   }
-  return { sha: receipt.releaseSha, distSha256: receipt.distSha256, deployRunId: String(run.id), environment: 'ws-production' };
+  if (!Array.isArray(recentRuns) || githubWsRelease(recentRuns) !== run.head_sha) fail('ws_not_latest_github_deploy');
+  return { sha: receipt.releaseSha, distSha256: receipt.distSha256, deployRunId: String(run.id), environment: 'ws-production',
+    evidence: 'latest-github-deploy' };
 }
 
-// Android: until M1 builds the signed AAB in CI, the dispatcher attests the Play upload. Stage/debug APKs are never
-// release evidence and nothing of the AAB is attached.
-export function androidEvidence({ sha, versionName, versionCode, aabSha256, track, attestedBy }) {
+// Android: until M1 builds the signed AAB in CI, only the repository owner attests the Play upload (never an agent on
+// the owner's behalf). Stage/debug APKs are never release evidence and nothing of the AAB is attached.
+export function androidEvidence({ sha, versionName, versionCode, aabSha256, track, attestedBy, owner }) {
   if (!SHA.test(String(sha))) fail('android_sha_invalid');
   if (!/^[0-9]+\.[0-9]+(\.[0-9]+)?$/.test(String(versionName))) fail('android_version_name_invalid');
   if (!/^[1-9][0-9]{0,9}$/.test(String(versionCode))) fail('android_version_code_invalid');
   if (!SHA256.test(String(aabSha256))) fail('android_aab_sha256_invalid');
   if (!ANDROID_TRACKS.includes(track)) fail('android_track_invalid');
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*(\[bot\])?$/.test(String(attestedBy))) fail('android_attester_invalid');
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(owner)) || attestedBy !== owner) fail('android_attestation_owner_only');
   return { sha, versionName, versionCode: Number(versionCode), aabSha256, track, evidence: 'attested', attestedBy };
 }
 
@@ -70,7 +75,7 @@ export function releaseNotes(manifest) {
     const c = manifest.components[name];
     if (!c) return `- ${name}: not recorded yet`;
     const extra = name === 'www' ? `Netlify deploy ${c.netlifyDeployId}`
-      : name === 'ws' ? `dist sha256 ${c.distSha256}, run ${c.deployRunId}`
+      : name === 'ws' ? `dist sha256 ${c.distSha256}, run ${c.deployRunId} (latest GitHub deploy when recorded; VPS not read)`
         : `${c.versionName} (${c.versionCode}), AAB sha256 ${c.aabSha256}, track ${c.track}, attested by ${c.attestedBy}`;
     return `- ${name}${name === manifest.changed ? ' (changed)' : ''}: ${c.sha} — ${extra} — since ${c.releasedIn}`;
   };
@@ -95,10 +100,10 @@ if (isMain) {
     if (component === 'www') {
       evidence = wwwEvidence(fs.readFileSync(env.WWW_BUILD_INFO_FILE, 'utf8'), env.WWW_DEPLOY_ID);
     } else if (component === 'ws') {
-      evidence = wsEvidence(read(env.WS_RUN_FILE), read(env.WS_JOBS_FILE), read(env.WS_RECEIPT_FILE));
+      evidence = wsEvidence(read(env.WS_RUN_FILE), read(env.WS_JOBS_FILE), read(env.WS_RECEIPT_FILE), read(env.WS_RECENT_RUNS_FILE));
     } else {
       evidence = androidEvidence({ sha: env.ANDROID_SHA, versionName: env.ANDROID_VERSION_NAME, versionCode: env.ANDROID_VERSION_CODE,
-        aabSha256: env.ANDROID_AAB_SHA256, track: env.ANDROID_TRACK, attestedBy: env.GITHUB_TRIGGERING_ACTOR });
+        aabSha256: env.ANDROID_AAB_SHA256, track: env.ANDROID_TRACK, attestedBy: env.GITHUB_TRIGGERING_ACTOR, owner: env.GITHUB_REPOSITORY_OWNER });
     }
     const manifest = buildManifest({ previous: read(env.PREVIOUS_MANIFEST_FILE), component, evidence, tag,
       recordedAt: new Date().toISOString(), recordedBy: { actor: env.GITHUB_ACTOR, triggeringActor: env.GITHUB_TRIGGERING_ACTOR, runId: env.GITHUB_RUN_ID } });

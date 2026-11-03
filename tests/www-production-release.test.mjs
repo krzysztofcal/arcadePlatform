@@ -179,25 +179,29 @@ const wsRun = (over = {}) => ({ id: 41700000001, path: '.github/workflows/ws-ser
 const wsJobs = (conclusion = 'success') => ({ jobs: [{ name: 'impact', conclusion: 'success' }, { name: 'deploy', conclusion }] });
 const wsReceipt = (over = {}) => ({ releaseSha: ws, runId: '41700000001', environment: 'ws-production', distSha256: 'd'.repeat(64), ...over });
 const by = { actor: 'krzysztofcal', triggeringActor: 'krzysztofcal', runId: '1' };
+const deployJob = (conclusion, started_at, status = 'completed') => ({ name: 'deploy', status, conclusion, started_at });
+const recent = (...runs) => runs;
+const current = recent({ id: 41700000001, head_sha: ws, status: 'completed', jobs: [deployJob('success', '2026-11-03T10:00:00Z')] });
 
 test('release manifest: selective records keep the unchanged components and their original release', () => {
-  const first = buildManifest({ previous: null, component: 'ws', evidence: wsEvidence(wsRun(), wsJobs(), wsReceipt()), tag: 'release-20261104-1', recordedAt: 't1', recordedBy: by });
+  const first = buildManifest({ previous: null, component: 'ws', evidence: wsEvidence(wsRun(), wsJobs(), wsReceipt(), current), tag: 'release-20261104-1', recordedAt: 't1', recordedBy: by });
   assert.equal(first.previous, null);
   assert.equal(first.components.www, null, 'a component never recorded stays explicitly unknown');
   assert.equal(first.components.android, null);
-  assert.deepEqual(first.components.ws, { sha: ws, distSha256: 'd'.repeat(64), deployRunId: '41700000001', environment: 'ws-production', releasedIn: 'release-20261104-1' });
+  assert.deepEqual(first.components.ws, { sha: ws, distSha256: 'd'.repeat(64), deployRunId: '41700000001', environment: 'ws-production', evidence: 'latest-github-deploy', releasedIn: 'release-20261104-1' });
 
   const wwwOnly = buildManifest({ previous: first, component: 'www', evidence: wwwEvidence(buildInfoJs(), id), tag: 'release-20261104-2', recordedAt: 't2', recordedBy: by });
   assert.deepEqual(wwwOnly.components.ws, first.components.ws, 'WS-only state is carried unchanged by a WWW-only record');
   assert.equal(wwwOnly.components.www.releasedIn, 'release-20261104-2');
   assert.equal(wwwOnly.previous, 'release-20261104-1');
 
-  const android = androidEvidence({ sha, versionName: '1.0.0', versionCode: '3', aabSha256: 'e'.repeat(64), track: 'internal', attestedBy: 'krzysztofcal' });
+  const android = androidEvidence({ sha, versionName: '1.0.0', versionCode: '3', aabSha256: 'e'.repeat(64), track: 'internal', attestedBy: 'krzysztofcal', owner: 'krzysztofcal' });
   const androidOnly = buildManifest({ previous: wwwOnly, component: 'android', evidence: android, tag: 'release-20261105-3', recordedAt: 't3', recordedBy: by });
   assert.deepEqual([androidOnly.components.www, androidOnly.components.ws], [wwwOnly.components.www, first.components.ws]);
   assert.equal(androidOnly.components.android.evidence, 'attested');
   assert.match(releaseNotes(androidOnly), /deploys nothing/);
   assert.match(releaseNotes(androidOnly), /- android \(changed\): a{40}/);
+  assert.match(releaseNotes(androidOnly), /latest GitHub deploy when recorded; VPS not read/, 'the record never claims the WS runtime');
 
   assert.throws(() => buildManifest({ previous: androidOnly, component: 'ws', evidence: first.components.ws, tag: 'release-20261105-3', recordedAt: 't', recordedBy: by }), /tag_exists/);
   assert.throws(() => buildManifest({ previous: { schema: 2 }, component: 'ws', evidence: first.components.ws, tag: 'release-20261105-4', recordedAt: 't', recordedBy: by }), /previous_manifest_invalid/);
@@ -211,16 +215,29 @@ test('release manifest: evidence must prove exactly the running release', () => 
   assert.throws(() => wwwEvidence(buildInfoJs(), 'x'), /www_deploy_id_invalid/);
 
   for (const run of [wsRun({ conclusion: 'failure' }), wsRun({ head_branch: 'feature' }), wsRun({ event: 'push' }), wsRun({ path: '.github/workflows/ws-preview-deploy.yml' }), wsRun({ status: 'in_progress' })]) {
-    assert.throws(() => wsEvidence(run, wsJobs(), wsReceipt()), /ws_run_not_successful_main_dispatch/);
+    assert.throws(() => wsEvidence(run, wsJobs(), wsReceipt(), current), /ws_run_not_successful_main_dispatch/);
   }
-  assert.throws(() => wsEvidence(wsRun(), wsJobs('skipped'), wsReceipt()), /ws_deploy_job_not_successful/);
+  assert.throws(() => wsEvidence(wsRun(), wsJobs('skipped'), wsReceipt(), current), /ws_deploy_job_not_successful/);
   for (const receipt of [null, wsReceipt({ releaseSha: sha }), wsReceipt({ runId: '2' }), wsReceipt({ environment: 'stage' }), wsReceipt({ distSha256: 'x' })]) {
-    assert.throws(() => wsEvidence(wsRun(), wsJobs(), receipt), /ws_receipt_mismatch/);
+    assert.throws(() => wsEvidence(wsRun(), wsJobs(), receipt, current), /ws_receipt_mismatch/);
   }
+  // A historical successful deploy is not recorded as current: a later deploy, an unfinished run or a later failed
+  // deploy attempt all stop the record (existing githubWsRelease rule).
+  const older = { id: 41700000001, head_sha: ws, status: 'completed', jobs: [deployJob('success', '2026-11-03T10:00:00Z')] };
+  for (const [label, runs] of [
+    ['newer deploy of another commit', recent({ id: 41700000009, head_sha: sha, status: 'completed', jobs: [deployJob('success', '2026-11-04T10:00:00Z')] }, older)],
+    ['deploy still running', recent({ id: 41700000009, head_sha: sha, status: 'in_progress', jobs: [deployJob(null, '2026-11-04T10:00:00Z', 'in_progress')] }, older)],
+    ['later deploy failed after switching', recent({ id: 41700000009, head_sha: sha, status: 'completed', jobs: [deployJob('failure', '2026-11-04T10:00:00Z')] }, older)],
+    ['no deploy evidence', recent()],
+    ['not collected', undefined],
+  ]) assert.throws(() => wsEvidence(wsRun(), wsJobs(), wsReceipt(), runs), /ws_not_latest_github_deploy/, label);
+  const skippedLater = recent({ id: 41700000009, head_sha: sha, status: 'completed', jobs: [deployJob('skipped', null)] }, older);
+  assert.equal(wsEvidence(wsRun(), wsJobs(), wsReceipt(), skippedLater).sha, ws, 'a later run whose deploy was skipped changes nothing');
 
-  const good = { sha, versionName: '1.0.0', versionCode: '3', aabSha256: 'e'.repeat(64), track: 'internal', attestedBy: 'krzysztofcal' };
-  for (const [field, value, reason] of [['aabSha256', 'debug.apk', 'aab_sha256'], ['track', 'stage', 'track'], ['versionCode', '0', 'version_code'], ['sha', 'main', 'sha'], ['attestedBy', 'a b', 'attester']]) {
-    assert.throws(() => androidEvidence({ ...good, [field]: value }), new RegExp(`android_${reason}_invalid`));
+  const good = { sha, versionName: '1.0.0', versionCode: '3', aabSha256: 'e'.repeat(64), track: 'internal', attestedBy: 'krzysztofcal', owner: 'krzysztofcal' };
+  for (const [field, value, reason] of [['aabSha256', 'debug.apk', 'aab_sha256_invalid'], ['track', 'stage', 'track_invalid'], ['versionCode', '0', 'version_code_invalid'], ['sha', 'main', 'sha_invalid'],
+    ['attestedBy', 'release-agent[bot]', 'attestation_owner_only'], ['owner', '', 'attestation_owner_only']]) {
+    assert.throws(() => androidEvidence({ ...good, [field]: value }), new RegExp(`android_${reason}`));
   }
 });
 
@@ -229,15 +246,31 @@ test('release record workflow publishes one manifest asset and cannot reach any 
   assert.match(workflow, /^on:\n  workflow_dispatch:\n/m);
   assert.doesNotMatch(workflow, /^  (push|pull_request|pull_request_target|schedule|workflow_run|release):/m);
   assert.match(workflow, /^permissions: \{\}$/m);
-  assert.match(workflow, /    permissions:\n      contents: write\n      actions: read\n/);
   assert.match(workflow, /persist-credentials: false/);
-  assert.doesNotMatch(workflow, /secrets\.|environment:|appleboy|ssh|netlify-cli|netlify deploy --|api\.netlify\.com|workflow run|gh workflow|upload-artifact|systemctl|arcade-ws-restart-gate|stage-db|play-console|fastlane/i);
+  assert.doesNotMatch(workflow, /secrets\.|environment:|appleboy|ssh|netlify-cli|netlify deploy --|api\.netlify\.com|workflow run|gh workflow|systemctl|arcade-ws-restart-gate|stage-db|play-console|fastlane/i);
   assert.match(workflow, /default: false/);
-  assert.match(workflow, /- name: Publish the GitHub Release\n        if: \$\{\{ inputs\.publish \}\}/);
+  // Dry run (owner or agent) is read-only; only the owner's own publish=true dispatch reaches contents: write.
+  const record = workflow.slice(workflow.indexOf('\n  record:\n'), workflow.indexOf('\n  publish:\n'));
+  const publish = workflow.slice(workflow.indexOf('\n  publish:\n'));
+  assert.match(record, /    permissions:\n      contents: read\n      actions: read\n/);
+  assert.doesNotMatch(record.replace(/^\s*#.*$/gm, ''), /contents: write|gh release create/);
+  assert.match(publish, /\n    needs: record\n/);
+  assert.match(publish, /    permissions:\n      contents: write\n    steps:/);
+  assert.equal((workflow.replace(/^\s*#.*$/gm, '').match(/contents: write/g) || []).length, 1);
+  const publishIf = publish.match(/\n    if: \$\{\{ (.+) \}\}\n/)[1];
+  const publishes = ({ actor, triggeringActor = actor, flag = true }) => Function(`return (${publishIf.replaceAll('inputs.publish', String(flag)).replaceAll('github.event_name', '"workflow_dispatch"').replaceAll('github.ref', '"refs/heads/main"').replaceAll('github.triggering_actor', JSON.stringify(triggeringActor)).replaceAll('github.actor', JSON.stringify(actor)).replaceAll('github.repository_owner', '"krzysztofcal"').replaceAll("'", '"').replaceAll(' == ', ' === ')});`)();
+  assert.equal(publishes({ actor: 'krzysztofcal' }), true);
+  assert.equal(publishes({ actor: 'krzysztofcal', flag: false }), false, 'dry run never publishes');
+  assert.equal(publishes({ actor: 'release-agent[bot]' }), false, 'the release agent never publishes');
+  assert.equal(publishes({ actor: 'krzysztofcal', triggeringActor: 'release-agent[bot]' }), false, 'an agent re-run of an owner run never publishes');
+  assert.match(record, /\[\[ "\$PUBLISH" != true \|\| "\$OWNER_RUN" == true \]\]/, 'an agent publish request fails instead of silently skipping');
+  assert.match(record, /\[\[ "\$COMPONENT" != android \|\| "\$OWNER_RUN" == true \]\]/, 'Android attestation is the owner\'s own');
   assert.equal((workflow.match(/gh release create/g) || []).length, 1);
-  assert.match(workflow, /gh release create "\$RELEASE_TAG" release-manifest\.json --repo "\$GITHUB_REPOSITORY" --target "\$RELEASE_TARGET" --title "\$RELEASE_TAG" --notes-file release-notes\.md\n/, 'the manifest is the only asset');
-  assert.match(workflow, /git merge-base --is-ancestor "\$TARGET" origin\/main/);
-  assert.match(workflow, /\[\[ "\$CONFIRMATION" == "RECORD \$COMPONENT RELEASE" \]\]/);
+  assert.match(publish, /gh release create "\$TAG" release-manifest\.json --repo "\$GITHUB_REPOSITORY" --target "\$TARGET" --title "\$TAG" --notes-file release-notes\.md\n/, 'the manifest is the only asset');
+  assert.match(record, /git merge-base --is-ancestor "\$TARGET" origin\/main/);
+  assert.match(publish, /compare\/\$TARGET\.\.\.main/);
+  assert.match(record, /\[\[ "\$CONFIRMATION" == "RECORD \$COMPONENT RELEASE" \]\]/);
+  assert.match(record, /ws-server-deploy\.yml\/runs\?branch=main&event=workflow_dispatch/);
   for (const block of workflow.split(/\n      - name: /).slice(1)) {
     const script = block.split('run: |')[1] || '';
     assert.doesNotMatch(script, /\$\{\{/, 'inputs reach scripts only through env');

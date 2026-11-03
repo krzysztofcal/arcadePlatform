@@ -19,22 +19,28 @@
   `releaseNotes()`; CLI reads the collected files and inputs from env and writes `release-manifest.json` and
   `release-notes.md` (no network, no process spawning).
 - `.github/workflows/release-record.yml`: `workflow_dispatch` (component, confirmation
-  `RECORD <component> RELEASE`, `publish` default false, component inputs), `permissions: {}` with job
-  `contents: write`, `actions: read`; checkout without persisted credentials; collect evidence read-only (latest
-  release manifest, WS run/jobs/receipt or live build-info); build; check target on `main` and tag absent; publish
-  only with `publish=true` (`gh release create … release-manifest.json`).
+  `RECORD <component> RELEASE`, `publish` default false, component inputs), `permissions: {}`.
+  - Job `record` (owner or release agent; `contents: read`, `actions: read`; checkout without persisted
+    credentials): refuses `publish=true` and `android` unless owner/owner; collects evidence read-only (latest
+    release manifest; WS run, jobs, receipt and the recent main dispatches with their jobs, or live build-info);
+    builds; checks target on `main` and tag absent; keeps manifest and notes as a run artifact.
+  - Job `publish` (`needs: record`, only `inputs.publish` with owner/owner; `contents: write`): rechecks target on
+    `main` (compare API) and tag absent, then `gh release create … release-manifest.json`.
 - `docs/release-records.md`, `agents.md`.
 
 ## Tests (existing files)
 
 - `tests/www-production-release.test.mjs` (registered in `scripts/test-all.mjs`): selective WWW/WS/Android records
-  carry unchanged components; evidence refusals; workflow has no deploy reach, one asset, dry-run default, env-only
-  inputs; no workflow triggers on tags or releases and every push is `main` only.
+  carry unchanged components; evidence refusals, including a historical WS deploy (newer, unfinished or later
+  failed deploy) and an Android attestation by anyone but the owner; workflow has no deploy reach, one asset,
+  dry-run default, env-only inputs, a read-only record job and an owner-only publish job; no workflow triggers on tags
+  or releases and every push is `main` only.
 - `ws-tests/ws-server-deploy.workflow.guard.test.mjs`: receipt steps are last, success-only, bound to `github.sha`,
   digest of the uploaded archive, no secrets.
 
 ## Risks
 
-- `contents: write` in the record job: only `main` definition, matching actor pairs, no persisted git credentials,
-  only `gh release create` uses it.
+- `contents: write` exists only in the `publish` job, which only the owner's own `publish=true` dispatch runs; the
+  release agent can prepare but never publish.
+- A WS entry is the last confirmed GitHub deployment, not a VPS runtime read; documented and stated in the notes.
 - The previous manifest is trusted as a release asset of this repository; a malformed one stops the record.

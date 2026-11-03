@@ -20,17 +20,20 @@ not a deployment engine.
 - **R-EVIDENCE.** Built only from existing evidence, verified before anything is written:
   - WWW: the live `https://play.kcswh.pl/js/build-info.js` names the given Netlify deploy id, `production`
     context, `main` branch and the commit;
-  - WS: a successful `WS Server Deploy` `workflow_dispatch` run on `main` whose `deploy` job succeeded, and the
+  - WS: a successful `WS Server Deploy` `workflow_dispatch` run on `main` whose `deploy` job succeeded, the
     `ws-release-receipt` it uploaded (release SHA = run SHA, run id, `ws-production`, SHA-256 of the
-    `ws-server-dist.tgz` uploaded to the VPS);
-  - Android: until M1 builds the signed AAB in CI, an attested record (commit, versionName, versionCode, AAB
-    SHA-256, Play track, attester). Stage/debug APKs are never release evidence.
+    `ws-server-dist.tgz` uploaded to the VPS), and `githubWsRelease()` showing it is still the latest deploy. This is
+    the last confirmed deployment (`evidence: latest-github-deploy`), not a VPS runtime check;
+  - Android: until M1 builds the signed AAB in CI, a record attested by the owner only (commit, versionName,
+    versionCode, AAB SHA-256, Play track). Stage/debug APKs are never release evidence.
 - **R-NO-DEPLOY.** Creating a tag or a release deploys, restarts, migrates and publishes nothing. The record
   workflow has no secret, environment, SSH, Netlify or Play access, and no workflow triggers on tags or releases.
 - **R-PUBLIC.** The only asset is `release-manifest.json` with whitelisted fields. No secret, Stage APK, AAB,
   WWW bundle, test identity or private data is attached.
 - **R-SAFE.** `main` only, matching actor pairs as the other release workflows, exact confirmation, dry run by
   default, tag target must be on `main`, an existing tag is never reused, records serialized.
+- **R-OWNER.** The dry run is read-only and open to the owner and the release agent. Publishing (tag and release,
+  the only `contents: write`) and the Android attestation are the owner's own dispatch only.
 
 ## Decision gate (Addendum B)
 

@@ -4,7 +4,9 @@ name: Release Record
 # release-<UTC date>-<run number>, single asset release-manifest.json). Each record changes one component, verified
 # from existing evidence, and carries the others unchanged from the previous record. It deploys nothing: no
 # deployment, WS restart, migration, WWW publication or Google Play upload is reachable here, and a tag or release
-# created with GITHUB_TOKEN starts no workflow. Default is a dry run; only publish=true creates the release.
+# created with GITHUB_TOKEN starts no workflow. The record job (dry run, owner or release agent) has read-only
+# permissions; only the publish job, run solely when the owner dispatched with publish=true, may create the tag and
+# release. Android attestation is owner-only.
 on:
   workflow_dispatch:
     inputs:
@@ -72,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
       actions: read
     steps:
       - name: Checkout main
@@ -90,9 +92,15 @@ jobs:
         env:
           COMPONENT: ${{ inputs.component }}
           CONFIRMATION: ${{ inputs.confirmation }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
           [[ "$CONFIRMATION" == "RECORD $COMPONENT RELEASE" ]] || { echo "confirmation phrase mismatch"; exit 1; }
+          OWNER_RUN=false
+          [[ "$GITHUB_ACTOR" == "$GITHUB_REPOSITORY_OWNER" && "$GITHUB_TRIGGERING_ACTOR" == "$GITHUB_REPOSITORY_OWNER" ]] && OWNER_RUN=true
+          # Publishing and the Android attestation are the owner's own act; an agent may only dry-run.
+          [[ "$PUBLISH" != true || "$OWNER_RUN" == true ]] || { echo "only the owner may publish a release record"; exit 1; }
+          [[ "$COMPONENT" != android || "$OWNER_RUN" == true ]] || { echo "only the owner may attest an Android release"; exit 1; }
 
       # Read-only: the previous record and the evidence of the changed component.
       - name: Collect evidence
@@ -115,7 +123,14 @@ jobs:
               gh api "repos/$GITHUB_REPOSITORY/actions/runs/$WS_RUN_ID" > .release/ws-run.json
               gh api "repos/$GITHUB_REPOSITORY/actions/runs/$WS_RUN_ID/jobs?per_page=100" > .release/ws-jobs.json
               gh run download "$WS_RUN_ID" --repo "$GITHUB_REPOSITORY" --name ws-release-receipt --dir .release/ws-receipt
-              { echo "WS_RUN_FILE=.release/ws-run.json"; echo "WS_JOBS_FILE=.release/ws-jobs.json"; echo "WS_RECEIPT_FILE=.release/ws-receipt/ws-release-receipt.json"; } >> "$GITHUB_ENV"
+              # The recent main dispatches with all deploy job attempts, for the "still the latest deploy" check.
+              gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ws-server-deploy.yml/runs?branch=main&event=workflow_dispatch&per_page=50" \
+                --jq '[.workflow_runs[] | {id, head_sha, status}]' > .release/ws-runs.json
+              for id in $(jq -r '.[].id' .release/ws-runs.json); do
+                gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=all&per_page=100" --jq "{id: $id, jobs: [.jobs[] | {name, status, conclusion, started_at}]}"
+              done | jq -s . > .release/ws-run-jobs.json
+              jq --slurpfile j .release/ws-run-jobs.json '[.[] | . as $r | $r + {jobs: ([$j[0][] | select(.id == $r.id) | .jobs][0] // [])}]' .release/ws-runs.json > .release/ws-recent-runs.json
+              { echo "WS_RUN_FILE=.release/ws-run.json"; echo "WS_JOBS_FILE=.release/ws-jobs.json"; echo "WS_RECEIPT_FILE=.release/ws-receipt/ws-release-receipt.json"; echo "WS_RECENT_RUNS_FILE=.release/ws-recent-runs.json"; } >> "$GITHUB_ENV"
               ;;
             www)
               [[ "$WWW_DEPLOY_ID" =~ ^[a-f0-9]{24}$ ]] || { echo "www_deploy_id must be a Netlify deploy id"; exit 1; }
@@ -144,13 +159,43 @@ jobs:
           # ls-remote --exit-code: 0 = tag exists, 2 = no such tag, anything else = cannot tell.
           TAG_CHECK=0; git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null || TAG_CHECK=$?
           [[ "$TAG_CHECK" == 2 ]] || { echo "tag $TAG exists or could not be checked ($TAG_CHECK)"; exit 1; }
-          { echo "RELEASE_TAG=$TAG"; echo "RELEASE_TARGET=$TARGET"; } >> "$GITHUB_ENV"
           { echo "### Release record $TAG (publish: $PUBLISH)"; echo '```json'; cat release-manifest.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Keep the manifest for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-record
+          path: |
+            release-manifest.json
+            release-notes.md
+          retention-days: 7
+          if-no-files-found: error
+
+  # Only the owner's own dispatch with publish=true reaches contents: write; the release agent never does.
+  publish:
+    needs: record
+    if: ${{ inputs.publish && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Get the reviewed manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: release-record
+
       - name: Publish the GitHub Release
-        if: ${{ inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" release-manifest.json --repo "$GITHUB_REPOSITORY" --target "$RELEASE_TARGET" --title "$RELEASE_TAG" --notes-file release-notes.md
+          TAG="$(jq -r .tag release-manifest.json)"
+          TARGET="$(jq -r '.components[.changed].sha' release-manifest.json)"
+          [[ "$TAG" =~ ^release-[0-9]{8}-[1-9][0-9]{0,9}$ && "$TARGET" =~ ^[a-f0-9]{40}$ ]] || { echo "invalid manifest"; exit 1; }
+          # Rechecked without a checkout: the target is still on main and the tag still absent.
+          STATUS="$(gh api "repos/$GITHUB_REPOSITORY/compare/$TARGET...main" --jq .status)"
+          [[ "$STATUS" == ahead || "$STATUS" == identical ]] || { echo "release target $TARGET is not on main ($STATUS)"; exit 1; }
+          EXISTING="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq "[.[] | select(.ref == \"refs/tags/$TAG\")] | length")"
+          [[ "$EXISTING" == 0 ]] || { echo "tag $TAG already exists"; exit 1; }
+          gh release create "$TAG" release-manifest.json --repo "$GITHUB_REPOSITORY" --target "$TARGET" --title "$TAG" --notes-file release-notes.md
