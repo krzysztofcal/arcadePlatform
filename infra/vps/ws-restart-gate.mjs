@@ -333,7 +333,7 @@ async function resume() {
     healthz: healthz.trim(),
     runningDir: /^[1-9][0-9]*$/.test(mainPid) ? realDir(`/proc/${mainPid}/cwd`) : null,
     currentDir: realDir(CURRENT_LINK),
-    gate: await runGate()
+    gate: await runGate().catch(() => blocked("gate_error"))
   });
   if (issue) return { safe: false, line: `RESUME_BLOCKED ${issue}` };
   fs.rmSync(HOLD_FILE, { force: true });
