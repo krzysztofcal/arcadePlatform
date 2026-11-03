@@ -1049,3 +1049,26 @@ jobs:
               ABORTED*) echo "release aborted before the switch; previous release keeps running" ;;
               *) echo "STOP: hold kept; owner decision (C7)"; exit 1 ;;
             esac
+
+      # #1159 Addendum B: evidence for the Release Record workflow (release-manifest.json). Recording deploys nothing.
+      # Last on purpose: it runs only after a verified, resumed release and a failure here cannot trigger the abort.
+      - name: Record the WS release receipt
+        if: ${{ success() }}
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          DIST_SHA256="$(sha256sum .artifacts/ws-server/ws-server-dist.tgz | cut -d' ' -f1)"
+          mkdir -p .artifacts/ws-release-receipt
+          DIST_SHA256="$DIST_SHA256" node -e 'process.stdout.write(JSON.stringify({ releaseSha: process.env.RELEASE_SHA, runId: process.env.RELEASE_RUN_ID, environment: "ws-production", distSha256: process.env.DIST_SHA256 }) + "\n")' > .artifacts/ws-release-receipt/ws-release-receipt.json
+          echo "WS release receipt: $RELEASE_SHA dist sha256 $DIST_SHA256" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the WS release receipt
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws-release-receipt
+          path: .artifacts/ws-release-receipt/ws-release-receipt.json
+          retention-days: 90
+          if-no-files-found: error

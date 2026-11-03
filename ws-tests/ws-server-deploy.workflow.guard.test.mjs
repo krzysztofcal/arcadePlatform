@@ -103,8 +103,22 @@ test("deploy authorizes the exact current main SHA before any VPS mutation", () 
   assert.match(recheck, /"\$MAIN_HEAD" == "\$GITHUB_SHA"/);
   assert.equal(deploy.indexOf("- name:", revalidate + 1), deploy.indexOf("- name: Atomic release switch + restart + health gate on VPS"), "no step between recheck and switch");
   assert.ok(deploy.indexOf("name: Prepare running WS for the release on VPS") < revalidate, "prepare before the final recheck");
-  // The released artifact, the VPS release id and the resumed release stay bound to the authorized revision.
-  assert.equal((deploy.match(/RELEASE_SHA: \$\{\{ github\.sha \}\}/g) || []).length, 3);
+  // The released artifact, the VPS release id, the resumed release and the release receipt stay bound to the
+  // authorized revision.
+  assert.equal((deploy.match(/RELEASE_SHA: \$\{\{ github\.sha \}\}/g) || []).length, 4);
+});
+
+test("the WS release receipt is recorded last, only after a verified release, and holds no secret (#1159 Addendum B)", () => {
+  const text = workflowText();
+  const deploy = text.slice(text.indexOf("  deploy:"));
+  const steps = [...deploy.matchAll(/\n      - name: ([^\n]+)/g)].map((m) => m[1]);
+  assert.deepEqual(steps.slice(-4), ["Resume new hands after the verified release on VPS", "Abort the release before the switch on VPS", "Record the WS release receipt", "Upload the WS release receipt"]);
+  const receipt = deploy.slice(deploy.indexOf("- name: Record the WS release receipt"));
+  assert.equal((receipt.match(/if: \$\{\{ success\(\) \}\}/g) || []).length, 2);
+  assert.match(receipt, /sha256sum \.artifacts\/ws-server\/ws-server-dist\.tgz/, "the digest of the archive that was uploaded to the VPS");
+  assert.match(receipt, /releaseSha: process\.env\.RELEASE_SHA, runId: process\.env\.RELEASE_RUN_ID, environment: "ws-production", distSha256: process\.env\.DIST_SHA256/);
+  assert.match(receipt, /name: ws-release-receipt\n\s+path: \.artifacts\/ws-release-receipt\/ws-release-receipt\.json/);
+  assert.doesNotMatch(receipt, /secrets\.|appleboy|ssh|gh release|contents: write/);
 });
 
 test("main push with WS deploy surface reports that Production was not deployed", () => {

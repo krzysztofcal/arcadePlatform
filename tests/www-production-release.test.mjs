@@ -170,3 +170,95 @@ test('release tool has no unlock, build or rollback path', () => {
   const src = fs.readFileSync(new URL('../scripts/www-production-release.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /unlock|\/builds|deploy --prod|stop_builds|--rollback|build_hooks/);
 });
+
+// #1159 Addendum B: GitHub Release manifest. A record never deploys and carries unchanged components forward.
+const manifestModule = await import('../scripts/release-manifest.mjs');
+const { buildManifest, wwwEvidence, wsEvidence, androidEvidence, releaseNotes } = manifestModule;
+const buildInfoJs = (over = {}) => `window.BUILD_INFO = ${JSON.stringify({ commitHash: sha, context: 'production', isProduction: true, branch: 'main', deployId: id, buildTime: '2026-11-03T00:00:00Z', ...over }, null, 2)};\n`;
+const wsRun = (over = {}) => ({ id: 41700000001, path: '.github/workflows/ws-server-deploy.yml', event: 'workflow_dispatch', head_branch: 'main', head_sha: ws, status: 'completed', conclusion: 'success', ...over });
+const wsJobs = (conclusion = 'success') => ({ jobs: [{ name: 'impact', conclusion: 'success' }, { name: 'deploy', conclusion }] });
+const wsReceipt = (over = {}) => ({ releaseSha: ws, runId: '41700000001', environment: 'ws-production', distSha256: 'd'.repeat(64), ...over });
+const by = { actor: 'krzysztofcal', triggeringActor: 'krzysztofcal', runId: '1' };
+
+test('release manifest: selective records keep the unchanged components and their original release', () => {
+  const first = buildManifest({ previous: null, component: 'ws', evidence: wsEvidence(wsRun(), wsJobs(), wsReceipt()), tag: 'release-20261104-1', recordedAt: 't1', recordedBy: by });
+  assert.equal(first.previous, null);
+  assert.equal(first.components.www, null, 'a component never recorded stays explicitly unknown');
+  assert.equal(first.components.android, null);
+  assert.deepEqual(first.components.ws, { sha: ws, distSha256: 'd'.repeat(64), deployRunId: '41700000001', environment: 'ws-production', releasedIn: 'release-20261104-1' });
+
+  const wwwOnly = buildManifest({ previous: first, component: 'www', evidence: wwwEvidence(buildInfoJs(), id), tag: 'release-20261104-2', recordedAt: 't2', recordedBy: by });
+  assert.deepEqual(wwwOnly.components.ws, first.components.ws, 'WS-only state is carried unchanged by a WWW-only record');
+  assert.equal(wwwOnly.components.www.releasedIn, 'release-20261104-2');
+  assert.equal(wwwOnly.previous, 'release-20261104-1');
+
+  const android = androidEvidence({ sha, versionName: '1.0.0', versionCode: '3', aabSha256: 'e'.repeat(64), track: 'internal', attestedBy: 'krzysztofcal' });
+  const androidOnly = buildManifest({ previous: wwwOnly, component: 'android', evidence: android, tag: 'release-20261105-3', recordedAt: 't3', recordedBy: by });
+  assert.deepEqual([androidOnly.components.www, androidOnly.components.ws], [wwwOnly.components.www, first.components.ws]);
+  assert.equal(androidOnly.components.android.evidence, 'attested');
+  assert.match(releaseNotes(androidOnly), /deploys nothing/);
+  assert.match(releaseNotes(androidOnly), /- android \(changed\): a{40}/);
+
+  assert.throws(() => buildManifest({ previous: androidOnly, component: 'ws', evidence: first.components.ws, tag: 'release-20261105-3', recordedAt: 't', recordedBy: by }), /tag_exists/);
+  assert.throws(() => buildManifest({ previous: { schema: 2 }, component: 'ws', evidence: first.components.ws, tag: 'release-20261105-4', recordedAt: 't', recordedBy: by }), /previous_manifest_invalid/);
+  assert.throws(() => buildManifest({ previous: null, component: 'db', evidence: {}, tag: 'release-20261105-4', recordedAt: 't', recordedBy: by }), /component_invalid/);
+});
+
+test('release manifest: evidence must prove exactly the running release', () => {
+  assert.throws(() => wwwEvidence(buildInfoJs({ deployId: live }), id), /www_deploy_not_published/, 'another deploy is published');
+  assert.throws(() => wwwEvidence(buildInfoJs({ context: 'deploy-preview', isProduction: false }), id), /www_not_production_main/);
+  assert.throws(() => wwwEvidence('not build info', id), /www_build_info_unreadable/);
+  assert.throws(() => wwwEvidence(buildInfoJs(), 'x'), /www_deploy_id_invalid/);
+
+  for (const run of [wsRun({ conclusion: 'failure' }), wsRun({ head_branch: 'feature' }), wsRun({ event: 'push' }), wsRun({ path: '.github/workflows/ws-preview-deploy.yml' }), wsRun({ status: 'in_progress' })]) {
+    assert.throws(() => wsEvidence(run, wsJobs(), wsReceipt()), /ws_run_not_successful_main_dispatch/);
+  }
+  assert.throws(() => wsEvidence(wsRun(), wsJobs('skipped'), wsReceipt()), /ws_deploy_job_not_successful/);
+  for (const receipt of [null, wsReceipt({ releaseSha: sha }), wsReceipt({ runId: '2' }), wsReceipt({ environment: 'stage' }), wsReceipt({ distSha256: 'x' })]) {
+    assert.throws(() => wsEvidence(wsRun(), wsJobs(), receipt), /ws_receipt_mismatch/);
+  }
+
+  const good = { sha, versionName: '1.0.0', versionCode: '3', aabSha256: 'e'.repeat(64), track: 'internal', attestedBy: 'krzysztofcal' };
+  for (const [field, value, reason] of [['aabSha256', 'debug.apk', 'aab_sha256'], ['track', 'stage', 'track'], ['versionCode', '0', 'version_code'], ['sha', 'main', 'sha'], ['attestedBy', 'a b', 'attester']]) {
+    assert.throws(() => androidEvidence({ ...good, [field]: value }), new RegExp(`android_${reason}_invalid`));
+  }
+});
+
+test('release record workflow publishes one manifest asset and cannot reach any deployment', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/release-record.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /^on:\n  workflow_dispatch:\n/m);
+  assert.doesNotMatch(workflow, /^  (push|pull_request|pull_request_target|schedule|workflow_run|release):/m);
+  assert.match(workflow, /^permissions: \{\}$/m);
+  assert.match(workflow, /    permissions:\n      contents: write\n      actions: read\n/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.doesNotMatch(workflow, /secrets\.|environment:|appleboy|ssh|netlify-cli|netlify deploy --|api\.netlify\.com|workflow run|gh workflow|upload-artifact|systemctl|arcade-ws-restart-gate|stage-db|play-console|fastlane/i);
+  assert.match(workflow, /default: false/);
+  assert.match(workflow, /- name: Publish the GitHub Release\n        if: \$\{\{ inputs\.publish \}\}/);
+  assert.equal((workflow.match(/gh release create/g) || []).length, 1);
+  assert.match(workflow, /gh release create "\$RELEASE_TAG" release-manifest\.json --repo "\$GITHUB_REPOSITORY" --target "\$RELEASE_TARGET" --title "\$RELEASE_TAG" --notes-file release-notes\.md\n/, 'the manifest is the only asset');
+  assert.match(workflow, /git merge-base --is-ancestor "\$TARGET" origin\/main/);
+  assert.match(workflow, /\[\[ "\$CONFIRMATION" == "RECORD \$COMPONENT RELEASE" \]\]/);
+  for (const block of workflow.split(/\n      - name: /).slice(1)) {
+    const script = block.split('run: |')[1] || '';
+    assert.doesNotMatch(script, /\$\{\{/, 'inputs reach scripts only through env');
+  }
+  assert.match(workflow, /github\.actor == github\.repository_owner && github\.triggering_actor == github\.repository_owner/);
+
+  // No workflow starts on a tag or a release; every push trigger is limited to main.
+  const dir = new URL('../.github/workflows/', import.meta.url);
+  let pushWorkflows = 0;
+  for (const file of fs.readdirSync(dir).filter((name) => name.endsWith('.yml'))) {
+    const on = fs.readFileSync(new URL(file, dir), 'utf8').split(/\n(?=[a-z])/).find((part) => part.startsWith('on:'));
+    assert.ok(on, `${file}: top-level on:`);
+    assert.doesNotMatch(on, /^  (release|create):/m, file);
+    assert.doesNotMatch(on, /^\s+tags:/m, file);
+    if (/^  push:/m.test(on)) {
+      pushWorkflows += 1;
+      assert.match(on, /^  push:\n    branches: \[ main \]\n/m, `${file}: push only on main`);
+    }
+  }
+  assert.ok(pushWorkflows >= 5, 'the scan sees the push-triggered workflows');
+
+  const script = fs.readFileSync(new URL('../scripts/release-manifest.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(script, /spawn|exec|fetch\(|writeFileSync\((?!'release-(manifest\.json|notes\.md)')/, 'the builder only reads files and writes the two outputs');
+});
