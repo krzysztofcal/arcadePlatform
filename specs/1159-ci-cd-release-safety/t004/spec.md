@@ -60,11 +60,11 @@ Corrections to the earlier T004 draft:
   - administrators cannot bypass the protection.
   Environment secrets reach the job only after approval. One approval covers the whole job: prepare, deploy, health and resume.
 - **R-IDENTITY.** The agent dispatches through a GitHub App installed only on this repository. It is not a collaborator and not the owner's token.
-  - Dispatch needs only `Actions: write` (+ `Metadata: read`). In T004-3 the App also replaces the owner token for code and PR work (`Contents`, `Pull requests`, `Issues`).
+  - Dispatch needs only `Actions: write` (+ `Metadata: read`). Code and PR work uses a separate credential without `Actions` write. Because both credentials end up on the agent's account, the agent gets the code credential only after the T004-3 re-run and `main`-only conditions are verified (plan, T004-3).
   - The App never gets `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables`. `Workflows` comes only after the secrets audit.
   - Without `Deployments: write` it cannot approve a pending deployment. Without `Workflows` it cannot change workflow files.
   - The agent mints a short-lived installation token (1 h) on the VPS from the App private key (owned by `copilot`, mode 0600) for each dispatch.
-  - A dispatch through the App runs with `github.actor` and `github.triggering_actor` = `<app-slug>[bot]`. The `deploy` job accepts a run only when both are the repository owner or `vars.WS_RELEASE_AGENT` (set to `<app-slug>[bot]`).
+  - A dispatch through the App runs with `github.actor` and `github.triggering_actor` = `<app-slug>[bot]`. The `deploy` job accepts only matching pairs: owner/owner, or `vars.WS_RELEASE_AGENT`/`vars.WS_RELEASE_AGENT` (set to `<app-slug>[bot]`). A mixed pair, such as an agent re-run of an owner run or the other way round, is refused.
   - With prevent self-review, a run started by the App is approved by the owner, and a run started by the owner cannot be self-approved (break-glass is an admin setting change).
   - No other dispatch path exists: there is no new workflow, `repository_dispatch` or alternative job.
   - **What `Actions: write` also allows:** it covers every workflow in the repository, so the App can dispatch, re-run, cancel or delete runs and their logs, and enable or disable workflows.
@@ -80,7 +80,7 @@ Corrections to the earlier T004 draft:
   - No such secret stays at repository level.
   - The repository keys for `copilot` (`WS_HOST`, `WS_USER`, `WS_SSH_KEY`, used by `infra-vps.yml` for Caddy) reach only `copilot`, which has no Production WS rights after T004-2.
 - **R-HOST.** Production release operations run only as a dedicated VPS account, `arcade-release`. Its SSH key exists only as the `ws-production` environment secret.
-  - It owns write access to `/opt/ws-server` and the deploy lock, after a reviewed ownership migration (plan, setup step 3).
+  - It owns write access to `/opt/ws-server` and the deploy lock, after a reviewed ownership migration (runbook `docs/ws-production-restart-gate.md` section D).
   - Its sudo rights are exactly:
     - the Production env preflight `""`;
     - gate `check` and `restart`;

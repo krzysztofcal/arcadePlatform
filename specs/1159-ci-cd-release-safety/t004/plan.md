@@ -14,7 +14,7 @@ Reuse first: the existing restart gate, hold/drain, the `WS Server Deploy` job a
   - The App cannot push code or workflows (no `Contents`), cannot approve deployments (no `Deployments`), and is not a reviewer.
   - Rejected: a separate Write collaborator account. `Contents: write` lets it push a branch workflow that runs with repository secrets and with any environment not limited to `main`.
   - Rejected: keeping the owner's token for dispatch with self-review allowed. Whether that token can approve its own run would depend on its permissions, which the agent cannot prove.
-  - Dispatch needs only `Actions: write`. In T004-3 the same App takes over code and PR work (`Contents`, `Pull requests`, `Issues`) and the owner token leaves `copilot`.
+  - Dispatch needs only `Actions: write`. Code and PR work uses a separate credential, given only after the T004-3 conditions hold. The owner token leaves `copilot` in T004-3.
   - Until then, the owner token on the VPS must not have `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables` write.
   - `Contents: write` lets the agent change scripts run by PR-triggered workflows, which is the same as today. This is why the secrets audit comes first: no Production secret may be reachable by such a workflow.
 - **A separate VPS account (`arcade-release`) for Production.**
@@ -67,7 +67,7 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 
 **`.github/workflows/ws-server-deploy.yml` job `deploy`:**
 - `environment: ws-production`;
-- `if:`: the existing conditions, with the actor checks replaced by `(github.actor == github.repository_owner || github.actor == vars.WS_RELEASE_AGENT) && (github.triggering_actor == github.repository_owner || github.triggering_actor == vars.WS_RELEASE_AGENT)`;
+- `if:`: the existing conditions, with the actor checks replaced by matching pairs only: `((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT))`. A test evaluates the expression for every actor combination;
 - the three SSH steps use the environment secrets `WS_PRODUCTION_HOST`, `WS_PRODUCTION_USER` and `WS_PRODUCTION_SSH_KEY`. `infra-vps.yml` keeps the repository secrets for Caddy;
 - the remote account check `copilot` → `arcade-release`, and `DEPLOY_GROUP` → `arcade-release`;
 - in `Atomic release switch …`, after the existing gate `check` under the lock and before `ln -sfn`: `… switching "$GITHUB_RUN_ID"`. It must print `SWITCH_MARKED`, otherwise exit 1 before the link changes;
@@ -84,9 +84,9 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 **`infra/vps/bootstrap.sh`, `infra/vps/stage-ws-restart-gate.sh`:**
 - create the `arcade-release` system user and group, with no password;
 - the post-install check runs `check` as both accounts.
-- No ownership change of `/opt/ws-server` is done here; it is a reviewed manual setup step.
+- No ownership change of `/opt/ws-server` is done here. It is the reviewed runbook section D, which also installs the VPS maintenance script and unit (now `arcade-release`) without running them.
 
-**Re-run hardening:** `chips-ledger-production-scheduled-automation.yml` also checks `github.triggering_actor == github.repository_owner`, so a re-run by the App cannot reuse the owner's privileges. `ws-server-deploy.yml` checks both actors, and any re-run needs a new `ws-production` approval. The Stage workflows gated on `github.actor` are left as they are (Stage only).
+**Re-run hardening:** `chips-ledger-production-scheduled-automation.yml` also checks `github.triggering_actor == github.repository_owner`, so a re-run by the App cannot reuse the owner's privileges. `ws-server-deploy.yml` checks both actors, and any re-run needs a new `ws-production` approval. The Stage workflows gated only on `github.actor` are hardened in T004-3, before any App exists.
 
 **`agents.md`:** the WS Production bullet says: agent dispatch, owner approval in `ws-production`, no manual root steps for a normal release.
 
@@ -100,7 +100,7 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 
 **Exit:** CI green. WS Preview is unaffected; the Production path does not run in PR CI.
 
-## T004-3: credential separation on the VPS (small PR, then setup)
+## T004-3: credential separation and re-run hardening (small PR, then setup)
 
 The GitHub App only makes the owner's approval mandatory if the agent cannot reach any owner token. Today the agent account also hosts the owner-token automation. Minimal separation, keeping the timers running:
 
@@ -109,10 +109,22 @@ The GitHub App only makes the owner's approval mandatory if the agent cannot rea
   - `gh` comes from a root-owned path (`/usr/local/bin/gh`, root `0755`) through `GH_BIN`. No binary, config or runtime directory of these units is writable by `copilot`.
   - Tokens come only from root-owned `0600` `EnvironmentFile`s read by systemd (`GH_TOKEN`). Each is a fine-grained owner token for this repository, limited to `Actions: write` (dispatch and run reads).
   - The Stage dispatcher gets its own token file instead of `copilot`'s `GH_CONFIG_DIR`.
-- **Agent:** `copilot` holds no owner token. For code and PR work, and for dispatch, it uses the App installation token only.
-  - App permissions: `Actions: write`, `Contents: write`, `Pull requests: write`, `Issues: write`, `Metadata: read`.
-  - `Workflows: write` is granted only after the secrets audit is verified. Until then the owner applies workflow-file changes.
-  - Never `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables`.
+- **Stage re-run audit and fix:** a re-run keeps the original `github.actor`. A Stage job gated only on `github.actor == owner` therefore runs with the owner's privileges and its Stage secrets when anyone with `Actions: write` re-runs an owner run. These jobs get `github.triggering_actor == github.repository_owner` as well:
+  - `chips-ledger-stage-scheduled-automation.yml`;
+  - `stage-bonus-campaigns.yml`;
+  - `stage-supabase-resource-health.yml`.
+  The Stage dispatcher dispatches as the owner, so the automatic runs keep working. A guard test asserts the clause in each owner-gated job.
+- **Dispatchable workflows on other refs:** every `workflow_dispatch` workflow that receives secrets either runs its secret-using jobs only for `github.ref == 'refs/heads/main'`, or is shown in the audit to hold only non-sensitive values. The inventory and decisions per workflow go into the private audit note; the PR adds only the guard clauses and their tests.
+- **Agent credentials: dispatch and code write are not combined until this is done.**
+  - Release dispatch: the GitHub App with `Actions: write` and `Metadata: read` only, used solely to dispatch `WS Server Deploy` and read runs.
+  - Code and PR work: a separate credential with `Contents`, `Pull requests` and `Issues` write and no `Actions` write.
+  - Never `Deployments`, `Environments`, `Administration`, `Secrets`, `Variables` or `Workflows`.
+  - Both credentials end up on the same VPS account, so the agent effectively holds both. With both, it can put code on a branch and dispatch or re-run a workflow on that branch, which runs the code with that workflow's secrets.
+  - So the agent receives the code-write credential only after:
+    - the re-run checks above;
+    - the `main`-only clauses on secret-using dispatchable workflows;
+    - the audit's confirmation that no Production secret reaches a PR- or push-triggered workflow.
+  - Until then, code and PR work stays with the current owner token, which the agent loses at the end of this step, and dispatch has to wait for it.
 - **`scripts/github-app-dispatch.mjs`:**
   - mints a 1 h installation token in-process from the App key (`~copilot/.config/arcade-release-app.pem`, `0600`);
   - dispatches `WS Server Deploy` with the current main SHA and the confirmation phrase;
@@ -128,77 +140,36 @@ The GitHub App only makes the owner's approval mandatory if the agent cannot rea
 ## Production secrets audit (owner; names and settings only, never values)
 
 1. List the repository secrets and variables, the environments with their secrets, reviewers, branch policy and admin bypass, and the fine-grained tokens and Apps with access to this repository.
-2. Map every secret name to the workflow jobs that reference it (from `.github/workflows`) and to the VPS env files that hold owner tokens. Classify each as Production, Stage, test or unused.
+2. Map every secret name to the workflow jobs that reference it (from `.github/workflows`), to their triggers (PR, push, dispatch, re-run) and refs, and to the VPS env files that hold owner tokens. Classify each as Production, Stage, test or unused.
 3. Production secrets live only in environments limited to `main`. An environment that can change Production needs owner review, unless it serves an owner-only scheduled automation whose job checks `github.actor` and `github.triggering_actor`. Unused secrets and environments are removed.
 4. Rotate any Production credential that was reachable by the agent account. Rotate the VPS dispatcher tokens when they move to `arcade-dispatch`.
 5. Record the result as names, classes and settings in a private owner note. Not in an issue, PR or CI log.
 
-## One-time setup (separate GOs, after T004-2 is merged)
-
-1. **Secrets and environments hardening (owner, before the App is installed; values are never printed):**
-   1. Inventory names only (Settings → Secrets and variables → Actions; Environments). Map each name to the workflows that use it (`grep -rn "secrets\." .github/workflows`) and classify it Production / Stage / test.
-   2. For every environment holding Production secrets:
-      - set deployment branches to `main` only;
-      - add owner review unless it serves an owner-only automation whose job checks `github.actor` and `github.triggering_actor`;
-      - disallow admin bypass.
-      - An environment no workflow references is emptied and deleted.
-   3. A repository-level secret that gives Production access moves into such an environment; the workflow job gets `environment:`. Stage and test secrets stay.
-   4. Verify by reading settings only: each Production environment shows the branch policy (and a reviewer where required); no Production name is left at repository level.
-2. **GitHub (owner):**
-   - create the GitHub App (repository-only install; `Actions: write`, `Metadata: read`; no webhook);
-   - put its private key on the VPS as `~copilot/.config/arcade-release-app.pem` (0600);
-   - set variable `WS_RELEASE_AGENT=<app-slug>[bot]`;
-   - create environment `ws-production` with the R-APPROVE settings;
-   - add the secrets `WS_PRODUCTION_HOST`, `WS_PRODUCTION_USER=arcade-release` and `WS_PRODUCTION_SSH_KEY` (a new ed25519 key, private part only in the environment);
-   - check that the owner token on the VPS has no `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables` write.
-3. **VPS ownership migration of `/opt/ws-server` (root, one shell, nothing else running):**
-   1. **Preconditions:**
-      - no queued or in-progress `WS Server Deploy` run;
-      - `flock -n /opt/ws-server/.deploy-maintenance.lock true` succeeds;
-      - `ws-server.service` is `active`; record its MainPID.
-   2. **Inventory and backup:** `find /opt/ws-server -xdev -printf '%u:%g %m %y %p\n'` to `/root/t4-backup/opt-ws-server-owners.txt`.
-   3. **Review the inventory:**
-      - owners are only `root` and `copilot`, the group is `arcade-deploy`, and there are no world-writable entries;
-      - `arcade` (the service user) can read every release file through its other permissions.
-      - Anything else: STOP.
-   4. **Change:**
-      - `chown -h arcade-release:arcade-release /opt/ws-server/current /opt/ws-server/.deploy-maintenance.lock`;
-      - `chgrp arcade-release /opt/ws-server /opt/ws-server/releases` (root stays the owner, setgid is kept);
-      - `chown -R arcade-release:arcade-release /opt/ws-server/releases/*`.
-      - No mode change.
-   5. **Verify:**
-      - `sudo -u arcade test -r /opt/ws-server/current/server.mjs`;
-      - `sudo -u copilot test -w /opt/ws-server/releases` fails;
-      - `sudo -u arcade-release test -w /opt/ws-server/releases` succeeds;
-      - MainPID unchanged, `/healthz` `ok`.
-   6. **Rollback:** restore owner and group per line from the inventory (`chown -h`), then repeat step 5's read check. No restart is needed: the running process keeps its open files.
-4. **VPS (root):**
-   - stage T004-1 and T004-2 with `stage-ws-restart-gate.sh`;
-   - add the public key to `~arcade-release/.ssh/authorized_keys`;
-   - `visudo -c`; gate `check` as `copilot` and as `arcade-release`.
-5. **Agent dispatch:** after T004-3 the agent mints an installation token from the App key for each dispatch (`scripts/github-app-dispatch.mjs`) and holds no owner token.
-6. **First run:**
-   1. the agent dispatches the current main SHA;
-   2. the owner approves;
-   3. the agent verifies the release, health, `RESUMED` and the money checks, then reports.
-
 ## Activation order (each step a separate owner GO; stop at the first unexpected result)
 
-1. Merge T004-2, then create and protect `ws-production` before anyone dispatches (step 4 settings).
-   - Nothing changes on the VPS.
-   - A dispatch before that would auto-create an unprotected, empty environment. With no `WS_PRODUCTION_*` secrets and no `arcade-release` account, its first SSH step fails before any VPS change.
-2. Production secrets audit and environment hardening (above).
-3. T004-3 merged; `arcade-dispatch` installed; timers verified on the next slots; owner token removed from `copilot`.
-4. Create the GitHub App, set `WS_RELEASE_AGENT`, create `ws-production` with its secrets, and verify the owner token permissions.
-5. VPS ownership migration of `/opt/ws-server` (setup step 3).
-6. Stage the gate with `stage-ws-restart-gate.sh`:
-   - creates `arcade-release`;
-   - installs the T004 helper, drop-in and sudoers;
-   - `copilot` loses `restart` and the Production preflight here.
-   Then add the release public key and run `check` as both accounts.
-7. First agent-initiated release: the agent dispatches, the owner approves `ws-production`, the agent verifies `PREPARED`, `SWITCH_MARKED`, `RESTARTED`, health, smoke and `RESUMED`, then the money checks, and reports.
+1. **Protect the environment first (owner, before merging T004-2).** Create `ws-production` with no secrets:
+   - required reviewer: the owner;
+   - "Prevent self-review" on;
+   - deployment branches: selected, `main` only;
+   - "Allow administrators to bypass" off.
+   The agent verifies by reading only (`GET /repos/krzysztofcal/arcadePlatform/environments/ws-production`):
+   - `required_reviewers` lists the owner, with `prevent_self_review: true`;
+   - `deployment_branch_policy` is custom branches, and the branch policy list is exactly `main`;
+   - `can_admins_bypass: false`.
+   Any mismatch: STOP.
+2. **Merge T004-2 (owner).** Nothing changes on the VPS. A dispatch now waits for approval and, without `WS_PRODUCTION_*` secrets and the `arcade-release` account, fails at its first SSH step before any VPS change.
+3. **Production secrets audit and environment hardening** (above), including `production-ledger`, `production-poker-refill` and the repository secrets.
+4. **T004-3 merged.** `arcade-dispatch` installed, timers verified on the next slots, owner token removed from `copilot`.
+5. **Create the release dispatch App** (`Actions: write`, `Metadata: read`, this repository only) and set `WS_RELEASE_AGENT=<app-slug>[bot]`. Give the separate code credential only once T004-3's conditions are verified.
+6. **Release account migration on the VPS** (runbook `docs/ws-production-restart-gate.md` section D): preconditions, inventory and backup, account, ownership, the maintenance script and unit installed but not run, verification, rollback.
+7. **Add the `ws-production` secrets** `WS_PRODUCTION_HOST`, `WS_PRODUCTION_USER=arcade-release` and `WS_PRODUCTION_SSH_KEY` (a new ed25519 key whose private part lives only in the environment), and put the public key into `~arcade-release/.ssh/authorized_keys`.
+8. **Stage the gate** with `stage-ws-restart-gate.sh` from the merged `main`: helper, drop-in and sudoers. It runs `check` as both accounts and confirms `copilot` cannot restart Production. From here `copilot` loses `restart` and the Production preflight.
+9. **First agent-initiated release:**
+   1. the agent dispatches through the App;
+   2. the owner approves `ws-production`;
+   3. the agent verifies `PREPARED`, `SWITCH_MARKED`, `RESTARTED`, health, smoke and `RESUMED`, then the money checks, and reports.
 
-Until step 6 is complete no WS Production deploy is possible. That is the intended fail-closed window.
+Until step 8 is complete no WS Production deploy is possible. That is the intended fail-closed window.
 
 ## Risks
 
@@ -208,6 +179,6 @@ Until step 6 is complete no WS Production deploy is possible. That is the intend
 - **R4.** The safe-stop path stays root-only and manual.
 - **R5.** The owner's `admin` role can still change environment settings. This is intended for break-glass; it is visible in the audit log.
 - **R6.** A stray pot on an idle table can be hidden for the duration of a running hand (allowance of one pot per running hand). Once no hand runs it stops `prepare`, and the drain phase allows no pot.
-- **R7.** `copilot`'s existing SSH keys and the repository keys stay valid for Preview and Caddy. They give no Production rights once T004-2 and setup step 3 are done.
+- **R7.** `copilot`'s existing SSH keys and the repository keys stay valid for Preview and Caddy. They give no Production rights once T004-2 and runbook section D are done.
 - **R8.** `Actions: write` lets the App dispatch other ungated workflows, cancel runs and delete run logs. These are Stage, Preview, tests and the Caddy reload from `main`. The agent can already do the same today. Environment deployment history keeps the approvals.
 - **R9.** A process change between `switching` and the gated restart, or a failure in that window, always ends in C7 (hold kept). This is intended.
