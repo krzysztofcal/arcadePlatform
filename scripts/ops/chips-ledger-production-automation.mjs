@@ -406,7 +406,8 @@ async function resumeProductionPrepareBatch({ activeRow, profile, env, policy, b
   return { state: "prepared", resumed: true, batchId: String(row.batch_id),
     transactions: dry.evidence.transactionCount, entries: dry.evidence.entryCount,
     compressedSha256: row.compressed_sha256, recoveryArchiveSha256: durable.recoveryArchive.sha256,
-    recoveryManifestSha256: durable.recoveryManifest.sha256 };
+    recoveryManifestSha256: durable.recoveryManifest.sha256,
+    storageWrites: [durable.recoveryArchive, durable.recoveryManifest].filter(object => object?.uploaded === true).length };
 }
 
 function assertProductionHumanPrunedBatch(row, batchId, cutoff = null, automaticContext = null) {
@@ -636,11 +637,12 @@ async function resumeProductionCanaryBatch({
     fail("active Production batch summary does not match the exact prepared batch");
   }
   let row = await pruneStore.getManifest(activeRow.object_path);
+  let resumedPrepare = null;
   // An automatic bot-only run that lost its session after commit leaves the
   // batch without any proof. Only that exact state resumes through PREPARE.
   if (mode === "automatic" && policy === "bot-only-7d" && row
     && [row.archive_proof_verified_at, row.archived_transaction_ids_sha256, row.archived_entry_ids_sha256].every(value => value == null)) {
-    await resumeProductionPrepareBatch({ activeRow, profile, env, policy, batchId, sql, lockSession,
+    resumedPrepare = await resumeProductionPrepareBatch({ activeRow, profile, env, policy, batchId, sql, lockSession,
       pruneStore, storageTarget, verifyBucket, storageDeps, tempRoot, deps, automaticContext });
     row = await pruneStore.getManifest(activeRow.object_path);
   }
@@ -723,7 +725,7 @@ async function resumeProductionCanaryBatch({
     compressedSha256: row.compressed_sha256,
     recoveryArchiveSha256: durable.recoveryArchive.sha256,
     recoveryManifestSha256: durable.recoveryManifest.sha256,
-    storageWrites: 0,
+    storageWrites: resumedPrepare?.storageWrites || 0,
     databaseWrites: 2,
   };
 }

@@ -4544,7 +4544,7 @@ await assert.rejects(runProductionAutomation({policy:"escrow",mode:"automatic",e
 const botResumeEvidence = { ...productionResumeEvidence,
   transactionIds: Array.from({ length: 6 }, (_, index) => `00000000-0000-4000-8000-00000000020${index}`),
   entryIds: Array.from({ length: 12 }, (_, index) => 2001 + index), transactionCount: 6, entryCount: 12 };
-function makeBotMissingProofHarness({ row: overrides = {}, badBytes = false, loseLockOnDownload = false } = {}) {
+function makeBotMissingProofHarness({ row: overrides = {}, badBytes = false, loseLockOnDownload = false, recoveryExisted = false } = {}) {
   const row = { ...makeProductionResumeRow(), source_policy_id: "production-ledger-bot-only-retention-7d-v1", batch_id: "440",
     transaction_count: 6, entry_count: 12,
     archive_proof_verified_at: null, archived_transaction_ids_sha256: null, archived_entry_ids_sha256: null, ...overrides };
@@ -4561,7 +4561,8 @@ function makeBotMissingProofHarness({ row: overrides = {}, badBytes = false, los
   };
   harness.deps.persistDurableRecovery = async () => {
     calls.persist += 1;
-    return { state: "complete", archive: { sha256: row.compressed_sha256 }, recoveryArchive: { sha256: row.compressed_sha256 }, recoveryManifest: { sha256: "4".repeat(64) } };
+    return { state: "complete", archive: { sha256: row.compressed_sha256 }, recoveryArchive: { sha256: row.compressed_sha256, uploaded: !recoveryExisted },
+      recoveryManifest: { sha256: "4".repeat(64), uploaded: !recoveryExisted } };
   };
   harness.deps.pruneArchive = async ({ argv }) => {
     if (argv.includes("--register-proof")) {
@@ -4585,6 +4586,8 @@ assert.equal(botMissingProofResult.batchId, "440");
 assert.equal(botMissingProofResult.transactions, 6);
 assert.equal(botMissingProofResult.entries, 12);
 assert.equal(botMissingProofResult.maxTransactions, 5000);
+assert.equal(botMissingProofResult.storageWrites, 2, "newly created recovery objects are reported");
+assert.equal((await makeBotMissingProofHarness({ recoveryExisted: true }).run()).storageWrites, 0, "existing recovery objects are not writes");
 assert.deepEqual(botMissingProof.calls, { proof: 1, dry: 2, persist: 1, execute: 1 });
 assert.equal(botMissingProof.harness.calls.export, 0);
 assert.equal(botMissingProof.harness.calls.store, 0);
