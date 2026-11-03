@@ -331,7 +331,7 @@ function assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicy
   return row;
 }
 
-function assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId) {
+function assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId, maxTransactions = 2) {
   if (!batchId || !/^[1-9][0-9]*$/.test(text(batchId))
     || text(activeRow?.batch_id) !== text(batchId) || text(row?.batch_id) !== text(batchId)) {
     fail("exact active Production batch ID does not match --batch-id");
@@ -344,7 +344,7 @@ function assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePo
     || !SHA256_RE.test(text(row.compressed_sha256)) || !SHA256_RE.test(text(row.raw_sha256))
     || row.object_path !== `v1/sha256/${row.compressed_sha256}.jsonl.gz`
     || !Number.isInteger(Number(row.transaction_count)) || Number(row.transaction_count) < 1
-    || Number(row.transaction_count) > 2 || Number(row.entry_count) !== Number(row.transaction_count) * 2
+    || Number(row.transaction_count) > maxTransactions || Number(row.entry_count) !== Number(row.transaction_count) * 2
     || String(activeRow.transaction_count) !== String(row.transaction_count)
     || String(activeRow.entry_count) !== String(row.entry_count)) {
     fail("active Production PREPARE batch identity, archive or cap differs");
@@ -365,10 +365,11 @@ function assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePo
 }
 
 async function resumeProductionPrepareBatch({ activeRow, profile, env, policy, batchId,
-  sql, lockSession, pruneStore, storageTarget, verifyBucket, storageDeps, tempRoot, deps }) {
+  sql, lockSession, pruneStore, storageTarget, verifyBucket, storageDeps, tempRoot, deps, automaticContext = null }) {
   const sourcePolicyId = PRODUCTION_POLICIES[policy];
+  const cap = effectiveProductionCap(automaticContext, sourcePolicyId);
   let row = await pruneStore.getManifest(activeRow.object_path);
-  assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId);
+  assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId, cap);
   await verifyBucket(storageTarget);
   const inspect = deps.inspectDurableRecoveryState || inspectDurableRecoveryState;
   const recovery = await inspect(storageTarget, row, profile, null, storageDeps);
@@ -386,7 +387,7 @@ async function resumeProductionPrepareBatch({ activeRow, profile, env, policy, b
     await runPrune({ argv: [...args, "--register-proof"], env, cwd: tempRoot, deps: pruneDeps });
   }
   row = await pruneStore.getManifest(activeRow.object_path);
-  assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId);
+  assertProductionPrepareBatch(row, activeRow, batchId, profile, sourcePolicyId, cap);
   if (!row.archive_proof_verified_at) fail("active Production PREPARE proof registration is incomplete");
   await assertRetentionAdvisoryLock(sql, lockSession);
   const dry = await runPrune({ argv: args, env, cwd: tempRoot, deps: pruneDeps });
@@ -401,7 +402,7 @@ async function resumeProductionPrepareBatch({ activeRow, profile, env, policy, b
   const durable = await (deps.persistDurableRecovery || persistDurableRecovery)(storageTarget, row, profile, dry.evidence, main.bytes, storageDeps);
   assertDurableRecoveryReady(durable);
   await assertRetentionAdvisoryLock(sql, lockSession);
-  assertProductionPrepareBatch(await pruneStore.getManifest(activeRow.object_path), activeRow, batchId, profile, sourcePolicyId);
+  assertProductionPrepareBatch(await pruneStore.getManifest(activeRow.object_path), activeRow, batchId, profile, sourcePolicyId, cap);
   return { state: "prepared", resumed: true, batchId: String(row.batch_id),
     transactions: dry.evidence.transactionCount, entries: dry.evidence.entryCount,
     compressedSha256: row.compressed_sha256, recoveryArchiveSha256: durable.recoveryArchive.sha256,
@@ -635,6 +636,14 @@ async function resumeProductionCanaryBatch({
     fail("active Production batch summary does not match the exact prepared batch");
   }
   let row = await pruneStore.getManifest(activeRow.object_path);
+  // An automatic bot-only run that lost its session after commit leaves the
+  // batch without any proof. Only that exact state resumes through PREPARE.
+  if (mode === "automatic" && policy === "bot-only-7d" && row
+    && [row.archive_proof_verified_at, row.archived_transaction_ids_sha256, row.archived_entry_ids_sha256].every(value => value == null)) {
+    await resumeProductionPrepareBatch({ activeRow, profile, env, policy, batchId, sql, lockSession,
+      pruneStore, storageTarget, verifyBucket, storageDeps, tempRoot, deps, automaticContext });
+    row = await pruneStore.getManifest(activeRow.object_path);
+  }
   assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId });
   await verifyBucket(storageTarget);
 
@@ -802,7 +811,7 @@ async function runProductionEscrowCycle({
   cwd = process.cwd(),
   identity,
 } = {}) {
-  let sql = deps.sql || postgres(profile.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 30 });
+  let sql = deps.sql || postgres(profile.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0, max_lifetime: 0 });
   const ownsSql = !deps.sql;
   let lockSession = null;
   const tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-production-escrow-"));
@@ -974,7 +983,7 @@ async function runProductionArchiveCycle({
       identity,
     });
   }
-  let sql = deps.sql || postgres(profile.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 30 });
+  let sql = deps.sql || postgres(profile.dbUrl, { max: 1, prepare: false, connect_timeout: 10, idle_timeout: 0, max_lifetime: 0 });
   const ownsSql = !deps.sql;
   let lockSession = null;
   const tempRoot = deps.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-production-automation-"));
