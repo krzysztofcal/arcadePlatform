@@ -1,11 +1,12 @@
 #!/usr/bin/node
 
 // Root helper for Production WS restarts. "check" prints RESTART_SAFE[...] or RESTART_BLOCKED <reasons>;
-// "restart" re-runs the same gate and only then restarts ws-server.service. "prepare" holds new hands, waits
-// for the running hands to settle, drains and waits for RESTART_SAFE; on any other outcome it puts the hold
-// file back as it found it. "resume" lifts the hold only when the running process is the current release,
-// healthy and the gate is safe. Only counts and flags are printed; the internal token and the database URL
-// never leave this process.
+// "restart" re-runs the same gate and only then restarts ws-server.service.
+// Release runs own their hold through a marker: "prepare <runId>" refuses any hold it does not own, holds new
+// hands, waits for running hands, drains and waits for RESTART_SAFE, and removes its own hold on any other
+// outcome. "resume <runId> <sha>" lifts it only after a restart into exactly that release; "abort <runId>" only
+// while the prepared process still runs unchanged. Only counts and flags are printed; the internal token and
+// the database URL never leave this process.
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -249,19 +250,22 @@ async function runGate(values = readEnvValues()) {
   return evaluateRestartGate({ serviceState, httpStatus: response.status, holdStatus: body?.newHandsHold, presence });
 }
 
-// Waits for settled hands under hold, then for an idle runtime under drain. Any other blocker stops.
-const HOLD_STOP = /^(humanSeatsOpen|closedWithEscrow)=|=unknown$|^(hold_path_|service_|http_|runtime_without_restart_preflight|internal_token_missing|presence_unverified|financial_unverified|hold_inactive|gate_error)/;
-const HOLD_WAIT = /^(loadedHandsInProgress|dbHandsInProgress)=[0-9]+$/;
-const DRAIN_WAIT = /^(tableCommandsInFlight|stateWritesInFlight)=[0-9]+$|^(supervisor_sweep|restart_not_safe)$/;
+// Under hold, wait only for running hands and transient runtime work; under drain, only for transient work.
+// Every presence, integrity or unverifiable reason stops at once.
+const TRANSIENT = /^(tableCommandsInFlight|stateWritesInFlight)=[0-9]+$|^(supervisor_sweep|restart_not_safe)$/;
+const HAND = /^(loadedHandsInProgress|dbHandsInProgress)=([0-9]+)$/;
+const POTS = /^invalidAmounts=([0-9]+)$/;
 
 export function prepareStep(phase, gate) {
   if (gate.safe) return phase === "drain" ? "ready" : "drain";
   const reasons = gate.line.replace(/^RESTART_BLOCKED /, "").split(",");
-  if (phase === "hold") {
-    if (reasons.some((reason) => HOLD_STOP.test(reason))) return "stop";
-    return reasons.some((reason) => HOLD_WAIT.test(reason)) ? "wait" : "drain";
-  }
-  return reasons.every((reason) => DRAIN_WAIT.test(reason)) ? "wait" : "stop";
+  if (phase === "drain") return reasons.every((reason) => TRANSIENT.test(reason)) ? "wait" : "stop";
+  if (!reasons.every((reason) => reason === "drain_inactive" || TRANSIENT.test(reason) || HAND.test(reason) || POTS.test(reason))) return "stop";
+  // A running hand has a pot, which the money check reports as invalidAmounts: at most one per running hand.
+  const hands = Math.max(0, ...reasons.map((reason) => Number(reason.match(HAND)?.[2] ?? 0)));
+  const pots = Number(reasons.map((reason) => reason.match(POTS)?.[1]).find(Boolean) ?? 0);
+  if (pots > hands) return "stop";
+  return hands > 0 ? "wait" : "drain";
 }
 
 function readHoldContent(holdFile) {
@@ -273,45 +277,31 @@ function readHoldContent(holdFile) {
   }
 }
 
-function writeHold(holdFile, content) {
-  const tmp = `${holdFile}.tmp`;
+function writeAtomic(file, content) {
+  const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, content, { mode: 0o644 });
   fs.chmodSync(tmp, 0o644);
-  fs.renameSync(tmp, holdFile);
+  fs.renameSync(tmp, file);
 }
 
-export async function prepare({ holdMs = 600000, drainMs = 120000, pollMs = 5000, holdFile = HOLD_FILE, holdPath = {}, gate = runGate, nowMs = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
-  const pathIssue = holdPathIssue(holdFile, holdPath);
-  if (pathIssue) return blocked(`hold_path_${pathIssue}`);
-  const before = readHoldContent(holdFile);
-  let phase = before !== null && /^drain\n?$/.test(before) ? "drain" : "hold";
-  if (before === null) writeHold(holdFile, "");
-  let deadline = nowMs() + (phase === "hold" ? holdMs : drainMs);
-  for (;;) {
-    const result = await gate().catch(() => blocked("gate_error"));
-    const step = prepareStep(phase, result);
-    if (step === "ready") return { safe: true, line: "PREPARED" };
-    if (step === "drain") {
-      writeHold(holdFile, "drain\n");
-      phase = "drain";
-      deadline = nowMs() + drainMs;
-      continue;
-    }
-    if (step === "stop" || nowMs() >= deadline) {
-      // Nothing was restarted, so the running process may go back to the hold state it had before.
-      if (before === null) fs.rmSync(holdFile, { force: true });
-      else writeHold(holdFile, before);
-      return blocked([`prepare_${phase}_${step === "stop" ? "stopped" : "timeout"}`, ...result.line.replace(/^RESTART_BLOCKED /, "").split(",")]);
-    }
-    await sleep(pollMs);
-  }
+// The marker next to the hold file ties the hold to one release run and to the process it prepared.
+const OP_ID = /^[1-9][0-9]{0,19}$/;
+const RELEASE_SHA = /^[0-9a-f]{40}$/;
+
+function markerFile(holdFile) {
+  return path.join(path.dirname(holdFile), "release-op");
 }
 
-export function resumeIssue({ serviceState, healthz, runningDir, currentDir, gate }) {
-  if (serviceState !== "active") return `service_${/^[a-z-]{1,32}$/.test(serviceState) ? serviceState : "unknown"}`;
-  if (healthz !== "ok") return "healthz";
-  if (!runningDir || runningDir !== currentDir) return "release_not_running";
-  return gate.safe ? null : gate.line.replace(/^RESTART_BLOCKED /, "");
+export function readOperation(holdFile) {
+  const content = readHoldContent(markerFile(holdFile));
+  if (content === null) return null;
+  const match = content.match(/^op=([1-9][0-9]{0,19}) pid=([1-9][0-9]*)\n?$/);
+  return match ? { op: match[1], pid: match[2] } : { op: null, pid: null };
+}
+
+function clearOperation(holdFile) {
+  fs.rmSync(holdFile, { force: true });
+  fs.rmSync(markerFile(holdFile), { force: true });
 }
 
 function realDir(target) {
@@ -322,27 +312,143 @@ function realDir(target) {
   }
 }
 
-async function resume() {
-  if (readHoldContent(HOLD_FILE) === null) return { safe: true, line: "RESUMED not_held" };
-  const serviceState = readServiceState();
+function readMainPid() {
   const pid = spawnSync("/usr/bin/systemctl", ["show", "ws-server.service", "-p", "MainPID", "--value"], { encoding: "utf8", timeout: 5000 });
-  const mainPid = String(pid.stdout || "").trim();
-  const healthz = await fetch(HEALTHZ_URL, { signal: AbortSignal.timeout(5000) }).then((response) => response.ok ? response.text() : "").catch(() => "");
-  const issue = resumeIssue({
-    serviceState,
-    healthz: healthz.trim(),
-    runningDir: /^[1-9][0-9]*$/.test(mainPid) ? realDir(`/proc/${mainPid}/cwd`) : null,
-    currentDir: realDir(CURRENT_LINK),
-    gate: await runGate().catch(() => blocked("gate_error"))
+  const value = String(pid.stdout || "").trim();
+  return /^[1-9][0-9]*$/.test(value) ? value : null;
+}
+
+const HOST = {
+  holdFile: HOLD_FILE,
+  holdPath: {},
+  releasesDir: "/opt/ws-server/releases",
+  gate: () => runGate(),
+  serviceState: readServiceState,
+  mainPid: readMainPid,
+  runningDir: (pid) => realDir(`/proc/${pid}/cwd`),
+  currentDir: () => realDir(CURRENT_LINK),
+  releaseSha: (dir) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(dir, "release-metadata.json"), "utf8")).releaseSha;
+    } catch {
+      return null;
+    }
+  },
+  healthz: () => fetch(HEALTHZ_URL, { signal: AbortSignal.timeout(5000) }).then((response) => (response.ok ? response.text() : "")).catch(() => ""),
+  holdMs: 600000,
+  drainMs: 120000,
+  pollMs: 5000,
+  nowMs: Date.now,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+};
+
+function pathIssue(host) {
+  return holdPathIssue(host.holdFile, host.holdPath) || holdPathIssue(markerFile(host.holdFile), host.holdPath);
+}
+
+// Refuses a hold it does not own. A rerun of the same run continues only while the prepared process still runs.
+export async function prepare(opId, overrides = {}) {
+  const host = { ...HOST, ...overrides };
+  if (!OP_ID.test(String(opId))) return blocked("unexpected_arguments");
+  const issue = pathIssue(host);
+  if (issue) return blocked(`hold_path_${issue}`);
+  const operation = readOperation(host.holdFile);
+  const pid = host.mainPid();
+  if (operation) {
+    if (operation.op !== opId) return blocked("hold_owned_by_other_operation");
+    if (operation.pid !== pid) return blocked("operation_process_changed");
+  } else {
+    if (readHoldContent(host.holdFile) !== null) return blocked("hold_owned_by_operator");
+    if (!pid) return blocked("service_not_running");
+    writeAtomic(markerFile(host.holdFile), `op=${opId} pid=${pid}\n`);
+  }
+  if (readHoldContent(host.holdFile) === null) writeAtomic(host.holdFile, "");
+  let phase = /^drain\n?$/.test(readHoldContent(host.holdFile)) ? "drain" : "hold";
+  let deadline = host.nowMs() + (phase === "hold" ? host.holdMs : host.drainMs);
+  for (;;) {
+    const result = await host.gate().catch(() => blocked("gate_error"));
+    const step = prepareStep(phase, result);
+    if (step === "ready") return { safe: true, line: "PREPARED" };
+    if (step === "drain") {
+      writeAtomic(host.holdFile, "drain\n");
+      phase = "drain";
+      deadline = host.nowMs() + host.drainMs;
+      continue;
+    }
+    if (step === "stop" || host.nowMs() >= deadline) {
+      // Nothing was switched or restarted: the release keeps running without this run's hold.
+      clearOperation(host.holdFile);
+      return blocked([`prepare_${phase}_${step === "stop" ? "stopped" : "timeout"}`, ...result.line.replace(/^RESTART_BLOCKED /, "").split(",")]);
+    }
+    await host.sleep(host.pollMs);
+  }
+}
+
+// Reopens play only for the exact release this run restarted into; otherwise the hold stays for the owner (C7).
+export function resumeIssue({ serviceState, pid, preparedPid, runningDir, currentDir, expectedDir, metadataSha, sha, healthz, gate }) {
+  if (serviceState !== "active") return `service_${/^[a-z-]{1,32}$/.test(serviceState) ? serviceState : "unknown"}`;
+  if (!pid || pid === preparedPid) return "not_restarted";
+  if (runningDir !== expectedDir || currentDir !== expectedDir) return "release_not_running";
+  if (metadataSha !== sha) return "release_metadata_mismatch";
+  if (healthz !== "ok") return "healthz";
+  return gate.safe ? null : gate.line.replace(/^RESTART_BLOCKED /, "");
+}
+
+export async function resume(opId, sha, overrides = {}) {
+  const host = { ...HOST, ...overrides };
+  if (!OP_ID.test(String(opId)) || !RELEASE_SHA.test(String(sha))) return { safe: false, line: "RESUME_BLOCKED unexpected_arguments" };
+  const issue = pathIssue(host);
+  if (issue) return { safe: false, line: `RESUME_BLOCKED hold_path_${issue}` };
+  const operation = readOperation(host.holdFile);
+  const held = readHoldContent(host.holdFile) !== null;
+  if (!operation) return held ? { safe: false, line: "RESUME_BLOCKED not_owned" } : { safe: true, line: "RESUMED not_held" };
+  if (operation.op !== opId) return { safe: false, line: "RESUME_BLOCKED not_owned" };
+  if (!held) {
+    clearOperation(host.holdFile);
+    return { safe: true, line: "RESUMED" };
+  }
+  const pid = host.mainPid();
+  const expectedDir = path.join(host.releasesDir, sha, "ws-server");
+  const reason = resumeIssue({
+    serviceState: host.serviceState(),
+    pid,
+    preparedPid: operation.pid,
+    runningDir: pid ? host.runningDir(pid) : null,
+    currentDir: host.currentDir(),
+    expectedDir,
+    metadataSha: host.releaseSha(expectedDir),
+    sha,
+    healthz: String(await host.healthz()).trim(),
+    gate: await host.gate().catch(() => blocked("gate_error"))
   });
-  if (issue) return { safe: false, line: `RESUME_BLOCKED ${issue}` };
-  fs.rmSync(HOLD_FILE, { force: true });
+  if (reason) return { safe: false, line: `RESUME_BLOCKED ${reason}` };
+  clearOperation(host.holdFile);
   return { safe: true, line: "RESUMED" };
 }
 
-async function main(mode) {
-  if (mode === "prepare") return prepare();
-  if (mode === "resume") return resume();
+// After a failure before any restart: removes this run's hold only while the prepared process still runs
+// from the current link. A changed process or link keeps the hold for the owner (C7).
+export async function abort(opId, overrides = {}) {
+  const host = { ...HOST, ...overrides };
+  if (!OP_ID.test(String(opId))) return { safe: false, line: "ABORT_BLOCKED unexpected_arguments" };
+  const issue = pathIssue(host);
+  if (issue) return { safe: false, line: `ABORT_BLOCKED hold_path_${issue}` };
+  const operation = readOperation(host.holdFile);
+  const held = readHoldContent(host.holdFile) !== null;
+  if (!operation) return held ? { safe: false, line: "ABORT_BLOCKED not_owned" } : { safe: true, line: "ABORTED not_held" };
+  if (operation.op !== opId) return { safe: false, line: "ABORT_BLOCKED not_owned" };
+  const pid = host.mainPid();
+  if (host.serviceState() !== "active" || pid !== operation.pid) return { safe: false, line: "ABORT_BLOCKED process_changed" };
+  if (host.runningDir(pid) !== host.currentDir()) return { safe: false, line: "ABORT_BLOCKED release_link_changed" };
+  clearOperation(host.holdFile);
+  return { safe: true, line: "ABORTED" };
+}
+
+async function main(mode, args) {
+  if (mode === "prepare" && args.length === 1) return prepare(args[0]);
+  if (mode === "abort" && args.length === 1) return abort(args[0]);
+  if (mode === "resume" && args.length === 2) return resume(args[0], args[1]);
+  if ((mode !== "check" && mode !== "restart") || args.length !== 0) return blocked("unexpected_arguments");
   const gate = await runGate();
   if (mode === "check" || !gate.safe) return gate;
   // The evidence is single-use: it is removed before the restart is attempted.
@@ -353,11 +459,9 @@ async function main(mode) {
     : { safe: false, line: "RESTART_FAILED systemctl" };
 }
 
-const MODES = new Set(["check", "restart", "prepare", "resume"]);
 const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1]);
 if (isMainModule) {
-  const mode = process.argv.length === 3 ? process.argv[2] : "";
-  (MODES.has(mode) ? main(mode) : Promise.resolve(blocked("unexpected_arguments")))
+  main(process.argv[2] || "", process.argv.slice(3))
     .catch(() => blocked("gate_error"))
     .then((result) => {
       process.stdout.write(`${result.line}\n`);

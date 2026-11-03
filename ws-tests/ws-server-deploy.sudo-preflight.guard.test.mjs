@@ -268,17 +268,22 @@ test("restart gate runbook commands parse and keep the first-deployment safety r
   assert.doesNotMatch(recovery, /; systemctl restart ws-server\.service/);
 });
 
-test("prepare holds, waits for settled hands, drains, and restores the previous hold on any other outcome", async () => {
-  const { prepare, prepareStep, resumeIssue } = await import("../infra/vps/ws-restart-gate.mjs");
+test("release runs own their hold: prepare refuses foreign holds and fails fast, resume/abort only release their own", async () => {
+  const { prepare, prepareStep, resume, abort, readOperation } = await import("../infra/vps/ws-restart-gate.mjs");
   const gate = (line) => (line === "RESTART_SAFE" ? { safe: true, line } : { safe: false, line: `RESTART_BLOCKED ${line}` });
+  // Wait only for running hands (one pot per hand) and transient work; any integrity reason stops at once.
   assert.equal(prepareStep("hold", gate("drain_inactive,loadedHandsInProgress=2,dbHandsInProgress=2,invalidAmounts=2,restart_not_safe")), "wait");
-  assert.equal(prepareStep("hold", gate("drain_inactive,restart_not_safe")), "drain");
-  for (const line of ["drain_inactive,loadedHandsInProgress=1,humanSeatsOpen=1", "closedWithEscrow=1", "dbHandsInProgress=unknown,financial_unverified", "http_503", "service_activating", "presence_unverified", "gate_error"]) {
-    assert.equal(prepareStep("hold", gate(line)), "stop", line);
-  }
+  assert.equal(prepareStep("hold", gate("drain_inactive,tableCommandsInFlight=1,restart_not_safe")), "drain");
+  for (const line of [
+    "drain_inactive,loadedHandsInProgress=1,dbHandsInProgress=1,invalidAmounts=2", "drain_inactive,invalidAmounts=1",
+    "drain_inactive,loadedHandsInProgress=1,balanceMismatches=1", "drain_inactive,loadedHandsInProgress=1,unresolvedRequests=1",
+    "drain_inactive,loadedHandsInProgress=1,dbVersionMismatches=1", "drain_inactive,loadedHandsInProgress=1,missingEscrow=1",
+    "drain_inactive,loadedHandsInProgress=1,humanSeatsOpen=1", "closedWithEscrow=1", "dbHandsInProgress=unknown,financial_unverified",
+    "http_503", "presence_unverified", "gate_error"
+  ]) assert.equal(prepareStep("hold", gate(line)), "stop", line);
   assert.equal(prepareStep("drain", gate("RESTART_SAFE")), "ready");
   assert.equal(prepareStep("drain", gate("tableCommandsInFlight=1,restart_not_safe")), "wait");
-  for (const line of ["loadedHandsInProgress=1,restart_not_safe", "balanceMismatches=1,restart_not_safe", "unresolvedRequests=1", "dbVersionMismatches=1", "drain_inactive"]) {
+  for (const line of ["loadedHandsInProgress=1,restart_not_safe", "invalidAmounts=1,restart_not_safe", "unresolvedRequests=1", "dbVersionMismatches=1", "drain_inactive"]) {
     assert.equal(prepareStep("drain", gate(line)), "stop", line);
   }
 
@@ -287,56 +292,106 @@ test("prepare holds, waits for settled hands, drains, and restores the previous 
   fs.mkdirSync(`${boundary}/ws-hold`, { mode: 0o755 });
   fs.chmodSync(`${boundary}/ws-hold`, 0o755);
   const holdFile = `${boundary}/ws-hold/new-hands`;
-  const run = (lines, options = {}) => {
-    const seen = [];
-    let now = 0;
-    return prepare({
-      holdFile, holdPath: { expectedUid: process.getuid(), boundary }, holdMs: 30, drainMs: 20, pollMs: 10,
-      nowMs: () => now, sleep: async (ms) => { now += ms; },
-      gate: async () => {
-        seen.push(fs.existsSync(holdFile) ? JSON.stringify(fs.readFileSync(holdFile, "utf8")) : "absent");
-        const line = lines.length > 1 ? lines.shift() : lines[0];
-        if (line instanceof Error) throw line;
-        return gate(line);
-      },
-      ...options
-    }).then((result) => ({ ...result, seen, after: fs.existsSync(holdFile) ? fs.readFileSync(holdFile, "utf8") : null }));
+  const marker = `${boundary}/ws-hold/release-op`;
+  const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
+  const reset = (hold = null, op = null) => {
+    for (const [file, content] of [[holdFile, hold], [marker, op]]) {
+      fs.rmSync(file, { force: true });
+      if (content !== null) fs.writeFileSync(file, content, { mode: 0o644 });
+    }
   };
+  let now = 0;
+  const host = (lines, extra = {}) => ({
+    holdFile, holdPath: { expectedUid: process.getuid(), boundary }, holdMs: 30, drainMs: 20, pollMs: 10,
+    nowMs: () => now, sleep: async (ms) => { now += ms; }, mainPid: () => "100",
+    gate: async () => {
+      const line = lines.length > 1 ? lines.shift() : lines[0];
+      if (line instanceof Error) throw line;
+      return gate(line);
+    },
+    ...extra
+  });
 
-  // Hold while the hand settles, then drain until the gate is safe; the hold stays for the restart.
-  const ok = await run(["drain_inactive,loadedHandsInProgress=1,restart_not_safe", "drain_inactive,restart_not_safe", "stateWritesInFlight=1,restart_not_safe", "RESTART_SAFE"]);
-  assert.deepEqual({ safe: ok.safe, line: ok.line, after: ok.after }, { safe: true, line: "PREPARED", after: "drain\n" });
-  assert.deepEqual(ok.seen, ['""', '""', '"drain\\n"', '"drain\\n"']);
-  // Already drained and safe: idempotent, nothing rewritten.
-  assert.equal((await run(["RESTART_SAFE"])).line, "PREPARED");
-  assert.equal(fs.readFileSync(holdFile, "utf8"), "drain\n");
+  // Own hold: hold → drain → PREPARED, marker bound to the run and the prepared process.
+  reset();
+  assert.equal((await prepare("7", host(["drain_inactive,loadedHandsInProgress=1,dbHandsInProgress=1,invalidAmounts=1", "drain_inactive", "stateWritesInFlight=1", "RESTART_SAFE"]))).line, "PREPARED");
+  assert.deepEqual([read(holdFile), readOperation(holdFile)], ["drain\n", { op: "7", pid: "100" }]);
+  // A rerun of the same run continues while the prepared process still runs; another run or a changed process is refused untouched.
+  assert.equal((await prepare("7", host(["RESTART_SAFE"]))).line, "PREPARED");
+  assert.equal((await prepare("8", host(["RESTART_SAFE"]))).line, "RESTART_BLOCKED hold_owned_by_other_operation");
+  assert.equal((await prepare("7", host(["RESTART_SAFE"], { mainPid: () => "101" }))).line, "RESTART_BLOCKED operation_process_changed");
+  assert.deepEqual([read(holdFile), read(marker)], ["drain\n", "op=7 pid=100\n"]);
 
-  fs.rmSync(holdFile);
-  const human = await run(["drain_inactive,humanSeatsOpen=1"]);
-  assert.deepEqual({ safe: human.safe, line: human.line, after: human.after }, { safe: false, line: "RESTART_BLOCKED prepare_hold_stopped,drain_inactive,humanSeatsOpen=1", after: null });
-  const slowHand = await run(["drain_inactive,loadedHandsInProgress=1"]);
-  assert.equal(slowHand.line, "RESTART_BLOCKED prepare_hold_timeout,drain_inactive,loadedHandsInProgress=1");
-  assert.equal(slowHand.after, null);
-  const busy = await run(["drain_inactive", "tableCommandsInFlight=1"]);
-  assert.equal(busy.line, "RESTART_BLOCKED prepare_drain_timeout,tableCommandsInFlight=1");
-  assert.equal(busy.after, null);
-  assert.equal((await run([new Error("unreachable")])).line, "RESTART_BLOCKED prepare_hold_stopped,gate_error");
-  assert.equal(fs.existsSync(holdFile), false);
-  // An operator hold that was already in place is kept exactly as it was.
-  fs.writeFileSync(holdFile, "", { mode: 0o644 });
-  const money = await run(["drain_inactive", "balanceMismatches=1,restart_not_safe"]);
-  assert.equal(money.line, "RESTART_BLOCKED prepare_drain_stopped,balanceMismatches=1,restart_not_safe");
-  assert.equal(money.after, "");
+  // An operator hold (any content, no marker) is never taken over or removed.
+  for (const content of ["", "drain\n"]) {
+    reset(content);
+    assert.equal((await prepare("7", host(["RESTART_SAFE"]))).line, "RESTART_BLOCKED hold_owned_by_operator");
+    assert.deepEqual([read(holdFile), read(marker)], [content, null]);
+    assert.equal((await resume("7", "a".repeat(40), host(["RESTART_SAFE"]))).line, "RESUME_BLOCKED not_owned");
+    assert.equal((await abort("7", host(["RESTART_SAFE"]))).line, "ABORT_BLOCKED not_owned");
+    assert.equal(read(holdFile), content);
+  }
+
+  // Integrity reasons fail fast; timeouts and gate errors also remove only this run's own hold.
+  for (const [lines, line] of [
+    [["drain_inactive,loadedHandsInProgress=1,balanceMismatches=1"], "RESTART_BLOCKED prepare_hold_stopped,drain_inactive,loadedHandsInProgress=1,balanceMismatches=1"],
+    [["drain_inactive,loadedHandsInProgress=1"], "RESTART_BLOCKED prepare_hold_timeout,drain_inactive,loadedHandsInProgress=1"],
+    [["drain_inactive", "tableCommandsInFlight=1"], "RESTART_BLOCKED prepare_drain_timeout,tableCommandsInFlight=1"],
+    [[new Error("unreachable")], "RESTART_BLOCKED prepare_hold_stopped,gate_error"]
+  ]) {
+    reset();
+    assert.equal((await prepare("7", host(lines))).line, line);
+    assert.deepEqual([read(holdFile), read(marker)], [null, null], line);
+  }
+  reset();
+  assert.equal((await prepare("7", host(["RESTART_SAFE"], { mainPid: () => null }))).line, "RESTART_BLOCKED service_not_running");
+  assert.equal((await prepare("x7", host(["RESTART_SAFE"]))).line, "RESTART_BLOCKED unexpected_arguments");
+
+  // Resume reopens only after a restart into exactly the approved release; otherwise the hold stays (C7).
+  const sha = "b".repeat(40);
+  const releaseDir = `/r/${sha}/ws-server`;
+  const restarted = {
+    releasesDir: "/r", mainPid: () => "200", serviceState: () => "active", runningDir: () => releaseDir, currentDir: () => releaseDir,
+    releaseSha: () => sha, healthz: async () => "ok\n"
+  };
+  for (const [extra, reason] of [
+    [{ mainPid: () => "100" }, "not_restarted"],
+    [{ runningDir: () => "/r/old/ws-server", currentDir: () => "/r/old/ws-server" }, "release_not_running"],
+    [{ currentDir: () => "/r/old/ws-server" }, "release_not_running"],
+    [{ releaseSha: () => "c".repeat(40) }, "release_metadata_mismatch"],
+    [{ healthz: async () => "" }, "healthz"],
+    [{ serviceState: () => "failed" }, "service_failed"]
+  ]) {
+    reset("drain\n", "op=7 pid=100\n");
+    assert.equal((await resume("7", sha, host(["RESTART_SAFE"], { ...restarted, ...extra }))).line, `RESUME_BLOCKED ${reason}`);
+    assert.equal(read(holdFile), "drain\n", reason);
+  }
+  assert.equal((await resume("7", sha, host(["humanSeatsOpen=1"], restarted))).line, "RESUME_BLOCKED humanSeatsOpen=1");
+  assert.equal((await resume("8", sha, host(["RESTART_SAFE"], restarted))).line, "RESUME_BLOCKED not_owned");
+  assert.equal((await resume("7", "short", host(["RESTART_SAFE"], restarted))).line, "RESUME_BLOCKED unexpected_arguments");
+  assert.equal((await resume("7", sha, host(["RESTART_SAFE"], restarted))).line, "RESUMED");
+  assert.deepEqual([read(holdFile), read(marker)], [null, null]);
+  // Interrupted after the hold was removed: the rerun only clears its own marker.
+  reset(null, "op=7 pid=100\n");
+  assert.equal((await resume("7", sha, host(["RESTART_SAFE"], restarted))).line, "RESUMED");
+  assert.equal(read(marker), null);
+
+  // Abort only before any restart, while the prepared process still runs from the current link.
+  const unchanged = { serviceState: () => "active", mainPid: () => "100", runningDir: () => "/r/old/ws-server", currentDir: () => "/r/old/ws-server" };
+  for (const [extra, line] of [
+    [{ mainPid: () => "200" }, "ABORT_BLOCKED process_changed"],
+    [{ serviceState: () => "activating" }, "ABORT_BLOCKED process_changed"],
+    [{ currentDir: () => releaseDir }, "ABORT_BLOCKED release_link_changed"]
+  ]) {
+    reset("drain\n", "op=7 pid=100\n");
+    assert.equal((await abort("7", host(["RESTART_SAFE"], { ...unchanged, ...extra }))).line, line);
+    assert.equal(read(holdFile), "drain\n", line);
+  }
+  assert.equal((await abort("7", host(["RESTART_SAFE"], unchanged))).line, "ABORTED");
+  assert.deepEqual([read(holdFile), read(marker)], [null, null]);
+  assert.equal((await abort("7", host(["RESTART_SAFE"], unchanged))).line, "ABORTED not_held");
+
   fs.chmodSync(`${boundary}/ws-hold`, 0o777);
-  assert.equal((await run(["RESTART_SAFE"])).line, "RESTART_BLOCKED hold_path_unprotected");
+  assert.equal((await prepare("7", host(["RESTART_SAFE"]))).line, "RESTART_BLOCKED hold_path_unprotected");
   fs.chmodSync(`${boundary}/ws-hold`, 0o755);
-
-  // Resume only reopens a healthy current release whose gate is safe; otherwise the hold stays for the owner.
-  const resumeOk = { serviceState: "active", healthz: "ok", runningDir: "/r/new/ws-server", currentDir: "/r/new/ws-server", gate: gate("RESTART_SAFE") };
-  assert.equal(resumeIssue(resumeOk), null);
-  assert.equal(resumeIssue({ ...resumeOk, serviceState: "failed" }), "service_failed");
-  assert.equal(resumeIssue({ ...resumeOk, healthz: "" }), "healthz");
-  assert.equal(resumeIssue({ ...resumeOk, runningDir: "/r/old/ws-server" }), "release_not_running");
-  assert.equal(resumeIssue({ ...resumeOk, runningDir: null, currentDir: null }), "release_not_running");
-  assert.equal(resumeIssue({ ...resumeOk, gate: gate("humanSeatsOpen=1") }), "humanSeatsOpen=1");
 });

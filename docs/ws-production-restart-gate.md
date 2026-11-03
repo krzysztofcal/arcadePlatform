@@ -23,10 +23,20 @@ the hold file set to `drain` and a quiet database.
 Both restart paths also require `humanSeatsOpen=0` (ACTIVE non-bot seats on OPEN tables) and `closedWithEscrow=0`, read in a read-only transaction. An unreadable count blocks with `presence_unverified`.
 
 - `check` / `restart`: unchanged decision lines, with the two extra blockers.
-- `prepare`: makes the running process restart-ready. It writes the hold (no new hands), waits up to 10 min until no hand is in progress, writes `drain` and waits up to 2 min for `RESTART_SAFE`, then prints `PREPARED`. On a seated human, closed-table escrow, money issue, timeout or error it puts the hold file back as it was before and prints `RESTART_BLOCKED prepare_<phase>_<stopped|timeout>,<reasons>`. It never restarts anything.
-- `resume`: removes the hold only if WS is `active`, local `/healthz` is `ok`, the running process directory equals `/opt/ws-server/current` and the gate is `RESTART_SAFE`. Otherwise it prints `RESUME_BLOCKED <reason>` and the hold stays for the owner.
+- `prepare <runId>`: makes the running process restart-ready for one release run.
+  - It refuses any hold it does not own: an operator hold (`hold_owned_by_operator`), or another run's hold. It writes a marker `/etc/arcadeplatform/ws-hold/release-op` (`op=<runId> pid=<MainPID>`), then the hold.
+  - It waits up to 10 min for running hands (one pot per running hand) and transient work, writes `drain`, and waits up to 2 min for `RESTART_SAFE`. Then it prints `PREPARED`.
+  - Any presence, integrity or unverifiable reason stops at once: `balanceMismatches`, `invalidAmounts` beyond the running hands, `unresolvedRequests`, `dbVersionMismatches`, missing state or escrow, errors. On a stop or a timeout it removes only its own hold and marker. It never restarts.
+  - A rerun of the same run continues only while the prepared process is still running.
+- `resume <runId> <sha>`: removes this run's hold only when all of these hold:
+  - WS was restarted (MainPID differs from the marker);
+  - the running process and `/opt/ws-server/current` are both `/opt/ws-server/releases/<sha>/ws-server`, and its `release-metadata.json` says `<sha>`;
+  - local `/healthz` is `ok`;
+  - the gate is `RESTART_SAFE`.
+  Otherwise it prints `RESUME_BLOCKED <reason>` and the hold stays (C7).
+- `abort <runId>`: after a failure before any restart, removes this run's hold only while the prepared process (same MainPID) still runs from the current link. Otherwise it prints `ABORT_BLOCKED <reason>` and the hold stays (C7).
 
-`prepare` and `resume` are not granted to any account by this repository's sudoers yet; see `specs/1159-ci-cd-release-safety/t004/plan.md`.
+No hold without a marker is ever removed by these modes. `prepare`, `resume` and `abort` are not granted to any account by this repository's sudoers yet; see `specs/1159-ci-cd-release-safety/t004/plan.md`.
 
 ## A. Gate installation (root)
 
