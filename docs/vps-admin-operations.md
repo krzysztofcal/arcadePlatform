@@ -18,7 +18,7 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | Operation | Effect |
 |---|---|
 | `ledger-dispatchers-status` | Read-only: user, state, timer state and pending `daemon-reload` of both ledger dispatchers |
-| `ledger-dispatchers-pause` | Stops both dispatcher timers, then waits until no dispatcher runs. One 5-minute deadline covers both dispatchers and every `systemctl` call; on timeout it reports `timeout_timers_left_stopped` with each service state and leaves the timers stopped for the owner's decision (no automatic resume) |
+| `ledger-dispatchers-pause` | Stops both dispatcher timers, then waits until no dispatcher runs. One 5-minute deadline covers both dispatchers and every `systemctl` call, and a state read after it is a timeout even if idle; on timeout it reports `timeout_timers_left_stopped` with each service state and leaves the timers stopped for the owner's decision (no automatic resume) |
 | `ledger-dispatchers-resume` | Refuses while any of the two services or two timers needs `daemon-reload`; otherwise starts both timers and checks they are active |
 | `systemd-daemon-reload` | `systemctl daemon-reload` |
 

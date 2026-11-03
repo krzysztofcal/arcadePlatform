@@ -57,9 +57,10 @@ export const OPERATIONS = Object.freeze({
     }
     for (;;) {
       const states = LEDGER.map((u) => `${u}.service=${read(host, `${u}.service`, "ActiveState")}`);
-      if (states.every((state) => IDLE.has(state.split("=")[1]))) return { ok: true, details: "timers_stopped dispatchers_idle" };
+      // The deadline is checked first: a result read after it is never a success.
       const left = deadline - host.now();
       if (left <= 0) return { ok: false, blocked: `timeout_timers_left_stopped ${states.join(" ")}` };
+      if (states.every((state) => IDLE.has(state.split("=")[1]))) return { ok: true, details: "timers_stopped dispatchers_idle" };
       host.sleep(Math.min(5000, left));
     }
   },

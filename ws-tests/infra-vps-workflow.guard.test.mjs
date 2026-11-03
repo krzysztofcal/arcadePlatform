@@ -693,6 +693,11 @@ test("VPS admin helper runs only its catalog, refuses unverifiable reads and una
   assert.match(runOperation("ledger-dispatchers-pause", "14", slowCalls.host).line, /^ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped /);
   assert.equal(slowCalls.calls.filter((c) => c.startsWith("show")).length, 2, "systemctl time counts against the deadline");
 
+  // Idle dispatchers read only after the deadline (slow systemctl) are still a timeout, never ADMIN_OK.
+  const lateIdle = fakeAdminHost({}, { callMs: 160000 });
+  assert.equal(runOperation("ledger-dispatchers-pause", "15", lateIdle.host).line,
+    "ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped arcade-chips-ledger-dispatch.service=inactive arcade-chips-ledger-production-dispatch.service=inactive");
+
   for (const unit of ["arcade-chips-ledger-dispatch.service", "arcade-chips-ledger-production-dispatch.timer"]) {
     const reload = fakeAdminHost({ [`${unit}:NeedDaemonReload`]: "yes" });
     assert.equal(runOperation("ledger-dispatchers-resume", "3", reload.host).line, `ADMIN_BLOCKED ledger-dispatchers-resume ${unit}_needs_daemon_reload`);
