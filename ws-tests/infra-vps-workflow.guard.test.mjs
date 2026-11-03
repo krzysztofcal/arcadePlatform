@@ -571,5 +571,6 @@ test("VPS SSH apply runs only for an owner main dispatch or an owner Caddy push,
   assert.equal(evaluate({ event: "push" }), true, "owner Caddy push to main");
   assert.equal(evaluate({ event: "push", caddy: "false" }), false, "push without Caddy change");
   assert.equal(evaluate({ event: "push", triggeringActor: "release-agent[bot]" }), false, "foreign re-run of a Caddy push");
+  assert.equal(evaluate({ event: "push", actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner re-run of a foreign push");
   assert.equal(evaluate({ event: "pull_request" }), false, "pull requests never reach the VPS");
 });
