@@ -18,6 +18,16 @@ older than the gate does not report this, so the gate answers `RESTART_BLOCKED r
 The only path for the first deployment is therefore a stopped service with root's single-use `safe-stop` evidence,
 the hold file set to `drain` and a quiet database.
 
+## Gate modes after the first gated deployment (#1159 T004)
+
+Both restart paths also require `humanSeatsOpen=0` (ACTIVE non-bot seats on OPEN tables) and `closedWithEscrow=0`, read in a read-only transaction. An unreadable count blocks with `presence_unverified`.
+
+- `check` / `restart`: unchanged decision lines, with the two extra blockers.
+- `prepare`: makes the running process restart-ready. It writes the hold (no new hands), waits up to 10 min until no hand is in progress, writes `drain` and waits up to 2 min for `RESTART_SAFE`, then prints `PREPARED`. On a seated human, closed-table escrow, money issue, timeout or error it puts the hold file back as it was before and prints `RESTART_BLOCKED prepare_<phase>_<stopped|timeout>,<reasons>`. It never restarts anything.
+- `resume`: removes the hold only if WS is `active`, local `/healthz` is `ok`, the running process directory equals `/opt/ws-server/current` and the gate is `RESTART_SAFE`. Otherwise it prints `RESUME_BLOCKED <reason>` and the hold stays for the owner.
+
+`prepare` and `resume` are not granted to any account by this repository's sudoers yet; see `specs/1159-ci-cd-release-safety/t004/plan.md`.
+
 ## A. Gate installation (root)
 
 ### A0. Precheck (read-only; the only write is the checkout under `/root`)

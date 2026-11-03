@@ -53,14 +53,15 @@ test("ws-server deploy gates the release switch and the automatic rollback on th
 });
 
 test("restart gate is fail-closed for every unverifiable runtime state", async () => {
-  const { evaluateRestartGate, holdPathIssue, unitHoldIssue, HOLD_FILE, readSafeStopEvidence, readHoldDrain, parseDbQuiet, readEnvValues } = await import("../infra/vps/ws-restart-gate.mjs");
+  const { evaluateRestartGate, holdPathIssue, unitHoldIssue, HOLD_FILE, readSafeStopEvidence, readHoldDrain, parseDbQuiet, parsePresence, readEnvValues } = await import("../infra/vps/ws-restart-gate.mjs");
   const ready = {
     active: true, drain: true, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
     supervisorSweepInProgress: false, dbHandsInProgress: 0, dbVersionMismatches: 0,
     dbFinancialIssues: { missingState: 0, missingEscrow: 0, invalidAmounts: 0, balanceMismatches: 0, unresolvedRequests: 0 },
     restartSafe: true
   };
-  const running = (holdStatus, httpStatus = 200) => evaluateRestartGate({ serviceState: "active", httpStatus, holdStatus });
+  const nobody = parsePresence("0|0\n");
+  const running = (holdStatus, httpStatus = 200, presence = nobody) => evaluateRestartGate({ serviceState: "active", httpStatus, holdStatus, presence });
   assert.deepEqual(running(ready), { safe: true, line: "RESTART_SAFE" });
   for (const httpStatus of [503, 401, 500, null]) assert.equal(running(ready, httpStatus).safe, false, String(httpStatus));
   for (const serviceState of ["activating", "deactivating", "unknown"]) {
@@ -71,6 +72,11 @@ test("restart gate is fail-closed for every unverifiable runtime state", async (
   assert.equal(running({ ...ready, drain: false }).line, "RESTART_BLOCKED drain_inactive");
   assert.equal(running({ ...ready, dbHandsInProgress: null }).line, "RESTART_BLOCKED dbHandsInProgress=unknown");
   assert.equal(running({ ...ready, dbFinancialIssues: null }).line, "RESTART_BLOCKED financial_unverified");
+  // Seated humans and escrow left on CLOSED tables block both paths; an unreadable count blocks too.
+  assert.equal(running(ready, 200, parsePresence("1|0")).line, "RESTART_BLOCKED humanSeatsOpen=1");
+  assert.equal(running(ready, 200, parsePresence("0|2")).line, "RESTART_BLOCKED closedWithEscrow=2");
+  assert.equal(running(ready, 200, null).line, "RESTART_BLOCKED presence_unverified");
+  for (const output of ["", "0", "0|x", "0|0|0"]) assert.equal(parsePresence(output), null, output);
   assert.equal(evaluateRestartGate({ serviceState: "active", holdPathIssue: "unprotected", httpStatus: 200, holdStatus: ready }).line, "RESTART_BLOCKED hold_path_unprotected");
 
   // The hold path comes only from the unit drop-in: exactly once, the protected value, never from the env file.
@@ -94,9 +100,10 @@ test("restart gate is fail-closed for every unverifiable runtime state", async (
     assert.equal(evaluateRestartGate({ serviceState, safeStop: { valid: false }, holdDrain: true, dbQuiet: quiet }).line, `RESTART_BLOCKED service_${serviceState}_without_safe_stop_evidence`);
     assert.equal(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: false, dbQuiet: quiet }).line, "RESTART_BLOCKED hold_file_not_drain");
     assert.equal(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: true, dbQuiet: null }).line, "RESTART_BLOCKED db_unverified");
-    assert.deepEqual(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: true, dbQuiet: quiet }), { safe: true, line: "RESTART_SAFE safe_stop_evidence", usesSafeStop: true });
+    assert.deepEqual(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: true, dbQuiet: quiet, presence: nobody }), { safe: true, line: "RESTART_SAFE safe_stop_evidence", usesSafeStop: true });
+    assert.equal(evaluateRestartGate({ serviceState, safeStop: evidence, holdDrain: true, dbQuiet: quiet }).line, "RESTART_BLOCKED presence_unverified");
   }
-  assert.equal(evaluateRestartGate({ serviceState: "failed", safeStop: evidence, holdDrain: true, dbQuiet: parseDbQuiet("1|0|0|0|2|0") }).line, "RESTART_BLOCKED handsInProgress=1,balanceMismatches=2");
+  assert.equal(evaluateRestartGate({ serviceState: "failed", safeStop: evidence, holdDrain: true, dbQuiet: parseDbQuiet("1|0|0|0|2|0"), presence: parsePresence("1|0") }).line, "RESTART_BLOCKED handsInProgress=1,balanceMismatches=2,humanSeatsOpen=1");
   for (const output of ["", "0|0|0|0|0", "0|0|0|0|0|x", "error"]) assert.equal(parseDbQuiet(output), null, output);
 
   // Hold file and evidence must sit in a directory chain the deploy account cannot change.
@@ -259,4 +266,77 @@ test("restart gate runbook commands parse and keep the first-deployment safety r
   // The manual rollback restarts only after the release check and the link switch succeeded.
   assert.match(recovery, /test -f \/opt\/ws-server\/releases\/<PREV_SHA>\/ws-server\/server\.mjs && ln -sfn [^`]* && systemctl reset-failed ws-server\.service && systemctl restart ws-server\.service/);
   assert.doesNotMatch(recovery, /; systemctl restart ws-server\.service/);
+});
+
+test("prepare holds, waits for settled hands, drains, and restores the previous hold on any other outcome", async () => {
+  const { prepare, prepareStep, resumeIssue } = await import("../infra/vps/ws-restart-gate.mjs");
+  const gate = (line) => (line === "RESTART_SAFE" ? { safe: true, line } : { safe: false, line: `RESTART_BLOCKED ${line}` });
+  assert.equal(prepareStep("hold", gate("drain_inactive,loadedHandsInProgress=2,dbHandsInProgress=2,invalidAmounts=2,restart_not_safe")), "wait");
+  assert.equal(prepareStep("hold", gate("drain_inactive,restart_not_safe")), "drain");
+  for (const line of ["drain_inactive,loadedHandsInProgress=1,humanSeatsOpen=1", "closedWithEscrow=1", "dbHandsInProgress=unknown,financial_unverified", "http_503", "service_activating", "presence_unverified", "gate_error"]) {
+    assert.equal(prepareStep("hold", gate(line)), "stop", line);
+  }
+  assert.equal(prepareStep("drain", gate("RESTART_SAFE")), "ready");
+  assert.equal(prepareStep("drain", gate("tableCommandsInFlight=1,restart_not_safe")), "wait");
+  for (const line of ["loadedHandsInProgress=1,restart_not_safe", "balanceMismatches=1,restart_not_safe", "unresolvedRequests=1", "dbVersionMismatches=1", "drain_inactive"]) {
+    assert.equal(prepareStep("drain", gate(line)), "stop", line);
+  }
+
+  const boundary = fs.mkdtempSync(`${os.tmpdir()}/ws-prepare-`);
+  fs.chmodSync(boundary, 0o755);
+  fs.mkdirSync(`${boundary}/ws-hold`, { mode: 0o755 });
+  fs.chmodSync(`${boundary}/ws-hold`, 0o755);
+  const holdFile = `${boundary}/ws-hold/new-hands`;
+  const run = (lines, options = {}) => {
+    const seen = [];
+    let now = 0;
+    return prepare({
+      holdFile, holdPath: { expectedUid: process.getuid(), boundary }, holdMs: 30, drainMs: 20, pollMs: 10,
+      nowMs: () => now, sleep: async (ms) => { now += ms; },
+      gate: async () => {
+        seen.push(fs.existsSync(holdFile) ? JSON.stringify(fs.readFileSync(holdFile, "utf8")) : "absent");
+        const line = lines.length > 1 ? lines.shift() : lines[0];
+        if (line instanceof Error) throw line;
+        return gate(line);
+      },
+      ...options
+    }).then((result) => ({ ...result, seen, after: fs.existsSync(holdFile) ? fs.readFileSync(holdFile, "utf8") : null }));
+  };
+
+  // Hold while the hand settles, then drain until the gate is safe; the hold stays for the restart.
+  const ok = await run(["drain_inactive,loadedHandsInProgress=1,restart_not_safe", "drain_inactive,restart_not_safe", "stateWritesInFlight=1,restart_not_safe", "RESTART_SAFE"]);
+  assert.deepEqual({ safe: ok.safe, line: ok.line, after: ok.after }, { safe: true, line: "PREPARED", after: "drain\n" });
+  assert.deepEqual(ok.seen, ['""', '""', '"drain\\n"', '"drain\\n"']);
+  // Already drained and safe: idempotent, nothing rewritten.
+  assert.equal((await run(["RESTART_SAFE"])).line, "PREPARED");
+  assert.equal(fs.readFileSync(holdFile, "utf8"), "drain\n");
+
+  fs.rmSync(holdFile);
+  const human = await run(["drain_inactive,humanSeatsOpen=1"]);
+  assert.deepEqual({ safe: human.safe, line: human.line, after: human.after }, { safe: false, line: "RESTART_BLOCKED prepare_hold_stopped,drain_inactive,humanSeatsOpen=1", after: null });
+  const slowHand = await run(["drain_inactive,loadedHandsInProgress=1"]);
+  assert.equal(slowHand.line, "RESTART_BLOCKED prepare_hold_timeout,drain_inactive,loadedHandsInProgress=1");
+  assert.equal(slowHand.after, null);
+  const busy = await run(["drain_inactive", "tableCommandsInFlight=1"]);
+  assert.equal(busy.line, "RESTART_BLOCKED prepare_drain_timeout,tableCommandsInFlight=1");
+  assert.equal(busy.after, null);
+  assert.equal((await run([new Error("unreachable")])).line, "RESTART_BLOCKED prepare_hold_stopped,gate_error");
+  assert.equal(fs.existsSync(holdFile), false);
+  // An operator hold that was already in place is kept exactly as it was.
+  fs.writeFileSync(holdFile, "", { mode: 0o644 });
+  const money = await run(["drain_inactive", "balanceMismatches=1,restart_not_safe"]);
+  assert.equal(money.line, "RESTART_BLOCKED prepare_drain_stopped,balanceMismatches=1,restart_not_safe");
+  assert.equal(money.after, "");
+  fs.chmodSync(`${boundary}/ws-hold`, 0o777);
+  assert.equal((await run(["RESTART_SAFE"])).line, "RESTART_BLOCKED hold_path_unprotected");
+  fs.chmodSync(`${boundary}/ws-hold`, 0o755);
+
+  // Resume only reopens a healthy current release whose gate is safe; otherwise the hold stays for the owner.
+  const resumeOk = { serviceState: "active", healthz: "ok", runningDir: "/r/new/ws-server", currentDir: "/r/new/ws-server", gate: gate("RESTART_SAFE") };
+  assert.equal(resumeIssue(resumeOk), null);
+  assert.equal(resumeIssue({ ...resumeOk, serviceState: "failed" }), "service_failed");
+  assert.equal(resumeIssue({ ...resumeOk, healthz: "" }), "healthz");
+  assert.equal(resumeIssue({ ...resumeOk, runningDir: "/r/old/ws-server" }), "release_not_running");
+  assert.equal(resumeIssue({ ...resumeOk, runningDir: null, currentDir: null }), "release_not_running");
+  assert.equal(resumeIssue({ ...resumeOk, gate: gate("humanSeatsOpen=1") }), "humanSeatsOpen=1");
 });
