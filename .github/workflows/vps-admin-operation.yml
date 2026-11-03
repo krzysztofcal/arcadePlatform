@@ -1,0 +1,81 @@
+name: VPS Admin Operation
+
+# #1159 root on demand: an agent (or the owner) requests one operation from the fixed catalog of
+# infra/vps/vps-admin.mjs; the owner approves the vps-admin environment, whose secrets alone reach the VPS account
+# arcade-admin. That account may run only the root helper's catalog (infra/vps/arcade-admin.sudoers).
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operation from the reviewed catalog
+        required: true
+        type: choice
+        options:
+          - ledger-dispatchers-status
+          - ledger-dispatchers-pause
+          - ledger-dispatchers-resume
+          - systemd-daemon-reload
+      reason:
+        description: Why the operation is needed (10-200 characters, shown to the approver in the run summary)
+        required: true
+        type: string
+      confirmation:
+        description: Exact RUN <operation>
+        required: true
+        type: string
+
+concurrency:
+  group: vps-admin
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  operate:
+    # Same identities as the WS Production release: only the same identity may dispatch and re-run (no owner/agent mix).
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    runs-on: ubuntu-latest
+    environment: vps-admin
+    timeout-minutes: 15
+    steps:
+      - name: Authorize the requested operation
+        env:
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          [[ "$OPERATION" =~ ^[a-z0-9-]{1,64}$ ]] || { echo "invalid operation name"; exit 1; }
+          [[ "$CONFIRMATION" == "RUN $OPERATION" ]] || { echo "confirmation phrase mismatch"; exit 1; }
+          [[ ${#REASON} -ge 10 && ${#REASON} -le 200 ]] || { echo "reason must be 10-200 characters"; exit 1; }
+          {
+            echo "### VPS admin operation"
+            echo "- operation: \`$OPERATION\`"
+            echo "- run: $GITHUB_RUN_ID (attempt $GITHUB_RUN_ATTEMPT), main $GITHUB_SHA"
+            echo "- requested by: $GITHUB_ACTOR, triggered by $GITHUB_TRIGGERING_ACTOR"
+            printf -- '- reason: %s\n' "$REASON"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the operation on the VPS as arcade-admin
+        id: operate
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          OPERATION: ${{ inputs.operation }}
+          ADMIN_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.VPS_ADMIN_HOST }}
+          username: ${{ secrets.VPS_ADMIN_USER }}
+          key: ${{ secrets.VPS_ADMIN_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 10m
+          envs: OPERATION,ADMIN_RUN_ID
+          script: |
+            set -eu
+            [ "$(id -un)" = "arcade-admin" ] || { echo "VPS admin operations must run as arcade-admin"; exit 1; }
+            RESULT="$(sudo -n /usr/local/sbin/arcade-vps-admin "$OPERATION" "$ADMIN_RUN_ID" || true)"
+            echo "$RESULT"
+            case "$RESULT" in
+              "ADMIN_OK $OPERATION "*) ;;
+              *) echo "STOP: operation did not complete; nothing is retried (owner decision)"; exit 1 ;;
+            esac
