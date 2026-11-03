@@ -109,6 +109,12 @@ id arcade-release >/dev/null 2>&1 || useradd --system --create-home --home-dir /
 gpasswd --delete copilot arcade-release >/dev/null 2>&1 || true
 install -d -o arcade-release -g arcade-release -m 0700 /home/arcade-release/.ssh
 
+# Ledger dispatchers: owner Actions tokens only from root-owned 0600 env files (#1159 T004-3).
+# No login, no home and no group shared with the agent account copilot.
+getent group arcade-dispatch >/dev/null || groupadd --system arcade-dispatch
+id arcade-dispatch >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid arcade-dispatch arcade-dispatch
+gpasswd --delete copilot arcade-dispatch >/dev/null 2>&1 || true
+
 getent group arcade-stage-runner >/dev/null || groupadd --system arcade-stage-runner
 id arcade-stage-runner >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /var/lib/arcade-stage-runner --shell /usr/sbin/nologin --gid arcade-stage-runner arcade-stage-runner
 

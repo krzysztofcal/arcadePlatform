@@ -5,14 +5,17 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=copilot
+User=arcade-dispatch
+Group=arcade-dispatch
 Environment=CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED=0
 EnvironmentFile=-/etc/arcadeplatform/production-retention-dispatch.env
-Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/run/arcade-chips-ledger-production-dispatch
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 RuntimeDirectory=arcade-chips-ledger-production-dispatch
 RuntimeDirectoryMode=0700
 ExecStart=/usr/local/bin/arcade-chips-ledger-production-dispatch.sh
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectHome=true
 UMask=0077
 TimeoutStartSec=240

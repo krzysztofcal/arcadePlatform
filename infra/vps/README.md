@@ -30,10 +30,24 @@ The WS services run as `arcade:arcade`. The production release layout is
 release. Preview uses `/opt/arcade-ws-preview/ws-server` and its external env
 file at `/opt/arcade-ws-preview/.env.preview`.
 
-The chips-ledger Stage cleanup dispatcher (`arcade-chips-ledger-dispatch.service`)
-runs as `copilot` with `HOME=/home/copilot` and
-`GH_CONFIG_DIR=/home/copilot/.config/gh`, authenticated as `krzysztofcal`.
-Preserve this owner-authenticated config for the existing cleanup path. The
+The ledger dispatchers (`arcade-chips-ledger-dispatch.service` for Stage and
+`arcade-chips-ledger-production-dispatch.service` for Production) run as the
+system account `arcade-dispatch` (no login, no home, no group shared with
+`copilot`), with `ProtectHome=true`. They use the root-owned distro `gh`
+(`/usr/bin/gh`, package `gh`) and authenticate only through `GH_TOKEN` from a
+root-owned `0600` environment file read by systemd:
+
+- Stage: `/etc/arcadeplatform/stage-retention-dispatch.env` (required). Owner
+  fine-grained token for `krzysztofcal/arcadePlatform` only: Actions read/write,
+  Contents read (the `02:04` check reads the workflow file), Metadata read.
+- Production: `/etc/arcadeplatform/production-retention-dispatch.env`
+  (optional; the service stays OFF without it). Actions read/write and Metadata
+  read only.
+
+No token grants Contents write, Pull requests, Workflows, Administration,
+Secrets, Variables, Environments or Deployments. The workflows accept only the
+owner as `github.actor` and `github.triggering_actor`, so these tokens belong to
+`krzysztofcal`; the agent account `copilot` must not be able to read them. The
 self-hosted runner uses the dedicated `arcade-stage-runner` account under
 `/var/lib/arcade-stage-runner/actions-runner`.
 
@@ -115,6 +129,88 @@ Before Task 10, repeat the systemd read-only audit. If `NeedDaemonReload=yes`
 is reported, obtain a separate owner approval for the required `daemon-reload`
 before any service restart; do not treat the warning as cleared by a normal
 restart.
+
+### Ledger dispatcher account migration (#1159 T004-3) — separate owner GO per step
+
+For the existing host only. Each numbered step is its own owner GO; stop at the
+first unexpected result. Never print, paste or pass a token as a command
+argument. Do not run `systemctl start` on a dispatcher and do not dispatch a
+workflow manually: the timers stay enabled and only their next slots are the
+verification.
+
+Slots: Stage `:02/:03/:17/:18/:32/:33/:47/:48` and `02:04` UTC; Production
+`:09/:24/:39` UTC. The switch window is `:40`–`:46` UTC (outside `02:00`–`02:10`).
+
+Two exact commits pin the files:
+
+- `PRE_SHA`: the approved state before the migration, i.e. the `main` commit
+  just before the merge of this change (the four dispatcher files are
+  unchanged there since `e2398365`);
+- `NEW_SHA`: the approved merge commit of this change. New files come only
+  from `git show "$NEW_SHA":<path>`, never from a moving `main`.
+
+The Production token is rotated: the old one was readable by `copilot`. The new
+token is staged root-only and reaches `/etc/arcadeplatform/` only in the same
+switch window as the new unit, so no process running as `copilot` ever starts
+with it.
+
+0. Read-only baseline: `sha256sum` of the two installed units and scripts
+   equals `git show "$PRE_SHA":<path> | sha256sum` for each; `systemctl
+   list-timers` shows both timers; the last Stage and Production runs
+   succeeded; no run is queued or in progress.
+1. Backup (root): `install -d -m 0700 /root/t004-3-backup`, then `cp -a` the two
+   units from `/etc/systemd/system/`, the two scripts from `/usr/local/bin/` and
+   `/etc/arcadeplatform/production-retention-dispatch.env` into it, and record
+   `sha256sum` of each. The backup stays root-only.
+2. Account and `gh` (root): create `arcade-dispatch` exactly as in
+   `infra/vps/bootstrap.sh`; `id arcade-dispatch` shows only its own group.
+   `apt-get install -y gh`; `/usr/bin/gh` is `root:root 0755`.
+3. Tokens (owner), written with a hidden prompt, each a `root:root 0600` file:
+   - Stage: a new token with the Stage scope above, as the single line
+     `GH_TOKEN=…` in `/etc/arcadeplatform/stage-retention-dispatch.env` (only
+     the new unit reads this file);
+   - Production: a **new** token with the Production scope above, staged in
+     `/root/t004-3-staged/production-retention-dispatch.env` (directory
+     `root:root 0700`) with the two lines
+     `CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED=1` and `GH_TOKEN=…`. The live
+     `/etc/arcadeplatform/production-retention-dispatch.env` keeps the old
+     token until step 4.
+
+   Read-only check as root, token only in the environment, for each of the two
+   files (`F`):
+   `( set -a; . "$F"; GH_CONFIG_DIR="$(mktemp -d)" /usr/bin/gh api user --jq .login; GH_CONFIG_DIR="$(mktemp -d)" /usr/bin/gh api repos/krzysztofcal/arcadePlatform/actions/workflows/349412824 --jq .state )`
+   must print `krzysztofcal` and `active`. For the Stage file also
+   `GH_CONFIG_DIR="$(mktemp -d)" /usr/bin/gh api 'repos/krzysztofcal/arcadePlatform/contents/.github/workflows/chips-ledger-stage-scheduled-automation.yml?ref=main' --jq .name`
+   must print the file name.
+4. Switch (root, inside one switch window, in this order):
+   1. install both scripts (`root:root 0755`) and both units (`root:root 0644`)
+      from `NEW_SHA`, and check each `sha256sum` against
+      `git show "$NEW_SHA":<path>`;
+   2. `install -o root -g root -m 0600` the staged Production file over
+      `/etc/arcadeplatform/production-retention-dispatch.env`, then remove the
+      staged copy;
+   3. one `systemctl daemon-reload`;
+   4. verify read-only `systemctl show -p User,EnvironmentFiles,NeedDaemonReload`
+      for both services (`User=arcade-dispatch`, `NeedDaemonReload=no`) and both
+      timers still active.
+5. Verify the next slots: Stage `:47` and `:48`, Production `:09`, `:24`, `:39`,
+   and the next Stage `02:04`. Each journal shows `dispatched …` under the
+   `arcade-dispatch` UID, and each GitHub run is `workflow_dispatch` on `main`
+   with actor and triggering actor `krzysztofcal` and a successful result.
+6. Only after step 5 (owner), in GitHub settings revoke the **old Production
+   token** and the old owner token used by `copilot`, then remove
+   `/home/copilot/.config/gh/hosts.yml`. Confirm `gh auth status` fails for
+   `copilot` and the next Stage and Production slots still dispatch.
+
+Rollback (steps 2–5, old tokens are still valid): inside a switch window restore
+the backed-up units, scripts and the old Production env file, one
+`daemon-reload`, and verify the next slots dispatch as `copilot` again. Then
+revoke the new Production and Stage tokens and remove
+`/etc/arcadeplatform/stage-retention-dispatch.env` and any staged copy, because
+`copilot`-run processes must not keep a token that the new design reserves for
+`arcade-dispatch`. The new account and `/usr/bin/gh` are harmless when unused.
+After step 6 the old units and tokens cannot authenticate any more, so fix the
+new token files instead of rolling back.
 
 ## Network baseline
 
