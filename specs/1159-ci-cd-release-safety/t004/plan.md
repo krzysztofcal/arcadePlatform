@@ -1,153 +1,98 @@
-# #1159 T004 — Plan
+# #1159 T004: Plan
 
-Reuse first. There is no new service, framework or workflow. Five small PRs; each is inert until the next one uses it.
+Reuse first: the existing restart gate, hold/drain, the `WS Server Deploy` job and its secrets model. There is no new service, workflow, framework or dependency. The work is two PRs, then a one-time setup under separate GOs.
 
 ## Design decisions
 
-- **Gate channel: a root helper, as with the env preflight.** `copilot` cannot read `/etc/arcadeplatform/ws-server.env` (root 0600) and cannot signal the `arcade` process. A fixed root helper reads `POKER_WS_INTERNAL_TOKEN` and calls `127.0.0.1:3000/internal/admin/release-drain`, the same auth model as the existing `/internal/admin/*` routes. It prints sanitized JSON and is called through `sudo -n` with fixed arguments.
-  - Rejected: a token copy as a GitHub secret (repository-level exposure, OPEN in PR4).
-  - Rejected: a file request plus a journal status (`copilot` journal access unverified).
-- **Readiness is computed by WS.** It already holds the runtime state, the DB client and the escrow/claim logic, so the helper adds no SQL.
-- **Drain to the hand boundary, not resumption of a live hand.** This avoids depending on private-state recovery (spec STOP).
-- **Freeze before restart.** It closes the window between the last check and SIGTERM. A SIGTERM handler is not needed for planned restarts (YAGNI).
-- **The schema fingerprint** is sha256 over the sorted versions joined by newlines, plus the count. Expected: the manifest `baseline_applied` versions ∪ the `supabase/production-migrations/*.sql` versions at the SHA. Actual: `supabase_migrations.schema_migrations`. Equality is required.
-- **The manifest is a GitHub Release** with one JSON asset. WWW = Netlify deploy ID (not a ZIP); WS = release SHA plus the `ws-server-dist.tgz` SHA-256 (not uploaded).
-  - Verify before relying on it: Releases/immutable releases availability and a `prod-*` tag ruleset (settings GO).
-  - There are 0 releases and 0 tags today, and no workflow triggers on `release`, `create` or tags.
+- **Approval is a GitHub Environment, not an actor check.**
+  - `ws-production` has the owner as required reviewer, prevent self-review, branch `main` only and no admin bypass.
+  - Environment secrets are released only after approval, so the job's VPS access exists only in an approved run.
+  - The actor check remains as a narrow allowlist: the owner or `vars.WS_RELEASE_AGENT`.
+- **A separate agent identity.**
+  - The VPS token used by the agent is replaced by one belonging to a dedicated GitHub account. That account has repository Write; its fine-grained token has Actions read/write, Contents read/write and Pull requests read/write, and no Administration, Environments, Secrets or Deployments write.
+  - Rejected: keeping the owner's token with self-review allowed. Whether that token can approve its own run would depend on its permissions, which the agent cannot prove.
+- **A separate VPS account (`arcade-release`) for Production.**
+  - The approved job reaches the VPS only through that account's key, held as an environment secret.
+  - The agent account `copilot` loses Production write and restart rights.
+  - Rejected: new sudo rules for `copilot`, because the agent runs as `copilot` and could use them without approval.
+  - Rejected: a forced-command key for `copilot`, because it still shares `copilot`'s sudo and files.
+- **Preparation lives in the existing root gate.** `prepare` and `resume` reuse `runGate()` and `evaluateRestartGate()`. There is no second readiness implementation, and the WS runtime is unchanged.
+- **The hold silences bot tables.** `set_desired_state` stays an admin tool outside the release flow.
 
-## PR T004-1: WS release drain (runtime, inert) — about 250 LOC
+## PR T004-1: gate presence check, `prepare`, `resume` (inert)
 
-**New file:** `ws-server/poker/runtime/release-drain.mjs::createReleaseDrain({ maxMs = 120000, hardMaxMs = 300000, nowMs })`
+The PR does not change the workflow, sudoers or runtime. Installing it changes only `check`/`restart` (extra blockers).
 
-| Method | Behavior |
-| --- | --- |
-| `begin({ requestId, deadlineMs })` | Starts draining with a clamped deadline. |
-| `freeze()` | Moves to frozen. |
-| `cancel()` | Returns to idle. It is the only way to reopen a frozen process. |
-| `phase(now)` | Reports the phase. Past the deadline, only `draining` returns to idle (drain failed). `frozen` never expires: it ends only with an explicit `cancel` or the process restart. |
-| `blocksCommand(commandName, now)` | While draining, allows only `act`, `bot_step`, `turn_timeout`, `bot_timeout_safety`, `leave`, `guest_leave`, `disconnect_cleanup` and `guest_disconnect_cleanup`; anything else, unknown names included, is blocked. While frozen, everything is blocked. |
-| `blocksWork(now)` | Blocks gifts, internal POSTs and cleanup sweeps. |
+**`infra/vps/ws-restart-gate.mjs`:**
+- `PRESENCE_SQL`, `parsePresence()` (shared `parseCounts()`), and `presenceReasons()` in both paths of `evaluateRestartGate({ …, presence })`;
+- `queryCounts(dbUrl, sql, parse)` replaces `queryDbQuiet()`;
+- `runGate(values)` adds `presence` to both paths;
+- `prepareStep(phase, gate)`: pure; `hold` returns wait/drain/stop, `drain` returns wait/ready/stop;
+- `prepare({ holdMs = 600000, drainMs = 120000, pollMs = 5000, … })`: atomic hold writes (`writeHold()`), and the previous content is restored on every non-`PREPARED` outcome;
+- `resumeIssue({ serviceState, healthz, runningDir, currentDir, gate })` and `resume()`;
+- the CLI accepts exactly `check|restart|prepare|resume`.
 
-**Other files:**
-- `ws-server/poker/runtime/table-command-queue.mjs`: add `pendingCount()` (sum of `pendingCount` across the queue states).
-- `ws-server/server.mjs`:
-  - `enqueueTableCommand()` throws `release_drain_active` when `blocksCommand` is true;
-  - `runGiftWork()` rejects with `release_drain_active`;
-  - `handleHttpRequest()`: internal POSTs (except the drain route) answer 503 `release_drain_active`;
-  - the action-history/closed-table sweep is skipped while draining;
-  - new route `/internal/admin/release-drain`, GET for status, POST `{operation: begin|freeze|cancel, requestId}`, with the same token check as `handleInternalPokerMaintenance`;
-  - status `{ phase, deadlineMs, frozenAt, inFlight: { tableCommands, giftWork }, loadedTables, liveHandTables, connectedHumans, persistedVersions }` (`persistedVersions`: the in-memory `persistedStateVersion` per loaded table, used by the T004-2 external-write check).
-- **Client:** `poker/poker-ws-client.js` needs no change; a rejected command already shows a generic reason. Release-time UX is accepted as breaking impact.
+**`docs/ws-production-restart-gate.md`:** a short "Gate modes" section.
 
-**Tests:**
-- new `ws-server/poker/runtime/release-drain.behavior.test.mjs` (allowlist, unknown command blocked, frozen blocks all, deadline clamp, draining expiry, frozen does not expire, cancel);
-- extend `table-command-queue.behavior.test.mjs` (`pendingCount` across tables and after a rejection); this test is not run by any workflow today;
-- register both in `ws-server-deploy.yml` `validate` and `ws-pr-checks.yml`, next to the existing `conn-state` step.
+**Tests:** extend `ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs`:
+- presence blockers and parse;
+- the `prepareStep` matrix;
+- `prepare` with a fake gate and clock: hold → drain → `PREPARED`; idempotent; human stop, timeouts and gate error restore an absent hold; an operator hold is kept; an unprotected path is refused;
+- `resumeIssue` cases.
 
-**Exit:** CI green, plus an exact-SHA WS Preview check:
-- begin, then bot tables stop at SETTLED with no new hand;
-- freeze, then wait past the deadline: still frozen, no command accepted;
-- cancel resumes them;
-- a freeze followed by a Preview restart resumes the bot tables, and a seated human after the restart keeps seat and stack.
+**Exit:** CI green. The Production install is a separate root GO (`infra/vps/stage-ws-restart-gate.sh`, unchanged), followed by `check`.
 
-## PR T004-2: read-only readiness report — about 250 LOC
+## PR T004-2: approved job, release account, sudoers
 
-**New file:** `ws-server/poker/persistence/release-readiness.mjs::readReleaseReadiness({ beginSql, loadedStates })`, run in one `begin read only` transaction:
-- `activeHumanSeats`: OPEN tables with an ACTIVE seat and `is_bot=false`;
-- `pendingRequests`: `poker_requests` with a null `result_json`;
-- `escrowMismatches`:
-  - OPEN tables whose `POKER_TABLE:<id>` balance differs from the claims of the persisted boundary state; the claims projection reuses `shared/poker-domain/terminal-close.mjs`, exporting the existing helper without a copy;
-  - CLOSED tables with escrow different from 0;
-- `schemaFingerprint` and `schemaCount`;
-- `externalWrites` (writers outside this process: Netlify `poker-create-table` / `poker-quick-seat` / admin functions, the chips-ledger automation, manual SQL):
-  - `poker_state.version` of every loaded table equals the in-memory `persistedStateVersion`, and there is no OPEN table with an ACTIVE seat that is not loaded;
-  - no `chips_transactions` row, `poker_seats` change or `poker_requests` row created after `frozenAt`;
-  - `ledgerWatermark`: the max `chips_transactions` id plus the per-table versions, so that the gate can compare two readings.
+**`.github/workflows/ws-server-deploy.yml` job `deploy`:**
+- `environment: ws-production`;
+- `if:`: the existing conditions, with the actor checks replaced by `(github.actor == github.repository_owner || github.actor == vars.WS_RELEASE_AGENT) && (github.triggering_actor == github.repository_owner || github.triggering_actor == vars.WS_RELEASE_AGENT)`;
+- the three SSH steps use the environment secrets `WS_PRODUCTION_HOST`, `WS_PRODUCTION_USER` and `WS_PRODUCTION_SSH_KEY` instead of `WS_HOST`, `WS_USER` and `WS_SSH_KEY`. `infra-vps.yml` keeps the repository secrets for Caddy;
+- the remote account check `copilot` → `arcade-release`, and `DEPLOY_GROUP` → `arcade-release`;
+- a new SSH step after `Pre-stage …` and before `Atomic release switch …`: `sudo -n /usr/local/sbin/arcade-ws-restart-gate prepare`, which must print `PREPARED`, otherwise exit 1 (nothing switched);
+- a new last SSH step `if: always() && <prepare step ran>`: `… resume`. `RESUMED*` passes; anything else fails the job with "hold kept; owner decision (C7)";
+- the summary gets the gate lines, `readlink -f /opt/ws-server/current` and `MainPID`.
 
-Any query error returns `{ ok: false, reason }`. No writes.
+**`infra/vps/arcade-deploy.sudoers`:**
+- `arcade-release`: Production env preflight `""`, gate `check`, `restart`, `prepare`, `resume`;
+- `copilot`: Preview restart, Caddy reload, Preview env preflight `""`, gate `check`;
+- the closed-table status rule stays in its own file.
 
-**Changes:**
-- `server.mjs` drain GET adds `readiness`;
-- `ready = phase === "frozen" && every in-flight count is 0 && liveHandTables === 0 && connectedHumans === 0 && readiness.ok && activeHumanSeats === 0 && pendingRequests === 0 && escrowMismatches === 0 && externalWrites === 0`.
+**`infra/vps/bootstrap.sh`, `infra/vps/stage-ws-restart-gate.sh`:**
+- create the `arcade-release` system user and group;
+- `/opt/ws-server` and the lock get group `arcade-release`;
+- `copilot` is not a member of that group;
+- the post-install check runs `check` as both accounts.
 
-**Tests:** new `release-readiness.behavior.test.mjs` with the existing fake-SQL pattern (`persisted-bootstrap-db.mjs`): mismatch, CLOSED non-zero, pending request, DB version ahead of memory, ledger row after `frozenAt`, query failure means not ready, fingerprint order independence.
-
-**Exit:** CI plus a WS Preview readout (no Production read).
-
-## PR T004-3: VPS gate in the WS deploy — about 250 LOC
-
-**New helper:** `infra/vps/ws-production-release-gate.mjs`, modelled on `ws-production-env-preflight.mjs` (`protectedRead`, `parseEnv`, `sanitizeOutput` reused by import):
-- `status`: read-only;
-- `drain`: begin, poll until boundary or deadline, freeze, then read readiness twice (a few seconds apart) and require an unchanged `ledgerWatermark`;
-- `cancel`.
-
-Output is a single JSON line; exit 0 only if ready.
-
-**Infrastructure:** `infra/vps/arcade-deploy.sudoers` gets three exact lines; `infra/vps/bootstrap.sh` installs the helper as root 0755.
-
-**Changes in `ws-server-deploy.yml`:**
-- in the package step, `sha256sum` of the artifact goes to the summary;
-- a runner step computes `EXPECTED_SCHEMA_FINGERPRINT` with `scripts/production-schema-fingerprint.mjs` (about 30 LOC, a pure function plus a CLI);
-- the revalidate step also refuses a queued or in-progress `Chips Ledger Production Automation` run (`actions: read`);
-- in the remote script, after `PROD_PREFLIGHT`: `GATE="$(sudo -n …release-gate drain)"`. Require `ready:true` and a matching fingerprint; otherwise call `…release-gate cancel` and exit before `ln -sfn` (a trap is set before the switch and cleared after `HAVE_SWITCHED=1`). After a successful gate nothing calls `cancel`: the frozen process is ended only by the restart.
-- **Rollback-restart path (ERR trap after the switch):** the new process starts unfrozen, so it may already have started hands when its health check fails. The rollback restart runs only when one of these holds:
-  - `systemctl is-active ws-server.service` is not `active` (no live process memory to lose; DB recovery as after a crash);
-  - `release-gate drain` against the new process returns `ready:true` with the same schema fingerprint.
-  Otherwise the trap does not restart. It leaves the new release running, prints `ROLLBACK_BLOCKED` with the gate JSON and fails the job for an OWNER decision. A runner smoke failure still causes no rollback.
+**`agents.md`:** the WS Production bullet says: agent dispatch, owner approval in `ws-production`, no manual root steps for a normal release.
 
 **Tests:**
-- extend `ws-tests/ws-server-deploy.workflow.guard.test.mjs`: gate after the env preflight and before `ln -sfn`, cancel only on the pre-switch failure path, no cancel after a ready gate, the rollback restart guarded by `is-active` or a ready gate, the fingerprint passed through env;
-- new `ws-tests/ws-production-release-gate.behavior.test.mjs`: fake HTTP for ready / not ready / timeout / missing token; sanitized output.
+- `ws-tests/ws-server-deploy.workflow.guard.test.mjs`: environment, the actor allowlist, environment-only secret names, `prepare` before the switch, `resume` always after, no `copilot` in the Production remote script;
+- `ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs` and `ws-tests/infra-vps-workflow.guard.test.mjs`: the exact sudoers lines for both accounts.
 
-**Breaking:** until the root install, deploys fail closed. Activation is a separate admin GO (install plus sudoers), followed by a `status` check.
+**Exit:** CI green. WS Preview is unaffected; the Production path does not run in PR CI.
 
-## PR T004-4: single operator entrypoint — about 300 LOC
+## One-time setup (separate GOs, after T004-2 is merged)
 
-**New file:** `scripts/production-release.mjs` (OWNER local, dry-run by default). Reused from `www-production-release.mjs`: `activeWsRelease`, `githubWsRelease`, `vpsWsRelease`, `wsSurfaceChanged`, `netlifyApi`, `candidateFailures`, `headerFailures`, `publishLocked`, `discardCandidate`, `phrase`.
-
-**Functions:**
-
-| Function | Purpose |
-| --- | --- |
-| `planRelease({ sha, mainHead, checkRuns, activeWs, publishedWww, diff })` | Pure; returns `{ ws, www, failures }`. |
-| `requiredCheckFailures(checkRuns, plan)` | Pure: every run on the SHA completed success/skipped/neutral; `validate` present when WS is selected. |
-| `releasePhrase(plan)` | Builds the confirmation phrase. |
-| `dispatchWs()` | `gh workflow run … -f releaseSha -f confirmation`, then waits on the exact run (bounded 30 min). |
-| `triggerWwwCandidate()` | Takes the OWNER build hook URL from env; waits for a ready Production deploy with `commit_ref == sha` (bounded 15 min). |
-| `writeReceipt()` | Writes the combined receipt. |
-
-**Rules:**
-- WWW selection is conservative: selected unless the diff lies only under `ws-server/**`, `ws-tests/**`, `specs/**`, `docs/**`, `infra/**`, `.github/**` or `mobile/**`;
-- when WS is selected and WWW is not, the browser WS client must not have changed since the published WWW, otherwise both are required;
-- the schema check runs `release-gate status` over SSH (read-only).
-
-**Other changes:**
-- in `www-production-release.mjs`, remove only its CLI main (keep the exports; there is one entrypoint);
-- update `agents.md` and the PR5 spec reference.
-
-**Tests:** new `tests/production-release.test.mjs` (selection matrix, browser-client coupling, check failures, the phrase, the WS→WWW order, discard on WWW abort after WS success = partial, recorded); keep the existing `tests/www-production-release.test.mjs`.
-
-## PR T004-5: release record — about 120 LOC
-
-**Changes:**
-- in `production-release.mjs`, `--record` runs only after a `published`/`deployed` outcome: `gh release create prod-<ts> --target <sha> --notes-file … release-manifest.json`;
-- add a guard to the existing workflow guard test: no workflow has a `release`, `create` or `push.tags` trigger.
-
-**Tests:** manifest shape, no secret fields.
-
-**Settings GO:** a `prod-*` tag ruleset and immutable releases, if available.
-
-## Later, separately: rollback
-
-Only after T004-5. Add a WS `rollbackToRelease` dispatch input (existing release directory, V3/prod, schema fingerprint unchanged, same gate) and a WWW publish of the previously recorded deploy with the same checks. A newer auth/privacy policy or a schema change means roll-forward only.
+1. **GitHub (owner):**
+   - create the agent account and add it as a Write collaborator;
+   - set variable `WS_RELEASE_AGENT` to its login;
+   - create environment `ws-production` with the settings from R-APPROVE;
+   - add the environment secrets `WS_PRODUCTION_HOST` and `WS_PRODUCTION_USER=arcade-release`, plus `WS_PRODUCTION_SSH_KEY` (a new ed25519 key, private part only in the environment).
+2. **VPS (root):**
+   - stage T004-1 and T004-2 with `stage-ws-restart-gate.sh`;
+   - add the public key to `~arcade-release/.ssh/authorized_keys`;
+   - `visudo -c`; gate `check` as `copilot` and as `arcade-release`.
+3. **Agent token:** replace the VPS `gh` token with the agent account's token and revoke the owner token there.
+4. **First run:**
+   1. the agent dispatches the current main SHA;
+   2. the owner approves;
+   3. the agent verifies the release, health, `RESUMED` and the money checks, then reports.
 
 ## Risks
 
-- **R1** Crash/OOM/reboot during a live hand: not addressed (separate engine scope).
-- **R2** Every activation step needs an admin root install.
-- **R3** The chips-ledger dispatcher can dispatch after the check. Mitigated by the run guard plus the `externalWrites` check and the second `ledgerWatermark` reading; a write between the last reading and the restart remains possible and is transactional.
-- **R4** Netlify `poker-create-table` / `poker-quick-seat` / admin functions are not drained. They are detected (not blocked) by `externalWrites`; the operator rule forbids admin operations during a release.
-- **R5** The rollback restart is gated (`is-active` or a ready gate). When blocked, the unhealthy new release keeps running until the OWNER decides: this is a deliberate fail-closed choice that can extend an outage.
-- **R8** A frozen process that loses its runner (cancelled job, SSH drop) stays frozen until `release-gate cancel` or a restart. Breaking impact: the tables stay paused; the operator command is documented in `agents.md`.
-- **R6** The 300 s maximum flock wait plus the drain window extends PR4's merge-during-release window; the operator rule stays.
-- **R7** Protocol compatibility between the old WWW client and the new WS for a few minutes is attested, not proven; mitigated by the WS→WWW order and the browser-client coupling rule.
+- **R1.** Crash/OOM/reboot during a live hand: not addressed (separate engine scope).
+- **R2.** `prepare` reads readiness at 5 s intervals. The switch still re-checks under the lock (existing `check`), and `restart` re-checks again.
+- **R3.** Netlify and admin functions write the DB outside WS. The drain-time checks catch a money mismatch; the operator rule (no admin operations during a release) stays.
+- **R4.** The safe-stop path stays root-only and manual.
+- **R5.** The owner's `admin` role can still change environment settings. This is intended for break-glass; it is visible in the audit log.

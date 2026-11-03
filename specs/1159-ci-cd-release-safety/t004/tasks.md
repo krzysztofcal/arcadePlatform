@@ -1,13 +1,11 @@
-# #1159 T004 — Tasks
+# #1159 T004: Tasks
 
-Each PR is separate, needs its own OWNER GO, and is tested only with fundamental deterministic tests. Merge, settings, root install, migrations and every Production action stay outside implementation.
+Each PR is separate and tested only with fundamental deterministic tests. Merge, GitHub settings, secrets, root installs and every Production action need a separate owner GO.
 
-- [x] Analysis: deploy workflow, runtime persistence boundary, restart verdict (STOP mid-hand), design; see `spec.md` and `plan.md`.
-- [ ] **BLOCKER** Private prerequisite released first (separate track, OWNER GO).
-- [ ] **T004-1** `release-drain.mjs`, `pendingCount()`, `server.mjs` gates plus `/internal/admin/release-drain`; tests; exact-SHA WS Preview acceptance (stop at boundary, frozen does not expire, cancel, restart resume, human seat kept).
-- [ ] **T004-2** `release-readiness.mjs` (read-only transaction: humans, pending requests, escrow vs claims, external writes, ledger watermark, schema fingerprint); tests; Preview readout.
-- [ ] **T004-3** `infra/vps/ws-production-release-gate.mjs`, sudoers/bootstrap, `production-schema-fingerprint.mjs`, workflow gate before `ln -sfn` with cancel only before the switch, gated rollback restart, chips-ledger run guard, artifact SHA-256; guard and behavior tests. Admin GO: root install plus `status` check.
-- [ ] **T004-4** `scripts/production-release.mjs` plan/execute (checks, selection, WS dispatch, WWW hook plus the existing publish/discard, combined receipt); `www-production-release.mjs` reduced to a library; `agents.md`. GO: OWNER build hook (from T003).
-- [ ] **T004-5** GitHub Release manifest (`--record`), no-release-trigger guard. Settings GO: tag ruleset / immutable releases.
-- [ ] First real release under the entrypoint (separate GO), recording restore/lock behavior and the gate output.
-- [ ] Later: compatible rollback mode; OPEN: crash-safe live hands, `ws-production` Environment, `/healthz` release SHA.
+- [x] T4 done: WS Production `d49ce068ff64b11e53cf3480ba6e54dbc8e9bbd0` through the gate, with bots restored and money checks clean. Earlier T004 drain/readiness/orchestrator drafts superseded by #1172–#1175 (see `spec.md`).
+- [x] Revised spec and plan: owner approval through environment `ws-production`, separate agent identity, separate VPS release account, `prepare`/`resume` in the existing gate.
+- [ ] **T004-1** `ws-restart-gate.mjs`: presence blockers, `prepare`, `resume`; gate test extension; doc section. Root install of the helper is a separate GO.
+- [ ] **T004-2** `ws-server-deploy.yml` `environment: ws-production`, actor allowlist, environment secrets, `prepare` before the switch, `resume` always; sudoers for `arcade-release`/`copilot`; bootstrap/stage account and group; guard tests.
+- [ ] One-time setup (separate GOs): agent account plus `WS_RELEASE_AGENT`, environment and secrets, VPS account, key and sudoers, agent token swap.
+- [ ] First agent-initiated, owner-approved release: report the run, approval, gate lines, health, `RESUMED` and money checks.
+- [ ] Later, optional: WWW publish behind the same model; restart without release; rollback input.

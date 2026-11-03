@@ -60,7 +60,7 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [ ] OWNER GO 3/4: OWNER-only build hook; first release with WS compatibility decision, recorded receipt and restore/lock behavior.
 - [ ] OPEN: historical permalink exposure / visitor protection; WS `/healthz` release SHA; redirects and function digest coverage.
 
-## T004 — controlled WWW + WS Production release
+## T004: agent-initiated, owner-approved WS Production operations
 
-- [x] Analysis, spec, plan and PR split: `t004/spec.md`, `t004/plan.md`, `t004/tasks.md`. Restart during a live hand is STOP; release only at a drained, frozen boundary with zero humans.
-- [ ] T004-1 … T004-5 per `t004/tasks.md`, each under separate OWNER GO.
+- [x] T4 done (WS Production `d49ce068`, gated). Revised spec, plan and PR split: `t004/spec.md`, `t004/plan.md`, `t004/tasks.md`. Approval is the `ws-production` environment; the agent and the VPS release account are separate identities; `prepare`/`resume` live in the existing gate.
+- [ ] T004-1, T004-2 and the one-time setup per `t004/tasks.md`, each under separate OWNER GO.
