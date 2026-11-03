@@ -620,3 +620,204 @@ test("ledger dispatchers never use copilot's home, gh or token and fail closed w
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+// #1159 root on demand: a fake host records every command; nothing touches systemd or the journal. The lock is real
+// flock(1) on a temporary file.
+function fakeAdminHost(state = {}, extra = {}) {
+  const lockFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vps-admin-")), "lock");
+  const calls = [];
+  const audits = [];
+  const loggerStatus = [...(extra.loggerStatus || [])];
+  const clock = { t: 0 };
+  const host = {
+    lockFile, requester: "arcade-admin", now: () => clock.t, sleep: (ms) => { clock.t += ms; },
+    run(argv) {
+      clock.t += extra.callMs || 0;
+      if (argv[0] === "/usr/bin/logger") {
+        audits.push(argv.at(-1));
+        return { status: loggerStatus.length ? loggerStatus.shift() : 0, stdout: "" };
+      }
+      calls.push(argv.slice(1).join(" "));
+      if (argv[1] === "show") {
+        const key = `${argv[4]}:${argv[3]}`;
+        if (state[`fail:${key}`]) return { status: 1, stdout: "" };
+        const value = state[key];
+        const out = typeof value === "function" ? value(clock.t) : Array.isArray(value) ? (value.length > 1 ? value.shift() : value[0]) : value;
+        return { status: 0, stdout: out ?? ({ User: "arcade-dispatch", ActiveState: "inactive", NeedDaemonReload: "no" })[argv[3]] };
+      }
+      if (extra.onRun) extra.onRun(argv);
+      return { status: state[`exit:${argv.slice(1).join(" ")}`] ?? 0, stdout: "" };
+    },
+  };
+  return { host, calls, audits, clock };
+}
+
+test("VPS admin helper runs only its catalog, refuses unverifiable reads and unaudited work, and serializes requests", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const [operation, runId] of [["rm -rf /", "1"], ["bash", "1"], ["ledger-dispatchers-pause", "0"], ["ledger-dispatchers-pause", "1;id"], ["toString", "1"]]) {
+    const { host, calls, audits } = fakeAdminHost();
+    const result = runOperation(operation, runId, host);
+    assert.equal(result.ok, false);
+    assert.match(result.line, /^ADMIN_BLOCKED [a-z0-9-]+ unexpected_arguments$/);
+    assert.deepEqual(calls, [], "a refused request runs no command");
+    assert.match(audits[0], /result=blocked reason=unexpected_arguments/);
+  }
+
+  const status = fakeAdminHost();
+  assert.equal(runOperation("ledger-dispatchers-status", "7", status.host).line, "ADMIN_OK ledger-dispatchers-status arcade-chips-ledger-dispatch=arcade-dispatch/inactive/timer:inactive/reload:no arcade-chips-ledger-production-dispatch=arcade-dispatch/inactive/timer:inactive/reload:no");
+  for (const state of [{ "fail:arcade-chips-ledger-production-dispatch.timer:ActiveState": true }, { "arcade-chips-ledger-dispatch.service:User": "" }, { "arcade-chips-ledger-dispatch.service:NeedDaemonReload": "maybe" }]) {
+    const bad = fakeAdminHost(state);
+    const result = runOperation("ledger-dispatchers-status", "8", bad.host);
+    assert.match(result.line, /^ADMIN_BLOCKED ledger-dispatchers-status unverifiable_arcade-chips-ledger-[a-z-]+\.(service|timer)_[A-Za-z]+$/, "a failed or unexpected read is never a status");
+    assert.match(bad.audits[1], /result=blocked/);
+  }
+
+  const idle = { "arcade-chips-ledger-dispatch.service:ActiveState": ["activating", "activating", "inactive"] };
+  const pause = fakeAdminHost(idle);
+  const paused = runOperation("ledger-dispatchers-pause", "41700000001", pause.host);
+  assert.equal(paused.line, "ADMIN_OK ledger-dispatchers-pause timers_stopped dispatchers_idle");
+  assert.deepEqual(pause.calls.filter((c) => !c.startsWith("show")), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"]);
+  assert.match(pause.audits[0], /^op=ledger-dispatchers-pause run=41700000001 by=arcade-admin phase=start$/);
+  assert.match(pause.audits[1], /result=ok/);
+
+  // One 5-minute deadline for both dispatchers, including systemctl time; on timeout the timers stay stopped.
+  const busyUntil = (ms) => (t) => (t < ms ? "activating" : "inactive");
+  const sequential = fakeAdminHost({ "arcade-chips-ledger-dispatch.service:ActiveState": busyUntil(200000),
+    "arcade-chips-ledger-production-dispatch.service:ActiveState": (t) => (t < 200000 ? "inactive" : t < 400000 ? "activating" : "inactive") });
+  assert.equal(runOperation("ledger-dispatchers-pause", "2", sequential.host).line,
+    "ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped arcade-chips-ledger-dispatch.service=inactive arcade-chips-ledger-production-dispatch.service=activating");
+  assert.ok(sequential.clock.t <= 300000 + 2 * 30000, "the deadline is shared, not 5 minutes per dispatcher");
+  assert.equal(sequential.calls.some((c) => c.startsWith("start")), false, "no timer is resumed automatically");
+  // Slow systemctl calls (100 s each) use up the deadline: one status round, no waiting, then STOP.
+  const slowCalls = fakeAdminHost({ "arcade-chips-ledger-dispatch.service:ActiveState": "activating" }, { callMs: 100000 });
+  assert.match(runOperation("ledger-dispatchers-pause", "14", slowCalls.host).line, /^ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped /);
+  assert.equal(slowCalls.calls.filter((c) => c.startsWith("show")).length, 2, "systemctl time counts against the deadline");
+
+  // Idle dispatchers read only after the deadline (slow systemctl) are still a timeout, never ADMIN_OK.
+  const lateIdle = fakeAdminHost({}, { callMs: 160000 });
+  assert.equal(runOperation("ledger-dispatchers-pause", "15", lateIdle.host).line,
+    "ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped arcade-chips-ledger-dispatch.service=inactive arcade-chips-ledger-production-dispatch.service=inactive");
+
+  for (const unit of ["arcade-chips-ledger-dispatch.service", "arcade-chips-ledger-production-dispatch.timer"]) {
+    const reload = fakeAdminHost({ [`${unit}:NeedDaemonReload`]: "yes" });
+    assert.equal(runOperation("ledger-dispatchers-resume", "3", reload.host).line, `ADMIN_BLOCKED ledger-dispatchers-resume ${unit}_needs_daemon_reload`);
+    assert.equal(reload.calls.some((c) => c.startsWith("start")), false, "no timer starts before daemon-reload");
+  }
+
+  const failed = fakeAdminHost({ "exit:daemon-reload": 1 });
+  assert.equal(runOperation("systemd-daemon-reload", "4", failed.host).line, "ADMIN_FAILED systemd-daemon-reload daemon-reload");
+  assert.match(failed.audits[1], /result=failed detail=daemon-reload/);
+
+  // Audit: no start entry, no work; no end entry, no success (and no retry).
+  const noStart = fakeAdminHost({}, { loggerStatus: [1] });
+  assert.equal(runOperation("ledger-dispatchers-pause", "9", noStart.host).line, "ADMIN_BLOCKED ledger-dispatchers-pause audit_unavailable");
+  assert.deepEqual(noStart.calls, [], "nothing runs without a recorded start");
+  const noEnd = fakeAdminHost({}, { loggerStatus: [0, 1] });
+  assert.equal(runOperation("systemd-daemon-reload", "10", noEnd.host).line, "ADMIN_FAILED systemd-daemon-reload audit_end_after_ok");
+  assert.deepEqual(noEnd.calls, ["daemon-reload"], "the operation ran exactly once");
+
+  // Lock: a second request while one runs is busy; the lock is released afterwards.
+  let nested;
+  const outer = fakeAdminHost({}, { onRun: () => { nested = runOperation("ledger-dispatchers-status", "12", { ...outer.host, run: fakeAdminHost().host.run }); } });
+  assert.equal(runOperation("systemd-daemon-reload", "11", outer.host).line, "ADMIN_OK systemd-daemon-reload reloaded");
+  assert.equal(nested.line, "ADMIN_BLOCKED ledger-dispatchers-status busy");
+  assert.equal(runOperation("ledger-dispatchers-status", "13", { ...outer.host, run: fakeAdminHost().host.run }).ok, true, "the lock is released");
+  const helper = fileText("infra/vps/vps-admin.mjs");
+  assert.match(helper, /spawnSync\("\/usr\/bin\/flock", \["-n", "3"\]/);
+  assert.doesNotMatch(helper, /mkdirSync|process\.pid|isAlive/, "no PID-file lock to go stale");
+
+  const cli = spawnSync(process.execPath, ["infra/vps/vps-admin.mjs", "ledger-dispatchers-status"], { encoding: "utf8" });
+  assert.equal(cli.status, 1);
+  assert.equal(cli.stdout, "ADMIN_BLOCKED invalid unexpected_arguments\n");
+});
+
+test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
+  const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
+  const catalog = Object.keys(OPERATIONS);
+  const workflow = fileText(".github/workflows/vps-admin-operation.yml");
+  const choices = workflow.match(/options:\n((?:\s+- [a-z0-9-]+\n)+)/)[1].trim().split(/\n\s*/).map((line) => line.replace("- ", ""));
+  assert.deepEqual(choices, catalog, "workflow choices equal the helper catalog");
+  const sudoers = fileText("infra/vps/arcade-admin.sudoers");
+  assert.deepEqual([...sudoers.matchAll(/\/usr\/local\/sbin\/arcade-vps-admin ([a-z0-9-]+) \*/g)].map((m) => m[1]), catalog, "sudoers grants exactly the catalog");
+  assert.match(sudoers, /^arcade-admin ALL=\(root\) NOPASSWD: ARCADE_ADMIN_COMMANDS$/m);
+  assert.doesNotMatch(sudoers, /copilot|ALL$|\/bin\/(ba)?sh|node |systemctl/m);
+  assert.doesNotMatch(fileText("infra/vps/arcade-deploy.sudoers"), /arcade-vps-admin|arcade-admin/);
+  assert.doesNotMatch(fileText("infra/vps/vps-admin.mjs"), /shell: *true|execSync|exec\(|"\/bin\/(ba)?sh"|bash -c|eval\(/);
+
+  assert.match(workflow, /^on:\n  workflow_dispatch:\n/m);
+  assert.doesNotMatch(workflow, /^  (push|pull_request|pull_request_target|schedule|workflow_run):/m);
+  assert.match(workflow, /group: vps-admin\n  cancel-in-progress: false/);
+  assert.doesNotMatch(workflow, /always\(\)|continue-on-error/);
+  const request = workflow.slice(workflow.indexOf("\n  request:\n"), workflow.indexOf("\n  operate:\n"));
+  const operate = workflow.slice(workflow.indexOf("\n  operate:\n"));
+  assert.doesNotMatch(request, /environment:|secrets\./, "the summary job has no environment and no secret");
+  assert.match(request, /GITHUB_STEP_SUMMARY/);
+  for (const field of ["operation: \\`$OPERATION\\`", "reason: \\`$REASON\\`", "revision: \\`$GITHUB_SHA\\`", "requested by: \\`$GITHUB_ACTOR\\`"]) assert.ok(request.includes(field), field);
+  assert.match(operate, /\n    needs: request\n/);
+  assert.match(operate, /\n    environment: vps-admin\n/);
+  assert.doesNotMatch(operate, /GITHUB_STEP_SUMMARY/);
+  assert.equal((operate.match(/secrets\./g) || []).length, 3, "only the three vps-admin secrets");
+  assert.match(operate, /\[ "\$\(id -un\)" = "arcade-admin" \]/);
+  assert.match(operate, /"ADMIN_OK \$OPERATION "\*\) ;;/);
+  assert.match(request, /\[\[ "\$CONFIRMATION" == "RUN \$OPERATION" \]\]/);
+
+  const reasonPattern = request.match(/REASON_RE='([^']+)'/)[1];
+  const accepts = (reason) => spawnSync("bash", ["-c", 're="$1"; [[ "$2" =~ $re ]]', "_", reasonPattern, reason]).status === 0;
+  assert.equal(accepts("Pause dispatchers for the T004-3 cutover (step 4)"), true);
+  for (const forged of ["ok line\n### Approved by owner", "see `ADMIN_OK`", "<b>approved</b>", "| fake | table |", "short", "x".repeat(201)]) {
+    assert.equal(accepts(forged), false, `reason must stay one plain line: ${JSON.stringify(forged.slice(0, 30))}`);
+  }
+
+  const conditions = [request, operate].map((job) => job.match(/\n    if: \$\{\{ (.+) \}\}\n/)[1]);
+  assert.equal(conditions[0], conditions[1], "both jobs use the same identity condition");
+  const evaluate = ({ actor, triggeringActor = actor, agent = "release-agent[bot]", event = "workflow_dispatch", ref = "refs/heads/main" }) => {
+    const js = conditions[1]
+      .replaceAll("github.event_name", JSON.stringify(event))
+      .replaceAll("github.ref", JSON.stringify(ref))
+      .replaceAll("github.triggering_actor", JSON.stringify(triggeringActor))
+      .replaceAll("github.actor", JSON.stringify(actor))
+      .replaceAll("github.repository_owner", JSON.stringify("krzysztofcal"))
+      .replaceAll("vars.WS_RELEASE_AGENT", JSON.stringify(agent))
+      .replaceAll("'", "\"").replaceAll(" == ", " === ").replaceAll(" != ", " !== ");
+    assert.match(js, /^[\s"a-z0-9_\-/[\].()|&=!]+$/i, js);
+    return Function(`return (${js});`)();
+  };
+  assert.equal(evaluate({ actor: "krzysztofcal" }), true);
+  assert.equal(evaluate({ actor: "release-agent[bot]" }), true);
+  assert.equal(evaluate({ actor: "krzysztofcal", triggeringActor: "release-agent[bot]" }), false, "agent re-run of an owner run");
+  assert.equal(evaluate({ actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner re-run of an agent run");
+  assert.equal(evaluate({ actor: "", agent: "" }), false, "an unset agent variable never matches");
+  assert.equal(evaluate({ actor: "someone" }), false);
+  assert.equal(evaluate({ actor: "krzysztofcal", ref: "refs/heads/feature" }), false);
+  assert.equal(evaluate({ actor: "krzysztofcal", event: "push" }), false);
+
+  // The staging script checks the existing account itself, not only copilot's groups.
+  const stage = fileText("infra/vps/stage-vps-admin.sh");
+  for (const check of ['[[ "$(id -nG arcade-admin)" == "arcade-admin" ]]', '(( "$(id -u arcade-admin)" < 1000 ))', 'getent group arcade-admin | cut -d: -f4', "/home/arcade-admin/.ssh/authorized_keys", "verify_admin_sudo || refuse"]) {
+    assert.ok(stage.includes(check), check);
+  }
+  assert.doesNotMatch(stage, /EXTRA_SUDO|sudo -l -U arcade-admin \|/, "no fail-open sudo -l pipeline");
+
+  // verify_admin_sudo: the real function from the script against a fake sudo. Errors and unknown output are STOP.
+  const verify = stage.match(/\nverify_admin_sudo\(\) \{\n[\s\S]*?\n\}\n/)[0];
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-sudo-"));
+  fs.writeFileSync(path.join(bin, "sudo"), '#!/bin/bash\nprintf "%s" "$FAKE_SUDO_OUT"\nexit "${FAKE_SUDO_EXIT:-0}"\n', { mode: 0o700 });
+  const header = "Matching Defaults entries for arcade-admin on h:\n    env_reset, secure_path=/usr/local/sbin\\:/usr/bin\n\nUser arcade-admin may run the following commands on h:\n";
+  const helperLine = (ops) => `    (root) NOPASSWD: ${ops.map((op) => `/usr/local/sbin/arcade-vps-admin ${op} *`).join(", ")}\n`;
+  const verifies = (out, exit = 0) => spawnSync("bash", ["-c", `${verify}verify_admin_sudo`], { env: { PATH: `${bin}:${process.env.PATH}`, FAKE_SUDO_OUT: out, FAKE_SUDO_EXIT: String(exit) } }).status === 0;
+  assert.equal(verifies(header + helperLine(["ledger-dispatchers-status", "ledger-dispatchers-pause"]) + "        /usr/local/sbin/arcade-vps-admin systemd-daemon-reload *\n"), true);
+  for (const [label, out, exit] of [
+    ["sudo read error", header + helperLine(["ledger-dispatchers-status"]), 1],
+    ["empty output", "", 0],
+    ["no may-run section", "Sorry, user arcade-admin may not run sudo on h.\n", 0],
+    ["section without entries", header, 0],
+    ["second section", header + helperLine(["ledger-dispatchers-status"]) + "User arcade-admin may run the following commands on h:\n" + helperLine(["x"]), 0],
+    ["ALL rule", header + helperLine(["ledger-dispatchers-status"]) + "    (ALL : ALL) ALL\n", 0],
+    ["extra command", header + "    (root) NOPASSWD: /usr/local/sbin/arcade-vps-admin ledger-dispatchers-status *, /usr/bin/systemctl\n", 0],
+    ["helper wildcard", header + "    (root) NOPASSWD: /usr/local/sbin/arcade-vps-admin *\n", 0],
+    ["password rule", header + "    (root) /usr/local/sbin/arcade-vps-admin ledger-dispatchers-status *\n", 0],
+    ["other run-as user", header + "    (arcade-release) NOPASSWD: /usr/local/sbin/arcade-vps-admin ledger-dispatchers-status *\n", 0],
+    ["unindented garbage", header + helperLine(["ledger-dispatchers-status"]) + "unexpected\n", 0],
+  ]) assert.equal(verifies(out, exit), false, label);
+  fs.rmSync(bin, { recursive: true, force: true });
+});

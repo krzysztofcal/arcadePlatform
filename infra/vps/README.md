@@ -81,6 +81,11 @@ used. The corresponding `WS_SSH_KEY` must be authorized for that account.
 Secret values are owner-managed and are never recorded here; changing the
 secret is a separate owner gate from filesystem staging.
 
+The VPS admin account `arcade-admin` (no group shared with `copilot`) is reachable only with the `vps-admin`
+environment key after owner approval and may run only `/usr/local/sbin/arcade-vps-admin` with its fixed operation
+catalog (`/etc/sudoers.d/arcade-admin`). On an existing host it is installed with `infra/vps/stage-vps-admin.sh`;
+see `docs/vps-admin-operations.md`.
+
 ### Existing-host least-privilege migration — separate from bootstrap
 
 This is a future owner-approved migration for an already-running VPS. It is

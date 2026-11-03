@@ -109,6 +109,12 @@ id arcade-release >/dev/null 2>&1 || useradd --system --create-home --home-dir /
 gpasswd --delete copilot arcade-release >/dev/null 2>&1 || true
 install -d -o arcade-release -g arcade-release -m 0700 /home/arcade-release/.ssh
 
+# VPS admin account: reachable only with the vps-admin environment key; runs only the admin helper's catalog.
+getent group arcade-admin >/dev/null || groupadd --system arcade-admin
+id arcade-admin >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-admin --shell /bin/bash --gid arcade-admin arcade-admin
+gpasswd --delete copilot arcade-admin >/dev/null 2>&1 || true
+install -d -o arcade-admin -g arcade-admin -m 0700 /home/arcade-admin/.ssh
+
 # Ledger dispatchers: owner Actions tokens only from root-owned 0600 env files (#1159 T004-3).
 # No login, no home and no group shared with the agent account copilot.
 getent group arcade-dispatch >/dev/null || groupadd --system arcade-dispatch
@@ -162,6 +168,14 @@ fi
 install -o root -g root -m 0440 \
   "$REPO_ROOT/infra/vps/arcade-deploy.sudoers" \
   /etc/sudoers.d/arcade-deploy
+visudo -c
+
+install -D -o root -g root -m 0755 "$REPO_ROOT/infra/vps/vps-admin.mjs" /usr/local/sbin/arcade-vps-admin
+if ! visudo -cf "$REPO_ROOT/infra/vps/arcade-admin.sudoers"; then
+  echo "refusing bootstrap: invalid arcade admin sudoers contract" >&2
+  exit 1
+fi
+install -o root -g root -m 0440 "$REPO_ROOT/infra/vps/arcade-admin.sudoers" /etc/sudoers.d/arcade-admin
 visudo -c
 
 install -d -o root -g root -m 0755 /etc/sysctl.d
