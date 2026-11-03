@@ -4,13 +4,18 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=copilot
-Environment=HOME=/home/copilot
-Environment=GH_CONFIG_DIR=/home/copilot/.config/gh
-Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin
+User=arcade-dispatch
+Group=arcade-dispatch
+EnvironmentFile=/etc/arcadeplatform/stage-retention-dispatch.env
+Environment=HOME=/run/arcade-chips-ledger-dispatch
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+RuntimeDirectory=arcade-chips-ledger-dispatch
+RuntimeDirectoryMode=0700
 ExecStart=/usr/local/bin/arcade-chips-ledger-dispatch.sh
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectHome=true
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

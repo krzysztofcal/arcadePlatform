@@ -462,12 +462,13 @@ to run; this runner is not a Production database backup mechanism.
 ## 8. Restore and activate the Stage external scheduler — FRESH-VPS MUTATION
 
 The versioned scheduler is a wake-up/dispatch component only. It runs as
-`copilot`, uses `/home/copilot/.local/bin/gh` and
-`/home/copilot/.config/gh`, dispatches the existing Stage workflows on `main`,
-and holds no Supabase credentials. Restore GitHub CLI authentication from the
-approved external source or authenticate interactively with the minimum
-repository-read/workflow-dispatch capability. Never store its token in Git or
-in the scheduler unit.
+`arcade-dispatch`, uses the root-owned distro `/usr/bin/gh`, dispatches the
+existing Stage workflows on `main`, and holds no Supabase credentials. It
+authenticates only through `GH_TOKEN` in the root-owned `0600`
+`/etc/arcadeplatform/stage-retention-dispatch.env`: a new owner fine-grained
+token for this repository with Actions read/write, Contents read and Metadata
+read (see `infra/vps/README.md`). Never store the token in Git, in the unit, in
+`copilot`'s home or on a command line.
 
 The scheduler contract is:
 

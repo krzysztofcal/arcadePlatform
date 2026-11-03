@@ -247,13 +247,16 @@ test("infra VPS repository versions the audited production WS and Stage schedule
   const schedulerService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
   for (const line of [
     "Type=oneshot",
-    "User=copilot",
-    "Environment=HOME=/home/copilot",
-    "Environment=GH_CONFIG_DIR=/home/copilot/.config/gh",
-    "Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin",
+    "User=arcade-dispatch",
+    "Group=arcade-dispatch",
+    "EnvironmentFile=/etc/arcadeplatform/stage-retention-dispatch.env",
+    "Environment=HOME=/run/arcade-chips-ledger-dispatch",
+    "Environment=PATH=/usr/local/bin:/usr/bin:/bin",
+    "RuntimeDirectoryMode=0700",
     "ExecStart=/usr/local/bin/arcade-chips-ledger-dispatch.sh",
     "NoNewPrivileges=true",
-    "PrivateTmp=true"
+    "PrivateTmp=true",
+    "ProtectHome=true"
   ]) {
     assert.match(schedulerService, new RegExp(`^${line.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}$`, "m"));
   }
@@ -288,7 +291,7 @@ test("retired poker refill scheduler is absent and chips cleanup credentials sta
   assert.doesNotMatch(bootstrap, /arcade-poker-pool-dispatch|poker-bot-pool-refill|arcade-poker-refill/i);
 
   const chipsService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
-  assert.match(chipsService, /^Environment=GH_CONFIG_DIR=\/home\/copilot\/\.config\/gh$/m);
+  assert.match(chipsService, /^User=arcade-dispatch$/m);
   assert.doesNotMatch(chipsService, /poker-refill|arcade-poker/);
   const dispatcher = fileText("infra/vps/arcade-chips-ledger-dispatch.sh");
   assert.match(dispatcher, /^REPO="krzysztofcal\/arcadePlatform"$/m);
@@ -573,4 +576,47 @@ test("VPS SSH apply runs only for an owner main dispatch or an owner Caddy push,
   assert.equal(evaluate({ event: "push", triggeringActor: "release-agent[bot]" }), false, "foreign re-run of a Caddy push");
   assert.equal(evaluate({ event: "push", actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner re-run of a foreign push");
   assert.equal(evaluate({ event: "pull_request" }), false, "pull requests never reach the VPS");
+});
+
+test("ledger dispatchers never use copilot's home, gh or token and fail closed without their own token (#1159 T004-3)", () => {
+  for (const [unit, script] of [
+    ["infra/vps/arcade-chips-ledger-dispatch.service", "infra/vps/arcade-chips-ledger-dispatch.sh"],
+    ["infra/vps/production-retention/arcade-chips-ledger-production-dispatch.service", "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+  ]) {
+    const unitText = fileText(unit);
+    assert.match(unitText, /^User=arcade-dispatch$/m, unit);
+    assert.match(unitText, /^ProtectHome=true$/m, unit);
+    assert.match(unitText, /^EnvironmentFile=-?\/etc\/arcadeplatform\/(?:stage|production)-retention-dispatch\.env$/m, unit);
+    assert.doesNotMatch(unitText, /copilot|GH_CONFIG_DIR|GH_TOKEN/, unit);
+    assert.match(fileText(script), /^GH_BIN="\$\{GH_BIN:-\/usr\/bin\/gh\}"$/m, script);
+    assert.doesNotMatch(fileText(script), /copilot/, script);
+  }
+  const bootstrap = fileText("infra/vps/bootstrap.sh");
+  assert.match(bootstrap, /useradd --system --no-create-home --home-dir \/nonexistent --shell \/usr\/sbin\/nologin --gid arcade-dispatch arcade-dispatch/);
+  assert.match(bootstrap, /gpasswd --delete copilot arcade-dispatch/);
+
+  // An ambient gh login must never authenticate the Stage dispatcher.
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "stage-dispatch-test-"));
+  try {
+    const gh = path.join(fixture, "gh");
+    const log = path.join(fixture, "calls");
+    fs.writeFileSync(gh, `#!/bin/bash\nprintf '%s\\n' "$*" >> "${log}"\necho '[]'\n`, { mode: 0o700 });
+    fs.writeFileSync(path.join(fixture, "date"), "#!/bin/bash\necho 10\n", { mode: 0o700 });
+    const run = (extra) => {
+      fs.writeFileSync(log, "");
+      const result = spawnSync("bash", ["infra/vps/arcade-chips-ledger-dispatch.sh"], { encoding: "utf8",
+        env: { PATH: `${fixture}:${process.env.PATH}`, GH_BIN: gh, RUNTIME_DIRECTORY: fixture, ...extra } });
+      return { ...result, calls: fs.readFileSync(log, "utf8") };
+    };
+    const missing = run({});
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /dedicated Stage GH_TOKEN is required/);
+    assert.equal(missing.calls, "", "no GitHub call without the dedicated token");
+    const withToken = run({ GH_TOKEN: "fake-test-only" });
+    assert.equal(withToken.status, 0, withToken.stderr);
+    assert.match(withToken.stdout, /skip: outside dispatch schedule/);
+    assert.equal(fs.statSync(path.join(fixture, "gh-stage")).mode & 0o777, 0o700);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
 });
