@@ -351,9 +351,10 @@ jobs:
           echo "WS Production NOT deployed: explicit release required for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
   deploy:
     needs: [impact, validate]
-    # #1159 T004: the owner or the release agent App (vars.WS_RELEASE_AGENT) dispatches the main definition;
+    # #1159 T004: the owner or the release agent App (vars.WS_RELEASE_AGENT) dispatches the main definition, and only
+    # the same identity may re-run it (no owner/agent mix);
     # the owner approves the ws-production environment, whose secrets alone reach the VPS release account.
-    if: ${{ needs.impact.outputs.deploy_ws == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (github.actor == github.repository_owner || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT)) && (github.triggering_actor == github.repository_owner || (vars.WS_RELEASE_AGENT != '' && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    if: ${{ needs.impact.outputs.deploy_ws == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
     runs-on: ubuntu-latest
     environment: ws-production
     env:

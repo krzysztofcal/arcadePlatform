@@ -285,6 +285,13 @@ test("restart gate runbook commands parse and keep the first-deployment safety r
   // The manual rollback restarts only after the release check and the link switch succeeded.
   assert.match(recovery, /test -f \/opt\/ws-server\/releases\/<PREV_SHA>\/ws-server\/server\.mjs && ln -sfn [^`]* && systemctl reset-failed ws-server\.service && systemctl restart ws-server\.service/);
   assert.doesNotMatch(recovery, /; systemctl restart ws-server\.service/);
+  // T004 migration: maintenance is installed and verified as arcade-release, never run, and nothing is deleted.
+  const migration = doc.slice(doc.indexOf("## D. Release account migration"));
+  assert.match(migration, /systemctl show arcadeplatform-vps-maintenance\.service -p User --value` → `arcade-release`/);
+  assert.match(migration, /flock -n \/opt\/ws-server\/\.deploy-maintenance\.lock true/);
+  assert.match(migration, /find \/opt\/ws-server -xdev -printf[^`]*> \/root\/t4-backup\/opt-ws-server-owners\.txt/);
+  assert.match(migration, /chown -h "\$owner" "\$path"; done < \/root\/t4-backup\/opt-ws-server-owners\.txt/);
+  assert.doesNotMatch(migration, /systemctl (?:start|restart|enable|stop)|vps-maintenance\.sh --apply|\brm -|chmod /);
 });
 
 test("release runs own their hold: prepare refuses foreign holds and fails fast, resume/abort only release their own", async () => {

@@ -45,15 +45,35 @@ test("ordinary main push or merge never deploys WS Production; only an owner or 
   const text = workflowText();
   const deploy = text.slice(text.indexOf("  deploy:"));
   const condition = deploy.match(/\n    if: \$\{\{ (.+) \}\}\n/)[1];
-  // Both the initial actor and a re-run's triggering actor must be the owner or the configured App bot.
-  const allowed = (actor) => `(${actor} == github.repository_owner || (vars.WS_RELEASE_AGENT != '' && ${actor} == vars.WS_RELEASE_AGENT))`;
-  assert.equal(condition, [
-    "needs.impact.outputs.deploy_ws == 'true'",
-    "github.event_name == 'workflow_dispatch'",
-    "github.ref == 'refs/heads/main'",
-    allowed("github.actor"),
-    allowed("github.triggering_actor")
-  ].join(" && "));
+  assert.doesNotMatch(condition, /'push'/);
+  // Evaluate the real expression: only the same identity may dispatch and re-run (owner/owner or agent/agent).
+  const evaluate = ({ actor, triggeringActor, agent, event = "workflow_dispatch", ref = "refs/heads/main", deployWs = "true" }) => {
+    const js = condition
+      .replaceAll("needs.impact.outputs.deploy_ws", JSON.stringify(deployWs))
+      .replaceAll("github.event_name", JSON.stringify(event))
+      .replaceAll("github.ref", JSON.stringify(ref))
+      .replaceAll("github.triggering_actor", JSON.stringify(triggeringActor))
+      .replaceAll("github.actor", JSON.stringify(actor))
+      .replaceAll("github.repository_owner", JSON.stringify("krzysztofcal"))
+      .replaceAll("vars.WS_RELEASE_AGENT", JSON.stringify(agent))
+      .replaceAll("'", "\"")
+      .replaceAll(" == ", " === ")
+      .replaceAll(" != ", " !== ");
+    assert.match(js, /^[\s"a-z0-9_\-/[\].()|&=!]+$/i, js);
+    return Function(`return (${js});`)();
+  };
+  const owner = "krzysztofcal";
+  const bot = "arcade-release-agent[bot]";
+  assert.equal(evaluate({ actor: owner, triggeringActor: owner, agent: bot }), true);
+  assert.equal(evaluate({ actor: bot, triggeringActor: bot, agent: bot }), true);
+  assert.equal(evaluate({ actor: owner, triggeringActor: bot, agent: bot }), false, "agent re-run of an owner run");
+  assert.equal(evaluate({ actor: bot, triggeringActor: owner, agent: bot }), false, "owner re-run of an agent run");
+  assert.equal(evaluate({ actor: owner, triggeringActor: owner, agent: "" }), true);
+  assert.equal(evaluate({ actor: "", triggeringActor: "", agent: "" }), false, "an unset agent variable never matches");
+  assert.equal(evaluate({ actor: "someone", triggeringActor: "someone", agent: bot }), false);
+  assert.equal(evaluate({ actor: bot, triggeringActor: bot, agent: bot, ref: "refs/heads/feature" }), false);
+  assert.equal(evaluate({ actor: owner, triggeringActor: owner, agent: bot, event: "push" }), false);
+  assert.equal(evaluate({ actor: owner, triggeringActor: owner, agent: bot, deployWs: "false" }), false);
 });
 
 test("deploy authorizes the exact current main SHA before any VPS mutation", () => {
