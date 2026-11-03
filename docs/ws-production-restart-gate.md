@@ -39,7 +39,7 @@ Both restart paths also require `humanSeatsOpen=0` (ACTIVE non-bot seats on OPEN
   Otherwise it prints `RESUME_BLOCKED <reason>` and the hold stays (C7).
 - `abort <runId>`: after a failure before the switch, removes this run's hold only while the marker still says `stage=prepared` and the prepared process (same MainPID) runs from the current link. Otherwise it prints `ABORT_BLOCKED <reason>` (for example `switch_started`) and the hold stays (C7).
 
-No hold without a marker is ever removed by these modes. `prepare`, `switching`, `resume` and `abort` are not granted to any account by this repository's sudoers yet; see `specs/1159-ci-cd-release-safety/t004/plan.md`.
+No hold without a marker is ever removed by these modes. `prepare`, `switching`, `resume` and `abort` (like `restart`) are granted only to `arcade-release`, which the `WS Server Deploy` job reaches after the owner approves the `ws-production` environment. `copilot` keeps only `check`. See `specs/1159-ci-cd-release-safety/t004/plan.md`.
 
 ## A. Gate installation (root)
 
@@ -246,3 +246,40 @@ C6.1 ends the rollback boundary.
    - when the new release fails its local health check while the rule is still present: C-M1 off first, then re-run the check before any rollback.
 7. **Getting the service back in any other state:** C-M1 off; `readlink -f /opt/ws-server/current` must point to an existing release; `systemctl reset-failed ws-server.service; systemctl start ws-server.service`; check `/healthz`.
 8. Gate or sudoers in the way: root acts without the gate (`systemctl …`); A3 withdraws the installation.
+
+## D. Release account migration on the existing host (#1159 T004; separate GO; root, one session)
+
+This moves the Production release tree and the weekly VPS maintenance from `copilot` to `arcade-release`. It never starts maintenance, never deletes a file and never restarts WS. Run it after the `ws-production` environment is protected and T004-2 is merged, and before `stage-ws-restart-gate.sh` installs the new sudoers. `<SHA>` is the merged `main` commit, checked out as in A0.1. Any unexpected result: STOP, then D6.
+
+**D0. Preconditions (read-only)**
+1. `systemctl is-active arcadeplatform-vps-maintenance.service` → `inactive`. `systemctl list-timers arcadeplatform-vps-maintenance.timer --no-pager` shows the next run at least 2 hours away.
+2. No queued or running `WS Server Deploy` run (Actions tab). `flock -n /opt/ws-server/.deploy-maintenance.lock true && echo LOCK_FREE` → `LOCK_FREE`.
+3. `systemctl show ws-server.service -p MainPID --value`: record the PID. `curl -fsS http://127.0.0.1:3000/healthz` → `ok`.
+
+**D1. Backup and inventory (writes only under `/root/t4-backup`)**
+1. `install -d -m 0700 /root/t4-backup && find /opt/ws-server -xdev -printf '%u:%g %m %y %p\n' > /root/t4-backup/opt-ws-server-owners.txt && cp -p /usr/local/sbin/arcadeplatform-vps-maintenance.sh /etc/systemd/system/arcadeplatform-vps-maintenance.service /root/t4-backup/ && echo BACKUP_OK`
+2. `awk '{print $1}' /root/t4-backup/opt-ws-server-owners.txt | sort | uniq -c` → only `root:arcade-deploy` and `copilot:arcade-deploy`.
+3. `awk '$3 != "l" && $2 ~ /[2367]$/' /root/t4-backup/opt-ws-server-owners.txt` → no output (nothing writable by others).
+4. `sudo -u arcade test -r /opt/ws-server/current/server.mjs && echo ARCADE_READ_OK` → `ARCADE_READ_OK`.
+
+**D2. Account (no sudo rights yet)**
+1. `getent group arcade-release >/dev/null || groupadd --system arcade-release; id arcade-release >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-release --shell /bin/bash --gid arcade-release arcade-release; install -d -o arcade-release -g arcade-release -m 0700 /home/arcade-release/.ssh && id arcade-release`
+2. `id -nG copilot` does not list `arcade-release`.
+
+**D3. Ownership (no mode change)**
+1. `chown -h arcade-release:arcade-release /opt/ws-server/current /opt/ws-server/.deploy-maintenance.lock && chgrp arcade-release /opt/ws-server /opt/ws-server/releases && chown -R arcade-release:arcade-release /opt/ws-server/releases/* && echo OWNERSHIP_OK`
+
+**D4. Maintenance files (installed, not run)**
+1. `install -o root -g root -m 0755 /root/t4-<SHA>/infra/vps/vps-maintenance.sh /usr/local/sbin/arcadeplatform-vps-maintenance.sh && install -o root -g root -m 0644 /root/t4-<SHA>/infra/vps/arcadeplatform-vps-maintenance.service /etc/systemd/system/arcadeplatform-vps-maintenance.service && systemctl daemon-reload && echo MAINT_INSTALLED`
+
+**D5. Verification (read-only)**
+1. `systemctl show arcadeplatform-vps-maintenance.service -p User --value` → `arcade-release`. `cmp /root/t4-<SHA>/infra/vps/vps-maintenance.sh /usr/local/sbin/arcadeplatform-vps-maintenance.sh && echo MAINT_SCRIPT_OK`. `systemctl is-active arcadeplatform-vps-maintenance.service` → still `inactive`, and the timer state is unchanged.
+2. `sudo -u arcade test -r /opt/ws-server/current/server.mjs && echo ARCADE_READ_OK` → `ARCADE_READ_OK`.
+3. `sudo -u copilot test -w /opt/ws-server || sudo -u copilot test -w /opt/ws-server/releases || sudo -u copilot test -w /opt/ws-server/current/server.mjs || echo COPILOT_NO_WRITE` → `COPILOT_NO_WRITE`.
+4. `sudo -u arcade-release test -w /opt/ws-server/releases && sudo -u arcade-release test -w /opt/ws-server/.deploy-maintenance.lock && echo RELEASE_WRITE_OK` → `RELEASE_WRITE_OK`.
+5. MainPID equals D0.3, and `/healthz` is `ok`.
+
+**D6. Rollback (root; no restart needed: the running process keeps its open files)**
+1. `while read -r owner mode type path; do chown -h "$owner" "$path"; done < /root/t4-backup/opt-ws-server-owners.txt && echo OWNERS_RESTORED`
+2. `install -o root -g root -m 0755 /root/t4-backup/arcadeplatform-vps-maintenance.sh /usr/local/sbin/arcadeplatform-vps-maintenance.sh && install -o root -g root -m 0644 /root/t4-backup/arcadeplatform-vps-maintenance.service /etc/systemd/system/arcadeplatform-vps-maintenance.service && systemctl daemon-reload && echo MAINT_RESTORED`
+3. Repeat D5.2 and D5.5.

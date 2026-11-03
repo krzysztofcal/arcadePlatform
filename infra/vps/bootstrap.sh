@@ -102,12 +102,21 @@ getent group arcade-deploy >/dev/null || groupadd --system arcade-deploy
 usermod --append --groups arcade-deploy copilot
 gpasswd --delete arcade arcade-deploy >/dev/null 2>&1 || true
 
+# WS Production release account: reachable only with the ws-production environment key (#1159 T004).
+# It owns the Production release tree; the agent account copilot is never a member of its group.
+getent group arcade-release >/dev/null || groupadd --system arcade-release
+id arcade-release >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-release --shell /bin/bash --gid arcade-release arcade-release
+gpasswd --delete copilot arcade-release >/dev/null 2>&1 || true
+install -d -o arcade-release -g arcade-release -m 0700 /home/arcade-release/.ssh
+
 getent group arcade-stage-runner >/dev/null || groupadd --system arcade-stage-runner
 id arcade-stage-runner >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /var/lib/arcade-stage-runner --shell /usr/sbin/nologin --gid arcade-stage-runner arcade-stage-runner
 
 install -d -o root -g root -m 0755 /etc/arcadeplatform
-install -d -o root -g arcade-deploy -m 2775 /opt/ws-server /opt/ws-server/releases
-install -o root -g arcade-deploy -m 0660 /dev/null /opt/ws-server/.deploy-maintenance.lock
+# New hosts only: an existing host moves /opt/ws-server through the reviewed ownership migration
+# (specs/1159-ci-cd-release-safety/t004/plan.md), never by re-running this script.
+install -d -o root -g arcade-release -m 2775 /opt/ws-server /opt/ws-server/releases
+install -o arcade-release -g arcade-release -m 0660 /dev/null /opt/ws-server/.deploy-maintenance.lock
 install -d -o arcade -g arcade -m 0755 /opt/arcade-ws-preview
 install -d -o root -g arcade-deploy -m 2775 \
   /opt/arcade-ws-preview/ws-server \

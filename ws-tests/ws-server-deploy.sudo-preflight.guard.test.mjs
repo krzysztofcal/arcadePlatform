@@ -34,7 +34,26 @@ test("ws-server deploy gates the release switch and the automatic rollback on th
   assert.match(rollback.slice(rollbackRestartIdx), /== RESTART_BLOCKED\*[\s\S]*ln -sfn -- "\$NEW_RELEASE_APP_DIR"[\s\S]*ROLLBACK_BLOCKED: restart gate is not safe[\s\S]*RESTART_UNCERTAIN/);
   assert.doesNotMatch(text, /sudo -n \/usr\/bin\/systemctl restart ws-server\.service/);
   const sudoers = fs.readFileSync("infra/vps/arcade-deploy.sudoers", "utf8");
-  assert.match(sudoers, /\/usr\/local\/sbin\/arcade-ws-restart-gate check, \\\n\s+\/usr\/local\/sbin\/arcade-ws-restart-gate restart\n/);
+  // #1159 T004: the agent account keeps only the read-only gate check; Production changes need the release account.
+  const alias = (name) => sudoers.match(new RegExp(`Cmnd_Alias ${name} = \\\\\n([\\s\\S]*?)\n\n`))[1].split(/,\s*\\\n\s*/).map((rule) => rule.trim());
+  assert.deepEqual(alias("ARCADE_DEPLOY_COMMANDS"), [
+    "/usr/bin/systemctl restart ws-server-preview.service",
+    "/usr/bin/systemctl reload caddy.service",
+    "/usr/local/sbin/arcade-ws-preview-env-preflight \"\"",
+    "/usr/local/sbin/arcade-ws-restart-gate check"
+  ]);
+  assert.deepEqual(alias("ARCADE_RELEASE_COMMANDS"), [
+    "/usr/local/sbin/arcade-ws-production-env-preflight \"\"",
+    "/usr/local/sbin/arcade-ws-restart-gate check",
+    "/usr/local/sbin/arcade-ws-restart-gate restart",
+    "/usr/local/sbin/arcade-ws-restart-gate prepare *",
+    "/usr/local/sbin/arcade-ws-restart-gate switching *",
+    "/usr/local/sbin/arcade-ws-restart-gate resume *",
+    "/usr/local/sbin/arcade-ws-restart-gate abort *"
+  ]);
+  assert.match(sudoers, /^copilot ALL=\(root\) NOPASSWD: ARCADE_DEPLOY_COMMANDS$/m);
+  assert.match(sudoers, /^arcade-release ALL=\(root\) NOPASSWD: ARCADE_RELEASE_COMMANDS$/m);
+  assert.equal((sudoers.match(/^[a-z-]+ ALL=/gm) || []).length, 2);
   assert.doesNotMatch(sudoers, /restart ws-server\.service/);
   assert.match(fs.readFileSync("infra/vps/bootstrap.sh", "utf8"), /ws-restart-gate\.mjs" \\\n  \/usr\/local\/sbin\/arcade-ws-restart-gate\ninstall -d -o root -g root -m 0755 \/etc\/arcadeplatform\/ws-hold\n/);
   // Minimal root staging on an existing host: validate before install, never touch services.
@@ -266,6 +285,13 @@ test("restart gate runbook commands parse and keep the first-deployment safety r
   // The manual rollback restarts only after the release check and the link switch succeeded.
   assert.match(recovery, /test -f \/opt\/ws-server\/releases\/<PREV_SHA>\/ws-server\/server\.mjs && ln -sfn [^`]* && systemctl reset-failed ws-server\.service && systemctl restart ws-server\.service/);
   assert.doesNotMatch(recovery, /; systemctl restart ws-server\.service/);
+  // T004 migration: maintenance is installed and verified as arcade-release, never run, and nothing is deleted.
+  const migration = doc.slice(doc.indexOf("## D. Release account migration"));
+  assert.match(migration, /systemctl show arcadeplatform-vps-maintenance\.service -p User --value` → `arcade-release`/);
+  assert.match(migration, /flock -n \/opt\/ws-server\/\.deploy-maintenance\.lock true/);
+  assert.match(migration, /find \/opt\/ws-server -xdev -printf[^`]*> \/root\/t4-backup\/opt-ws-server-owners\.txt/);
+  assert.match(migration, /chown -h "\$owner" "\$path"; done < \/root\/t4-backup\/opt-ws-server-owners\.txt/);
+  assert.doesNotMatch(migration, /systemctl (?:start|restart|enable|stop)|vps-maintenance\.sh --apply|\brm -|chmod /);
 });
 
 test("release runs own their hold: prepare refuses foreign holds and fails fast, resume/abort only release their own", async () => {

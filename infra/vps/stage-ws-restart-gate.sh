@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Installs only the WS restart gate, its root-only hold directory, the hold drop-in and the deploy sudoers
-# contract. Runs as root on an existing host instead of the full bootstrap. Never restarts services; the
-# drop-in takes effect at the next WS start. The attested production env file is never modified.
+# Installs only the WS restart gate, its root-only hold directory, the hold drop-in, the arcade-release account
+# and the deploy sudoers contract. Runs as root on an existing host instead of the full bootstrap. Never restarts
+# services and never changes /opt/ws-server ownership (a separate reviewed migration); the drop-in takes effect
+# at the next WS start. The attested production env file is never modified.
 if [[ "$EUID" -ne 0 ]]; then
   echo "stage-ws-restart-gate must run as root" >&2
   exit 1
@@ -55,6 +56,15 @@ if ! visudo -cf "$SUDOERS_SRC"; then
   exit 1
 fi
 
+# The release account must not share a group with the agent account copilot.
+getent group arcade-release >/dev/null || groupadd --system arcade-release
+id arcade-release >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-release --shell /bin/bash --gid arcade-release arcade-release
+if id -nG copilot | tr ' ' '\n' | grep -qx arcade-release; then
+  echo "refusing staging: copilot is a member of arcade-release" >&2
+  exit 1
+fi
+install -d -o arcade-release -g arcade-release -m 0700 /home/arcade-release/.ssh
+
 install -D -o root -g root -m 0755 "$HELPER_SRC" "$HELPER_DEST"
 install -d -o root -g root -m 0755 "$HOLD_DIR"
 install -D -o root -g root -m 0644 "$DROPIN_SRC" "$DROPIN_DEST"
@@ -66,10 +76,17 @@ fi
 install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_DEST"
 visudo -c
 
-# Read-only verification as the deploy account: the gate must answer with one decision line.
-GATE_OUTPUT="$(sudo -u copilot sudo -n "$HELPER_DEST" check || true)"
-if [[ ! "$GATE_OUTPUT" =~ ^RESTART_(SAFE|BLOCKED) ]]; then
-  echo "stage-ws-restart-gate: verification failed: '$GATE_OUTPUT'" >&2
+# Read-only verification as both accounts: the gate must answer with one decision line, and copilot must not be
+# able to restart Production.
+for account in copilot arcade-release; do
+  GATE_OUTPUT="$(sudo -u "$account" sudo -n "$HELPER_DEST" check || true)"
+  if [[ ! "$GATE_OUTPUT" =~ ^RESTART_(SAFE|BLOCKED) ]]; then
+    echo "stage-ws-restart-gate: verification failed for $account: '$GATE_OUTPUT'" >&2
+    exit 1
+  fi
+done
+if sudo -u copilot sudo -n -l "$HELPER_DEST" restart >/dev/null 2>&1; then
+  echo "stage-ws-restart-gate: copilot can still restart Production" >&2
   exit 1
 fi
 echo "stage-ws-restart-gate: OK ($GATE_OUTPUT)"

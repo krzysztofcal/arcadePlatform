@@ -351,9 +351,12 @@ jobs:
           echo "WS Production NOT deployed: explicit release required for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
   deploy:
     needs: [impact, validate]
-    # #1159 PR4: only an OWNER dispatch (and OWNER rerun) of the main definition may deploy.
-    if: ${{ needs.impact.outputs.deploy_ws == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'krzysztofcal' && github.triggering_actor == 'krzysztofcal' }}
+    # #1159 T004: the owner or the release agent App (vars.WS_RELEASE_AGENT) dispatches the main definition, and only
+    # the same identity may re-run it (no owner/agent mix);
+    # the owner approves the ws-production environment, whose secrets alone reach the VPS release account.
+    if: ${{ needs.impact.outputs.deploy_ws == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
     runs-on: ubuntu-latest
+    environment: ws-production
     env:
       WS_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-${{ github.run_id }}-${{ github.run_attempt }}
     permissions:
@@ -385,9 +388,9 @@ jobs:
       - name: Pre-stage shared deploy/maintenance lock on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.WS_HOST }}
-          username: ${{ secrets.WS_USER }}
-          key: ${{ secrets.WS_SSH_KEY }}
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
           timeout: 2m
           command_timeout: 10m
           script: |
@@ -403,10 +406,10 @@ jobs:
             BASE_DIR="/opt/ws-server"
             RELEASES_DIR="$BASE_DIR/releases"
             LOCK_FILE="$BASE_DIR/.deploy-maintenance.lock"
-            DEPLOY_GROUP="arcade-deploy"
+            DEPLOY_GROUP="arcade-release"
 
-            if [[ "$(id -un)" != "copilot" ]]; then
-              echo "Production deploy must run as copilot"
+            if [[ "$(id -un)" != "arcade-release" ]]; then
+              echo "Production deploy must run as arcade-release"
               exit 1
             fi
             if ! test -d "$BASE_DIR" || test -L "$BASE_DIR" || ! test -w "$BASE_DIR" || ! test -x "$BASE_DIR"; then
@@ -463,7 +466,7 @@ jobs:
             fi
 
             lock_owner="$(stat -Lc '%U' -- "/proc/$$/fd/9")"
-            if [[ "$lock_owner" != root && "$lock_owner" != copilot ]]; then
+            if [[ "$lock_owner" != root && "$lock_owner" != arcade-release ]]; then
               echo "deploy maintenance lock has an unexpected owner"
               exit 1
             fi
@@ -570,13 +573,34 @@ jobs:
       - name: Upload ws-server artifact to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.WS_HOST }}
-          username: ${{ secrets.WS_USER }}
-          key: ${{ secrets.WS_SSH_KEY }}
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
           source: .artifacts/ws-server/ws-server-dist.tgz
           target: ${{ env.WS_REMOTE_TMP_DIR }}
 
-      # main may advance during packaging/upload; recheck immediately before the switch.
+      # Holds new hands, waits for running hands, drains and waits for RESTART_SAFE. Any other outcome
+      # removes only this run's hold (or keeps it on a process change) and nothing is switched.
+      - name: Prepare running WS for the release on VPS
+        id: prepare
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 15m
+          envs: RELEASE_RUN_ID
+          script: |
+            set -eu
+            [ "$(id -un)" = "arcade-release" ] || { echo "Production deploy must run as arcade-release"; exit 1; }
+            PREPARE_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate prepare "$RELEASE_RUN_ID" || true)"
+            printf '%s\n' "$PREPARE_RESULT"
+            [ "$PREPARE_RESULT" = "PREPARED" ] || { echo "STOP: WS not prepared; nothing switched"; exit 1; }
+
+      # main may advance during packaging/upload/preparation; recheck immediately before the switch.
       - name: Revalidate current main HEAD before release switch
         run: |
           set -euo pipefail
@@ -587,14 +611,15 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           RELEASE_SHA: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
           WS_REMOTE_TMP_DIR: ${{ env.WS_REMOTE_TMP_DIR }}
         with:
-          host: ${{ secrets.WS_HOST }}
-          username: ${{ secrets.WS_USER }}
-          key: ${{ secrets.WS_SSH_KEY }}
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
           timeout: 2m
           command_timeout: 20m
-          envs: RELEASE_SHA,WS_REMOTE_TMP_DIR
+          envs: RELEASE_SHA,RELEASE_RUN_ID,WS_REMOTE_TMP_DIR
           script: |
             set -eu
             if ! command -v bash >/dev/null 2>&1; then
@@ -609,8 +634,8 @@ jobs:
             RELEASES_DIR="$BASE_DIR/releases"
             CURRENT_LINK="$BASE_DIR/current"
             DEPLOY_MAINTENANCE_LOCK="/opt/ws-server/.deploy-maintenance.lock"
-            if [[ "$(id -un)" != "copilot" ]]; then
-              echo "Production deploy must run as copilot"
+            if [[ "$(id -un)" != "arcade-release" ]]; then
+              echo "Production deploy must run as arcade-release"
               exit 1
             fi
             if [[ ! "$WS_REMOTE_TMP_DIR" =~ ^/tmp/arcadeplatform-ws-[0-9]+-[0-9]+$ ]]; then
@@ -781,6 +806,14 @@ jobs:
             printf '%s\n' "$RESTART_GATE"
             if [[ "$RESTART_GATE" != RESTART_SAFE* ]]; then
               echo "STOP: restart gate is not safe; nothing switched"
+              exit 1
+            fi
+
+            # Point of no return, marked by root before the link changes: from here every failure keeps the hold (C7).
+            SWITCH_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate switching "$RELEASE_RUN_ID" || true)"
+            printf '%s\n' "$SWITCH_RESULT"
+            if [[ "$SWITCH_RESULT" != "SWITCH_MARKED" ]]; then
+              echo "STOP: switch not marked; nothing switched"
               exit 1
             fi
 
@@ -973,3 +1006,46 @@ jobs:
           socket.on('error', (err) => fail(`socket-error:${err && err.code ? err.code : 'unknown'}`));
           socket.on('end', () => fail('socket-end-before-helloAck'));
           NODE
+
+      # Only after authorize, RESTARTED, both health checks and the smoke succeeded in this run.
+      - name: Resume new hands after the verified release on VPS
+        if: ${{ success() }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 5m
+          envs: RELEASE_SHA,RELEASE_RUN_ID
+          script: |
+            set -eu
+            RESUME_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate resume "$RELEASE_RUN_ID" "$RELEASE_SHA" || true)"
+            printf '%s\n' "$RESUME_RESULT"
+            [ "$RESUME_RESULT" = "RESUMED" ] || { echo "STOP: hold kept; owner decision (C7)"; exit 1; }
+            printf 'release=%s pid=%s\n' "$(readlink -f /opt/ws-server/current)" "$(systemctl show ws-server.service -p MainPID --value)"
+
+      # A failure before the switch was marked reopens play on the untouched release; anything later keeps the hold (C7).
+      - name: Abort the release before the switch on VPS
+        if: ${{ failure() && steps.prepare.outcome == 'success' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 5m
+          envs: RELEASE_RUN_ID
+          script: |
+            set -eu
+            ABORT_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate abort "$RELEASE_RUN_ID" || true)"
+            printf '%s\n' "$ABORT_RESULT"
+            case "$ABORT_RESULT" in
+              ABORTED*) echo "release aborted before the switch; previous release keeps running" ;;
+              *) echo "STOP: hold kept; owner decision (C7)"; exit 1 ;;
+            esac

@@ -175,11 +175,11 @@ lock as `root:arcade-deploy`.
 
 The maintenance command is read-only with no arguments or with `--dry-run`;
 only an explicit `--apply` permits deletion, and the systemd service is the
-only scheduled caller using `--apply`. The service runs as `copilot`: the
-`arcade-deploy` group permits release cleanup, and Production/Preview workflow
-temporary directories are created by the `copilot` deploy user. Automatic
-temporary cleanup additionally requires the exact directory owner to be
-`copilot`, so the current legacy directories owned by `arcade` are skipped.
+only scheduled caller using `--apply`. The service runs as `arcade-release`
+(#1159 T004), the owner of the Production release tree, and Production deploy
+temporary directories are created by that account. Automatic temporary cleanup
+additionally requires the exact directory owner to be `arcade-release`, so
+legacy directories owned by `arcade` or `copilot` are skipped.
 After a fresh owner-approved read-only inventory, those legacy directories may
 be handled by a separate one-time root cleanup; they are not part of the
 weekly automation. No service restart is part of maintenance.

@@ -17,7 +17,7 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.doesNotMatch(text, /sudo -n true/);
   assert.match(text, /systemctl cat ws-server\.service/);
   assert.match(text, /provision deploy group paths first/);
-  assert.match(text, /\[\[ "\$\(id -un\)" != "copilot" \]\]/);
+  assert.match(text, /\[\[ "\$\(id -un\)" != "arcade-release" \]\]/);
   assert.match(text, /test -L "\$BASE_DIR"/);
   assert.match(text, /test -L "\$RELEASES_DIR"/);
   assert.match(text, /install nodejs/);
@@ -46,8 +46,10 @@ test("remote deploy script is strict, rollback-capable and health-gated", () => 
   assert.notEqual(publicHealthIdx, -1);
   assert.ok(localHealthIdx < publicHealthIdx, "local health check should run before public health check");
 
-  assert.doesNotMatch(text, /local healthz failed after retries[\s\S]*exit 1/);
-  assert.doesNotMatch(text, /public healthz failed after retries[\s\S]*exit 1/);
+  // The health loops end the atomic step through the ERR trap; later steps (resume/abort) are separate.
+  const atomic = text.slice(text.indexOf("- name: Atomic release switch + restart + health gate on VPS"), text.indexOf("- name: Smoke-check ws.kcswh.pl"));
+  assert.doesNotMatch(atomic, /local healthz failed after retries[\s\S]*exit 1/);
+  assert.doesNotMatch(atomic, /public healthz failed after retries[\s\S]*exit 1/);
   assert.match(text, /local healthz failed after retries[\s\S]*false/);
   assert.match(text, /public healthz failed after retries[\s\S]*false/);
 
@@ -109,7 +111,7 @@ test("Production deploy pre-stages a missing shared lock before any artifact tra
   assert.ok(preStageIdx < uploadIdx, 'lock pre-stage must precede artifact upload');
   assert.ok(preStageIdx < atomicStepIdx, 'lock pre-stage must precede the deploy transaction');
 
-  const preStage = text.slice(preStageIdx, atomicStepIdx);
+  const preStage = text.slice(preStageIdx, text.indexOf('- name: Build and package ws-server deploy artifact'));
   assert.match(preStage, /BASE_DIR="\/opt\/ws-server"/);
   assert.match(preStage, /LOCK_FILE="\$BASE_DIR\/\.deploy-maintenance\.lock"/);
   assert.match(preStage, /test -d "\$BASE_DIR"/);
@@ -126,7 +128,7 @@ test("Production deploy pre-stages a missing shared lock before any artifact tra
   assert.match(preStage, /stat -Lc '%h' -- "\/proc\/\$\$\/fd\/9"/);
   assert.match(preStage, /exec 9<> "\$LOCK_FILE"/);
   assert.match(preStage, /flock -w 300 9/);
-  assert.match(preStage, /DEPLOY_GROUP="arcade-deploy"/);
+  assert.match(preStage, /DEPLOY_GROUP="arcade-release"/);
   assert.match(preStage, /chgrp "\$DEPLOY_GROUP" "\/proc\/\$\$\/fd\/9"/);
   assert.match(preStage, /chmod 0660 "\/proc\/\$\$\/fd\/9"/);
   assert.doesNotMatch(preStage, /\b(?:sudo|systemctl|docker|kill|pkill)\b/i);
