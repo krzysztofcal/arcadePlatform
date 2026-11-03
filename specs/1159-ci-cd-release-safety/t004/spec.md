@@ -93,11 +93,9 @@ Corrections to the earlier T004 draft:
   7. a summary with the gate lines, the release link and MainPID.
   - Concurrency: the existing workflow concurrency group plus the existing VPS deploy lock for the switch.
   - Audit: environment deployment history (who approved which run and SHA), the run log with the helper lines, and sudo logging.
-- **R-STOP.** STOP leaves the hold in place for the owner (C7 of `docs/ws-production-restart-gate.md`). It applies to:
-  - an active human, unsettled escrow or an unknown state;
-  - a helper or health error;
-  - `RESTART_UNCERTAIN` or `ROLLBACK_BLOCKED`.
-  - Never force a Leave, edit a ledger or hand, bypass a gate or retry automatically.
+- **R-STOP.** A STOP never forces a Leave, edits a ledger or hand, bypasses a gate or retries automatically. What happens to the hold depends on when the STOP happens:
+  - **Before the release switch:** an active human, unsettled escrow, an unknown state or a helper error. Nothing was switched or restarted, so `prepare` puts the previous hold state back and play continues on the unchanged release. The run fails and the agent reports it.
+  - **After the switch:** a health or helper error, `RESTART_UNCERTAIN`, `ROLLBACK_BLOCKED`, or `RESUME_BLOCKED`. The hold stays in place for the owner (C7 of `docs/ws-production-restart-gate.md`).
 
 ## Agent operations
 

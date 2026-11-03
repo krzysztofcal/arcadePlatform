@@ -60,7 +60,7 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 
 **`infra/vps/bootstrap.sh`, `infra/vps/stage-ws-restart-gate.sh`:**
 - create the `arcade-release` system user and group;
-- `/opt/ws-server` and the lock get group `arcade-release`;
+- `chown -R arcade-release:arcade-release` on `/opt/ws-server` (releases, `current` and the lock). Today the release directories and the lock are owned by `copilot`, so a group change alone would leave the agent able to write them;
 - `copilot` is not a member of that group;
 - the post-install check runs `check` as both accounts.
 
