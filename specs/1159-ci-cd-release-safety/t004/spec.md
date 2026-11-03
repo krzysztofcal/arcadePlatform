@@ -60,8 +60,9 @@ Corrections to the earlier T004 draft:
   - administrators cannot bypass the protection.
   Environment secrets reach the job only after approval. One approval covers the whole job: prepare, deploy, health and resume.
 - **R-IDENTITY.** The agent dispatches through a GitHub App installed only on this repository. It is not a collaborator and not the owner's token.
-  - App permissions: `Actions: write` and `Metadata: read` only. No `Contents`, `Deployments`, `Environments`, `Administration`, `Secrets`, `Variables`, `Workflows` or `Pull requests` access.
-  - Without `Contents: write` it cannot push branches or workflow files. Without `Deployments: write` it cannot approve a pending deployment.
+  - Dispatch needs only `Actions: write` (+ `Metadata: read`). In T004-3 the App also replaces the owner token for code and PR work (`Contents`, `Pull requests`, `Issues`).
+  - The App never gets `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables`. `Workflows` comes only after the secrets audit.
+  - Without `Deployments: write` it cannot approve a pending deployment. Without `Workflows` it cannot change workflow files.
   - The agent mints a short-lived installation token (1 h) on the VPS from the App private key (owned by `copilot`, mode 0600) for each dispatch.
   - A dispatch through the App runs with `github.actor` and `github.triggering_actor` = `<app-slug>[bot]`. The `deploy` job accepts a run only when both are the repository owner or `vars.WS_RELEASE_AGENT` (set to `<app-slug>[bot]`).
   - With prevent self-review, a run started by the App is approved by the owner, and a run started by the owner cannot be self-approved (break-glass is an admin setting change).
@@ -70,7 +71,7 @@ Corrections to the earlier T004 draft:
     - A re-run keeps the original `github.actor`. So every workflow that changes Production must check `github.triggering_actor` too, or sit behind an environment with owner review.
     - A re-run of a `ws-production` job needs a new approval.
     - Approvals stay in the environment deployment history even if run logs are deleted.
-  - **The owner token that stays on the VPS** for code and PR work and for the ledger dispatcher must not have `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables` write. The owner verifies this in the token settings.
+  - **The App does not make the owner's GO mandatory while the agent can reach an owner token.** T004-3 therefore removes every owner token from the agent account. The ledger dispatchers move to a dedicated account (`arcade-dispatch`) whose tokens, binaries and processes `copilot` cannot read or modify. Until then the owner token on the VPS must not have `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables` write.
 - **R-REPO.** Changes to `main` and to the workflows need the owner. This is verified today:
   - the ruleset `main is protected` requires a pull request with code-owner review (`CODEOWNERS`: `* @krzysztofcal`), the required checks and no force-push or deletion, and has no bypass actors;
   - the `ws-production` branch policy (`main` only) stops a workflow edited on another branch from using the environment.
