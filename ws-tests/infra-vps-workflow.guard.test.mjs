@@ -170,7 +170,10 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(bootstrap, /gpasswd --delete arcade arcade-deploy/);
   assert.doesNotMatch(bootstrap, /usermod --append --groups (?:sudo|docker|arcade-deploy) arcade/);
   assert.doesNotMatch(bootstrap, /arcade ALL=/);
-  assert.match(bootstrap, /install -d -o root -g arcade-deploy -m 2775 \/opt\/ws-server \/opt\/ws-server\/releases/);
+  // #1159 T004: the Production release tree belongs to arcade-release; copilot is never in its group.
+  assert.match(bootstrap, /install -d -o root -g arcade-release -m 2775 \/opt\/ws-server \/opt\/ws-server\/releases/);
+  assert.match(bootstrap, /gpasswd --delete copilot arcade-release/);
+  assert.doesNotMatch(bootstrap, /usermod --append --groups [^\n]*arcade-release/);
   assert.match(bootstrap, /install -d -o arcade -g arcade -m 0755 \/opt\/arcade-ws-preview/);
   assert.match(bootstrap, /\/opt\/arcade-ws-preview\/(?:ws-server|shared|netlify|node_modules)/);
   assert.match(bootstrap, /-g arcade-deploy -m 2775/);
@@ -183,7 +186,8 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(bootstrap, /arcade-deploy\.sudoers/);
   assert.match(sudoers, /copilot ALL=\(root\) NOPASSWD:/);
   assert.doesNotMatch(sudoers, /systemctl restart ws-server\.service/);
-  assert.match(sudoers, /\/usr\/local\/sbin\/arcade-ws-restart-gate check, \\\n\s+\/usr\/local\/sbin\/arcade-ws-restart-gate restart\n/);
+  assert.match(sudoers, /arcade-release ALL=\(root\) NOPASSWD: ARCADE_RELEASE_COMMANDS/);
+  assert.match(sudoers, /\/usr\/local\/sbin\/arcade-ws-restart-gate restart, \\\n/);
   assert.match(sudoers, /restart ws-server-preview\.service/);
   assert.match(sudoers, /reload caddy\.service/);
   assert.match(sudoers, /arcade-ws-preview-env-preflight ""/);

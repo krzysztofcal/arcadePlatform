@@ -113,7 +113,7 @@ find() {
 }
 stat() {
   if [[ "$1" == '-c' && "$2" == '%U' && "$4" == "$FIXTURE_TMP_ROOT/"* ]]; then
-    printf 'copilot\\n'
+    printf 'arcade-release\\n'
   else
     command stat "$@"
   fi
@@ -134,7 +134,7 @@ test('uses only fixed maintenance paths and a guarded dry-run CLI without proces
   assert.match(source, /^readonly CURRENT_RELEASE_LINK='\/opt\/ws-server\/current'$/m);
   assert.match(source, /^readonly TMP_ROOT='\/tmp'$/m);
   assert.match(source, /^readonly LOCK_FILE='\/opt\/ws-server\/.deploy-maintenance\.lock'$/m);
-  assert.match(source, /^readonly DEPLOY_USER='copilot'$/m);
+  assert.match(source, /^readonly DEPLOY_USER='arcade-release'$/m);
   assert.match(source, /if \[\[ "\$\{BASH_SOURCE\[0\]\}" == "\$0" \]\]; then\n  main "\$@"\nfi/);
   assert.match(source, /\[\[ "\$1" != --dry-run \]\]/);
   assert.match(source, /\[\[ "\$1" == --apply \]\]/);
@@ -259,7 +259,7 @@ test('removes only old allowlisted temporary directories', (t) => {
   const options = bashEnv(directory, `
 stat() {
   if [[ "$1" == '-c' && "$2" == '%U' && "$4" == "$TMP_FIXTURE_ROOT/"* ]]; then
-    printf 'copilot\\n'
+    printf 'arcade-release\\n'
   else
     command stat "$@"
   fi
@@ -289,7 +289,7 @@ stat() {
   if [[ "$1" == '-c' && "$2" == '%U' ]]; then
     case "$4" in
       "$LEGACY_TMP") printf 'arcade\\n' ;;
-      "$ELIGIBLE_TMP") printf 'copilot\\n' ;;
+      "$ELIGIBLE_TMP") printf 'arcade-release\\n' ;;
       *) return 99 ;;
     esac
   else

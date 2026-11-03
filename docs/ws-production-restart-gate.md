@@ -39,7 +39,7 @@ Both restart paths also require `humanSeatsOpen=0` (ACTIVE non-bot seats on OPEN
   Otherwise it prints `RESUME_BLOCKED <reason>` and the hold stays (C7).
 - `abort <runId>`: after a failure before the switch, removes this run's hold only while the marker still says `stage=prepared` and the prepared process (same MainPID) runs from the current link. Otherwise it prints `ABORT_BLOCKED <reason>` (for example `switch_started`) and the hold stays (C7).
 
-No hold without a marker is ever removed by these modes. `prepare`, `switching`, `resume` and `abort` are not granted to any account by this repository's sudoers yet; see `specs/1159-ci-cd-release-safety/t004/plan.md`.
+No hold without a marker is ever removed by these modes. `prepare`, `switching`, `resume` and `abort` (like `restart`) are granted only to `arcade-release`, which the `WS Server Deploy` job reaches after the owner approves the `ws-production` environment. `copilot` keeps only `check`. See `specs/1159-ci-cd-release-safety/t004/plan.md`.
 
 ## A. Gate installation (root)
 

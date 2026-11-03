@@ -72,17 +72,17 @@ No-argument and `--dry-run` invocations do not delete; only explicit
 
 On an existing host that predates the shared lock, the first Production deploy
 pre-stages `/opt/ws-server/.deploy-maintenance.lock` before artifact upload.
-This is a bounded, non-restarting operation performed by `copilot`: it creates
-only the regular lock when absent, verifies the writable Production paths, and
-normalizes the lock to the `arcade-deploy` group with mode `0660`. A failed
-pre-stage aborts before release or service mutation. Fresh-host bootstrap keeps
-the `root:arcade-deploy` lock ownership. The deploy waits up to 300 seconds
+This is a bounded, non-restarting operation performed by `arcade-release`: it
+creates only the regular lock when absent, verifies the writable Production
+paths, and normalizes the lock to the `arcade-release` group with mode `0660`.
+A failed pre-stage aborts before release or service mutation. Fresh-host
+bootstrap creates the lock as `arcade-release:arcade-release`. The deploy waits up to 300 seconds
 for the shared lock; maintenance remains non-blocking.
 
-The maintenance service runs as `copilot`: the `arcade-deploy` group is
-sufficient for release cleanup, and the automated `/tmp` path additionally
-requires the exact directory owner to be `copilot`. Existing legacy directories
-owned by `arcade` are deliberately not eligible for automation; after a fresh
+The maintenance service runs as `arcade-release` (#1159 T004): it owns the
+Production release tree, and the automated `/tmp` path additionally requires
+the exact directory owner to be `arcade-release`. Existing legacy directories
+owned by `arcade` or `copilot` are deliberately not eligible for automation; after a fresh
 owner-approved read-only inventory they may receive a separate one-time root
 cleanup. Maintenance does not restart Production, Preview, or Caddy.
 

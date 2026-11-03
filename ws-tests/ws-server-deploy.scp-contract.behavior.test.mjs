@@ -17,7 +17,7 @@ test("ws-server deploy scp contract maps workspace artifact to expected remote a
   assert.match(text, /source: \.artifacts\/ws-server\/ws-server-dist\.tgz/);
   assert.match(text, /target: \$\{\{ env\.WS_REMOTE_TMP_DIR \}\}/);
   assert.match(text, /WS_REMOTE_TMP_DIR: \$\{\{ env\.WS_REMOTE_TMP_DIR \}\}/);
-  assert.match(text, /envs: RELEASE_SHA,WS_REMOTE_TMP_DIR/);
+  assert.match(text, /envs: RELEASE_SHA,RELEASE_RUN_ID,WS_REMOTE_TMP_DIR/);
   assert.match(
     text,
     /if \[\[ ! "\$WS_REMOTE_TMP_DIR" =~ \^\/tmp\/arcadeplatform-ws-\[0-9\]\+-\[0-9\]\+\$ \]\]; then[\s\S]*invalid run-scoped production temp dir/

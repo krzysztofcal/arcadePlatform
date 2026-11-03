@@ -509,6 +509,8 @@ for (const character of productionJobIf) {
 assert.equal(productionJobIfParenthesisBalance, 0, "production-archive.if parentheses must balance");
 assert.match(productionJobIf, /inputs\.mode != 'automatic'/);
 assert.match(productionJobIf, /github\.actor == github\.repository_owner/);
+// #1159 T004: a re-run keeps github.actor, so the re-running actor must be the owner too.
+assert.match(productionJobIf, /github\.actor == github\.repository_owner && github\.triggering_actor == github\.repository_owner/);
 assert.match(productionWorkflow, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(productionWorkflow, /node scripts\/ops\/chips-ledger-production-automation\.mjs/);
 assert.match(productionWorkflow, /--policy "\$PRODUCTION_POLICY"/);

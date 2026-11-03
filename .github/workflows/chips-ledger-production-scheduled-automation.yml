@@ -62,7 +62,7 @@ permissions:
 
 jobs:
   production-archive:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && (inputs.mode != 'automatic' || vars.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED == '1') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && (inputs.mode != 'automatic' || vars.CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED == '1') }}
     runs-on: ubuntu-latest
     environment: production-ledger
     timeout-minutes: 60
