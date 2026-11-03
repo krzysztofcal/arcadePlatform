@@ -547,3 +547,29 @@ test("infra VPS recovery docs retain the mutation boundaries and runner contract
     assert.ok(inventory.includes(phrase), `inventory must include ${phrase}`);
   }
 });
+
+test("VPS SSH apply runs only for an owner main dispatch or an owner Caddy push, never a foreign re-run (#1159 T004-3)", () => {
+  const condition = workflowText().match(/\n  apply:\n    needs: validate\n    if: (.+)\n/)[1];
+  const evaluate = ({ event = "workflow_dispatch", ref = "refs/heads/main", actor = "krzysztofcal", triggeringActor = actor, caddy = "true" } = {}) => {
+    const js = condition
+      .replaceAll("needs.validate.outputs.caddy", JSON.stringify(caddy))
+      .replaceAll("github.event_name", JSON.stringify(event))
+      .replaceAll("github.ref", JSON.stringify(ref))
+      .replaceAll("github.triggering_actor", JSON.stringify(triggeringActor))
+      .replaceAll("github.actor", JSON.stringify(actor))
+      .replaceAll("github.repository_owner", JSON.stringify("krzysztofcal"))
+      .replaceAll("'", "\"")
+      .replaceAll(" == ", " === ")
+      .replaceAll(" != ", " !== ");
+    assert.match(js, /^[\s"a-z0-9_\-/[\].()|&=!]+$/i, js);
+    return Function(`return (${js});`)();
+  };
+  assert.equal(evaluate(), true, "owner main dispatch");
+  assert.equal(evaluate({ ref: "refs/heads/feature" }), false, "dispatch from another branch");
+  assert.equal(evaluate({ triggeringActor: "release-agent[bot]" }), false, "foreign re-run of an owner dispatch");
+  assert.equal(evaluate({ actor: "release-agent[bot]" }), false, "foreign dispatch");
+  assert.equal(evaluate({ event: "push" }), true, "owner Caddy push to main");
+  assert.equal(evaluate({ event: "push", caddy: "false" }), false, "push without Caddy change");
+  assert.equal(evaluate({ event: "push", triggeringActor: "release-agent[bot]" }), false, "foreign re-run of a Caddy push");
+  assert.equal(evaluate({ event: "pull_request" }), false, "pull requests never reach the VPS");
+});
