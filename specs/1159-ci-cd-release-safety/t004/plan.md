@@ -8,9 +8,13 @@ Reuse first: the existing restart gate, hold/drain, the `WS Server Deploy` job a
   - `ws-production` has the owner as required reviewer, prevent self-review, branch `main` only and no admin bypass.
   - Environment secrets are released only after approval, so the job's VPS access exists only in an approved run.
   - The actor check remains as a narrow allowlist: the owner or `vars.WS_RELEASE_AGENT`.
-- **A separate agent identity.**
-  - The VPS token used by the agent is replaced by one belonging to a dedicated GitHub account. That account has repository Write; its fine-grained token has Actions read/write, Contents read/write and Pull requests read/write, and no Administration, Environments, Secrets or Deployments write.
-  - Rejected: keeping the owner's token with self-review allowed. Whether that token can approve its own run would depend on its permissions, which the agent cannot prove.
+- **The agent dispatches through a GitHub App, not as a collaborator.**
+  - The App is installed on this repository only, with `Actions: write` and `Metadata: read`. Its installation tokens last 1 h and are minted on the VPS from the App private key.
+  - `github.actor` and `github.triggering_actor` are `<app-slug>[bot]`.
+  - The App cannot push code or workflows (no `Contents`), cannot approve deployments (no `Deployments`), and is not a reviewer.
+  - Rejected: a separate Write collaborator account. `Contents: write` lets it push a branch workflow that runs with repository secrets and with any environment not limited to `main`.
+  - Rejected: keeping the owner's token for dispatch with self-review allowed. Whether that token can approve its own run would depend on its permissions, which the agent cannot prove.
+  - The owner token stays on the VPS for code/PR work and the ledger dispatcher. It must not have `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables` write.
 - **A separate VPS account (`arcade-release`) for Production.**
   - The approved job reaches the VPS only through that account's key, held as an environment secret.
   - The agent account `copilot` loses Production write and restart rights.
@@ -21,10 +25,11 @@ Reuse first: the existing restart gate, hold/drain, the `WS Server Deploy` job a
   - The marker records the run id and the MainPID at prepare time. The run id ties the hold to one approved run; the MainPID proves whether a restart happened.
   - The WS runtime still reads only `new-hands`.
   - Rejected: putting the owner into the hold file content, because the runtime and `readHoldDrain()` require exactly `drain`.
-- **Resume depends on the workflow result.** `resume` runs only on `success()` and re-proves the exact release itself. `abort` covers only failures before any restart.
+- **Resume depends on the workflow result.** `resume` runs only on `success()` and re-proves the exact release itself. `abort` covers only failures before the switch.
+- **An explicit point of no return.** After a switch whose link was restored, the MainPID and the link look exactly as before the operation. So the workflow marks `stage=switching` through the gate before it touches the link, and from then on only the owner decides (C7).
 - **The hold silences bot tables.** `set_desired_state` stays an admin tool outside the release flow.
 
-## PR T004-1: gate presence check, run-owned `prepare`/`resume`/`abort` (inert)
+## PR T004-1: gate presence check, run-owned `prepare`/`switching`/`resume`/`abort` (inert)
 
 The PR does not change the workflow, sudoers or runtime. Installing it changes only `check`/`restart` (extra blockers). The CLI keeps `check`/`restart` without arguments.
 
@@ -35,8 +40,9 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
   - `hold` waits only for `loadedHandsInProgress`/`dbHandsInProgress` (with `invalidAmounts` ≤ running hands) and `TRANSIENT` (commands, writes, sweep).
   - `drain` waits only for `TRANSIENT`.
   - Anything else returns `stop`.
-- `readOperation(holdFile)` and `clearOperation(holdFile)`; the marker `release-op` is written atomically with `writeAtomic()`;
-- `prepare(opId, host)`, `resume(opId, sha, host)`, `resumeIssue({…})` and `abort(opId, host)`. The `HOST` defaults hold the systemd, `/proc`, link, metadata, healthz and clock access, overridable in tests;
+- `readOperation(holdFile)`, `writeOperation()` and `clearOperation(holdFile)`: the marker `release-op` (`op`, `pid`, `stage`) is written atomically;
+- `prepare(opId, host)`: re-checks MainPID on every poll; a change is STOP with the hold kept;
+- `markSwitching(opId, host)`, `resume(opId, sha, host)` (requires `stage=switching`), `resumeIssue({…})` and `abort(opId, host)` (requires `stage=prepared`). The `HOST` defaults hold the systemd, `/proc`, link, metadata, healthz and clock access, overridable in tests;
 - `main(mode, args)`: exact arity per mode, otherwise `unexpected_arguments`.
 
 **`docs/ws-production-restart-gate.md`:** the "Gate modes" section.
@@ -46,11 +52,12 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 - the fail-fast `prepareStep` matrix;
 - `prepare`:
   - own hold → `PREPARED`;
-  - rerun of the same run; another run refused; a changed process refused;
+  - rerun of the same run; another run refused; a changed process refused; a process change while waiting is STOP with the hold kept;
   - an operator hold (empty or `drain`) is never taken over or removed;
   - integrity stop, timeouts and gate error remove only the run's own hold;
 - `resume` refusals: not restarted, wrong release, link mismatch, metadata mismatch, healthz, service, presence, foreign run, bad arguments. Then success, and the interrupted rerun;
-- `abort` refusals: process changed, link changed. Then success, and `not_held`.
+- `markSwitching`: not drained, foreign run, process changed; then marked and idempotent; afterwards `prepare` refuses;
+- `abort` refusals: process changed, link changed, `switch_started` with an unchanged PID and link (a restored link). Then success, and `not_held`.
 
 **Exit:** CI green. The Production install is a separate root GO (`infra/vps/stage-ws-restart-gate.sh`, unchanged), followed by `check`.
 
@@ -61,6 +68,7 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 - `if:`: the existing conditions, with the actor checks replaced by `(github.actor == github.repository_owner || github.actor == vars.WS_RELEASE_AGENT) && (github.triggering_actor == github.repository_owner || github.triggering_actor == vars.WS_RELEASE_AGENT)`;
 - the three SSH steps use the environment secrets `WS_PRODUCTION_HOST`, `WS_PRODUCTION_USER` and `WS_PRODUCTION_SSH_KEY`. `infra-vps.yml` keeps the repository secrets for Caddy;
 - the remote account check `copilot` → `arcade-release`, and `DEPLOY_GROUP` → `arcade-release`;
+- in `Atomic release switch …`, after the existing gate `check` under the lock and before `ln -sfn`: `… switching "$GITHUB_RUN_ID"`. It must print `SWITCH_MARKED`, otherwise exit 1 before the link changes;
 - a new SSH step `id: prepare` after `Pre-stage …` and before `Atomic release switch …`: `sudo -n /usr/local/sbin/arcade-ws-restart-gate prepare "$GITHUB_RUN_ID"`, which must print `PREPARED`, otherwise exit 1;
 - `Resume new hands`, `if: success()`, placed after the WS smoke: `… resume "$GITHUB_RUN_ID" "$RELEASE_SHA"`. It must print `RESUMED`, otherwise the job fails with "hold kept; owner decision (C7)";
 - `Abort before restart`, `if: failure() && steps.prepare.outcome == 'success'`: `… abort "$GITHUB_RUN_ID"`. `ABORTED*` passes; `ABORT_BLOCKED` means the hold is kept (C7). The job stays failed either way;
@@ -68,7 +76,7 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 - the summary gets the gate lines, `readlink -f /opt/ws-server/current` and `MainPID`.
 
 **`infra/vps/arcade-deploy.sudoers`:**
-- `arcade-release`: Production env preflight `""`, gate `check`, `restart`, `prepare *`, `resume *`, `abort *`;
+- `arcade-release`: Production env preflight `""`, gate `check`, `restart`, `prepare *`, `switching *`, `resume *`, `abort *`;
 - `copilot`: Preview restart, Caddy reload, Preview env preflight `""`, gate `check`.
 
 **`infra/vps/bootstrap.sh`, `infra/vps/stage-ws-restart-gate.sh`:**
@@ -76,12 +84,15 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 - the post-install check runs `check` as both accounts.
 - No ownership change of `/opt/ws-server` is done here; it is a reviewed manual setup step.
 
+**Re-run hardening:** every workflow gated on `github.actor == <owner>` also checks `github.triggering_actor`. These are `chips-ledger-production-scheduled-automation.yml`, `chips-ledger-stage-scheduled-automation.yml`, `stage-bonus-campaigns.yml` and `stage-supabase-resource-health.yml`. A re-run by the App then cannot reuse the owner's privileges.
+
 **`agents.md`:** the WS Production bullet says: agent dispatch, owner approval in `ws-production`, no manual root steps for a normal release.
 
 **Tests:**
 - `ws-tests/ws-server-deploy.workflow.guard.test.mjs`:
   - environment, the actor allowlist, environment-only secret names;
-  - `prepare` before the switch, `resume` only under `success()`, `abort` only under `failure()` after `prepare`;
+  - `prepare` before the switch, `switching` after the gate check and before `ln -sfn`, `resume` only under `success()`, `abort` only under `failure()` after `prepare`;
+  - every owner-gated workflow also checks `github.triggering_actor`;
   - no `always()` on them; no `copilot` in the Production remote script;
 - `ws-tests/ws-server-deploy.sudo-preflight.guard.test.mjs` and `ws-tests/infra-vps-workflow.guard.test.mjs`: the exact sudoers lines for both accounts.
 
@@ -89,14 +100,22 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 
 ## One-time setup (separate GOs, after T004-2 is merged)
 
-1. **GitHub secrets review (owner, before anything else):**
-   - list the repository secrets and every environment, with its secrets, reviewers and branch policy;
-   - move every Production-capable secret into an environment restricted to `main`, with owner review where it can change Production;
-   - remove what is unused (R-SECRETS).
+1. **Secrets and environments hardening (owner, before the App is installed; values are never printed):**
+   1. Inventory names only (Settings → Secrets and variables → Actions; Environments). Map each name to the workflows that use it (`grep -rn "secrets\." .github/workflows`) and classify it Production / Stage / test.
+   2. For every environment holding Production secrets:
+      - set deployment branches to `main` only;
+      - add owner review unless it serves an owner-only automation whose job checks `github.actor` and `github.triggering_actor`;
+      - disallow admin bypass.
+      - An environment no workflow references is emptied and deleted.
+   3. A repository-level secret that gives Production access moves into such an environment; the workflow job gets `environment:`. Stage and test secrets stay.
+   4. Verify by reading settings only: each Production environment shows the branch policy (and a reviewer where required); no Production name is left at repository level.
 2. **GitHub (owner):**
-   - create the agent account, add it as a Write collaborator, and set variable `WS_RELEASE_AGENT`;
+   - create the GitHub App (repository-only install; `Actions: write`, `Metadata: read`; no webhook);
+   - put its private key on the VPS as `~copilot/.config/arcade-release-app.pem` (0600);
+   - set variable `WS_RELEASE_AGENT=<app-slug>[bot]`;
    - create environment `ws-production` with the R-APPROVE settings;
-   - add the secrets `WS_PRODUCTION_HOST`, `WS_PRODUCTION_USER=arcade-release` and `WS_PRODUCTION_SSH_KEY` (a new ed25519 key, private part only in the environment).
+   - add the secrets `WS_PRODUCTION_HOST`, `WS_PRODUCTION_USER=arcade-release` and `WS_PRODUCTION_SSH_KEY` (a new ed25519 key, private part only in the environment);
+   - check that the owner token on the VPS has no `Deployments`, `Environments`, `Administration`, `Secrets` or `Variables` write.
 3. **VPS ownership migration of `/opt/ws-server` (root, one shell, nothing else running):**
    1. **Preconditions:**
       - no queued or in-progress `WS Server Deploy` run;
@@ -122,7 +141,7 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
    - stage T004-1 and T004-2 with `stage-ws-restart-gate.sh`;
    - add the public key to `~arcade-release/.ssh/authorized_keys`;
    - `visudo -c`; gate `check` as `copilot` and as `arcade-release`.
-5. **Agent token:** replace the VPS `gh` token with the agent account's token and revoke the owner token there.
+5. **Agent dispatch:** the agent mints an installation token from the App key for each dispatch (`POST /app/installations/<id>/access_tokens`, scoped to this repository) and uses it only for `workflow_dispatch` and run reads.
 6. **First run:**
    1. the agent dispatches the current main SHA;
    2. the owner approves;
@@ -137,3 +156,5 @@ The PR does not change the workflow, sudoers or runtime. Installing it changes o
 - **R5.** The owner's `admin` role can still change environment settings. This is intended for break-glass; it is visible in the audit log.
 - **R6.** A stray pot on an idle table can be hidden for the duration of a running hand (allowance of one pot per running hand). Once no hand runs it stops `prepare`, and the drain phase allows no pot.
 - **R7.** `copilot`'s existing SSH keys and the repository keys stay valid for Preview and Caddy. They give no Production rights once T004-2 and setup step 3 are done.
+- **R8.** `Actions: write` lets the App dispatch other ungated workflows, cancel runs and delete run logs. These are Stage, Preview, tests and the Caddy reload from `main`. The agent can already do the same today. Environment deployment history keeps the approvals.
+- **R9.** A process change between `switching` and the gated restart, or a failure in that window, always ends in C7 (hold kept). This is intended.
