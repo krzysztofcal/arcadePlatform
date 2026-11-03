@@ -4537,3 +4537,71 @@ const escrowGateSql={unsafe:async query=>{
 },begin:async()=>{throw new Error("unexpected escrow write");}};
 await assert.rejects(runProductionAutomation({policy:"escrow",mode:"automatic",env:terminalAutomaticEnv,
  deps:{sql:escrowGateSql,read:async()=>escrowActivatedState,sqlRead:async()=>escrowActivatedState}}),/fresh escrow automatic policy gate rejected/);
+// #1159 incident: an automatic bot-only run lost its lock session after the
+// archive commit, leaving no proof. Only the complete absence of proof,
+// receipts and destructive GO may resume through PREPARE before cleanup.
+// Batch 440 holds 6 transactions / 12 entries: above the manual cap of 2.
+const botResumeEvidence = { ...productionResumeEvidence,
+  transactionIds: Array.from({ length: 6 }, (_, index) => `00000000-0000-4000-8000-00000000020${index}`),
+  entryIds: Array.from({ length: 12 }, (_, index) => 2001 + index), transactionCount: 6, entryCount: 12 };
+function makeBotMissingProofHarness({ row: overrides = {}, badBytes = false, loseLockOnDownload = false, recoveryExisted = false } = {}) {
+  const row = { ...makeProductionResumeRow(), source_policy_id: "production-ledger-bot-only-retention-7d-v1", batch_id: "440",
+    transaction_count: 6, entry_count: 12,
+    archive_proof_verified_at: null, archived_transaction_ids_sha256: null, archived_entry_ids_sha256: null, ...overrides };
+  const harness = makeProductionResumeHarness(row);
+  const calls = { proof: 0, dry: 0, persist: 0, execute: 0 };
+  let lockLost = false;
+  const unsafe = harness.deps.sql.unsafe;
+  harness.deps.sql.unsafe = async (query, values) => (lockLost && query.includes("pg_backend_pid") && !query.includes("pg_try_advisory_lock")
+    ? [{ backend_pid: "reconnected-production-session" }] : unsafe(query, values));
+  harness.deps.inspectDurableRecoveryState = async () => ({ state: "both_missing" });
+  harness.deps.downloadPrivateArchiveObject = async () => {
+    if (loseLockOnDownload) lockLost = true;
+    return { bytes: badBytes ? Buffer.from("wrong archive") : productionResumeArchiveBytes };
+  };
+  harness.deps.persistDurableRecovery = async () => {
+    calls.persist += 1;
+    return { state: "complete", archive: { sha256: row.compressed_sha256 }, recoveryArchive: { sha256: row.compressed_sha256, uploaded: !recoveryExisted },
+      recoveryManifest: { sha256: "4".repeat(64), uploaded: !recoveryExisted } };
+  };
+  harness.deps.pruneArchive = async ({ argv }) => {
+    if (argv.includes("--register-proof")) {
+      calls.proof += 1;
+      Object.assign(row, { archive_proof_verified_at: "2026-11-03T13:09:46Z", archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+        archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256 });
+      return { state: "proof_registered", evidence: botResumeEvidence };
+    }
+    if (argv.includes("--execute")) { calls.execute += 1; return { state: "cleaned", evidence: botResumeEvidence }; }
+    calls.dry += 1;
+    return { state: "ready", read_only: true, evidence: botResumeEvidence };
+  };
+  const run = () => runProductionAutomation({ policy: "bot-only-7d", mode: "automatic", env: terminalAutomaticEnv,
+    deps: { ...harness.deps, read: async () => botActivatedState, sqlRead: async () => botActivatedState } });
+  return { row, calls, run, harness };
+}
+const botMissingProof = makeBotMissingProofHarness();
+const botMissingProofResult = await botMissingProof.run();
+assert.equal(botMissingProofResult.state, "cleaned");
+assert.equal(botMissingProofResult.batchId, "440");
+assert.equal(botMissingProofResult.transactions, 6);
+assert.equal(botMissingProofResult.entries, 12);
+assert.equal(botMissingProofResult.maxTransactions, 5000);
+assert.equal(botMissingProofResult.storageWrites, 2, "newly created recovery objects are reported");
+assert.equal((await makeBotMissingProofHarness({ recoveryExisted: true }).run()).storageWrites, 0, "existing recovery objects are not writes");
+assert.deepEqual(botMissingProof.calls, { proof: 1, dry: 2, persist: 1, execute: 1 });
+assert.equal(botMissingProof.harness.calls.export, 0);
+assert.equal(botMissingProof.harness.calls.store, 0);
+const manualSixPrepare = makeProductionPrepareResumeHarness({ row: { transaction_count: 6, entry_count: 12 } });
+await assert.rejects(prepareProductionResume(manualSixPrepare), /PREPARE batch identity, archive or cap differs/);
+assert.deepEqual(manualSixPrepare.prepareCalls, { proof: 0, dry: 0, persist: 0 }, "manual PREPARE keeps the cap of 2");
+const botPartialProof = makeBotMissingProofHarness({ row: { archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256 } });
+await assert.rejects(botPartialProof.run(), /missing its immutable archive proof/);
+assert.deepEqual(botPartialProof.calls, { proof: 0, dry: 0, persist: 0, execute: 0 });
+const botBadArchive = makeBotMissingProofHarness({ badBytes: true });
+await assert.rejects(botBadArchive.run(), /archive SHA differs/);
+assert.deepEqual(botBadArchive.calls, { proof: 0, dry: 0, persist: 0, execute: 0 });
+const botLostLock = makeBotMissingProofHarness({ loseLockOnDownload: true });
+await assert.rejects(botLostLock.run(), /advisory lock session changed/);
+assert.deepEqual(botLostLock.calls, { proof: 0, dry: 0, persist: 0, execute: 0 });
+assert.equal((await fs.promises.readFile(new URL("../../scripts/ops/chips-ledger-production-automation.mjs", import.meta.url), "utf8"))
+  .match(/idle_timeout: 0, max_lifetime: 0 \}\);/g)?.length, 2, "Production advisory-lock sessions must never be recycled");
