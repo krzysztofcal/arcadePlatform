@@ -24,19 +24,22 @@ Both restart paths also require `humanSeatsOpen=0` (ACTIVE non-bot seats on OPEN
 
 - `check` / `restart`: unchanged decision lines, with the two extra blockers.
 - `prepare <runId>`: makes the running process restart-ready for one release run.
-  - It refuses any hold it does not own: an operator hold (`hold_owned_by_operator`), or another run's hold. It writes a marker `/etc/arcadeplatform/ws-hold/release-op` (`op=<runId> pid=<MainPID>`), then the hold.
+  - It refuses any hold it does not own: an operator hold (`hold_owned_by_operator`), or another run's hold. It writes a marker `/etc/arcadeplatform/ws-hold/release-op` (`op=<runId> pid=<MainPID> stage=prepared`), then the hold.
   - It waits up to 10 min for running hands (one pot per running hand) and transient work, writes `drain`, and waits up to 2 min for `RESTART_SAFE`. Then it prints `PREPARED`.
   - Any presence, integrity or unverifiable reason stops at once: `balanceMismatches`, `invalidAmounts` beyond the running hands, `unresolvedRequests`, `dbVersionMismatches`, missing state or escrow, errors. On a stop or a timeout it removes only its own hold and marker. It never restarts.
-  - A rerun of the same run continues only while the prepared process is still running.
+  - If the WS process changes while it waits, it stops with `prepare_<phase>_process_changed,hold_kept`, and the hold and marker stay for the owner.
+  - A rerun of the same run continues only while the stage is `prepared` and the prepared process is still running.
+- `switching <runId>`: the point of no return. The workflow calls it under the deploy lock right before the link changes. It needs this run's marker, the unchanged prepared process and the hold set to `drain`, and it sets `stage=switching`. From then on `prepare` and `abort` refuse, so a switch whose link was later restored is never mistaken for "nothing happened".
 - `resume <runId> <sha>`: removes this run's hold only when all of these hold:
+  - the marker says `stage=switching`;
   - WS was restarted (MainPID differs from the marker);
   - the running process and `/opt/ws-server/current` are both `/opt/ws-server/releases/<sha>/ws-server`, and its `release-metadata.json` says `<sha>`;
   - local `/healthz` is `ok`;
   - the gate is `RESTART_SAFE`.
   Otherwise it prints `RESUME_BLOCKED <reason>` and the hold stays (C7).
-- `abort <runId>`: after a failure before any restart, removes this run's hold only while the prepared process (same MainPID) still runs from the current link. Otherwise it prints `ABORT_BLOCKED <reason>` and the hold stays (C7).
+- `abort <runId>`: after a failure before the switch, removes this run's hold only while the marker still says `stage=prepared` and the prepared process (same MainPID) runs from the current link. Otherwise it prints `ABORT_BLOCKED <reason>` (for example `switch_started`) and the hold stays (C7).
 
-No hold without a marker is ever removed by these modes. `prepare`, `resume` and `abort` are not granted to any account by this repository's sudoers yet; see `specs/1159-ci-cd-release-safety/t004/plan.md`.
+No hold without a marker is ever removed by these modes. `prepare`, `switching`, `resume` and `abort` are not granted to any account by this repository's sudoers yet; see `specs/1159-ci-cd-release-safety/t004/plan.md`.
 
 ## A. Gate installation (root)
 

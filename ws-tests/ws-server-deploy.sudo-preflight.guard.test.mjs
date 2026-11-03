@@ -315,12 +315,29 @@ test("release runs own their hold: prepare refuses foreign holds and fails fast,
   // Own hold: hold → drain → PREPARED, marker bound to the run and the prepared process.
   reset();
   assert.equal((await prepare("7", host(["drain_inactive,loadedHandsInProgress=1,dbHandsInProgress=1,invalidAmounts=1", "drain_inactive", "stateWritesInFlight=1", "RESTART_SAFE"]))).line, "PREPARED");
-  assert.deepEqual([read(holdFile), readOperation(holdFile)], ["drain\n", { op: "7", pid: "100" }]);
+  assert.deepEqual([read(holdFile), readOperation(holdFile)], ["drain\n", { op: "7", pid: "100", stage: "prepared" }]);
   // A rerun of the same run continues while the prepared process still runs; another run or a changed process is refused untouched.
   assert.equal((await prepare("7", host(["RESTART_SAFE"]))).line, "PREPARED");
   assert.equal((await prepare("8", host(["RESTART_SAFE"]))).line, "RESTART_BLOCKED hold_owned_by_other_operation");
   assert.equal((await prepare("7", host(["RESTART_SAFE"], { mainPid: () => "101" }))).line, "RESTART_BLOCKED operation_process_changed");
-  assert.deepEqual([read(holdFile), read(marker)], ["drain\n", "op=7 pid=100\n"]);
+  assert.deepEqual([read(holdFile), read(marker)], ["drain\n", "op=7 pid=100 stage=prepared\n"]);
+  // A process change while waiting is STOP with the hold and marker kept for the owner.
+  reset();
+  let pids = ["100", "100", "100", "101"];
+  const changed = await prepare("7", host(["drain_inactive,loadedHandsInProgress=1"], { mainPid: () => (pids.length > 1 ? pids.shift() : pids[0]) }));
+  assert.equal(changed.line, "RESTART_BLOCKED prepare_hold_process_changed,hold_kept");
+  assert.deepEqual([read(holdFile), read(marker)], ["", "op=7 pid=100 stage=prepared\n"]);
+  // The switch mark needs this run's drained hold and the prepared process; after it, prepare and abort refuse.
+  const { markSwitching } = await import("../infra/vps/ws-restart-gate.mjs");
+  assert.equal((await markSwitching("7", host(["RESTART_SAFE"]))).line, "SWITCH_BLOCKED hold_file_not_drain");
+  reset("drain\n", "op=7 pid=100 stage=prepared\n");
+  assert.equal((await markSwitching("8", host(["RESTART_SAFE"]))).line, "SWITCH_BLOCKED not_owned");
+  assert.equal((await markSwitching("7", host(["RESTART_SAFE"], { mainPid: () => "101" }))).line, "SWITCH_BLOCKED process_changed");
+  assert.equal((await markSwitching("7", host(["RESTART_SAFE"]))).line, "SWITCH_MARKED");
+  assert.equal(read(marker), "op=7 pid=100 stage=switching\n");
+  assert.equal((await markSwitching("7", host(["RESTART_SAFE"]))).line, "SWITCH_MARKED");
+  assert.equal((await prepare("7", host(["RESTART_SAFE"]))).line, "RESTART_BLOCKED operation_switch_started");
+  assert.equal(read(holdFile), "drain\n");
 
   // An operator hold (any content, no marker) is never taken over or removed.
   for (const content of ["", "drain\n"]) {
@@ -362,31 +379,39 @@ test("release runs own their hold: prepare refuses foreign holds and fails fast,
     [{ healthz: async () => "" }, "healthz"],
     [{ serviceState: () => "failed" }, "service_failed"]
   ]) {
-    reset("drain\n", "op=7 pid=100\n");
+    reset("drain\n", "op=7 pid=100 stage=switching\n");
     assert.equal((await resume("7", sha, host(["RESTART_SAFE"], { ...restarted, ...extra }))).line, `RESUME_BLOCKED ${reason}`);
     assert.equal(read(holdFile), "drain\n", reason);
   }
   assert.equal((await resume("7", sha, host(["humanSeatsOpen=1"], restarted))).line, "RESUME_BLOCKED humanSeatsOpen=1");
   assert.equal((await resume("8", sha, host(["RESTART_SAFE"], restarted))).line, "RESUME_BLOCKED not_owned");
+  reset("drain\n", "op=7 pid=100 stage=prepared\n");
+  assert.equal((await resume("7", sha, host(["RESTART_SAFE"], restarted))).line, "RESUME_BLOCKED switch_not_marked");
+  reset("drain\n", "op=7 pid=100 stage=switching\n");
   assert.equal((await resume("7", "short", host(["RESTART_SAFE"], restarted))).line, "RESUME_BLOCKED unexpected_arguments");
   assert.equal((await resume("7", sha, host(["RESTART_SAFE"], restarted))).line, "RESUMED");
   assert.deepEqual([read(holdFile), read(marker)], [null, null]);
   // Interrupted after the hold was removed: the rerun only clears its own marker.
-  reset(null, "op=7 pid=100\n");
+  reset(null, "op=7 pid=100 stage=switching\n");
   assert.equal((await resume("7", sha, host(["RESTART_SAFE"], restarted))).line, "RESUMED");
   assert.equal(read(marker), null);
 
-  // Abort only before any restart, while the prepared process still runs from the current link.
+  // Abort only before the switch was marked, while the prepared process still runs from the current link.
+  // After switch → link restored, PID and link look unchanged, but the mark keeps the hold (C7).
   const unchanged = { serviceState: () => "active", mainPid: () => "100", runningDir: () => "/r/old/ws-server", currentDir: () => "/r/old/ws-server" };
   for (const [extra, line] of [
     [{ mainPid: () => "200" }, "ABORT_BLOCKED process_changed"],
     [{ serviceState: () => "activating" }, "ABORT_BLOCKED process_changed"],
     [{ currentDir: () => releaseDir }, "ABORT_BLOCKED release_link_changed"]
   ]) {
-    reset("drain\n", "op=7 pid=100\n");
+    reset("drain\n", "op=7 pid=100 stage=prepared\n");
     assert.equal((await abort("7", host(["RESTART_SAFE"], { ...unchanged, ...extra }))).line, line);
     assert.equal(read(holdFile), "drain\n", line);
   }
+  reset("drain\n", "op=7 pid=100 stage=switching\n");
+  assert.equal((await abort("7", host(["RESTART_SAFE"], unchanged))).line, "ABORT_BLOCKED switch_started");
+  assert.equal(read(holdFile), "drain\n");
+  reset("drain\n", "op=7 pid=100 stage=prepared\n");
   assert.equal((await abort("7", host(["RESTART_SAFE"], unchanged))).line, "ABORTED");
   assert.deepEqual([read(holdFile), read(marker)], [null, null]);
   assert.equal((await abort("7", host(["RESTART_SAFE"], unchanged))).line, "ABORTED not_held");

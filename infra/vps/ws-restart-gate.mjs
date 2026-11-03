@@ -4,8 +4,9 @@
 // "restart" re-runs the same gate and only then restarts ws-server.service.
 // Release runs own their hold through a marker: "prepare <runId>" refuses any hold it does not own, holds new
 // hands, waits for running hands, drains and waits for RESTART_SAFE, and removes its own hold on any other
-// outcome. "resume <runId> <sha>" lifts it only after a restart into exactly that release; "abort <runId>" only
-// while the prepared process still runs unchanged. Only counts and flags are printed; the internal token and
+// outcome. "switching <runId>" marks the point of no return before the link changes. "resume <runId> <sha>" lifts
+// the hold only after a marked switch and a restart into exactly that release; "abort <runId>" only before the
+// switch was marked, while the prepared process still runs unchanged. Only counts and flags are printed; the internal token and
 // the database URL never leave this process.
 import fs from "node:fs";
 import path from "node:path";
@@ -292,11 +293,16 @@ function markerFile(holdFile) {
   return path.join(path.dirname(holdFile), "release-op");
 }
 
+// Stage "prepared" until the workflow marks the point of no return with "switching", before it touches the link.
 export function readOperation(holdFile) {
   const content = readHoldContent(markerFile(holdFile));
   if (content === null) return null;
-  const match = content.match(/^op=([1-9][0-9]{0,19}) pid=([1-9][0-9]*)\n?$/);
-  return match ? { op: match[1], pid: match[2] } : { op: null, pid: null };
+  const match = content.match(/^op=([1-9][0-9]{0,19}) pid=([1-9][0-9]*) stage=(prepared|switching)\n?$/);
+  return match ? { op: match[1], pid: match[2], stage: match[3] } : { op: null, pid: null, stage: null };
+}
+
+function writeOperation(holdFile, { op, pid, stage }) {
+  writeAtomic(markerFile(holdFile), `op=${op} pid=${pid} stage=${stage}\n`);
 }
 
 function clearOperation(holdFile) {
@@ -356,17 +362,20 @@ export async function prepare(opId, overrides = {}) {
   const pid = host.mainPid();
   if (operation) {
     if (operation.op !== opId) return blocked("hold_owned_by_other_operation");
+    if (operation.stage !== "prepared") return blocked("operation_switch_started");
     if (operation.pid !== pid) return blocked("operation_process_changed");
   } else {
     if (readHoldContent(host.holdFile) !== null) return blocked("hold_owned_by_operator");
     if (!pid) return blocked("service_not_running");
-    writeAtomic(markerFile(host.holdFile), `op=${opId} pid=${pid}\n`);
+    writeOperation(host.holdFile, { op: opId, pid, stage: "prepared" });
   }
   if (readHoldContent(host.holdFile) === null) writeAtomic(host.holdFile, "");
   let phase = /^drain\n?$/.test(readHoldContent(host.holdFile)) ? "drain" : "hold";
   let deadline = host.nowMs() + (phase === "hold" ? host.holdMs : host.drainMs);
   for (;;) {
     const result = await host.gate().catch(() => blocked("gate_error"));
+    // A process that changed while waiting was not restarted by this run: STOP and keep the hold for the owner.
+    if (host.mainPid() !== pid) return blocked([`prepare_${phase}_process_changed`, "hold_kept"]);
     const step = prepareStep(phase, result);
     if (step === "ready") return { safe: true, line: "PREPARED" };
     if (step === "drain") {
@@ -403,6 +412,7 @@ export async function resume(opId, sha, overrides = {}) {
   const held = readHoldContent(host.holdFile) !== null;
   if (!operation) return held ? { safe: false, line: "RESUME_BLOCKED not_owned" } : { safe: true, line: "RESUMED not_held" };
   if (operation.op !== opId) return { safe: false, line: "RESUME_BLOCKED not_owned" };
+  if (operation.stage !== "switching") return { safe: false, line: "RESUME_BLOCKED switch_not_marked" };
   if (!held) {
     clearOperation(host.holdFile);
     return { safe: true, line: "RESUMED" };
@@ -426,8 +436,8 @@ export async function resume(opId, sha, overrides = {}) {
   return { safe: true, line: "RESUMED" };
 }
 
-// After a failure before any restart: removes this run's hold only while the prepared process still runs
-// from the current link. A changed process or link keeps the hold for the owner (C7).
+// After a failure before the switch: removes this run's hold only while the marker is still "prepared" and the
+// prepared process runs from the current link. Once "switching" was marked, every outcome is C7 for the owner.
 export async function abort(opId, overrides = {}) {
   const host = { ...HOST, ...overrides };
   if (!OP_ID.test(String(opId))) return { safe: false, line: "ABORT_BLOCKED unexpected_arguments" };
@@ -437,6 +447,7 @@ export async function abort(opId, overrides = {}) {
   const held = readHoldContent(host.holdFile) !== null;
   if (!operation) return held ? { safe: false, line: "ABORT_BLOCKED not_owned" } : { safe: true, line: "ABORTED not_held" };
   if (operation.op !== opId) return { safe: false, line: "ABORT_BLOCKED not_owned" };
+  if (operation.stage !== "prepared") return { safe: false, line: "ABORT_BLOCKED switch_started" };
   const pid = host.mainPid();
   if (host.serviceState() !== "active" || pid !== operation.pid) return { safe: false, line: "ABORT_BLOCKED process_changed" };
   if (host.runningDir(pid) !== host.currentDir()) return { safe: false, line: "ABORT_BLOCKED release_link_changed" };
@@ -444,9 +455,26 @@ export async function abort(opId, overrides = {}) {
   return { safe: true, line: "ABORTED" };
 }
 
+// Point of no return, called under the deploy lock right before the link changes. It needs this run's prepared,
+// drained hold and the unchanged prepared process; afterwards abort always refuses.
+export async function markSwitching(opId, overrides = {}) {
+  const host = { ...HOST, ...overrides };
+  if (!OP_ID.test(String(opId))) return { safe: false, line: "SWITCH_BLOCKED unexpected_arguments" };
+  const issue = pathIssue(host);
+  if (issue) return { safe: false, line: `SWITCH_BLOCKED hold_path_${issue}` };
+  const operation = readOperation(host.holdFile);
+  if (!operation || operation.op !== opId) return { safe: false, line: "SWITCH_BLOCKED not_owned" };
+  if (operation.stage === "switching") return { safe: true, line: "SWITCH_MARKED" };
+  if (host.mainPid() !== operation.pid) return { safe: false, line: "SWITCH_BLOCKED process_changed" };
+  if (!readHoldDrain(host.holdFile, host.holdPath)) return { safe: false, line: "SWITCH_BLOCKED hold_file_not_drain" };
+  writeOperation(host.holdFile, { ...operation, stage: "switching" });
+  return { safe: true, line: "SWITCH_MARKED" };
+}
+
 async function main(mode, args) {
   if (mode === "prepare" && args.length === 1) return prepare(args[0]);
   if (mode === "abort" && args.length === 1) return abort(args[0]);
+  if (mode === "switching" && args.length === 1) return markSwitching(args[0]);
   if (mode === "resume" && args.length === 2) return resume(args[0], args[1]);
   if ((mode !== "check" && mode !== "restart") || args.length !== 0) return blocked("unexpected_arguments");
   const gate = await runGate();
