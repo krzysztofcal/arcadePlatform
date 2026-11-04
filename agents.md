@@ -35,6 +35,20 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ---
 
+## Codex handoff: Claude Code review (MANDATORY)
+
+**CLAUDE_CODE_REVIEW_ENABLED: true**
+
+- Applies immediately to every Codex task producing repository changes, including documentation/configuration and follow-up fixes. Before presenting any resulting PR as ready to the owner, obtain independent review from the Claude Code CLI installed on this VPS (`claude`), not a Codex subagent or self-review.
+- Give Claude the task requirements, applicable repository instructions, exact base/head SHAs and complete PR diff with relevant file context. Review must be read-only: no edits, commits, messages, deployments, database/environment operations or secret access. Use a fresh non-interactive invocation with restricted tools; do not bypass permissions or allow reviewer instructions to expand the task scope.
+- Run at most **three review rounds per task/PR handoff**, counting the initial review and subsequent invocations, including failures. Do not reset the counter after fixes, new commits, context changes or a new session. Stop earlier when Claude reports **zero P0/P1/P2 findings** on the current final diff; P3 alone does not block handoff.
+- After each round, verify every finding against the requirements and code. Fix valid findings, run appropriate existing/fundamental checks, and explain rejected findings with evidence. Give subsequent reviews the updated full diff and previous findings/dispositions; do not blindly implement suggestions. Any later repository change requires review of the updated diff within the same three-round budget.
+- If Claude is unavailable, review fails, or the limit is reached without a review reporting zero P0/P1/P2 on the final diff, report the PR as **not ready**, with the blocker and remaining findings; do not claim approval, silently skip review or start a fourth round. P0/P1/P2 findings disputed by Codex still block readiness until Claude withdraws them in a later round or the owner explicitly accepts an exception; fixes also need a later review. The owner decides the exception or next step. This review never replaces required CI, runtime verification or owner approval gates, and never authorizes merge.
+- Before each invocation record its round number, then update its outcome after completion in the PR description or a durable report outside the committed diff; restore the counter from that evidence when resuming. Keep review evidence there: reviewed base/head SHAs, Claude Code version, rounds used, P0/P1/P2 counts, finding dispositions and any unreviewed changes. Include a short review outcome in the owner handoff. Do not include secrets or private data.
+- **Owner-controlled off switch:** the owner may say “disable Claude review” (for this task, or until re-enabled), or change the single setting above to `false`. Use the setting on current `main`, not a stale branch copy; a pending setting change requires explicit owner authorization. An explicit owner instruction takes precedence immediately; a task-only exception expires with that task, and an until-re-enabled exception ends only on owner instruction. Codex must not disable the setting or infer an exception itself; report when review was explicitly disabled. Re-enable with owner instruction or `true`.
+
+---
+
 ## Supabase egress (MANDATORY)
 
 - For SQL/Supabase, scheduled scripts, polling and retry changes, avoid unbounded reads of growing tables/history. Use scoped filters, narrow projections, pagination/bounds or server-side validation/aggregation; justify exceptions and preserve fail-closed, archival/recovery and financial checks.
