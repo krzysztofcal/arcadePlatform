@@ -24,13 +24,15 @@ export function parseBuildInfo(text) {
 
 // GitHub side: the most recently started WS `deploy` job on main (any attempt) must have succeeded.
 // Any unfinished run or deploy job (queued, waiting, running, not yet started) may still change Production: no evidence.
-export function githubWsRelease(runs) {
+// latestWsDeploy also names the run of that deploy job, so one run (not just its SHA) can be identified.
+export function latestWsDeploy(runs) {
   if (runs.some(r => r.status !== 'completed')) return null;
-  const deploys = runs.flatMap(r => (r.jobs || []).filter(j => j.name === 'deploy' && j.conclusion !== 'skipped').map(j => ({ ...j, sha: r.head_sha })));
+  const deploys = runs.flatMap(r => (r.jobs || []).filter(j => j.name === 'deploy' && j.conclusion !== 'skipped').map(j => ({ ...j, sha: r.head_sha, runId: r.id })));
   if (deploys.some(j => j.status !== 'completed')) return null;
   const last = deploys.filter(j => j.started_at).sort((a, b) => b.started_at.localeCompare(a.started_at))[0];
-  return last?.conclusion === 'success' && SHA.test(last.sha) ? last.sha : null;
+  return last?.conclusion === 'success' && SHA.test(last.sha) ? { sha: last.sha, runId: last.runId } : null;
 }
+export const githubWsRelease = (runs) => latestWsDeploy(runs)?.sha ?? null;
 
 // VPS side: `current` release dir, its metadata and a running service started after that release was installed.
 export function vpsWsRelease(output) {
