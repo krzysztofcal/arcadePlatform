@@ -35,6 +35,16 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ---
 
+## Supabase egress (MANDATORY)
+
+- For SQL/Supabase, scheduled scripts, polling and retry changes, avoid unbounded reads of growing tables/history. Use scoped filters, narrow projections, pagination/bounds or server-side validation/aggregation; justify exceptions and preserve fail-closed, archival/recovery and financial checks.
+- Check returned rows, bytes per row/response, calls per run and runs per day, including future data growth. Estimate daily egress as response bytes × calls/day (or rows × bytes/row × calls/day); use server-side counts/size aggregates or bounded samples rather than downloading history to measure it.
+- Inspect loops, retries and cron for repeated heavy reads; safely reuse results only while preserving required freshness, locks and validation.
+- For changes that may materially increase transfer, include a short egress assessment in the PR: baseline, expected rows/response size/call frequency, estimated daily transfer and uncertainty. Distinguish serialization/wire estimates from measured billed egress and identify the service, especially Shared Pooler versus Storage, where evidence permits.
+- Green CI does not prove low transfer cost. Lessons: [#735](https://github.com/krzysztofcal/arcadePlatform/issues/735) and [#1183](https://github.com/krzysztofcal/arcadePlatform/issues/1183) had different causes; [#1184](https://github.com/krzysztofcal/arcadePlatform/pull/1184) fixes the repeated Stage history reads.
+
+---
+
 ## 🏗️ Architecture Overview
 
 ### Frontend
@@ -55,6 +65,7 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - DB is NOT source of truth
 
 ### WS Preview Deploy Gate (CRITICAL)
+- Agents MUST use the approved release/admin paths below; never bypass owner approvals or substitute manual SSH/root/sudo, service restarts, direct release switching or direct publication. Missing approval or a blocked workflow is a STOP; request the owner’s decision. Read-only diagnostics permitted below and by the release procedure do not authorize mutations.
 - Netlify deploy previews update the browser app only. The `WS Server Deploy` pull-request check validates the WS package but does **not** deploy it; its deploy job is intentionally skipped on PR events.
 - If a PR changes `ws-server/**`, WS runtime dependencies under `shared/**`, or browser/WS protocol behavior, the agent MUST remind the user that `WS Preview Deploy` is required before end-to-end preview verification.
 - The agent must never describe the PR preview as fully deployed merely because Netlify, `WS PR Checks`, or `WS Server Deploy` validation is green.
@@ -69,7 +80,7 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ### WS Runtime Logs
 - For preview incidents, agents may inspect:
-  - `sudo journalctl -u ws-server-preview -f`
+  - `journalctl -u ws-server-preview -f`
   - `journalctl -u ws-server-preview.service`
 - For production WS incidents, agents may inspect:
   - `journalctl -u ws-server.service`
