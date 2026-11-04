@@ -743,10 +743,11 @@ function quarantineFixture() {
   }
   fs.writeFileSync(path.join(home, ".config/arcadeplatform/window/browser-profile"), "kept"); // not in the list
   const proc = path.join(top, "proc");
-  const addProcess = (pid, fd) => {
+  const addProcess = (pid, fd, maps = "") => {
     fs.mkdirSync(path.join(proc, pid, "fd"), { recursive: true });
     for (const link of ["cwd", "root"]) fs.symlinkSync("/", path.join(proc, pid, link));
     if (fd) fs.symlinkSync(fd, path.join(proc, pid, "fd", "3"));
+    fs.writeFileSync(path.join(proc, pid, "maps"), maps);
   };
   addProcess("1");
   const base = path.join(top, "var/arcade-admin/quarantine");
@@ -782,7 +783,8 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
     assert.equal(fs.readFileSync(path.join(runDir, "1-env.json"), "utf8"), "SECRET-MARKER-1", "kept for recovery");
     assert.equal(fs.existsSync(path.join(fx.home, fx.files[0])), false);
     assert.equal(fs.readFileSync(path.join(fx.home, ".config/arcadeplatform/window/browser-profile"), "utf8"), "kept", "unlisted files stay");
-    assert.match(fs.readFileSync(path.join(runDir, "MANIFEST"), "utf8"), /^planned 2 .*\nfile 0 \.config\/netlify\/config\.json -> 0-config\.json\nfile 1 .*\nmoved 0\nmoved 1\ncomplete 2\n$/);
+    assert.match(fs.readFileSync(path.join(runDir, "MANIFEST"), "utf8"),
+      /^planned 2 .*\nfile 0 \.config\/netlify\/config\.json -> 0-config\.json dev=\d+ ino=\d+ size=\d+\nfile 1 .*\nmoving 0\nmoved 0\nmoving 1\nmoved 1\ncomplete 2\n$/);
 
     // A missing file is never success, also after a complete earlier run; the run directory is not created.
     assert.equal(runOperation(op, "41700000003", fx.host).line, `ADMIN_BLOCKED ${op} file_0_missing`);
@@ -792,6 +794,30 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
     open.addProcess("42", path.join(open.home, open.files[1]));
     assert.equal(runOperation(op, "5", open.host).line, `ADMIN_BLOCKED ${op} file_in_use`);
     assert.equal(fs.existsSync(open.base), false, "nothing is created or moved while a file is open");
+
+    // A memory mapping keeps the content readable after the descriptor is closed.
+    const mapped = fixture();
+    const target = fs.statSync(path.join(mapped.home, mapped.files[0]));
+    const dev = (d) => `${(((d >> 8) & 0xfff)).toString(16).padStart(2, "0")}:${((d & 0xff) | ((d >> 12) & ~0xff)).toString(16).padStart(2, "0")}`;
+    mapped.addProcess("43", undefined, `7f00-7f01 r--s 00000000 ${dev(target.dev)} ${target.ino}    /gone\n`);
+    assert.equal(runOperation(op, "10", mapped.host).line, `ADMIN_BLOCKED ${op} file_in_use`);
+
+    // Swapping a parent directory for a symlink after the check does not redirect the move: the pinned
+    // directory's own file moves, the decoy stays.
+    const swapped = fixture();
+    const decoy = path.join(swapped.top, "decoy");
+    fs.mkdirSync(decoy);
+    fs.writeFileSync(path.join(decoy, "config.json"), "decoy");
+    swapped.host.rename = (from, to) => {
+      if (from.endsWith("/config.json")) {
+        fs.renameSync(path.join(swapped.home, ".config/netlify"), path.join(swapped.home, ".config/moved"));
+        fs.symlinkSync(decoy, path.join(swapped.home, ".config/netlify"));
+      }
+      fs.renameSync(from, to);
+    };
+    assert.match(runOperation(op, "11", swapped.host).line, /^ADMIN_OK /);
+    assert.equal(fs.readFileSync(path.join(swapped.base, "11", "0-config.json"), "utf8"), "SECRET-MARKER-0");
+    assert.equal(fs.readFileSync(path.join(decoy, "config.json"), "utf8"), "decoy");
 
     const linked = fixture();
     fs.linkSync(path.join(linked.home, linked.files[0]), path.join(linked.home, "copy"));
@@ -818,7 +844,13 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
     };
     const partial = runOperation(op, "9", changed.host);
     assert.match(partial.line, new RegExp(`^ADMIN_FAILED ${op} file_1_changed custody=partial moved=1/2 manifest=`));
-    assert.doesNotMatch(fs.readFileSync(path.join(changed.base, "9", "MANIFEST"), "utf8"), /complete/);
+    assert.match(fs.readFileSync(path.join(changed.base, "9", "MANIFEST"), "utf8"), /moving 0\nmoved 0\n$/, "no complete line");
+
+    // A failed rename leaves the state uncertain: the intent line exists without its moved line.
+    const failing = fixture();
+    failing.host.rename = () => { throw new Error("EIO"); };
+    assert.match(runOperation(op, "12", failing.host).line, new RegExp(`^ADMIN_FAILED ${op} file_0_move custody=uncertain moved=0/2 `));
+    assert.match(fs.readFileSync(path.join(failing.base, "12", "MANIFEST"), "utf8"), /moving 0\n$/);
     assert.match(changed.admin.audits[1], /result=failed/);
   } finally {
     for (const fx of fixtures) fs.rmSync(fx.top, { recursive: true, force: true });
