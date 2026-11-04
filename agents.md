@@ -49,6 +49,17 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ---
 
+## Claude Code handoff: Codex review (MANDATORY)
+
+**CODEX_REVIEW_ENABLED: true**
+
+- For any repository change authored or prepared by Claude Code (including documentation, configuration and follow-up fixes), require an independent review by Codex before reporting the final PR as ready. **Claude must not review Claude's own work; Codex must not review Codex's own work.** Choose the reviewer from the actual agent responsible for the changes, not the GitHub committer or PR creator. Codex-authored changes continue to require Claude Code review under the rule above.
+- The review must use the complete, current base/head diff, task requirements and relevant context, without repository changes, secret access, deployment or other side effects. An earlier review of a different diff does not approve the final diff. Reuse the read-only, max-three-round, evidence/reporting, blocking-findings and owner-approval rules from the Codex handoff section above, swapping author/reviewer roles. Prior Codex review rounds for the same task count toward that limit even when reviewing an obsolete version.
+- If both agents authored changes in the same diff, neither is an independent reviewer for the complete diff; STOP and ask the owner to decide a truly independent review path. Never substitute self-review, green CI or an unrelated earlier review for this gate.
+- Only the owner may explicitly disable this requirement for a task or until re-enabled, or change `CODEX_REVIEW_ENABLED` to `false`. An agent must not disable it or infer an exception; report any owner exception in the PR and restore the gate when the owner's stated scope expires.
+
+---
+
 ## Supabase egress (MANDATORY)
 
 - For SQL/Supabase, scheduled scripts, polling and retry changes, avoid unbounded reads of growing tables/history. Use scoped filters, narrow projections, pagination/bounds or server-side validation/aggregation; justify exceptions and preserve fail-closed, archival/recovery and financial checks.
