@@ -21,10 +21,17 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | `ledger-dispatchers-pause` | Stops both dispatcher timers, then waits until no dispatcher runs. One 5-minute deadline covers both dispatchers and every `systemctl` call, and a state read after it is a timeout even if idle; on timeout it reports `timeout_timers_left_stopped` with each service state and leaves the timers stopped for the owner's decision (no automatic resume) |
 | `ledger-dispatchers-resume` | Refuses while any of the two services or two timers needs `daemon-reload`; otherwise starts both timers and checks they are active |
 | `systemd-daemon-reload` | `systemctl daemon-reload` |
-| `copilot-secret-snapshots-quarantine` | Moves the agent account's local operator state, `~/.config/netlify` and `~/.config/arcadeplatform` of `copilot`, as whole directories into `/var/lib/arcade-admin/quarantine/<runId>/` (`root:root 0700`), so `copilot` can no longer read them. Everything is checked before anything moves: both parents and every entry belong to `copilot`, no regular file has another hard link, the quarantine is on the same filesystem, and no process has its cwd, root, executable or an open file inside a source (`source_in_use`). `rename(2)` keeps every byte and inode; the result reports only counts and the quarantine path. An absent source counts as already moved. Recovery is the owner's root `mv` back; there is no restore operation |
+| `copilot-secret-snapshots-quarantine` | Moves the fixed list of `copilot` files that hold credentials or their recovery copies (`HOST.quarantine.files` in `infra/vps/vps-admin.mjs`; nothing else in the home) into `/var/lib/arcade-admin/quarantine/<runId>/` (`root:root 0700`) with `rename(2)`, so `copilot` can no longer read them. Before the first move every file must exist as a single-link regular file of `copilot` under real `copilot` directories (no symlink), no process may use it, existing quarantine directories must already be `root:root 0700` (they are never changed) and the run directory must be new. Each file is checked again right before and after its move (same inode, size and mtime). `MANIFEST` in the run directory records the plan and every completed move and ends with `complete <n>` only for full custody; the result is `custody=complete` or an `ADMIN_FAILED … custody=partial moved=<k>/<n> manifest=<path>`. A missing file blocks (`file_<i>_missing`), also after an earlier run. Output carries only counts and paths, never file contents |
 
 Every operation uses fixed absolute commands with fixed arguments and no shell. There is no free command, file
 path, package name or unit name input.
+
+### Quarantine recovery
+
+Owner only, as root, after reading `MANIFEST` of the run directory: for every `moved <i>` line move `<i>-<name>` back
+to `/home/copilot/<relative path>` from its `file <i>` line (owner and mode are unchanged). A run without
+`complete <n>` is partial: decide per file from the `moved` lines; do not request the operation again until every
+listed file is back in place or the list is changed by a reviewed PR. There is no restore operation.
 
 ## Request
 

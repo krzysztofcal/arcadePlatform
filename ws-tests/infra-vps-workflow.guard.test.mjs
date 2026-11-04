@@ -736,79 +736,92 @@ test("VPS admin helper runs only its catalog, refuses unverifiable reads and una
 function quarantineFixture() {
   const top = fs.mkdtempSync(path.join(os.tmpdir(), "vps-quarantine-"));
   const home = path.join(top, "home");
-  for (const dir of [".config/netlify/old-run", ".config/arcadeplatform/window"]) fs.mkdirSync(path.join(home, dir), { recursive: true });
-  fs.writeFileSync(path.join(home, ".config/netlify/config.json"), "SECRET-MARKER-token", { mode: 0o600 });
-  fs.writeFileSync(path.join(home, ".config/arcadeplatform/window/env.json"), "SECRET-MARKER-env", { mode: 0o600 });
+  const files = [".config/netlify/config.json", ".config/arcadeplatform/window/env.json"];
+  for (const [i, rel] of files.entries()) {
+    fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+    fs.writeFileSync(path.join(home, rel), `SECRET-MARKER-${i}`, { mode: 0o600 });
+  }
+  fs.writeFileSync(path.join(home, ".config/arcadeplatform/window/browser-profile"), "kept"); // not in the list
   const proc = path.join(top, "proc");
-  const addProcess = (pid, cwd) => {
+  const addProcess = (pid, fd) => {
     fs.mkdirSync(path.join(proc, pid, "fd"), { recursive: true });
-    fs.symlinkSync(cwd, path.join(proc, pid, "cwd"));
-    fs.symlinkSync("/", path.join(proc, pid, "root"));
+    for (const link of ["cwd", "root"]) fs.symlinkSync("/", path.join(proc, pid, link));
+    if (fd) fs.symlinkSync(fd, path.join(proc, pid, "fd", "3"));
   };
-  addProcess("1", "/");
+  addProcess("1");
   const base = path.join(top, "var/arcade-admin/quarantine");
   const admin = fakeAdminHost();
-  const uid = String(process.getuid());
   const host = {
     ...admin.host,
-    quarantine: { user: "copilot", home, sources: [".config/netlify", ".config/arcadeplatform"], base, proc,
-      rootUid: process.getuid(), rootGid: process.getgid(), maxEntries: 1000 },
+    rename: (from, to) => fs.renameSync(from, to),
+    quarantine: { user: "copilot", home, base, proc, files, rootUid: process.getuid(), rootGid: process.getgid() },
     run(argv) {
       if (argv[0] === "/usr/bin/logger") return admin.host.run(argv);
-      admin.calls.push(argv.join(" "));
-      if (argv[0] === "/usr/bin/id") return { status: 0, stdout: uid };
+      if (argv[0] === "/usr/bin/id") return { status: 0, stdout: String(process.getuid()) };
       if (argv[0] === "/usr/bin/install") return { status: spawnSync(argv[0], argv.slice(1)).status, stdout: "" };
       return { status: 1, stdout: "" };
     },
   };
-  return { top, home, proc, base, host, admin, addProcess };
+  return { top, home, proc, base, host, admin, files, addProcess };
 }
 
-test("VPS admin quarantine moves copilot's snapshot directories into a root-only directory, fail-closed", async () => {
+test("VPS admin quarantine keeps listed credential files in root-only custody and never reports partial custody as success", async () => {
   const { runOperation } = await import("../infra/vps/vps-admin.mjs");
   const op = "copilot-secret-snapshots-quarantine";
-  const fx = quarantineFixture();
+  const fixtures = [];
+  const fixture = () => { const fx = quarantineFixture(); fixtures.push(fx); return fx; };
   try {
-    const before = fs.statSync(path.join(fx.home, ".config/netlify/config.json")).ino;
-    const inUse = quarantineFixture();
-    inUse.addProcess("42", path.join(inUse.home, ".config/arcadeplatform/window"));
-    assert.equal(runOperation(op, "5", inUse.host).line, `ADMIN_BLOCKED ${op} source_in_use`);
-    assert.equal(fs.existsSync(inUse.base), false, "nothing is created or moved while a source is in use");
-    fs.rmSync(inUse.top, { recursive: true, force: true });
-
-    const linked = quarantineFixture();
-    fs.linkSync(path.join(linked.home, ".config/netlify/config.json"), path.join(linked.home, "copy"));
-    assert.equal(runOperation(op, "6", linked.host).line, `ADMIN_BLOCKED ${op} source_0_hardlinked_file`);
-    fs.rmSync(linked.top, { recursive: true, force: true });
-
-    const symlinked = quarantineFixture();
-    fs.renameSync(path.join(symlinked.home, ".config/netlify"), path.join(symlinked.top, "elsewhere"));
-    fs.symlinkSync(path.join(symlinked.top, "elsewhere"), path.join(symlinked.home, ".config/netlify"));
-    assert.equal(runOperation(op, "7", symlinked.host).line, `ADMIN_BLOCKED ${op} source_0_not_owned_directory`);
-    fs.rmSync(symlinked.top, { recursive: true, force: true });
-
-    const noUid = quarantineFixture();
-    noUid.host.run = (argv) => (argv[0] === "/usr/bin/logger" ? { status: 0, stdout: "" } : { status: 1, stdout: "" });
-    assert.equal(runOperation(op, "8", noUid.host).line, `ADMIN_BLOCKED ${op} unverifiable_owner_uid`);
-    fs.rmSync(noUid.top, { recursive: true, force: true });
-
+    const fx = fixture();
+    const inode = fs.statSync(path.join(fx.home, fx.files[0])).ino;
     const ok = runOperation(op, "41700000002", fx.host);
     const runDir = path.join(fx.base, "41700000002");
-    assert.equal(ok.line, `ADMIN_OK ${op} moved=2 absent=0 quarantine=${runDir}`);
+    assert.equal(ok.line, `ADMIN_OK ${op} custody=complete moved=2 quarantine=${runDir}`);
     assert.doesNotMatch(ok.line + fx.admin.audits.join("\n"), /SECRET-MARKER/, "no content reaches the result or the journal");
     for (const dir of [path.dirname(fx.base), fx.base, runDir]) assert.equal(fs.statSync(dir).mode & 0o7777, 0o700, dir);
-    assert.equal(fs.existsSync(path.join(fx.home, ".config/netlify")), false);
-    assert.equal(fs.existsSync(path.join(fx.home, ".config/arcadeplatform")), false);
-    const kept = path.join(runDir, "netlify/config.json");
-    assert.equal(fs.statSync(kept).ino, before, "rename keeps the inode");
-    assert.equal(fs.readFileSync(kept, "utf8"), "SECRET-MARKER-token", "the file is kept for recovery");
-    assert.equal(fs.readFileSync(path.join(runDir, "arcadeplatform/window/env.json"), "utf8"), "SECRET-MARKER-env");
+    assert.equal(fs.statSync(path.join(runDir, "0-config.json")).ino, inode, "rename keeps the inode");
+    assert.equal(fs.readFileSync(path.join(runDir, "1-env.json"), "utf8"), "SECRET-MARKER-1", "kept for recovery");
+    assert.equal(fs.existsSync(path.join(fx.home, fx.files[0])), false);
+    assert.equal(fs.readFileSync(path.join(fx.home, ".config/arcadeplatform/window/browser-profile"), "utf8"), "kept", "unlisted files stay");
+    assert.match(fs.readFileSync(path.join(runDir, "MANIFEST"), "utf8"), /^planned 2 .*\nfile 0 \.config\/netlify\/config\.json -> 0-config\.json\nfile 1 .*\nmoved 0\nmoved 1\ncomplete 2\n$/);
 
-    assert.equal(runOperation(op, "41700000002", fx.host).line, `ADMIN_OK ${op} moved=0 absent=2`, "a repeated request moves nothing");
-    fs.mkdirSync(path.join(fx.home, ".config/netlify"));
-    assert.equal(runOperation(op, "41700000002", fx.host).line, `ADMIN_BLOCKED ${op} quarantine_run_exists`, "a run directory is never reused");
+    // A missing file is never success, also after a complete earlier run; the run directory is not created.
+    assert.equal(runOperation(op, "41700000003", fx.host).line, `ADMIN_BLOCKED ${op} file_0_missing`);
+    assert.equal(fs.existsSync(path.join(fx.base, "41700000003")), false);
+
+    const open = fixture();
+    open.addProcess("42", path.join(open.home, open.files[1]));
+    assert.equal(runOperation(op, "5", open.host).line, `ADMIN_BLOCKED ${op} file_in_use`);
+    assert.equal(fs.existsSync(open.base), false, "nothing is created or moved while a file is open");
+
+    const linked = fixture();
+    fs.linkSync(path.join(linked.home, linked.files[0]), path.join(linked.home, "copy"));
+    assert.equal(runOperation(op, "6", linked.host).line, `ADMIN_BLOCKED ${op} file_0_not_owned_single_link_file`);
+
+    const symlinked = fixture();
+    fs.renameSync(path.join(symlinked.home, ".config/netlify"), path.join(symlinked.top, "elsewhere"));
+    fs.symlinkSync(path.join(symlinked.top, "elsewhere"), path.join(symlinked.home, ".config/netlify"));
+    assert.equal(runOperation(op, "7", symlinked.host).line, `ADMIN_BLOCKED ${op} file_0_parent_not_owned_directory`);
+
+    // An existing quarantine directory is verified, never re-moded by install(1).
+    const loose = fixture();
+    fs.mkdirSync(loose.base, { recursive: true, mode: 0o755 });
+    fs.chmodSync(loose.base, 0o755);
+    assert.equal(runOperation(op, "8", loose.host).line, `ADMIN_BLOCKED ${op} quarantine_dir_unsafe`);
+    assert.equal(fs.statSync(loose.base).mode & 0o7777, 0o755);
+
+    // A file changed between the check and its move, or a failed move: partial custody, recorded, not success.
+    const changed = fixture();
+    changed.host.rename = (from, to) => {
+      if (from.endsWith("env.json")) throw new Error("EIO");
+      fs.writeFileSync(path.join(changed.home, changed.files[1]), "SECRET-MARKER-x");
+      fs.renameSync(from, to);
+    };
+    const partial = runOperation(op, "9", changed.host);
+    assert.match(partial.line, new RegExp(`^ADMIN_FAILED ${op} file_1_changed custody=partial moved=1/2 manifest=`));
+    assert.doesNotMatch(fs.readFileSync(path.join(changed.base, "9", "MANIFEST"), "utf8"), /complete/);
+    assert.match(changed.admin.audits[1], /result=failed/);
   } finally {
-    fs.rmSync(fx.top, { recursive: true, force: true });
+    for (const fx of fixtures) fs.rmSync(fx.top, { recursive: true, force: true });
   }
 });
 

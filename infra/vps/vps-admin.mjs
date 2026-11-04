@@ -33,11 +33,23 @@ const HOST = {
   now: () => Date.now(),
   lockFile: "/run/arcade-vps-admin.lock",
   requester: process.env.SUDO_USER || "root",
-  // The agent account's local operator snapshots (Netlify CLI state, exported configuration) move as whole
-  // directories into a root-only quarantine kept for recovery; the agent account cannot read them afterwards.
+  rename: (from, to) => fs.renameSync(from, to),
+  // Verified files of the agent account that hold credentials or their recovery copies. They move into a root-only
+  // quarantine kept for recovery; copilot cannot read them afterwards. Nothing else in copilot's home is touched.
   quarantine: {
-    user: "copilot", home: "/home/copilot", sources: [".config/netlify", ".config/arcadeplatform"],
-    base: "/var/lib/arcade-admin/quarantine", proc: "/proc", rootUid: 0, rootGid: 0, maxEntries: 200000,
+    user: "copilot", home: "/home/copilot", base: "/var/lib/arcade-admin/quarantine", proc: "/proc", rootUid: 0, rootGid: 0,
+    files: [
+      ".config/netlify/config.json",
+      ".config/netlify/pr2-custody-I0a9U7/original-contexts.json",
+      ".config/netlify/pr2-empty-deal-47rEGR/original.json",
+      ".config/netlify/pr2-parent-env-npz5ZX/before.json",
+      ".config/netlify/pr2-redis-parent-nOIRKu/before.json",
+      ".config/netlify/pr2-stage-final-flags-119pOR/original.json",
+      ".config/netlify/pr2-stage-operational-kV5AtM/chips-before.json",
+      ".config/netlify/pr2-stage-operational-kV5AtM/custody.json",
+      ".config/netlify/pr2-stage-operational-kV5AtM/deal-candidate.json",
+      ".config/arcadeplatform/google-production-1100/netlify-env-before-rollout.json",
+    ],
   },
 };
 
@@ -58,27 +70,26 @@ function lstatOrNull(file) {
   }
 }
 
-// Every entry must belong to the agent account; a regular file with another hard link would stay readable.
-function treeProblem(root, uid, maxEntries) {
-  const stack = [root];
-  let entries = 0;
-  while (stack.length) {
-    const dir = stack.pop();
-    for (const name of fs.readdirSync(dir)) {
-      const entry = path.join(dir, name);
-      const s = fs.lstatSync(entry);
-      if (++entries > maxEntries) return "tree_too_large";
-      if (s.uid !== uid) return "foreign_owned_entry";
-      if (s.isFile() && s.nlink !== 1) return "hardlinked_file";
-      if (s.isDirectory()) stack.push(entry);
-    }
+const sameFile = (a, b) => a && b && a.isFile() && b.isFile() && a.dev === b.dev && a.ino === b.ino
+  && a.size === b.size && a.mtimeMs === b.mtimeMs && b.nlink === 1;
+
+// Every directory from the home down to the file is a real directory of the agent account (no symlink), and the
+// file is its own regular file with no other hard link. Returns the file's lstat or a reason.
+function ownedFile(home, rel, uid) {
+  let dir = home;
+  for (const part of ["", ...path.dirname(rel).split("/").filter((x) => x && x !== ".")]) {
+    dir = path.join(dir, part);
+    const s = lstatOrNull(dir);
+    if (!s || !s.isDirectory() || s.uid !== uid) return "parent_not_owned_directory";
   }
-  return null;
+  const s = lstatOrNull(path.join(home, rel));
+  if (!s) return "missing";
+  if (!s.isFile() || s.uid !== uid || s.nlink !== 1) return "not_owned_single_link_file";
+  return s;
 }
 
-// A process whose cwd, root, executable or open file is inside a source would keep access after the move.
-function sourcesInUse(procRoot, sources) {
-  const inside = (target) => sources.some((src) => target === src || target.startsWith(`${src}/`));
+// True when any process has one of the files as its cwd, root, executable or an open descriptor.
+function inUse(procRoot, files) {
   for (const pid of fs.readdirSync(procRoot).filter((name) => /^[0-9]+$/.test(name))) {
     const links = ["cwd", "root", "exe"].map((link) => path.join(procRoot, pid, link));
     try {
@@ -95,68 +106,77 @@ function sourcesInUse(procRoot, sources) {
         if (error.code === "ENOENT" || error.code === "ESRCH") continue;
         throw new Unverifiable("proc");
       }
-      if (inside(target.replace(/ \(deleted\)$/, ""))) return true;
+      if (files.includes(target.replace(/ \(deleted\)$/, ""))) return true;
     }
   }
   return false;
 }
 
-// Checks everything before moving anything; rename(2) on the same filesystem keeps every byte and inode. An absent
-// source counts as already moved, so the operation can be requested again after a partial result.
+function fsyncPath(file) {
+  const fd = fs.openSync(file, "r");
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+
+// An existing quarantine directory is only verified, never changed; a missing one is created root:root 0700.
+function quarantineDir(host, dir, mustBeNew) {
+  const q = host.quarantine;
+  const safe = (s) => s && s.isDirectory() && s.uid === q.rootUid && s.gid === q.rootGid && (s.mode & 0o7777) === 0o700;
+  const existing = lstatOrNull(dir);
+  if (existing) return mustBeNew ? "quarantine_run_exists" : safe(existing) ? null : "quarantine_dir_unsafe";
+  if (host.run(["/usr/bin/install", "-d", "-o", String(q.rootUid), "-g", String(q.rootGid), "-m", "0700", dir]).status !== 0) return "quarantine_dir_create";
+  return safe(lstatOrNull(dir)) ? null : "quarantine_dir_unsafe";
+}
+
+// Moves the fixed list of files into quarantine/<runId>/ with rename(2) on the same filesystem (bytes and inode
+// kept for recovery). Everything is checked before the first move; each file is re-checked right before and after
+// its move, and MANIFEST records the plan and every completed move, so a partial result is visible and is never
+// reported as success. A missing file blocks the operation. Nothing is retried.
 function quarantineSnapshots(host, runId) {
   const q = host.quarantine;
   const id = host.run(["/usr/bin/id", "-u", q.user]);
   if (id.status !== 0 || !/^[1-9][0-9]{0,9}$/.test(id.stdout)) throw new Unverifiable("owner_uid");
   const uid = Number(id.stdout);
-  for (const dir of [q.home, path.join(q.home, ".config")]) {
-    const s = lstatOrNull(dir);
-    if (!s || !s.isDirectory() || s.uid !== uid) return { ok: false, blocked: "home_not_owned_directory" };
+  const files = [];
+  for (const [index, rel] of q.files.entries()) {
+    const s = ownedFile(q.home, rel, uid);
+    if (typeof s === "string") return { ok: false, blocked: `file_${index}_${s}` };
+    files.push({ index, rel, src: path.join(q.home, rel), stat: s });
   }
-  const present = [];
-  for (const [index, rel] of q.sources.entries()) {
-    const src = path.join(q.home, rel);
-    const s = lstatOrNull(src);
-    if (!s) continue;
-    if (!s.isDirectory() || s.uid !== uid) return { ok: false, blocked: `source_${index}_not_owned_directory` };
-    let problem;
-    try {
-      problem = treeProblem(src, uid, q.maxEntries);
-    } catch {
-      throw new Unverifiable(`source_${index}_tree`);
-    }
-    if (problem) return { ok: false, blocked: `source_${index}_${problem}` };
-    present.push({ src, dev: s.dev, ino: s.ino });
-  }
-  const absent = q.sources.length - present.length;
-  if (!present.length) return { ok: true, details: `moved=0 absent=${absent}` };
-  if (sourcesInUse(q.proc, present.map((p) => p.src))) return { ok: false, blocked: "source_in_use" };
-
+  if (inUse(q.proc, files.map((f) => f.src))) return { ok: false, blocked: "file_in_use" };
   const runDir = path.join(q.base, String(runId));
-  if (lstatOrNull(runDir)) return { ok: false, blocked: "quarantine_run_exists" };
-  for (const dir of [path.dirname(q.base), q.base, runDir]) {
-    if (host.run(["/usr/bin/install", "-d", "-o", String(q.rootUid), "-g", String(q.rootGid), "-m", "0700", dir]).status !== 0) {
-      return { ok: false, failed: "quarantine_dir" };
-    }
-    const s = lstatOrNull(dir);
-    if (!s || !s.isDirectory() || s.uid !== q.rootUid || s.gid !== q.rootGid || (s.mode & 0o7777) !== 0o700) {
-      return { ok: false, failed: "quarantine_dir_unsafe" };
-    }
+  for (const [dir, mustBeNew] of [[path.dirname(q.base), false], [q.base, false], [runDir, true]]) {
+    const problem = quarantineDir(host, dir, mustBeNew);
+    if (problem) return { ok: false, blocked: problem };
   }
-  if (present.some((p) => p.dev !== fs.lstatSync(runDir).dev)) return { ok: false, blocked: "cross_device" };
+  if (files.some((f) => f.stat.dev !== fs.lstatSync(runDir).dev)) return { ok: false, blocked: "cross_device" };
 
+  const manifest = path.join(runDir, "MANIFEST");
+  const record = (line) => { fs.appendFileSync(manifest, `${line}\n`, { mode: 0o600 }); fsyncPath(manifest); };
+  record(`planned ${files.length} home=${q.home}`);
+  for (const f of files) record(`file ${f.index} ${f.rel} -> ${f.index}-${path.basename(f.rel)}`);
+  fsyncPath(runDir);
+  const partial = (step, moved) => ({ ok: false, failed: `${step} custody=partial moved=${moved}/${files.length} manifest=${manifest}` });
   let moved = 0;
-  for (const p of present) {
-    const dest = path.join(runDir, path.basename(p.src));
+  for (const f of files) {
+    const now = ownedFile(q.home, f.rel, uid);
+    if (typeof now === "string" || !sameFile(f.stat, now)) return partial(`file_${f.index}_changed`, moved);
+    const dest = path.join(runDir, `${f.index}-${path.basename(f.rel)}`);
     try {
-      fs.renameSync(p.src, dest);
+      host.rename(f.src, dest);
     } catch {
-      return { ok: false, failed: `move_after_${moved}` };
+      return partial(`file_${f.index}_move`, moved);
     }
-    const d = lstatOrNull(dest);
-    if (!d || d.dev !== p.dev || d.ino !== p.ino) return { ok: false, failed: `moved_identity_after_${moved}` };
+    if (!sameFile(f.stat, lstatOrNull(dest)) || lstatOrNull(f.src)) return partial(`file_${f.index}_identity`, moved);
+    record(`moved ${f.index}`);
     moved += 1;
   }
-  return { ok: true, details: `moved=${moved} absent=${absent} quarantine=${runDir}` };
+  for (const dir of new Set([runDir, ...files.map((f) => path.dirname(f.src))])) fsyncPath(dir);
+  // A descriptor opened between the check and the move would keep access: custody is then not complete.
+  if (inUse(q.proc, files.map((f) => path.join(runDir, `${f.index}-${path.basename(f.rel)}`)))) {
+    return { ok: false, failed: `open_after_move custody=moved_but_open moved=${moved}/${files.length} manifest=${manifest}` };
+  }
+  record(`complete ${moved}`);
+  return { ok: true, details: `custody=complete moved=${moved} quarantine=${runDir}` };
 }
 
 export const OPERATIONS = Object.freeze({
