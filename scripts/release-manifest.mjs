@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { githubWsRelease, parseBuildInfo } from './www-production-release.mjs';
+import { latestWsDeploy, parseBuildInfo } from './www-production-release.mjs';
 
 // GitHub Release manifest for WWW, WS and Android (#1159 Addendum B). A release is an audited record of what is
 // already running: it never deploys, restarts WS, migrates, publishes WWW or publishes to Google Play. Each record
@@ -29,7 +29,8 @@ export function wwwEvidence(buildInfoJs, deployId) {
 }
 
 // WS: a successful owner-approved WS Server Deploy dispatch on main, the receipt its deploy job uploaded, and GitHub
-// evidence that it is still the latest deploy (githubWsRelease: newest deploy job on main, nothing unfinished).
+// evidence that this run is still the latest deploy (latestWsDeploy: newest deploy job on main, nothing unfinished;
+// the run itself, since a later successful deploy of the same SHA is a different release).
 // Release Record does not read the VPS, so this is the last confirmed deployment, not a runtime check
 // (scripts/www-production-release.mjs checks the VPS `current` release with SSH).
 export function wsEvidence(run, jobs, receipt, recentRuns) {
@@ -41,7 +42,8 @@ export function wsEvidence(run, jobs, receipt, recentRuns) {
     || String(receipt.runId) !== String(run.id) || receipt.environment !== 'ws-production' || !SHA256.test(String(receipt.distSha256))) {
     fail('ws_receipt_mismatch');
   }
-  if (!Array.isArray(recentRuns) || githubWsRelease(recentRuns) !== run.head_sha) fail('ws_not_latest_github_deploy');
+  const latest = Array.isArray(recentRuns) ? latestWsDeploy(recentRuns) : null;
+  if (!latest || String(latest.runId) !== String(run.id) || latest.sha !== run.head_sha) fail('ws_not_latest_github_deploy');
   return { sha: receipt.releaseSha, distSha256: receipt.distSha256, deployRunId: String(run.id), environment: 'ws-production',
     evidence: 'latest-github-deploy' };
 }

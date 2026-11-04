@@ -12,7 +12,7 @@ Each record changes one component and carries the other two from the previous re
 | Component | Evidence checked by `Release Record` |
 |---|---|
 | `www` | `https://play.kcswh.pl/js/build-info.js` names the given Netlify deploy id, context `production`, branch `main`; the record takes its commit |
-| `ws` | the given run is a successful `WS Server Deploy` dispatch on `main` with a successful `deploy` job, its `ws-release-receipt` names the same commit, run, `ws-production` and the SHA-256 of the archive uploaded to the VPS, and GitHub shows it is still the latest deploy (`githubWsRelease()`: newest `deploy` job on `main` succeeded for that commit, no dispatch unfinished). Recorded as `evidence: latest-github-deploy` |
+| `ws` | the given run is a successful `WS Server Deploy` dispatch on `main` with a successful `deploy` job, its `ws-release-receipt` names the same commit, run, `ws-production` and the SHA-256 of the archive uploaded to the VPS, and GitHub shows this run is still the latest deploy (`latestWsDeploy()`: the newest `deploy` job on `main` succeeded and belongs to this run, so a later deploy of the same commit also stops the record; no dispatch unfinished). Recorded as `evidence: latest-github-deploy` |
 | `android` | attested by the owner only (never by the release agent) until M1 builds the signed AAB: commit, versionName, versionCode, AAB SHA-256, Play track |
 
 1. After a component is released and verified through its own path, dispatch `Release Record` from `main` with

@@ -22,7 +22,7 @@ not a deployment engine.
     context, `main` branch and the commit;
   - WS: a successful `WS Server Deploy` `workflow_dispatch` run on `main` whose `deploy` job succeeded, the
     `ws-release-receipt` it uploaded (release SHA = run SHA, run id, `ws-production`, SHA-256 of the
-    `ws-server-dist.tgz` uploaded to the VPS), and `githubWsRelease()` showing it is still the latest deploy. This is
+    `ws-server-dist.tgz` uploaded to the VPS), and `latestWsDeploy()` showing this run (not only its commit) is still the latest deploy. This is
     the last confirmed deployment (`evidence: latest-github-deploy`), not a VPS runtime check;
   - Android: until M1 builds the signed AAB in CI, a record attested by the owner only (commit, versionName,
     versionCode, AAB SHA-256, Play track). Stage/debug APKs are never release evidence.

@@ -226,6 +226,7 @@ test('release manifest: evidence must prove exactly the running release', () => 
   const older = { id: 41700000001, head_sha: ws, status: 'completed', jobs: [deployJob('success', '2026-11-03T10:00:00Z')] };
   for (const [label, runs] of [
     ['newer deploy of another commit', recent({ id: 41700000009, head_sha: sha, status: 'completed', jobs: [deployJob('success', '2026-11-04T10:00:00Z')] }, older)],
+    ['newer successful deploy of the same commit (another run)', recent({ id: 41700000009, head_sha: ws, status: 'completed', jobs: [deployJob('success', '2026-11-04T10:00:00Z')] }, older)],
     ['deploy still running', recent({ id: 41700000009, head_sha: sha, status: 'in_progress', jobs: [deployJob(null, '2026-11-04T10:00:00Z', 'in_progress')] }, older)],
     ['later deploy failed after switching', recent({ id: 41700000009, head_sha: sha, status: 'completed', jobs: [deployJob('failure', '2026-11-04T10:00:00Z')] }, older)],
     ['no deploy evidence', recent()],
