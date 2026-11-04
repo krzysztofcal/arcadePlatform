@@ -80,6 +80,7 @@ jobs:
           host: ${{ secrets.VPS_ADMIN_HOST }}
           username: ${{ secrets.VPS_ADMIN_USER }}
           key: ${{ secrets.VPS_ADMIN_SSH_KEY }}
+          fingerprint: SHA256:dDmTXhjkTP/9hCchXlrkpjnFT/a21QcpcmuvNO/ZBEY
           timeout: 2m
           command_timeout: 10m
           envs: OPERATION,ADMIN_RUN_ID
