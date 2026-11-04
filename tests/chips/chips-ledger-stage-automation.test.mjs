@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
 import {
@@ -12,6 +13,8 @@ import {
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
   acquireInitialAutomaticLock,
+  assertAutomaticBotOnlyRows,
+  STAGE_OWN_BATCHES_SQL,
   assertBotOnlyActiveManifestMatch,
   assertBotOnlyExecuteBatch,
   assertClosedHumanAutomaticPolicy,
@@ -4605,3 +4608,86 @@ await assert.rejects(botLostLock.run(), /advisory lock session changed/);
 assert.deepEqual(botLostLock.calls, { proof: 0, dry: 0, persist: 0, execute: 0 });
 assert.equal((await fs.promises.readFile(new URL("../../scripts/ops/chips-ledger-production-automation.mjs", import.meta.url), "utf8"))
   .match(/idle_timeout: 0, max_lifetime: 0 \}\);/g)?.length, 2, "Production advisory-lock sessions must never be recycled");
+
+// Full-history lifecycle checks must survive bounded transfer, including old corruption.
+{
+  const db = new PGlite();
+  try {
+    const fields = [
+      "object_path", "project_ref", "source_policy_id", "status", "batch_id", "format_version",
+      "cutoff", "cursor_start_created_at", "cursor_start_id", "transaction_count", "entry_count",
+      "raw_bytes", "compressed_bytes", "raw_sha256", "compressed_sha256", "credits", "debits",
+      "net_amount", "committed_at", "archive_proof_verified_at", "archived_transaction_ids_sha256",
+      "archived_entry_ids_sha256", "pruned_at", "pruned_transaction_count", "pruned_entry_count",
+      "pruned_transaction_ids_sha256", "pruned_entry_ids_sha256", "bot_only_table_id",
+      "bot_only_table_count", "bot_only_newest_created_at", "bot_only_registry_keys_sha256",
+      "bot_only_out_of_scope_keys_sha256", "bot_only_identity_count", "bot_only_eligible_count",
+      "registry_cleaned_at", "registry_cleaned_key_count", "registry_cleaned_keys_sha256",
+      "destructive_go_at", "destructive_go_batch_id",
+    ];
+    await db.exec(`create table public.chips_ledger_archive_batches (
+      ${fields.map((name) => `${name} text`).join(",")}, created_at timestamptz);
+      create table public.poker_tables (id text, bot_only_retention_complete_at timestamptz);`);
+    await db.query(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, source_policy_id, status, batch_id, created_at,
+      archive_proof_verified_at, archived_transaction_ids_sha256, archived_entry_ids_sha256,
+      pruned_at, pruned_transaction_count, pruned_entry_count,
+      pruned_transaction_ids_sha256, pruned_entry_ids_sha256,
+      registry_cleaned_at, registry_cleaned_key_count, registry_cleaned_keys_sha256)
+      select lpad(n::text, 5, '0'), $1, $2, 'committed', n::text,
+        '2026-10-01'::timestamptz + n * interval '1 second',
+        'proof', 'tx', 'entry', 'pruned', '1', '2', 'tx', 'entry', 'cleaned', '1', 'keys'
+      from generate_series(1, 10000) n`, [STAGE_PROJECT_REF, BOT_ONLY_RETENTION_POLICY_ID]);
+    const select = async (policy = BOT_ONLY_RETENTION_POLICY_ID) =>
+      (await db.query(STAGE_OWN_BATCHES_SQL, [STAGE_PROJECT_REF, policy])).rows;
+    assert.deepEqual((await select()).map((r) => r.batch_id), ["10000"], "only latest completed crosses the wire");
+    // Same timestamp: preserve the original descending object_path tie-breaker.
+    await db.exec("update public.chips_ledger_archive_batches set created_at = '2027-01-01' where batch_id in ('9998','9999')");
+    assert.deepEqual((await select()).map((r) => r.batch_id), ["9999"]);
+    for (const [id, update, message] of [
+      ["1", "archive_proof_verified_at = null", /proof is partial/],
+      ["2", "pruned_entry_count = null", /receipt is partial/],
+      ["3", "registry_cleaned_key_count = null", /cleanup receipt is partial/],
+      ["4", "status = 'invalid'", /invalid state/],
+      ["5", "status = null", /invalid state/],
+    ]) {
+      await db.exec("begin");
+      await db.exec(`update public.chips_ledger_archive_batches set ${update} where batch_id = '${id}'`);
+      const rows = await select();
+      assert.ok(rows.length <= 4);
+      // Exercise the same validator as the automatic runner, without any Stage execution.
+      assert.throws(() => assertAutomaticBotOnlyRows(rows), message);
+      await db.exec("rollback");
+    }
+    assert.equal(assertAutomaticBotOnlyRows(await select()), null);
+    await db.exec("update public.chips_ledger_archive_batches set status = 'pending' where batch_id = '1'");
+    assert.equal(assertAutomaticBotOnlyRows(await select()).batch_id, "1", "old active row survives many completed rows");
+    await db.exec("update public.chips_ledger_archive_batches set status = 'pending' where batch_id in ('2','3')");
+    const ambiguous = await select();
+    assert.ok(ambiguous.length <= 4);
+    assert.throws(() => assertAutomaticBotOnlyRows(ambiguous), /multiple incomplete/);
+    assert.deepEqual(await select("unrelated-policy"), []);
+    assert.deepEqual((await db.query(STAGE_OWN_BATCHES_SQL, ["other-project", BOT_ONLY_RETENTION_POLICY_ID])).rows, []);
+    // The shared 30d caller must ignore absent registry receipts and retain its
+    // latest-completed selection and ambiguity check after SQL compaction.
+    await db.query(`update public.chips_ledger_archive_batches set source_policy_id = $1,
+      status = 'committed', registry_cleaned_at = null, registry_cleaned_key_count = null,
+      registry_cleaned_keys_sha256 = null`, [STAGE_AUTOMATION_POLICY_ID]);
+    const completed = findOwnCycle(await select(STAGE_AUTOMATION_POLICY_ID));
+    assert.equal(completed.active, null);
+    assert.equal(completed.latestCompleted.batch_id, "9999");
+    await db.exec(`update public.chips_ledger_archive_batches set pruned_at = null,
+      pruned_transaction_count = null, pruned_entry_count = null,
+      pruned_transaction_ids_sha256 = null, pruned_entry_ids_sha256 = null where batch_id = '1'`);
+    assert.equal(findOwnCycle(await select(STAGE_AUTOMATION_POLICY_ID)).active.batch_id, "1");
+    await db.exec(`update public.chips_ledger_archive_batches set pruned_at = null,
+      pruned_transaction_count = null, pruned_entry_count = null,
+      pruned_transaction_ids_sha256 = null, pruned_entry_ids_sha256 = null where batch_id in ('2','3')`);
+    const ambiguous30d = await select(STAGE_AUTOMATION_POLICY_ID);
+    assert.throws(() => findOwnCycle(ambiguous30d), /multiple incomplete/);
+    await db.exec("delete from public.chips_ledger_archive_batches");
+    assert.equal(assertAutomaticBotOnlyRows(await select()), null);
+  } finally {
+    await db.close();
+  }
+}
