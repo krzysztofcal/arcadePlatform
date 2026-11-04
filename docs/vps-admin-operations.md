@@ -26,7 +26,12 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 Every operation uses fixed absolute commands with fixed arguments and no shell. There is no free command, file
 path, package name or unit name input.
 
-### Quarantine recovery
+### Quarantine limits and recovery
+
+`custody=complete` means every listed file is in the quarantine, `copilot` has no path to it and no process shows a
+reference to it in `/proc`. It cannot prove that `copilot` kept no copy or hidden reference (for example a
+descriptor queued on a Unix socket): an account that could read a file may have copied it. Treat the contents as
+exposed; rotating the credentials stays required.
 
 Recovery means the owner reads a quarantined file as root where it is: `/var/lib/arcade-admin/quarantine/<runId>/`.
 Never move a file back into `/home/copilot` as root: that tree belongs to `copilot`, and a root write there can be
