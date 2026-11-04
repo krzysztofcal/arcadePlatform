@@ -8,6 +8,7 @@
 // Nothing runs without a successful start entry, and a missing end entry is never reported as success.
 // A new operation is a reviewed code change here, in the workflow choice list and in arcade-admin.sudoers.
 import fs from "node:fs";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +33,12 @@ const HOST = {
   now: () => Date.now(),
   lockFile: "/run/arcade-vps-admin.lock",
   requester: process.env.SUDO_USER || "root",
+  // The agent account's local operator snapshots (Netlify CLI state, exported configuration) move as whole
+  // directories into a root-only quarantine kept for recovery; the agent account cannot read them afterwards.
+  quarantine: {
+    user: "copilot", home: "/home/copilot", sources: [".config/netlify", ".config/arcadeplatform"],
+    base: "/var/lib/arcade-admin/quarantine", proc: "/proc", rootUid: 0, rootGid: 0, maxEntries: 200000,
+  },
 };
 
 class Unverifiable extends Error {}
@@ -40,6 +47,116 @@ function read(host, unit, property) {
   const result = host.run(["/usr/bin/systemctl", "show", "-P", property, unit]);
   if (result.status !== 0 || !EXPECTED[property].test(result.stdout)) throw new Unverifiable(`${unit}_${property}`);
   return result.stdout;
+}
+
+function lstatOrNull(file) {
+  try {
+    return fs.lstatSync(file);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw new Unverifiable("stat");
+  }
+}
+
+// Every entry must belong to the agent account; a regular file with another hard link would stay readable.
+function treeProblem(root, uid, maxEntries) {
+  const stack = [root];
+  let entries = 0;
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const name of fs.readdirSync(dir)) {
+      const entry = path.join(dir, name);
+      const s = fs.lstatSync(entry);
+      if (++entries > maxEntries) return "tree_too_large";
+      if (s.uid !== uid) return "foreign_owned_entry";
+      if (s.isFile() && s.nlink !== 1) return "hardlinked_file";
+      if (s.isDirectory()) stack.push(entry);
+    }
+  }
+  return null;
+}
+
+// A process whose cwd, root, executable or open file is inside a source would keep access after the move.
+function sourcesInUse(procRoot, sources) {
+  const inside = (target) => sources.some((src) => target === src || target.startsWith(`${src}/`));
+  for (const pid of fs.readdirSync(procRoot).filter((name) => /^[0-9]+$/.test(name))) {
+    const links = ["cwd", "root", "exe"].map((link) => path.join(procRoot, pid, link));
+    try {
+      links.push(...fs.readdirSync(path.join(procRoot, pid, "fd")).map((fd) => path.join(procRoot, pid, "fd", fd)));
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ESRCH") continue; // the process ended meanwhile
+      throw new Unverifiable("proc");
+    }
+    for (const link of links) {
+      let target;
+      try {
+        target = fs.readlinkSync(link);
+      } catch (error) {
+        if (error.code === "ENOENT" || error.code === "ESRCH") continue;
+        throw new Unverifiable("proc");
+      }
+      if (inside(target.replace(/ \(deleted\)$/, ""))) return true;
+    }
+  }
+  return false;
+}
+
+// Checks everything before moving anything; rename(2) on the same filesystem keeps every byte and inode. An absent
+// source counts as already moved, so the operation can be requested again after a partial result.
+function quarantineSnapshots(host, runId) {
+  const q = host.quarantine;
+  const id = host.run(["/usr/bin/id", "-u", q.user]);
+  if (id.status !== 0 || !/^[1-9][0-9]{0,9}$/.test(id.stdout)) throw new Unverifiable("owner_uid");
+  const uid = Number(id.stdout);
+  for (const dir of [q.home, path.join(q.home, ".config")]) {
+    const s = lstatOrNull(dir);
+    if (!s || !s.isDirectory() || s.uid !== uid) return { ok: false, blocked: "home_not_owned_directory" };
+  }
+  const present = [];
+  for (const [index, rel] of q.sources.entries()) {
+    const src = path.join(q.home, rel);
+    const s = lstatOrNull(src);
+    if (!s) continue;
+    if (!s.isDirectory() || s.uid !== uid) return { ok: false, blocked: `source_${index}_not_owned_directory` };
+    let problem;
+    try {
+      problem = treeProblem(src, uid, q.maxEntries);
+    } catch {
+      throw new Unverifiable(`source_${index}_tree`);
+    }
+    if (problem) return { ok: false, blocked: `source_${index}_${problem}` };
+    present.push({ src, dev: s.dev, ino: s.ino });
+  }
+  const absent = q.sources.length - present.length;
+  if (!present.length) return { ok: true, details: `moved=0 absent=${absent}` };
+  if (sourcesInUse(q.proc, present.map((p) => p.src))) return { ok: false, blocked: "source_in_use" };
+
+  const runDir = path.join(q.base, String(runId));
+  if (lstatOrNull(runDir)) return { ok: false, blocked: "quarantine_run_exists" };
+  for (const dir of [path.dirname(q.base), q.base, runDir]) {
+    if (host.run(["/usr/bin/install", "-d", "-o", String(q.rootUid), "-g", String(q.rootGid), "-m", "0700", dir]).status !== 0) {
+      return { ok: false, failed: "quarantine_dir" };
+    }
+    const s = lstatOrNull(dir);
+    if (!s || !s.isDirectory() || s.uid !== q.rootUid || s.gid !== q.rootGid || (s.mode & 0o7777) !== 0o700) {
+      return { ok: false, failed: "quarantine_dir_unsafe" };
+    }
+  }
+  if (present.some((p) => p.dev !== fs.lstatSync(runDir).dev)) return { ok: false, blocked: "cross_device" };
+
+  let moved = 0;
+  for (const p of present) {
+    const dest = path.join(runDir, path.basename(p.src));
+    try {
+      fs.renameSync(p.src, dest);
+    } catch {
+      return { ok: false, failed: `move_after_${moved}` };
+    }
+    const d = lstatOrNull(dest);
+    if (!d || d.dev !== p.dev || d.ino !== p.ino) return { ok: false, failed: `moved_identity_after_${moved}` };
+    moved += 1;
+  }
+  return { ok: true, details: `moved=${moved} absent=${absent} quarantine=${runDir}` };
 }
 
 export const OPERATIONS = Object.freeze({
@@ -77,6 +194,7 @@ export const OPERATIONS = Object.freeze({
   "systemd-daemon-reload": (host) => (host.run(["/usr/bin/systemctl", "daemon-reload"], 60000).status === 0
     ? { ok: true, details: "reloaded" }
     : { ok: false, failed: "daemon-reload" }),
+  "copilot-secret-snapshots-quarantine": quarantineSnapshots,
 });
 
 function audit(host, fields) {
@@ -112,7 +230,7 @@ export function runOperation(operation, runId, overrides = {}) {
     if (!audit(host, { ...entry, phase: "start" })) return { ok: false, line: `ADMIN_BLOCKED ${name} audit_unavailable` };
     let result;
     try {
-      result = OPERATIONS[operation](host);
+      result = OPERATIONS[operation](host, run);
     } catch (error) {
       result = error instanceof Unverifiable ? { ok: false, blocked: `unverifiable_${error.message}` } : { ok: false, failed: "exception" };
     }

@@ -731,6 +731,87 @@ test("VPS admin helper runs only its catalog, refuses unverifiable reads and una
   assert.equal(cli.stdout, "ADMIN_BLOCKED invalid unexpected_arguments\n");
 });
 
+// Real temporary directories and the real install(1); the current user stands for both copilot and root, and a fake
+// /proc tree lists the processes. Nothing outside the fixture is touched.
+function quarantineFixture() {
+  const top = fs.mkdtempSync(path.join(os.tmpdir(), "vps-quarantine-"));
+  const home = path.join(top, "home");
+  for (const dir of [".config/netlify/old-run", ".config/arcadeplatform/window"]) fs.mkdirSync(path.join(home, dir), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config/netlify/config.json"), "SECRET-MARKER-token", { mode: 0o600 });
+  fs.writeFileSync(path.join(home, ".config/arcadeplatform/window/env.json"), "SECRET-MARKER-env", { mode: 0o600 });
+  const proc = path.join(top, "proc");
+  const addProcess = (pid, cwd) => {
+    fs.mkdirSync(path.join(proc, pid, "fd"), { recursive: true });
+    fs.symlinkSync(cwd, path.join(proc, pid, "cwd"));
+    fs.symlinkSync("/", path.join(proc, pid, "root"));
+  };
+  addProcess("1", "/");
+  const base = path.join(top, "var/arcade-admin/quarantine");
+  const admin = fakeAdminHost();
+  const uid = String(process.getuid());
+  const host = {
+    ...admin.host,
+    quarantine: { user: "copilot", home, sources: [".config/netlify", ".config/arcadeplatform"], base, proc,
+      rootUid: process.getuid(), rootGid: process.getgid(), maxEntries: 1000 },
+    run(argv) {
+      if (argv[0] === "/usr/bin/logger") return admin.host.run(argv);
+      admin.calls.push(argv.join(" "));
+      if (argv[0] === "/usr/bin/id") return { status: 0, stdout: uid };
+      if (argv[0] === "/usr/bin/install") return { status: spawnSync(argv[0], argv.slice(1)).status, stdout: "" };
+      return { status: 1, stdout: "" };
+    },
+  };
+  return { top, home, proc, base, host, admin, addProcess };
+}
+
+test("VPS admin quarantine moves copilot's snapshot directories into a root-only directory, fail-closed", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "copilot-secret-snapshots-quarantine";
+  const fx = quarantineFixture();
+  try {
+    const before = fs.statSync(path.join(fx.home, ".config/netlify/config.json")).ino;
+    const inUse = quarantineFixture();
+    inUse.addProcess("42", path.join(inUse.home, ".config/arcadeplatform/window"));
+    assert.equal(runOperation(op, "5", inUse.host).line, `ADMIN_BLOCKED ${op} source_in_use`);
+    assert.equal(fs.existsSync(inUse.base), false, "nothing is created or moved while a source is in use");
+    fs.rmSync(inUse.top, { recursive: true, force: true });
+
+    const linked = quarantineFixture();
+    fs.linkSync(path.join(linked.home, ".config/netlify/config.json"), path.join(linked.home, "copy"));
+    assert.equal(runOperation(op, "6", linked.host).line, `ADMIN_BLOCKED ${op} source_0_hardlinked_file`);
+    fs.rmSync(linked.top, { recursive: true, force: true });
+
+    const symlinked = quarantineFixture();
+    fs.renameSync(path.join(symlinked.home, ".config/netlify"), path.join(symlinked.top, "elsewhere"));
+    fs.symlinkSync(path.join(symlinked.top, "elsewhere"), path.join(symlinked.home, ".config/netlify"));
+    assert.equal(runOperation(op, "7", symlinked.host).line, `ADMIN_BLOCKED ${op} source_0_not_owned_directory`);
+    fs.rmSync(symlinked.top, { recursive: true, force: true });
+
+    const noUid = quarantineFixture();
+    noUid.host.run = (argv) => (argv[0] === "/usr/bin/logger" ? { status: 0, stdout: "" } : { status: 1, stdout: "" });
+    assert.equal(runOperation(op, "8", noUid.host).line, `ADMIN_BLOCKED ${op} unverifiable_owner_uid`);
+    fs.rmSync(noUid.top, { recursive: true, force: true });
+
+    const ok = runOperation(op, "41700000002", fx.host);
+    const runDir = path.join(fx.base, "41700000002");
+    assert.equal(ok.line, `ADMIN_OK ${op} moved=2 absent=0 quarantine=${runDir}`);
+    assert.doesNotMatch(ok.line + fx.admin.audits.join("\n"), /SECRET-MARKER/, "no content reaches the result or the journal");
+    for (const dir of [path.dirname(fx.base), fx.base, runDir]) assert.equal(fs.statSync(dir).mode & 0o7777, 0o700, dir);
+    assert.equal(fs.existsSync(path.join(fx.home, ".config/netlify")), false);
+    assert.equal(fs.existsSync(path.join(fx.home, ".config/arcadeplatform")), false);
+    const kept = path.join(runDir, "netlify/config.json");
+    assert.equal(fs.statSync(kept).ino, before, "rename keeps the inode");
+    assert.equal(fs.readFileSync(kept, "utf8"), "SECRET-MARKER-token", "the file is kept for recovery");
+    assert.equal(fs.readFileSync(path.join(runDir, "arcadeplatform/window/env.json"), "utf8"), "SECRET-MARKER-env");
+
+    assert.equal(runOperation(op, "41700000002", fx.host).line, `ADMIN_OK ${op} moved=0 absent=2`, "a repeated request moves nothing");
+    fs.mkdirSync(path.join(fx.home, ".config/netlify"));
+    assert.equal(runOperation(op, "41700000002", fx.host).line, `ADMIN_BLOCKED ${op} quarantine_run_exists`, "a run directory is never reused");
+  } finally {
+    fs.rmSync(fx.top, { recursive: true, force: true });
+  }
+});
+
 test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
   const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
   const catalog = Object.keys(OPERATIONS);
@@ -740,7 +821,8 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
   const sudoers = fileText("infra/vps/arcade-admin.sudoers");
   assert.deepEqual([...sudoers.matchAll(/\/usr\/local\/sbin\/arcade-vps-admin ([a-z0-9-]+) \*/g)].map((m) => m[1]), catalog, "sudoers grants exactly the catalog");
   assert.match(sudoers, /^arcade-admin ALL=\(root\) NOPASSWD: ARCADE_ADMIN_COMMANDS$/m);
-  assert.doesNotMatch(sudoers, /copilot|ALL$|\/bin\/(ba)?sh|node |systemctl/m);
+  // No rule for or as copilot (the quarantine operation only names copilot's directories).
+  assert.doesNotMatch(sudoers.replaceAll("arcade-vps-admin copilot-secret-snapshots-quarantine *", ""), /copilot|ALL$|\/bin\/(ba)?sh|node |systemctl/m);
   assert.doesNotMatch(fileText("infra/vps/arcade-deploy.sudoers"), /arcade-vps-admin|arcade-admin/);
   assert.doesNotMatch(fileText("infra/vps/vps-admin.mjs"), /shell: *true|execSync|exec\(|"\/bin\/(ba)?sh"|bash -c|eval\(/);
 
