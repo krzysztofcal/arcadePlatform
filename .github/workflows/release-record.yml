@@ -115,7 +115,13 @@ jobs:
           LATEST="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')"
           if [[ -n "$LATEST" ]]; then
             gh release download "$LATEST" --repo "$GITHUB_REPOSITORY" --pattern release-manifest.json --dir .release/previous
-            echo "PREVIOUS_MANIFEST_FILE=.release/previous/release-manifest.json" >> "$GITHUB_ENV"
+            # Provenance of the previous record: the release itself and the Release Record run its manifest names.
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$LATEST" > .release/previous-release.json
+            PREVIOUS_RUN_ID="$(jq -r '.recordedBy.runId // ""' .release/previous/release-manifest.json)"
+            [[ "$PREVIOUS_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || { echo "previous record names no Release Record run"; exit 1; }
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID" > .release/previous-run.json
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/jobs?per_page=100" > .release/previous-jobs.json
+            { echo "PREVIOUS_MANIFEST_FILE=.release/previous/release-manifest.json"; echo "PREVIOUS_RELEASE_FILE=.release/previous-release.json"; echo "PREVIOUS_RUN_FILE=.release/previous-run.json"; echo "PREVIOUS_JOBS_FILE=.release/previous-jobs.json"; } >> "$GITHUB_ENV"
           fi
           case "$COMPONENT" in
             ws)
@@ -199,3 +205,6 @@ jobs:
           EXISTING="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq "[.[] | select(.ref == \"refs/tags/$TAG\")] | length")"
           [[ "$EXISTING" == 0 ]] || { echo "tag $TAG already exists"; exit 1; }
           gh release create "$TAG" release-manifest.json --repo "$GITHUB_REPOSITORY" --target "$TARGET" --title "$TAG" --notes-file release-notes.md
+          # Immutable Releases (repository setting) lock the asset and tag; the next record refuses a mutable one.
+          IMMUTABLE="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .immutable)"
+          [[ "$IMMUTABLE" == true ]] || { echo "release $TAG is not immutable: enable Immutable Releases; the next record will refuse it"; exit 1; }

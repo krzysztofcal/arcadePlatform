@@ -25,7 +25,10 @@
     release manifest; WS run, jobs, receipt and the recent main dispatches with their jobs, or live build-info);
     builds; checks target on `main` and tag absent; keeps manifest and notes as a run artifact.
   - Job `publish` (`needs: record`, only `inputs.publish` with owner/owner; `contents: write`): rechecks target on
-    `main` (compare API) and tag absent, then `gh release create … release-manifest.json`.
+    `main` (compare API) and tag absent, then `gh release create … release-manifest.json`, and fails unless the new
+    release is immutable.
+  - Previous record (`previousRecord()`): the release object and the run its manifest names are collected and checked
+    before the manifest is reused.
 - `docs/release-records.md`, `agents.md`.
 
 ## Tests (existing files)
@@ -43,4 +46,6 @@
 - `contents: write` exists only in the `publish` job, which only the owner's own `publish=true` dispatch runs; the
   release agent can prepare but never publish.
 - A WS entry is the last confirmed GitHub deployment, not a VPS runtime read; documented and stated in the notes.
-- The previous manifest is trusted as a release asset of this repository; a malformed one stops the record.
+- The previous manifest is used only after its provenance check (immutable release by `github-actions[bot]`, named
+  owner `Release Record` run with a successful `publish` job, tag = run number); a release made by anyone else blocks
+  the next record until the owner removes it (fail closed).

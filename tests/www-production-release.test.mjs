@@ -173,7 +173,7 @@ test('release tool has no unlock, build or rollback path', () => {
 
 // #1159 Addendum B: GitHub Release manifest. A record never deploys and carries unchanged components forward.
 const manifestModule = await import('../scripts/release-manifest.mjs');
-const { buildManifest, wwwEvidence, wsEvidence, androidEvidence, releaseNotes } = manifestModule;
+const { buildManifest, wwwEvidence, wsEvidence, androidEvidence, releaseNotes, previousRecord, RECORD_WORKFLOW } = manifestModule;
 const buildInfoJs = (over = {}) => `window.BUILD_INFO = ${JSON.stringify({ commitHash: sha, context: 'production', isProduction: true, branch: 'main', deployId: id, buildTime: '2026-11-03T00:00:00Z', ...over }, null, 2)};\n`;
 const wsRun = (over = {}) => ({ id: 41700000001, path: '.github/workflows/ws-server-deploy.yml', event: 'workflow_dispatch', head_branch: 'main', head_sha: ws, status: 'completed', conclusion: 'success', ...over });
 const wsJobs = (conclusion = 'success') => ({ jobs: [{ name: 'impact', conclusion: 'success' }, { name: 'deploy', conclusion }] });
@@ -241,6 +241,46 @@ test('release manifest: evidence must prove exactly the running release', () => 
   }
 });
 
+test('release manifest: the previous record is trusted only as the owner\'s own immutable Release Record publication', () => {
+  const manifest = { schema: 1, tag: 'release-20261104-7', recordedBy: { actor: 'krzysztofcal', triggeringActor: 'krzysztofcal', runId: '41800000007' }, components: {} };
+  const bot = { login: 'github-actions[bot]' };
+  const release = (over = {}) => ({ tag_name: 'release-20261104-7', draft: false, prerelease: false, immutable: true, author: bot, assets: [{ name: 'release-manifest.json', uploader: bot }], ...over });
+  const run = (over = {}) => ({ id: 41800000007, run_number: 7, path: RECORD_WORKFLOW, event: 'workflow_dispatch', head_branch: 'main', actor: { login: 'krzysztofcal' }, triggering_actor: { login: 'krzysztofcal' }, ...over });
+  const jobs = (conclusion = 'success') => ({ jobs: [{ name: 'record', conclusion: 'success' }, { name: 'publish', conclusion }] });
+  assert.equal(previousRecord(manifest, release(), run(), jobs(), 'krzysztofcal'), manifest);
+  assert.equal(previousRecord(null, null, null, null, 'krzysztofcal'), null, 'first record');
+
+  for (const [label, rel] of [
+    ['published by the code agent', release({ author: { login: 'arcade-code-agent[bot]' } })],
+    ['asset replaced by someone else', release({ assets: [{ name: 'release-manifest.json', uploader: { login: 'arcade-code-agent[bot]' } }] })],
+    ['mutable release', release({ immutable: false })],
+    ['extra asset', release({ assets: [...release().assets, { name: 'app.apk', uploader: bot }] })],
+    ['manifest of another tag', release({ tag_name: 'release-20261104-8' })],
+    ['release missing', null],
+  ]) assert.throws(() => previousRecord(manifest, rel, run(), jobs(), 'krzysztofcal'), /previous_release_untrusted/, label);
+  for (const [label, r, j] of [
+    ['run of another workflow', run({ path: '.github/workflows/ci.yml' }), jobs()],
+    ['agent dispatch', run({ actor: { login: 'release-agent[bot]' }, triggering_actor: { login: 'release-agent[bot]' } }), jobs()],
+    ['agent re-run of an owner run', run({ triggering_actor: { login: 'release-agent[bot]' } }), jobs()],
+    ['other branch', run({ head_branch: 'feature' }), jobs()],
+    ['tag not made by this run', run({ run_number: 8 }), jobs()],
+    ['manifest names another run', run({ id: 41800000008 }), jobs()],
+    ['dry run only', run(), jobs('skipped')],
+    ['run missing', null, jobs()],
+  ]) assert.throws(() => previousRecord(manifest, release(), r, j, 'krzysztofcal'), /previous_record_not_owner_published/, label);
+
+  // The CLI applies the check before building: a previous record published by the agent blocks the next one.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-record-'));
+  const file = (name, value) => { fs.writeFileSync(path.join(dir, name), JSON.stringify(value)); return path.join(dir, name); };
+  const env = { PATH: process.env.PATH, GITHUB_RUN_ID: '41800000009', GITHUB_RUN_NUMBER: '9', GITHUB_REPOSITORY_OWNER: 'krzysztofcal', GITHUB_ACTOR: 'krzysztofcal', GITHUB_TRIGGERING_ACTOR: 'krzysztofcal',
+    RELEASE_COMPONENT: 'android', ANDROID_SHA: sha, ANDROID_VERSION_NAME: '1.0.0', ANDROID_VERSION_CODE: '3', ANDROID_AAB_SHA256: 'e'.repeat(64), ANDROID_TRACK: 'internal',
+    PREVIOUS_MANIFEST_FILE: file('m.json', manifest), PREVIOUS_RUN_FILE: file('r.json', run()), PREVIOUS_JOBS_FILE: file('j.json', jobs()) };
+  const cli = (rel) => spawnSync(process.execPath, [new URL('../scripts/release-manifest.mjs', import.meta.url).pathname], { cwd: dir, env: { ...env, PREVIOUS_RELEASE_FILE: file('rel.json', rel) }, encoding: 'utf8' }).stdout;
+  assert.match(cli(release({ author: { login: 'arcade-code-agent[bot]' } })), /^RELEASE_RECORD_BLOCKED previous_release_untrusted\n$/);
+  assert.match(cli(release()), /^RELEASE_RECORD_READY release-\d{8}-9 android a{40}\n$/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('release record workflow publishes one manifest asset and cannot reach any deployment', () => {
   const workflow = fs.readFileSync(new URL('../.github/workflows/release-record.yml', import.meta.url), 'utf8');
   assert.match(workflow, /^on:\n  workflow_dispatch:\n/m);
@@ -271,6 +311,9 @@ test('release record workflow publishes one manifest asset and cannot reach any 
   assert.match(publish, /compare\/\$TARGET\.\.\.main/);
   assert.match(record, /\[\[ "\$CONFIRMATION" == "RECORD \$COMPONENT RELEASE" \]\]/);
   assert.match(record, /ws-server-deploy\.yml\/runs\?branch=main&event=workflow_dispatch/);
+  assert.match(record, /releases\/tags\/\$LATEST" > \.release\/previous-release\.json/, 'the previous release is checked, not only its asset');
+  assert.match(record, /actions\/runs\/\$PREVIOUS_RUN_ID\/jobs/, 'the run the previous manifest names is checked');
+  assert.match(publish, /--jq \.immutable\)"\n.*\[\[ "\$IMMUTABLE" == true \]\]/, 'a published record must be immutable');
   for (const block of workflow.split(/\n      - name: /).slice(1)) {
     const script = block.split('run: |')[1] || '';
     assert.doesNotMatch(script, /\$\{\{/, 'inputs reach scripts only through env');

@@ -34,6 +34,12 @@ not a deployment engine.
   default, tag target must be on `main`, an existing tag is never reused, records serialized.
 - **R-OWNER.** The dry run is read-only and open to the owner and the release agent. Publishing (tag and release,
   the only `contents: write`) and the Android attestation are the owner's own dispatch only.
+- **R-PROVENANCE.** Records are published as GitHub Immutable Releases (repository setting; asset and tag locked).
+  The release is created by `GITHUB_TOKEN`, so its author is `github-actions[bot]`; owner publication is proven by the
+  run instead: the previous record is used only if it is immutable, created and uploaded by `github-actions[bot]`
+  with the manifest as its only asset, and the manifest's `recordedBy.runId` is a `Release Record` dispatch on `main`
+  by the owner (actor and triggering actor) whose `publish` job succeeded and whose run number the tag carries.
+  Anything else, including a release made by the code agent, stops the record.
 
 ## Decision gate (Addendum B)
 

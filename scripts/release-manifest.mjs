@@ -58,6 +58,28 @@ export function androidEvidence({ sha, versionName, versionCode, aabSha256, trac
   return { sha, versionName, versionCode: Number(versionCode), aabSha256, track, evidence: 'attested', attestedBy };
 }
 
+// The previous record is trusted only as this workflow's own owner publication: an immutable release (assets and tag
+// locked by GitHub) created by the publish job's GITHUB_TOKEN (github-actions[bot]) with the manifest as its only
+// asset, in an owner-dispatched Release Record run on main that the manifest names and whose number the tag carries.
+// A release created or changed by anyone else, including the code agent, stops the record.
+export const RECORD_WORKFLOW = '.github/workflows/release-record.yml';
+const ACTIONS_BOT = 'github-actions[bot]';
+export function previousRecord(manifest, release, run, jobs, owner) {
+  if (manifest == null && release == null) return null;
+  const assets = release?.assets || [];
+  if (!manifest || !release || release.tag_name !== manifest.tag || release.draft !== false || release.prerelease !== false
+    || release.immutable !== true || release.author?.login !== ACTIONS_BOT || assets.length !== 1
+    || assets[0].name !== 'release-manifest.json' || assets[0].uploader?.login !== ACTIONS_BOT) fail('previous_release_untrusted');
+  const by = manifest.recordedBy || {};
+  const publish = (jobs?.jobs || []).filter((job) => job.name === 'publish');
+  if (!run || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(owner)) || String(run.id) !== String(by.runId) || run.path !== RECORD_WORKFLOW || run.event !== 'workflow_dispatch' || run.head_branch !== 'main'
+    || run.actor?.login !== owner || run.triggering_actor?.login !== owner || by.actor !== owner || by.triggeringActor !== owner
+    || String(manifest.tag).split('-')[2] !== String(run.run_number) || publish.length !== 1 || publish[0].conclusion !== 'success') {
+    fail('previous_record_not_owner_published');
+  }
+  return manifest;
+}
+
 export function buildManifest({ previous, component, evidence, tag, recordedAt, recordedBy }) {
   if (!COMPONENTS.includes(component)) fail('component_invalid');
   if (!TAG.test(String(tag))) fail('tag_invalid');
@@ -105,7 +127,9 @@ if (isMain) {
       evidence = androidEvidence({ sha: env.ANDROID_SHA, versionName: env.ANDROID_VERSION_NAME, versionCode: env.ANDROID_VERSION_CODE,
         aabSha256: env.ANDROID_AAB_SHA256, track: env.ANDROID_TRACK, attestedBy: env.GITHUB_TRIGGERING_ACTOR, owner: env.GITHUB_REPOSITORY_OWNER });
     }
-    const manifest = buildManifest({ previous: read(env.PREVIOUS_MANIFEST_FILE), component, evidence, tag,
+    const previous = previousRecord(read(env.PREVIOUS_MANIFEST_FILE), read(env.PREVIOUS_RELEASE_FILE), read(env.PREVIOUS_RUN_FILE),
+      read(env.PREVIOUS_JOBS_FILE), env.GITHUB_REPOSITORY_OWNER);
+    const manifest = buildManifest({ previous, component, evidence, tag,
       recordedAt: new Date().toISOString(), recordedBy: { actor: env.GITHUB_ACTOR, triggeringActor: env.GITHUB_TRIGGERING_ACTOR, runId: env.GITHUB_RUN_ID } });
     fs.writeFileSync('release-manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
     fs.writeFileSync('release-notes.md', releaseNotes(manifest));

@@ -28,6 +28,17 @@ The release has one asset, `release-manifest.json` (schema 1): `tag`, `recordedA
 `previous` and `components.www|ws|android`, each `null` until first recorded, otherwise its commit, evidence
 references and `releasedIn` (the record where it last changed).
 
+## Provenance of a record
+
+Enable **Immutable Releases** (Settings → General → Releases) before the first publication: GitHub then locks a
+published record's asset and tag. The publish job fails if the new release is not immutable. The release is created
+with `GITHUB_TOKEN`, so GitHub shows `github-actions[bot]` as its author; the owner's publication is proven by the
+run. Before reusing the previous record, `Release Record` checks that it is immutable, created and uploaded by
+`github-actions[bot]` with only `release-manifest.json`, and that the run named in `recordedBy.runId` is a
+`Release Record` dispatch on `main` by the owner (actor and triggering actor) with a successful `publish` job and the
+run number carried by the tag. A release created by anyone else (including the code agent, which can write releases)
+stops the next record until the owner deletes it.
+
 ## What a WS entry does and does not prove
 
 `Release Record` does not read the VPS (no SSH or secret). A WS entry therefore states the **last confirmed
