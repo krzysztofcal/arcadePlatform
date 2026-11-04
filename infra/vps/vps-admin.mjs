@@ -207,22 +207,36 @@ function quarantineSnapshots(host, runId) {
       ...files.map((f) => `file ${f.index} ${f.rel} -> ${f.dest} dev=${f.stat.dev} ino=${f.stat.ino} size=${f.stat.size}`)];
     if (!planned.every(record)) return stop("manifest_write", "none");
     fsyncFd(run);
-    for (const f of files) {
-      if (!sameFile(f.stat, lstatOrNull(at(f.parent, f.name)))) return stop(`file_${f.index}_changed`, moved ? "partial" : "none");
-      if (!record(`moving ${f.index}`)) return stop("manifest_write", moved ? "partial" : "none");
-      try {
-        host.rename(at(f.parent, f.name), at(run, f.dest));
-      } catch {
-        return stop(`file_${f.index}_move`, "uncertain");
+    // From the first move on, every error is reported with the custody state, never as a bare exception.
+    try {
+      for (const f of files) {
+        if (!sameFile(f.stat, lstatOrNull(at(f.parent, f.name)))) return stop(`file_${f.index}_changed`, moved ? "partial" : "none");
+        if (!record(`moving ${f.index}`)) return stop("manifest_write", moved ? "partial" : "none");
+        try {
+          host.rename(at(f.parent, f.name), at(run, f.dest));
+        } catch {
+          return stop(`file_${f.index}_move`, "uncertain");
+        }
+        fsyncFd(f.parent);
+        fsyncFd(run);
+        // The file's own data is made durable too, through the pinned run directory.
+        const fd = fs.openSync(at(run, f.dest), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+        let same;
+        try {
+          same = sameFile(f.stat, fs.fstatSync(fd));
+          fs.fsyncSync(fd);
+        } finally {
+          fs.closeSync(fd);
+        }
+        if (!same || lstatOrNull(at(f.parent, f.name))) return stop(`file_${f.index}_identity`, "uncertain");
+        if (!record(`moved ${f.index}`)) return stop("manifest_write", "uncertain");
+        moved += 1;
       }
-      fsyncFd(f.parent);
-      fsyncFd(run);
-      if (!sameFile(f.stat, lstatOrNull(at(run, f.dest))) || lstatOrNull(at(f.parent, f.name))) return stop(`file_${f.index}_identity`, "uncertain");
-      if (!record(`moved ${f.index}`)) return stop("manifest_write", "uncertain");
-      moved += 1;
+      // A reference taken between the check and the move would keep access: custody is then not complete.
+      if (inUse(q.proc, files.map((f) => f.stat))) return stop("open_after_move", "moved_but_open");
+    } catch {
+      return stop("error_during_move", "uncertain");
     }
-    // A reference taken between the check and the move would keep access: custody is then not complete.
-    if (inUse(q.proc, files.map((f) => f.stat))) return stop("open_after_move", "moved_but_open");
     if (!record(`complete ${moved}`)) return stop("manifest_write", "uncertain");
     return { ok: true, details: `custody=complete moved=${moved} quarantine=${runDir}` };
   } finally {

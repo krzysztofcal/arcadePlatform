@@ -851,6 +851,14 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
     failing.host.rename = () => { throw new Error("EIO"); };
     assert.match(runOperation(op, "12", failing.host).line, new RegExp(`^ADMIN_FAILED ${op} file_0_move custody=uncertain moved=0/2 `));
     assert.match(fs.readFileSync(path.join(failing.base, "12", "MANIFEST"), "utf8"), /moving 0\n$/);
+
+    // An error after a move (here the final /proc scan) still reports the custody state, never a bare exception.
+    const late = fixture();
+    late.host.rename = (from, to) => {
+      fs.renameSync(from, to);
+      if (to.endsWith("1-env.json")) { fs.rmSync(path.join(late.proc, "1", "maps")); fs.mkdirSync(path.join(late.proc, "1", "maps")); }
+    };
+    assert.match(runOperation(op, "13", late.host).line, new RegExp(`^ADMIN_FAILED ${op} error_during_move custody=uncertain moved=2/2 `));
     assert.match(changed.admin.audits[1], /result=failed/);
   } finally {
     for (const fx of fixtures) fs.rmSync(fx.top, { recursive: true, force: true });
