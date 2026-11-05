@@ -50,3 +50,14 @@ Global advisory lock (also held by prune writers) → re-check policy enabled, c
 - Irreversible loss of >12-month recovery ability (intended; owner-accepted via spec).
 - The D1 choice changes replay semantics for very old client keys.
 - The ledger exists since 2025-12-18 and archives since 2026-08, so likely no batch anywhere is older than 12 months yet; the first Production candidates are expected from about 2026-12. Diagnostic counts confirm this before activation. The Stage canary therefore needs a test cutoff. **Open**: allow `p_cutoff_override` for Stage only, never Production.
+
+## Implementation notes (2026-11-05, implementation PR)
+
+These differ from the sections above; this section takes precedence.
+
+- **One new script instead of a policy inside the automation monoliths.** `scripts/ops/chips-ledger-settled-retention.mjs --target stage|production --mode diagnostic|canary|automatic` uses the shared profile, the advisory lock (same key as the existing cycles) and `resolveStorageTarget`. It sends DELETE requests only, via `deletePrivateObjectIfExists` in `chips-ledger-archive-store.mjs`. The monoliths change only for R-A2 (`latestCompleted` skips `objects_expired_at`) and, in Production, for R-B (the escrow candidate SQL skips expired batches). The new column is always read through `to_jsonb(...)`, so code merged before the migration keeps working.
+- **D1 is done per batch.** `public.chips_expire_archive_batch` (owner `chips_ledger_archive_pruner`) sets `objects_expired_at` and deletes that batch's archived registry rows in one call, reusing the existing pruner-only registry DELETE gate. FR-004 (replay rows block expiry) is superseded by D1.
+- **R-B at DB level.** The new trigger `chips_guard_archive_objects_expiry` refuses an account-retirement receipt on an expired batch. A batch with pending escrow retirement is never eligible.
+- **New eligibility rule.** A closed-human batch is eligible only after WS deleted its table, which happens only after the lifecycle completion marker; until then the archive is still needed to complete the lifecycle.
+- **Production ordering.** The Production equivalent requires `20261022091126` (the last #1117 equivalent) to be applied first, because the #1117 equivalents check the exact earlier history.
+- **Workflows (T030).** Wiring the new script into the Production and Stage workflows is still owner-pushed and comes before the Stage rollout (T050).
