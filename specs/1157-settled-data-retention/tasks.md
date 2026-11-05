@@ -6,6 +6,7 @@
 
 - [ ] T001 Owner decides D1–D6 in spec.md; record them in research.md.
 - [ ] T002 Owner accepts the Stage-only cutoff override (plan "Risks") or an alternative Stage proof.
+- [ ] T003 Read-only code audit (no DB, Storage, VPS or workflow access): list every reader of `chips_ledger_archive_batches` rows and of `chips-ledger-archive` objects in `scripts/ops/**`, `netlify/functions/**`, `supabase/**` (functions/views) and `.github/workflows/**`. For each one record: file:function, which batches it can reach (latest/active only or any `committed`), whether it downloads or HEADs objects, and what happens when objects are gone (fail closed, no-op, or wrong success). Result: `research.md` table plus a PASS/STOP verdict. STOP when any path can reach a batch with `objects_expired_at` set and would then fail open, retry-loop with Storage GETs (egress), or block normal retention. Fixes become T010/T021 requirements before implementation.
 
 ## Phase 1 — Schema (Stage auto-apply is an intended effect)
 
