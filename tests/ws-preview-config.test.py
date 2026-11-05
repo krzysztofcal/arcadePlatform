@@ -486,18 +486,28 @@ class PreviewIsolation(unittest.TestCase):
             def clean_accounts(self):
                 pass
 
+            def old_runtime(self):
+                return None
+
             def run(self, argv, expected=(0,)):
                 outer.calls.append(argv)
                 if 'ActiveState' in argv:
-                    return 'ActiveState=' + outer.active + '\nMainPID=' + ('0' if outer.active == 'inactive' else '123')
+                    return 'ActiveState=' + outer.active + '\nMainPID=' + ('0' if outer.active == 'inactive' else '123') + '\nLoadState=loaded'
                 if 'SupplementaryGroups' in argv:
-                    return 'User=arcade-preview\nGroup=arcade-preview\nSupplementaryGroups='
+                    return '\n'.join(k + '=' + v for k, v in {
+                        'User':'arcade-preview', 'Group':'arcade-preview', 'SupplementaryGroups':'',
+                        'NoNewPrivileges':'yes', 'ProtectSystem':'strict', 'ProtectHome':'yes',
+                        'PrivateTmp':'yes', 'ReadWritePaths':'', 'AmbientCapabilities':'', 'DynamicUser':'no',
+                        'CapabilityBoundingSet':'', 'WorkingDirectory':str(self.base / 'ws-server')}.items())
+                if 'ExecStartEx' in argv:
+                    return 'ExecStartEx={ path=/usr/bin/node ; argv[]=/usr/bin/node server.mjs ; flags= ; pid=0 }'
+                if 'DropInPaths' in argv:
+                    return '/etc/systemd/system/ws-server-preview.service.d/99-preview-isolation.conf' if any(p.exists() for p in self.targets) else ''
                 if '-T' in argv:
                     return '\n'.join(k + ' ' + v for k, v in {
-                        'authorizedkeysfile': str(self.auth), 'authorizedkeyscommand': 'none',
-                        'pubkeyacceptedalgorithms': 'ssh-ed25519', 'authenticationmethods': 'publickey',
-                        'passwordauthentication': 'no', 'kbdinteractiveauthentication': 'no',
-                        'disableforwarding': 'yes', 'permittty': 'no', 'permituserrc': 'no'}.items())
+                        'authorizedkeysfile':'.ssh/authorized_keys .ssh/authorized_keys2', 'authorizedkeyscommand':'none',
+                        'trustedusercakeys':'none', 'kbdinteractiveauthentication':'no', 'hostbasedauthentication':'no',
+                        'strictmodes':'yes', 'pubkeyauthentication':'yes'}.items())
                 if '-G' in argv:
                     return str(outer.accounts[argv[-1]].pw_gid)
                 if 'EnvironmentFiles' in argv:
@@ -505,7 +515,7 @@ class PreviewIsolation(unittest.TestCase):
                 if '-U' in argv:
                     if argv[-1] == isolation.RUNTIME:
                         return 'User arcade-preview is not allowed to run sudo on fixture.'
-                    return 'User arcade-preview-deploy may run the following commands on fixture:\n    (root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight \"\", /usr/bin/systemctl restart ws-server-preview.service'
+                    return 'Matching Defaults entries for arcade-preview-deploy on fixture:\n    env_reset, use_pty\nUser arcade-preview-deploy may run the following commands on fixture:\n    (root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight \"\", /usr/bin/systemctl restart ws-server-preview.service'
                 if '--config-only' in argv:
                     return 'PASS CONFIG ONLY Redis V3 stage; live verification required'
                 return ''
@@ -519,8 +529,10 @@ class PreviewIsolation(unittest.TestCase):
         wire = b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + bytes(32)
         self.task.key.write_bytes(b'ssh-ed25519 ' + base64.b64encode(wire))
         self.task.key.chmod(0o644)
-        self.task.auth = root / 'authorized-key'
-        self.task.targets = {root / 'isolation.conf': isolation.DROPIN, root / 'sudo': isolation.SUDO, root / 'ssh': isolation.SSH}
+        self.task.home = root / 'deploy-home'
+        self.task.auth = self.task.home / '.ssh/authorized_keys'
+        (root / 'sudoers.d').mkdir(mode=0o755)
+        self.task.targets = {root / 'isolation.conf': isolation.DROPIN, root / 'sudoers.d/preview': isolation.SUDO}
         (self.task.base / '.env.preview').write_bytes(BASE)
         (self.task.base / '.env.preview').chmod(0o600)
         for name in isolation.SYNC:
@@ -538,6 +550,20 @@ class PreviewIsolation(unittest.TestCase):
         mock.start()
         self.addCleanup(mock.stop)
 
+    def test_unprivileged_forced_session_supports_relative_scp_staging(self):
+        import subprocess
+        staging = Path(self.tmp.name) / 'session-staging'
+        staging.mkdir(mode=0o700)
+        command = isolation.session_command().replace('/var/lib/arcade-preview-deploy/staging', str(staging))
+        result = subprocess.run(['/bin/bash', '--noprofile', '--norc', '-c', command],
+                                env={'PATH':'/usr/bin:/bin', 'SSH_ORIGINAL_COMMAND':"printf archive > relative.tar.gz"},
+                                capture_output=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual((staging / 'relative.tar.gz').read_text(), 'archive')
+        key = isolation.public_key(self.task.key.read_bytes())
+        self.assertIn(b'command="cd /var/lib/arcade-preview-deploy/staging', key)
+        self.assertIn(b'\\"$SSH_ORIGINAL_COMMAND\\"', key)
+
     def test_public_key_and_active_service_block_before_mutation(self):
         self.task.key.write_bytes(b'')
         with self.assertRaisesRegex(isolation.secure.Refused, 'owner_public_key_missing'):
@@ -551,7 +577,8 @@ class PreviewIsolation(unittest.TestCase):
     def test_provision_and_rollback_preserve_original_inodes_and_production(self):
         before = {name: (self.task.base / name).stat().st_ino for name in isolation.ROOTS}
         self.assertEqual(self.task.provision('123'), 'provisioned_runtime_not_started')
-        self.assertTrue(self.task.auth.read_bytes().startswith(b'restrict ssh-ed25519 '))
+        self.assertTrue(self.task.auth.read_bytes().startswith(b'restrict,command='))
+        self.assertEqual((self.task.base / 'ws-server/fixture.mjs').stat().st_mode & 0o777, 0o644)
         for name in isolation.ROOTS:
             self.assertEqual((self.task.backup / ('before-' + name)).stat().st_ino, before[name])
             self.assertNotEqual((self.task.base / name).stat().st_ino, before[name])
@@ -571,7 +598,7 @@ class PreviewIsolation(unittest.TestCase):
         self.assertEqual((self.task.base / 'ws-server').stat().st_ino, before)
         self.assertEqual(self.production.read_bytes(), b'unchanged')
         self.assertFalse(self.task.auth.exists())
-        self.assertEqual(self.task.rollback(), 'rolled_back_not_started')
+        self.assertFalse(self.task.backup.exists())
 
     def test_interruption_after_backup_rename_can_be_rolled_back(self):
         from unittest.mock import patch
@@ -603,14 +630,65 @@ class PreviewIsolation(unittest.TestCase):
         with self.assertRaisesRegex(isolation.secure.Refused, 'preview_must_be_stopped'):
             self.task.rollback()
 
+    def test_optional_foreign_environment_is_not_ignored(self):
+        run = self.task.run
+        def with_foreign_optional(argv, **kwargs):
+            if 'EnvironmentFiles' in argv:
+                return str(self.task.base / '.env.preview') + ' (ignore_errors=no) /etc/foreign.env (ignore_errors=yes)'
+            return run(argv, **kwargs)
+        self.task.run = with_foreign_optional
+        with self.assertRaisesRegex(isolation.secure.Refused, 'unexpected_environment_files'):
+            self.task.provision('127')
+        self.assertFalse(self.task.backup.exists())
+
+    def test_private_or_runtime_owned_state_is_not_made_world_readable(self):
+        private = self.task.base / 'ws-server/private-fixture'
+        private.write_bytes(b'fixture confidential')
+        private.chmod(0o600)
+        with self.assertRaisesRegex(isolation.secure.Refused, 'private_file_requires_inventory'):
+            self.task.provision('128')
+        self.assertEqual(private.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(self.task.backup.exists())
+        private.unlink()
+        self.task.old_runtime = lambda: (os.getuid(), {os.getgid()})
+        with self.assertRaisesRegex(isolation.secure.Refused, 'runtime_writable_(file|directory)_requires_inventory'):
+            self.task.preflight()
+        self.assertFalse(self.task.backup.exists())
+
+    def test_post_install_invalid_sudo_is_removed_and_rollback_stays_available(self):
+        run = self.task.run
+        sudo = next(p for p in self.task.targets if p.parent.name == 'sudoers.d')
+        def fail_only_installed(argv, **kwargs):
+            if argv == ['/usr/sbin/visudo', '-c'] and sudo.exists():
+                raise isolation.secure.Refused('command_failed')
+            return run(argv, **kwargs)
+        self.task.run = fail_only_installed
+        with self.assertRaises(isolation.secure.Refused):
+            self.task.provision('129')
+        self.assertFalse(sudo.exists())
+        self.assertFalse(self.task.auth.exists())
+        self.assertEqual(self.task.rollback(), 'rolled_back_not_started')
+        self.assertEqual(self.production.read_bytes(), b'unchanged')
+
+    def test_effective_hardening_override_blocks_before_key_is_enabled(self):
+        run = self.task.run
+        def weakened_unit(argv, **kwargs):
+            value = run(argv, **kwargs)
+            return value.replace('NoNewPrivileges=yes', 'NoNewPrivileges=no')
+        self.task.run = weakened_unit
+        with self.assertRaisesRegex(isolation.secure.Refused, 'effective_unit_mismatch'):
+            self.task.provision('130')
+        self.assertFalse(self.task.auth.exists())
+        self.assertEqual(self.task.rollback(), 'rolled_back_not_started')
+
     def test_local_financial_state_and_preexisting_config_block(self):
         env = self.task.base / '.env.preview'
         env.write_bytes(BASE + b'WS_PERSISTED_STATE_FILE=/tmp/local-state.json\n')
         with self.assertRaisesRegex(isolation.secure.Refused, 'local_financial_state_requires_separate_migration'):
             self.task.preflight()
         env.write_bytes(BASE)
-        self.task.auth.write_bytes(b'existing key')
-        with self.assertRaisesRegex(isolation.secure.Refused, 'target_already_exists'):
+        self.task.home.mkdir(mode=0o755)
+        with self.assertRaisesRegex(isolation.secure.Refused, 'home_already_exists'):
             self.task.preflight()
         self.assertFalse(self.task.backup.exists())
 

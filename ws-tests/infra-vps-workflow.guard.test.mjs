@@ -965,7 +965,7 @@ test("Preview isolation catalog uses fixed actions and unprivileged fundamental 
     const originalRun = fx.host.run;
     fx.host.run = (argv, ...args) => {
       if (argv[0] === "/usr/bin/python3") {
-        assert.deepEqual(argv, ["/usr/bin/python3", "-I", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, "123"]);
+        assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, "123"]);
         return { status: 1, stdout: "PREVIEW_BLOCKED owner_public_key_missing_or_invalid" };
       }
       return originalRun(argv, ...args);

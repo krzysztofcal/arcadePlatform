@@ -14,6 +14,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 
 _spec = importlib.util.spec_from_file_location('preview_secure', Path(__file__).with_name('prepare-ws-preview-v3.py'))
 secure = importlib.util.module_from_spec(_spec)
@@ -27,41 +28,50 @@ DROPIN = (Path(__file__).parent / 'ws-server-preview.service.d/99-preview-isolat
 SUDO = b'''# Preview-only deployment identity, not the copilot/Production command alias.
 arcade-preview-deploy ALL=(root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight "", /usr/bin/systemctl restart ws-server-preview.service
 '''
-SSH = b'''Match User arcade-preview-deploy
-    AuthorizedKeysFile /etc/ssh/arcade-preview-authorized-key
-    AuthorizedKeysCommand none
-    PubkeyAcceptedAlgorithms ssh-ed25519
-    AuthenticationMethods publickey
-    PasswordAuthentication no
-    KbdInteractiveAuthentication no
-    DisableForwarding yes
-    PermitTTY no
-    PermitUserRC no
-Match all
-'''
 
 
 def public_key(data):
     # Empty until OWNER supplies a dedicated PUBLIC key in a separately reviewed commit.
-    parts = data.decode('ascii').strip().split()
-    require(len(parts) == 2 and parts[0] == 'ssh-ed25519', 'owner_public_key_missing_or_invalid')
+    try:
+        lines = data.decode('ascii').strip().splitlines()
+        require(len(lines) == 1, 'owner_public_key_missing_or_invalid')
+        parts = lines[0].split()
+    except UnicodeDecodeError:
+        raise secure.Refused('owner_public_key_missing_or_invalid') from None
+    require(len(parts) >= 2 and parts[0] == 'ssh-ed25519', 'owner_public_key_missing_or_invalid')
+    parts = parts[:2]  # ignore the optional public comment; never copy it into authorization
     try:
         wire = base64.b64decode(parts[1], validate=True)
     except ValueError:
         raise secure.Refused('owner_public_key_missing_or_invalid') from None
     require(len(wire) == 51 and wire[:19] == b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20', 'invalid_ed25519_key')
-    return ('restrict ' + ' '.join(parts) + '\n').encode()
+    # The pinned scp-action uploads its outer archive to a relative remote path. Keep the home and
+    # authorization root-owned, but start every unprivileged SSH command in its private work directory.
+    command = session_command()
+    quoted = command.replace('\\', '\\\\').replace('"', '\\"')
+    return ('restrict,command="' + quoted + '" ' + ' '.join(parts) + '\n').encode()
 
 
-def copy_tree(source, destination, uid, gid, relative='.', budget=None):
-    """Read through pinned descriptors; create only NEW files under a root-private staging directory.
+def session_command():
+    return 'cd /var/lib/arcade-preview-deploy/staging && exec /bin/bash --noprofile --norc -c "$SSH_ORIGINAL_COMMAND"'
 
-    Never chmod/chown a source inode. Never follow symlinks, devices, sockets or hardlinks.
-    Relative links may refer only to one of the four copied Preview roots.
+
+def copy_tree(source, destination, uid, gid, relative='.', budget=None, writers=None):
+    """destination=None inventories only. Copy only new inodes, never follow source links.
+
+    Do not widen permissions or silently convert runtime-writable state into executable code.
     """
     budget = budget if budget is not None else [0, 0]
     require(len(Path(relative).parts) < 80, 'tree_too_deep')
-    destination.mkdir(mode=0o700)
+    directory = os.fstat(source)
+    require(directory.st_mode & 0o005 == 0o005, 'runtime_cannot_read_source_directory')
+    if writers:
+        runtime_uid, runtime_groups = writers
+        require(not (directory.st_uid == runtime_uid and directory.st_mode & 0o200 or
+                     directory.st_gid in runtime_groups and directory.st_mode & 0o020 or directory.st_mode & 0o002),
+                'runtime_writable_directory_requires_inventory')
+    if destination is not None:
+        destination.mkdir(mode=0o700)
     for name in os.listdir(source):
         if relative == 'netlify' and name != 'functions':
             continue
@@ -70,47 +80,60 @@ def copy_tree(source, destination, uid, gid, relative='.', budget=None):
         budget[0] += 1
         require(budget[0] <= 250000, 'tree_too_large')
         entry = os.stat(name, dir_fd=source, follow_symlinks=False)
-        target = destination / name
+        target = destination / name if destination is not None else None
         rel = posixpath.normpath(posixpath.join(relative, name))
         if stat.S_ISLNK(entry.st_mode):
             link = os.readlink(name, dir_fd=source)
             resolved = posixpath.normpath(posixpath.join(posixpath.dirname(rel), link))
             require(not posixpath.isabs(link) and resolved.split('/')[0] in ROOTS
                     and not resolved.startswith('../'), 'symlink_outside_preview')
-            target.symlink_to(link)
-            os.chown(target, uid, gid, follow_symlinks=False)
+            if target is not None:
+                target.symlink_to(link)
+                os.chown(target, uid, gid, follow_symlinks=False)
         elif stat.S_ISDIR(entry.st_mode):
             fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=source)
             try:
                 require(os.fstat(fd).st_dev == entry.st_dev and os.fstat(fd).st_ino == entry.st_ino, 'source_changed')
-                copy_tree(fd, target, uid, gid, rel, budget)
+                copy_tree(fd, target, uid, gid, rel, budget, writers)
             finally:
                 os.close(fd)
         else:
             require(stat.S_ISREG(entry.st_mode) and entry.st_nlink == 1, 'unsupported_source_entry')
+            require(entry.st_mode & 0o004, 'private_file_requires_inventory')
+            if writers:
+                runtime_uid, runtime_groups = writers
+                writable = (entry.st_uid == runtime_uid and entry.st_mode & 0o200 or
+                            entry.st_gid in runtime_groups and entry.st_mode & 0o020 or entry.st_mode & 0o002)
+                require(not writable, 'runtime_writable_file_requires_inventory')
+            budget[1] += entry.st_size
+            require(budget[1] <= 4 * 1024**3, 'tree_too_large')
+            if target is None:
+                continue
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=source)
             with os.fdopen(fd, 'rb') as src, target.open('xb') as dst:
                 before = os.fstat(src.fileno())
                 require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
                         and (before.st_dev, before.st_ino) == (entry.st_dev, entry.st_ino), 'source_changed')
+                copied = 0
                 while chunk := src.read(1024 * 1024):
-                    budget[1] += len(chunk)
-                    require(budget[1] <= 4 * 1024**3, 'tree_too_large')
+                    copied += len(chunk)
+                    require(copied <= before.st_size, 'source_changed')
                     dst.write(chunk)
                 after = os.fstat(src.fileno())
                 require((before.st_size, before.st_mtime_ns, before.st_ctime_ns) ==
                         (after.st_size, after.st_mtime_ns, after.st_ctime_ns), 'source_changed')
                 os.fchown(dst.fileno(), uid, gid)
-                os.fchmod(dst.fileno(), 0o755 if entry.st_mode & 0o111 else 0o644)
+                os.fchmod(dst.fileno(), stat.S_IMODE(entry.st_mode) & 0o755)
                 dst.flush()
                 os.fsync(dst.fileno())
-    os.chown(destination, uid, gid)
-    destination.chmod(0o2755)
-    fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    if destination is not None:
+        os.chown(destination, uid, gid)
+        destination.chmod(stat.S_IMODE(directory.st_mode) & 0o2755)
+        fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 class Isolation:
@@ -122,9 +145,9 @@ class Isolation:
         self.targets = {
             Path('/etc/systemd/system/ws-server-preview.service.d/99-preview-isolation.conf'): DROPIN,
             Path('/etc/sudoers.d/arcade-preview-deploy'): SUDO,
-            Path('/etc/ssh/sshd_config.d/90-arcade-preview.conf'): SSH,
         }
-        self.auth = Path('/etc/ssh/arcade-preview-authorized-key')
+        self.home = Path('/var/lib/arcade-preview-deploy')
+        self.auth = self.home / '.ssh/authorized_keys'
 
     def run(self, argv, expected=(0,)):
         result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -133,8 +156,8 @@ class Isolation:
         return result.stdout.decode().strip()
 
     def stopped(self):
-        value = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'ActiveState', '-p', 'MainPID'])
-        require(set(value.splitlines()) == {'ActiveState=inactive', 'MainPID=0'}, 'preview_must_be_stopped')
+        value = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'ActiveState', '-p', 'MainPID', '-p', 'LoadState'])
+        require(set(value.splitlines()) == {'ActiveState=inactive', 'MainPID=0', 'LoadState=loaded'}, 'preview_must_be_stopped')
 
     def clean_accounts(self):
         for name in (DEPLOY, RUNTIME):
@@ -157,33 +180,83 @@ class Isolation:
         self.files.parents(self.base / '.env.preview')
         env = secure.parse_env(self.files.read(self.base / '.env.preview', 0o600))
         env_files = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'EnvironmentFiles', '--value'])
-        paths = re.findall(r'(/[^ ]+) \(ignore_errors=no\)', env_files)
+        records = re.findall(r'(/[^ ]+) \(ignore_errors=(no|yes)\)', env_files)
+        require(' '.join(re.findall(r'/[^ ]+ \(ignore_errors=(?:no|yes)\)', env_files)) == env_files, 'unexpected_environment_files')
+        paths = [path for path, _ in records]
         require(paths and paths[0] == str(self.base / '.env.preview') and
                 len(paths) == len(set(paths)) and
                 all(p in (str(self.base / '.env.preview'), '/etc/arcadeplatform/ws-preview-signing.env') for p in paths),
                 'unexpected_environment_files')
-        for path in paths[1:]:
-            env.update(secure.parse_env(self.files.read(Path(path), 0o600)))
+        for path, optional in records[1:]:
+            try:
+                signing = secure.parse_env(self.files.read(Path(path), 0o600))
+            except FileNotFoundError:
+                require(optional == 'yes' and not Path(path).is_symlink(), 'missing_environment_file')
+                continue
+            require(set(signing) <= {'WS_AUTH_HS256_SECRET'}, 'unexpected_signing_environment_keys')
+            env.update(signing)
         inline = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'Environment', '--value'])
         # systemd EnvironmentFile values override Environment assignments; reject financial file state anywhere.
         assignments = dict(item.split('=', 1) for item in shlex.split(inline))
         require(not assignments.get('WS_PERSISTED_STATE_FILE'), 'local_financial_state_requires_separate_migration')
         env = {**assignments, **env}
-        secure.validate_stage(env)
+        # The installed configuration preflight attests deletion-window ON/OFF; this reuse checks identity.
+        secure.validate_stage({**env, 'ACCOUNT_DELETION_ENABLED': '0'})
         require(not env.get('WS_PERSISTED_STATE_FILE'), 'local_financial_state_requires_separate_migration')
         require(not self.backup.exists() and not self.backup.is_symlink(), 'backup_already_exists_use_rollback')
         self.files.parents(self.backup)
+        self.files.parents(self.home)
+        require(not self.home.exists() and not self.home.is_symlink(), 'home_already_exists')
+        require(self.base.stat().st_dev == self.backup.parent.stat().st_dev, 'cross_device_backup')
         self.clean_accounts()
-        for target in [*self.targets, self.auth]:
+        for target in self.targets:
             self.files.parents(target)
             require(not target.exists() and not target.is_symlink(), 'target_already_exists')
+        self.unit_dropins(False)
+        self.writers = self.old_runtime()
         for name in ROOTS:
             meta = (self.base / name).lstat()
-            require(stat.S_ISDIR(meta.st_mode) and meta.st_uid == self.files.uid, 'untrusted_preview_root')
+            require(stat.S_ISDIR(meta.st_mode) and meta.st_uid == self.files.uid
+                    and meta.st_dev == self.base.stat().st_dev, 'untrusted_preview_root')
+            fd = os.open(self.base / name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                copy_tree(fd, None, 0, 0, name, writers=self.writers)
+            finally:
+                os.close(fd)
         require(self.run(['/usr/local/sbin/arcade-ws-preview-env-preflight', '--config-only']).startswith('PASS CONFIG ONLY'), 'stage_preflight_failed')
         self.run(['/usr/sbin/sshd', '-t'])
         self.run(['/usr/sbin/visudo', '-c'])
+        self.ssh_policy()
+        with tempfile.TemporaryDirectory(prefix='.preview-policy-', dir=self.backup.parent) as directory:
+            candidate = Path(directory) / 'sudoers'
+            self.files.atomic(candidate, SUDO, 0o440)
+            self.run(['/usr/sbin/visudo', '-c', '-f', str(candidate)])
         return key
+
+    def old_runtime(self):
+        name = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'User', '--value'])
+        require(name == 'arcade', 'unexpected_original_runtime')
+        account = pwd.getpwnam(name)
+        return account.pw_uid, set(os.getgrouplist(name, account.pw_gid))
+
+    def unit_dropins(self, installed):
+        prefix = '/etc/systemd/system/ws-server-preview.service.d/'
+        allowed = {prefix + x for x in ['20-stage-signing.conf', '50-new-hands-hold.conf']}
+        if installed:
+            allowed.add(prefix + '99-preview-isolation.conf')
+        drops = set(self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'DropInPaths', '--value']).split())
+        require(drops <= allowed and (not installed or prefix + '99-preview-isolation.conf' in drops), 'unexpected_unit_dropins')
+
+    def ssh_policy(self):
+        # Use root-owned default authorized_keys instead of changing/reloading global SSH configuration.
+        policy = self.run(['/usr/sbin/sshd', '-T', '-C', 'user=arcade-preview-deploy,host=localhost,addr=127.0.0.1'])
+        policy = dict(line.split(' ', 1) for line in policy.splitlines())
+        for name, value in {'authorizedkeysfile': '.ssh/authorized_keys .ssh/authorized_keys2',
+                            'authorizedkeyscommand': 'none', 'trustedusercakeys': 'none',
+                            'kbdinteractiveauthentication': 'no', 'hostbasedauthentication': 'no',
+                            'strictmodes': 'yes', 'pubkeyauthentication': 'yes'}.items():
+            require(policy.get(name) == value, 'effective_ssh_policy_mismatch')
+        return policy
 
     def save(self, state):
         self.files.atomic(self.backup / 'manifest.json', json.dumps(state, sort_keys=True).encode(), 0o600)
@@ -202,18 +275,24 @@ class Isolation:
                       '--shell', shell, '--gid', name, '--password', '*', name])
         deploy = pwd.getpwnam(DEPLOY)
         runtime = pwd.getpwnam(RUNTIME)
-        require(deploy.pw_uid != runtime.pw_uid and deploy.pw_gid != runtime.pw_gid, 'identities_not_separate')
+        require(deploy.pw_uid > 0 and runtime.pw_uid > 0 and deploy.pw_uid != runtime.pw_uid
+                and deploy.pw_gid > 0 and runtime.pw_gid > 0 and deploy.pw_gid != runtime.pw_gid, 'identities_not_separate')
         # Root-owned home and key policy: a deployer cannot replace its authorization by editing its home.
         home = Path(deploy.pw_dir)
+        require(home == self.home, 'unexpected_deploy_home')
         self.files.parents(home)
         require(not home.exists() and not home.is_symlink(), 'home_already_exists')
         home.mkdir(mode=0o755)
+        (home / '.ssh').mkdir(mode=0o755)
+        staging = home / 'staging'
+        staging.mkdir(mode=0o700)
+        os.chown(staging, deploy.pw_uid, deploy.pw_gid)
         for name in ROOTS:
             fd = os.open(self.base / name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
                 meta = os.fstat(fd)
                 state['original'][name] = [meta.st_dev, meta.st_ino]
-                copy_tree(fd, self.backup / ('new-' + name), deploy.pw_uid, deploy.pw_gid, name)
+                copy_tree(fd, self.backup / ('new-' + name), deploy.pw_uid, deploy.pw_gid, name, writers=self.writers)
             finally:
                 os.close(fd)
             installed = (self.backup / ('new-' + name)).lstat()
@@ -240,33 +319,49 @@ class Isolation:
             self.files.sync_dir(self.backup)
         for target, contents in self.targets.items():
             self.files.atomic(target, contents, 0o440 if target.parent.name == 'sudoers.d' else 0o644)
-        self.run(['/usr/sbin/visudo', '-c'])
-        self.run(['/usr/sbin/sshd', '-t'])
+        try:
+            self.run(['/usr/sbin/visudo', '-c'])
+        except Exception:
+            sudo_file = next(p for p in self.targets if p.parent.name == 'sudoers.d')
+            require(self.files.read(sudo_file, 0o440) == SUDO, 'target_changed')
+            sudo_file.unlink()
+            self.files.sync_dir(sudo_file.parent)
+            raise
         self.run(['/usr/bin/systemctl', 'daemon-reload'])
-        effective = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'User', '-p', 'Group', '-p', 'SupplementaryGroups'])
-        require(set(effective.splitlines()) == {'User=' + RUNTIME, 'Group=' + RUNTIME, 'SupplementaryGroups='}, 'effective_unit_mismatch')
-        policy = self.run(['/usr/sbin/sshd', '-T', '-C', 'user=arcade-preview-deploy,host=localhost,addr=127.0.0.1'])
-        policy = dict(line.split(' ', 1) for line in policy.splitlines())
-        for name, value in {'authorizedkeysfile': str(self.auth), 'authorizedkeyscommand': 'none',
-                            'pubkeyacceptedalgorithms': 'ssh-ed25519', 'authenticationmethods': 'publickey',
-                            'passwordauthentication': 'no', 'kbdinteractiveauthentication': 'no',
-                            'disableforwarding': 'yes', 'permittty': 'no', 'permituserrc': 'no'}.items():
-            require(policy.get(name) == value, 'effective_ssh_policy_mismatch')
+        expected = {'User': RUNTIME, 'Group': RUNTIME, 'SupplementaryGroups': '', 'NoNewPrivileges': 'yes',
+                    'ProtectSystem': 'strict', 'ProtectHome': 'yes', 'PrivateTmp': 'yes', 'ReadWritePaths': '',
+                    'AmbientCapabilities': '', 'DynamicUser': 'no', 'CapabilityBoundingSet': '',
+                    'WorkingDirectory': str(self.base / 'ws-server')}
+        argv = ['/usr/bin/systemctl', 'show', '--all', UNIT]
+        for prop in expected:
+            argv += ['-p', prop]
+        effective = dict(line.split('=', 1) for line in self.run(argv).splitlines())
+        require(effective == expected, 'effective_unit_mismatch')
+        hooks = self.run(['/usr/bin/systemctl', 'show', '--all', UNIT, '-p', 'ExecStartEx', '-p', 'ExecStartPre',
+                          '-p', 'ExecStartPost', '-p', 'ExecStop', '-p', 'ExecStopPost', '-p', 'ExecCondition', '-p', 'ExecReload'])
+        hooks = dict(line.split('=', 1) for line in hooks.splitlines())
+        require(re.match(r'^\{ path=/usr/bin/node ; argv\[\]=/usr/bin/node server\.mjs ; flags= ; ', hooks.pop('ExecStartEx', ''))
+                and all(not value for value in hooks.values()), 'unexpected_exec_hooks')
+        self.unit_dropins(True)
+        self.stopped()
+        self.ssh_policy()
         for name in (DEPLOY, RUNTIME):
             account = pwd.getpwnam(name)
             require(self.run(['/usr/bin/id', '-G', name]) == str(account.pw_gid), 'unexpected_account_groups')
         sudo = self.run(['/usr/bin/sudo', '-n', '-l', '-U', DEPLOY])
         marker = 'User ' + DEPLOY + ' may run the following commands on '
         require(sudo.count(marker) == 1, 'unexpected_sudo_policy')
+        defaults = sudo.split(marker, 1)[0]
+        require('env_reset' in defaults and '!env_reset' not in defaults and 'env_keep' not in defaults, 'unexpected_sudo_environment')
         entries = sudo.split(marker, 1)[1].split('\n', 1)[1]
         entries = ' '.join(line.strip() for line in entries.splitlines() if line.strip())
         require(entries == '(root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight \"\", /usr/bin/systemctl restart ws-server-preview.service',
                 'unexpected_sudo_policy')
-        runtime_sudo = self.run(['/usr/bin/sudo', '-n', '-l', '-U', RUNTIME], expected=(1,))
+        runtime_sudo = self.run(['/usr/bin/sudo', '-n', '-l', '-U', RUNTIME], expected=(0, 1))
         require('not allowed to run sudo' in runtime_sudo or 'may not run sudo' in runtime_sudo,
                 'unexpected_runtime_sudo_policy')
         self.files.atomic(self.auth, key, 0o644)  # enabled only after the unit uses the isolated runtime
-        self.run(['/usr/bin/systemctl', 'reload', 'ssh.service'])
+        self.stopped()
         state['phase'] = 'provisioned_runtime_not_started'
         self.save(state)
         return state['phase']
@@ -284,7 +379,6 @@ class Isolation:
         if self.auth.exists():
             self.auth.unlink()
             self.files.sync_dir(self.auth.parent)
-        self.run(['/usr/bin/systemctl', 'reload', 'ssh.service'])
         for name in (DEPLOY, RUNTIME):
             try:
                 user = pwd.getpwnam(name)
@@ -311,7 +405,6 @@ class Isolation:
         self.run(['/usr/sbin/visudo', '-c'])
         self.run(['/usr/sbin/sshd', '-t'])
         self.run(['/usr/bin/systemctl', 'daemon-reload'])
-        self.run(['/usr/bin/systemctl', 'reload', 'ssh.service'])
         state['phase'] = 'rolled_back_not_started'
         self.save(state)
         return state['phase']
