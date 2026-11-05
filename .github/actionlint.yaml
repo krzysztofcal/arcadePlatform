@@ -8,3 +8,6 @@ paths:
   .github/workflows/chips-ledger-stage-scheduled-automation.yml:
     ignore:
       - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/chips-ledger-stage-settled-retention.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'

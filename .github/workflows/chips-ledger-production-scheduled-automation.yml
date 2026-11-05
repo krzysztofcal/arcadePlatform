@@ -13,6 +13,7 @@ on:
           - bot-only-7d
           - closed-human-30d
           - escrow
+          - retention-12m
       mode:
         description: Production automation mode
         required: true
@@ -102,14 +103,21 @@ jobs:
           PRODUCTION_CUTOFF: ${{ inputs.cutoff || '' }}
           PRODUCTION_COMPLETION_CONFIRMATION: ${{ inputs.completion_confirmation || '' }}
           PRODUCTION_CONFIRMATION: ${{ inputs.confirmation || '' }}
+          PRODUCTION_RECOVERY_OBJECT_PATH: ${{ inputs.recovery_object_path || '' }}
         run: |
           set -euo pipefail
           checked_out_sha="$(git rev-parse HEAD)"
           test "$checked_out_sha" = "$GITHUB_SHA"
           test "$GITHUB_REF" = "refs/heads/main"
           test "$GITHUB_REPOSITORY" = "krzysztofcal/arcadePlatform"
-          test "$PRODUCTION_POLICY" = "existing-30d" || test "$PRODUCTION_POLICY" = "bot-only-7d" || test "$PRODUCTION_POLICY" = "closed-human-30d" || test "$PRODUCTION_POLICY" = "escrow"
+          test "$PRODUCTION_POLICY" = "existing-30d" || test "$PRODUCTION_POLICY" = "bot-only-7d" || test "$PRODUCTION_POLICY" = "closed-human-30d" || test "$PRODUCTION_POLICY" = "escrow" || test "$PRODUCTION_POLICY" = "retention-12m"
           test "$PRODUCTION_MODE" = "diagnostic" || test "$PRODUCTION_MODE" = "prepare" || test "$PRODUCTION_MODE" = "canary" || test "$PRODUCTION_MODE" = "automatic" || test "$PRODUCTION_MODE" = "lifecycle-completion"
+          if [[ "$PRODUCTION_POLICY" == "retention-12m" ]]; then
+            # #1157: diagnostic, exact canary or automatic only; no Production cutoff override.
+            test "$PRODUCTION_MODE" = "diagnostic" || test "$PRODUCTION_MODE" = "canary" || test "$PRODUCTION_MODE" = "automatic"
+            test -z "$CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256"
+            test -z "$PRODUCTION_RECOVERY_OBJECT_PATH"
+          fi
           if [[ "$PRODUCTION_MODE" == "lifecycle-completion" ]]; then
             test "$PRODUCTION_POLICY" = "closed-human-30d"
             [[ "$PRODUCTION_BATCH_ID" =~ ^[1-9][0-9]*$ ]]
@@ -141,6 +149,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$PRODUCTION_POLICY" == "retention-12m" ]]; then
+            args=(--target production --mode "$PRODUCTION_MODE")
+            if [[ -n "$PRODUCTION_BATCH_ID" ]]; then args+=(--batch-id "$PRODUCTION_BATCH_ID"); fi
+            if [[ -n "$PRODUCTION_CONFIRMATION" ]]; then args+=(--confirmation "$PRODUCTION_CONFIRMATION"); fi
+            exec node scripts/ops/chips-ledger-settled-retention.mjs "${args[@]}"
+          fi
           args=(
             --policy "$PRODUCTION_POLICY"
             --mode "$PRODUCTION_MODE"

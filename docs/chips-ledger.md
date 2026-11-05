@@ -152,7 +152,7 @@ These will be built on top of this ledger.
 
 ## 12-month settled history cap (#1157)
 
-`scripts/ops/chips-ledger-settled-retention.mjs --target stage|production --mode diagnostic|canary|automatic` (spec: `specs/1157-settled-data-retention/`):
+`scripts/ops/chips-ledger-settled-retention.mjs --target stage|production --mode diagnostic|canary|automatic` (spec: `specs/1157-settled-data-retention/`). Owner dispatch from `main`: Production policy `retention-12m` in `Chips Ledger Production Automation`; Stage workflow `Chips Ledger Stage Settled Retention`.
 
 - **Archive expiry.** A committed, pruned archive batch whose newest row is older than 12 months loses its Storage objects: the primary archive, the `recovery/` copy and manifest, and its `account-recovery/` object, if it has one. The script only sends DELETE requests and never downloads or lists objects. `public.chips_expire_archive_batch` then sets `objects_expired_at` and deletes that batch's archived `chips_transaction_idempotency` rows (decision D1). The metadata row stays as non-personal evidence. A recovery older than 12 months is therefore no longer possible.
 - **Never expired:**

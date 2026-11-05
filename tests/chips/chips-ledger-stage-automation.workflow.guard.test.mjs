@@ -473,7 +473,7 @@ assert.deepEqual(Object.keys(parsedProductionWorkflow.on?.workflow_dispatch?.inp
 ].sort(), "Production dispatch input set");
 assert.deepEqual(
   parsedProductionWorkflow.on.workflow_dispatch.inputs.policy.options,
-  ["existing-30d", "bot-only-7d", "closed-human-30d", "escrow"],
+  ["existing-30d", "bot-only-7d", "closed-human-30d", "escrow", "retention-12m"],
   "Production must expose exactly one fixed policy choice per dispatch",
 );
 assert.deepEqual(
@@ -521,6 +521,11 @@ assert.match(productionWorkflow, /test -z "\$PRODUCTION_CONFIRMATION"/);
 assert.match(productionWorkflow, /--table-id "\$PRODUCTION_TABLE_ID"/);
 assert.match(productionWorkflow, /--cutoff "\$PRODUCTION_CUTOFF"/);
 assert.match(productionWorkflow, /--completion-confirmation "\$PRODUCTION_COMPLETION_CONFIRMATION"/);
+// #1157: retention-12m runs only the settled retention script, never a cutoff override.
+assert.match(productionWorkflow, /test "\$PRODUCTION_MODE" = "diagnostic" \|\| test "\$PRODUCTION_MODE" = "canary" \|\| test "\$PRODUCTION_MODE" = "automatic"\n\s+test -z "\$CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256"\n\s+test -z "\$PRODUCTION_RECOVERY_OBJECT_PATH"/);
+assert.match(productionWorkflow, /exec node scripts\/ops\/chips-ledger-settled-retention\.mjs "\$\{args\[@\]\}"/);
+assert.match(productionWorkflow, /args=\(--target production --mode "\$PRODUCTION_MODE"\)/);
+assert.doesNotMatch(productionWorkflow, /chips-ledger-settled-retention\.mjs[^\n]*--cutoff/);
 const productionEnv = productionJob.env;
 assert.deepEqual(Object.keys(productionEnv).sort(), [
   "CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256",
@@ -691,6 +696,7 @@ const stageOwnerConditions = {
   "chips-ledger-stage-legacy-allowlist": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-legacy-allowlist.yml", "utf8")).jobs.prepare.if,
   "chips-ledger-stage-legacy-allowlist-freeze": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-legacy-allowlist-freeze.yml", "utf8")).jobs.freeze.if,
   "chips-ledger-stage-timeout-diagnostic": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-timeout-diagnostic.yml", "utf8")).jobs["stage-timeout-diagnostic"].if,
+  "chips-ledger-stage-settled-retention": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-settled-retention.yml", "utf8")).jobs["stage-settled-retention"].if,
 };
 for (const [name, condition] of Object.entries(stageOwnerConditions)) {
   assert.equal(evaluateStageCondition(condition), true, `${name}: owner main dispatch`);
@@ -698,8 +704,8 @@ for (const [name, condition] of Object.entries(stageOwnerConditions)) {
   assert.equal(evaluateStageCondition(condition, { triggeringActor: "release-agent[bot]" }), false, `${name}: foreign re-run of an owner run`);
   assert.equal(evaluateStageCondition(condition, { actor: "release-agent[bot]" }), false, `${name}: foreign dispatch`);
 }
-for (const name of ["chips-ledger-stage-legacy-allowlist", "chips-ledger-stage-legacy-allowlist-freeze", "chips-ledger-stage-timeout-diagnostic"]) {
-  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { enabled: "0" }), false, `${name}: automation switch still applies`);
+for (const name of ["chips-ledger-stage-legacy-allowlist", "chips-ledger-stage-legacy-allowlist-freeze", "chips-ledger-stage-timeout-diagnostic", "chips-ledger-stage-settled-retention"]) {
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { enabled: "0", mode: "automatic" }), false, `${name}: automation switch still applies`);
   assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule" }), false, `${name}: only workflow_dispatch`);
 }
 for (const name of ["stage-archive", "stage-supabase-resource-health"]) {
@@ -719,6 +725,7 @@ const STAGE_ENVIRONMENT_JOBS = [
   ["chips-ledger-stage-legacy-allowlist-freeze.yml", "freeze"],
   ["chips-ledger-stage-timeout-diagnostic.yml", "stage-timeout-diagnostic"],
   ["chips-ledger-stage-scheduled-automation.yml", "stage-archive"],
+  ["chips-ledger-stage-settled-retention.yml", "stage-settled-retention"],
   ["stage-bonus-campaigns.yml", "stage-operator"],
   ["stage-supabase-resource-health.yml", "monitor"],
   ["db-stage-apply-pr.yml", "apply-stage"],
@@ -727,3 +734,29 @@ for (const [file, job] of STAGE_ENVIRONMENT_JOBS) {
   const stageWorkflow = YAML.parse(fs.readFileSync(`.github/workflows/${file}`, "utf8"));
   assert.equal(stageWorkflow.jobs?.[job]?.environment, "stage-automation", `${file}: ${job} must use stage-automation`);
 }
+
+// #1157: the Stage settled retention workflow is owner-dispatch only and shares
+// the Stage automation concurrency group; diagnostic and canary need no switch.
+const settledWorkflowText = fs.readFileSync(".github/workflows/chips-ledger-stage-settled-retention.yml", "utf8");
+const settledWorkflow = YAML.parse(settledWorkflowText);
+assert.deepEqual(Object.keys(settledWorkflow.on), ["workflow_dispatch"]);
+assert.deepEqual(settledWorkflow.on.workflow_dispatch.inputs.mode.options, ["diagnostic", "canary", "automatic"]);
+assert.deepEqual(Object.keys(settledWorkflow.on.workflow_dispatch.inputs).sort(), ["batch_id", "confirmation", "cutoff", "mode"]);
+assert.equal(settledWorkflow.concurrency.group, "chips-ledger-stage-automation");
+assert.deepEqual(Object.keys(settledWorkflow.jobs), ["stage-settled-retention"]);
+const settledJobIf = settledWorkflow.jobs["stage-settled-retention"].if;
+for (const mode of ["diagnostic", "canary"]) {
+  assert.equal(evaluateStageCondition(settledJobIf, { mode, enabled: "0" }), true, `settled ${mode} without automation switch`);
+}
+assert.equal(evaluateStageCondition(settledJobIf, { mode: "automatic" }), true, "settled automatic with switch");
+assert.equal(evaluateStageCondition(settledJobIf, { mode: "diagnostic", event: "schedule" }), false, "settled: dispatch only");
+assert.deepEqual(Object.keys(settledWorkflow.jobs["stage-settled-retention"].env).sort(), [
+  "CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED",
+  "DEPLOYED_COMMIT_SHA",
+  "EXPECTED_SUPABASE_STAGE_PROJECT_REF",
+  "SUPABASE_STAGE_DB_URL",
+  "SUPABASE_STAGE_SERVICE_ROLE_KEY",
+  "SUPABASE_STAGE_URL",
+]);
+assert.doesNotMatch(settledWorkflowText, /SUPABASE_PROD_|--target production/);
+assert.match(settledWorkflowText, /node scripts\/ops\/chips-ledger-settled-retention\.mjs "\$\{args\[@\]\}"/);
