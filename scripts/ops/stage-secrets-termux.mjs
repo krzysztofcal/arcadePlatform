@@ -31,9 +31,10 @@ export function prepareConnections(raw, api, ref) {
   // Matches stage-db-migrate.mjs::connectionEnv: pinned direct host, postgres DB, 5432, SSL require.
   return { SUPABASE_STAGE_DB_URL: u.href, SUPABASE_STAGE_DIRECT_DB_URL: direct.href };
 }
-export function verifyMetadata(metadata, name, started) {
+export function verifyMetadata(metadata, name, previous) {
   requireSafe(metadata?.name === name && Number.isFinite(Date.parse(metadata.updated_at))
-    && Date.parse(metadata.updated_at) >= Math.floor(started / 1000) * 1000, 'SECRET_METADATA_NOT_FRESH');
+    && (!previous || (previous.name === name && Number.isFinite(Date.parse(previous.updated_at))
+      && Date.parse(metadata.updated_at) > Date.parse(previous.updated_at))), 'SECRET_METADATA_NOT_FRESH');
   return true;
 }
 export async function migrate(secrets, { preflight, write, metadata }) {
@@ -41,9 +42,9 @@ export async function migrate(secrets, { preflight, write, metadata }) {
   try {
     await preflight();
     for (const [name, value] of Object.entries(secrets)) {
-      const started = Date.now();
+      const previous = await metadata(name);
       await write(name, value);
-      verifyMetadata(await metadata(name), name, started);
+      verifyMetadata(await metadata(name), name, previous);
       report[name] = 'PASS';
     }
   } catch { /* Never output child errors, response bodies or secret values. No rollback/retry. */ }
@@ -126,9 +127,11 @@ async function main() {
     requireSafe(process.platform === 'android' && process.env.PREFIX?.startsWith('/data/data/com.termux/'), 'TERMUX_ONLY');
     requireSafe(Number(process.versions.node.split('.')[0]) >= 22 && process.stdin.isTTY && process.stdout.isTTY, 'NODE22_AND_TTY_REQUIRED');
     process.umask(0o077);
-    await run('gh',['--version']); await run('netlify',['--version']);
+    const ghVersion = await run('gh',['--version']);
+    requireSafe(/gh version (?:2\.(?:4[5-9]|[5-9]\d|\d{3,})\.|[3-9]\.)/.test(ghVersion),'GH_245_REQUIRED');
+    requireSafe(/^netlify-cli\/26\.2\.0\s/.test(await run('netlify',['--version'])),'NETLIFY_2620_REQUIRED');
     const methods = await run('netlify',['api','--list']);
-    requireSafe(['getSite','getEnvVar'].every(m => methods.includes(m)), 'NETLIFY_API_INCOMPATIBLE');
+    requireSafe(['getSite','getEnvVar'].every(m => new RegExp(`\\b${m}\\b`).test(methods)), 'NETLIFY_API_INCOMPATIBLE');
     let ownerToken;
     const gh = (args,input) => run('gh',args,{token:ownerToken,input});
     const api = async path => JSON.parse(await gh(['api','--hostname','github.com',path]));
@@ -154,7 +157,7 @@ async function main() {
     };
     phase = 'GITHUB_PREFLIGHT'; await preflight();
     phase = 'NETLIFY_AUTH';
-    await run('netlify',['login'],{interactive:true}); // Browser login; only auth output inherits the terminal.
+    await run('netlify',['login','--new'],{interactive:true}); // Browser login; only auth output inherits the terminal.
     const netlify = async (method,data) => JSON.parse(await run('netlify',['api',method,'--data',JSON.stringify(data)]));
     phase = 'NETLIFY_SOURCE';
     const site = await netlify('getSite',{site_id:SITE});
@@ -169,7 +172,12 @@ async function main() {
     phase = 'GITHUB_WRITE_OR_METADATA';
     report = await migrate(secrets, { preflight,
       write: (name,value) => gh(['secret','set',name,'--repo',REPO,'--env',ENVIRONMENT],value),
-      metadata: name => api(`${ENDPOINT}/secrets/${name}`),
+      metadata: async name => {
+        const list = await api(`${ENDPOINT}/secrets?per_page=100`);
+        requireSafe(Number.isInteger(list.total_count) && list.total_count <= 100
+          && list.secrets?.length === list.total_count,'SECRET_METADATA_INCOMPLETE');
+        return list.secrets.find(s => s.name === name) ?? null;
+      },
     });
     ownerToken = undefined;
     for (const key of NAMES) secrets[key] = '';
