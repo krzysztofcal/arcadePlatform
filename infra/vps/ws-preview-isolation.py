@@ -48,7 +48,7 @@ def public_key(data):
     # The pinned scp-action uploads its outer archive to a relative remote path. Keep the home and
     # authorization root-owned, but start every unprivileged SSH command in its private work directory.
     command = session_command()
-    quoted = command.replace('\\', '\\\\').replace('"', '\\"')
+    quoted = command.replace('"', '\\"')
     return ('restrict,command="' + quoted + '" ' + ' '.join(parts) + '\n').encode()
 
 
@@ -65,6 +65,7 @@ def copy_tree(source, destination, uid, gid, relative='.', budget=None, writers=
     require(len(Path(relative).parts) < 80, 'tree_too_deep')
     directory = os.fstat(source)
     require(directory.st_mode & 0o005 == 0o005, 'runtime_cannot_read_source_directory')
+    require(directory.st_mode & 0o200, 'deployer_requires_owner_write')
     if writers:
         runtime_uid, runtime_groups = writers
         require(not (directory.st_uid == runtime_uid and directory.st_mode & 0o200 or
@@ -100,6 +101,7 @@ def copy_tree(source, destination, uid, gid, relative='.', budget=None, writers=
         else:
             require(stat.S_ISREG(entry.st_mode) and entry.st_nlink == 1, 'unsupported_source_entry')
             require(entry.st_mode & 0o004, 'private_file_requires_inventory')
+            require(entry.st_mode & 0o200, 'deployer_requires_owner_write')
             if writers:
                 runtime_uid, runtime_groups = writers
                 writable = (entry.st_uid == runtime_uid and entry.st_mode & 0o200 or
@@ -213,6 +215,19 @@ class Isolation:
             self.files.parents(target)
             require(not target.exists() and not target.is_symlink(), 'target_already_exists')
         self.unit_dropins(False)
+        self.unit_exec()
+        self.unit_state_paths()
+        for rel in (*SYNC, 'netlify/functions'):
+            fd = os.open(self.base, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                for part in Path(rel).parts:
+                    next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                    os.close(fd)
+                    fd = next_fd
+            except OSError:
+                raise secure.Refused('missing_or_symlinked_sync_root') from None
+            finally:
+                os.close(fd)
         self.writers = self.old_runtime()
         for name in ROOTS:
             meta = (self.base / name).lstat()
@@ -238,6 +253,22 @@ class Isolation:
         require(name == 'arcade', 'unexpected_original_runtime')
         account = pwd.getpwnam(name)
         return account.pw_uid, set(os.getgrouplist(name, account.pw_gid))
+
+    def unit_exec(self):
+        hooks = self.run(['/usr/bin/systemctl', 'show', '--all', UNIT, '-p', 'ExecStartEx', '-p', 'ExecStartPre',
+                          '-p', 'ExecStartPost', '-p', 'ExecStop', '-p', 'ExecStopPost', '-p', 'ExecCondition', '-p', 'ExecReload'])
+        hooks = dict(line.split('=', 1) for line in hooks.splitlines())
+        require(re.match(r'^\{ path=/usr/bin/node ; argv\[\]=/usr/bin/node server\.mjs ; flags= ; ', hooks.pop('ExecStartEx', ''))
+                and all(not value for value in hooks.values()), 'unexpected_exec_hooks')
+
+    def unit_state_paths(self):
+        properties = ['BindPaths', 'BindReadOnlyPaths', 'StateDirectory', 'RuntimeDirectory', 'CacheDirectory',
+                      'LogsDirectory', 'ConfigurationDirectory', 'RootDirectory', 'RootImage']
+        argv = ['/usr/bin/systemctl', 'show', '--all', UNIT]
+        for prop in properties:
+            argv += ['-p', prop]
+        state = dict(line.split('=', 1) for line in self.run(argv).splitlines())
+        require(state == dict.fromkeys(properties, ''), 'unreviewed_runtime_state_paths')
 
     def unit_dropins(self, installed):
         prefix = '/etc/systemd/system/ws-server-preview.service.d/'
@@ -283,7 +314,9 @@ class Isolation:
         self.files.parents(home)
         require(not home.exists() and not home.is_symlink(), 'home_already_exists')
         home.mkdir(mode=0o755)
+        home.chmod(0o755)
         (home / '.ssh').mkdir(mode=0o755)
+        (home / '.ssh').chmod(0o755)
         staging = home / 'staging'
         staging.mkdir(mode=0o700)
         os.chown(staging, deploy.pw_uid, deploy.pw_gid)
@@ -337,11 +370,8 @@ class Isolation:
             argv += ['-p', prop]
         effective = dict(line.split('=', 1) for line in self.run(argv).splitlines())
         require(effective == expected, 'effective_unit_mismatch')
-        hooks = self.run(['/usr/bin/systemctl', 'show', '--all', UNIT, '-p', 'ExecStartEx', '-p', 'ExecStartPre',
-                          '-p', 'ExecStartPost', '-p', 'ExecStop', '-p', 'ExecStopPost', '-p', 'ExecCondition', '-p', 'ExecReload'])
-        hooks = dict(line.split('=', 1) for line in hooks.splitlines())
-        require(re.match(r'^\{ path=/usr/bin/node ; argv\[\]=/usr/bin/node server\.mjs ; flags= ; ', hooks.pop('ExecStartEx', ''))
-                and all(not value for value in hooks.values()), 'unexpected_exec_hooks')
+        self.unit_exec()
+        self.unit_state_paths()
         self.unit_dropins(True)
         self.stopped()
         self.ssh_policy()
@@ -352,7 +382,8 @@ class Isolation:
         marker = 'User ' + DEPLOY + ' may run the following commands on '
         require(sudo.count(marker) == 1, 'unexpected_sudo_policy')
         defaults = sudo.split(marker, 1)[0]
-        require('env_reset' in defaults and '!env_reset' not in defaults and 'env_keep' not in defaults, 'unexpected_sudo_environment')
+        require('env_reset' in defaults and '!env_reset' not in defaults and 'env_keep' not in defaults
+                and 'secure_path=' in defaults, 'unexpected_sudo_environment')
         entries = sudo.split(marker, 1)[1].split('\n', 1)[1]
         entries = ' '.join(line.strip() for line in entries.splitlines() if line.strip())
         require(entries == '(root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight \"\", /usr/bin/systemctl restart ws-server-preview.service',
@@ -368,7 +399,10 @@ class Isolation:
 
     def rollback(self):
         self.stopped()
-        state = json.loads(self.files.read(self.backup / 'manifest.json', 0o600))
+        try:
+            state = json.loads(self.files.read(self.backup / 'manifest.json', 0o600))
+        except FileNotFoundError:
+            raise secure.Refused('backup_manifest_missing_requires_recovery') from None
         require(state.get('version') == 1 and state.get('phase') in
                 ('preparing', 'switching', 'provisioned_runtime_not_started'), 'unknown_backup_phase')
         # Revoke the new key before restoring a unit that runs as the shared identity.

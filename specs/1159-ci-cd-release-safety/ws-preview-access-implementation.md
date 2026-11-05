@@ -59,7 +59,9 @@ via existing other-read/search bits without joining its writable group. Netlify 
 The root-owned `99-preview-isolation.conf` drop-in changes only the Preview unit's User/Group,
 clears supplementary groups, enables NoNewPrivileges, ProtectHome, strict ProtectSystem and PrivateTmp,
 and clears writable-system paths/capabilities and all extra execution hooks. Effective properties,
-exact unprivileged Node ExecStart flags and allowed drop-ins are checked before enabling the key. Existing Stage signing and hold drop-ins remain. Required and optional EnvironmentFiles
+exact unprivileged Node ExecStart flags and allowed drop-ins are checked before enabling the key.
+Preflight also refuses existing hooks/changed Node arguments, undeclared writable/mounted state paths,
+or missing/symlinked sync roots before persistent mutation; existing gates cannot be silently reset. Existing Stage signing and hold drop-ins remain. Required and optional EnvironmentFiles
 must be exactly Preview's environment plus its optional signing file; all present files are protected and validated
 for Stage. The signing file may define only `WS_AUTH_HS256_SECRET`; it cannot override Stage identity,
 financial storage or feature flags. The existing protected configuration preflight remains the authority
@@ -85,6 +87,8 @@ account retained no open descriptor/copy of its old files. No secret values are 
    remain: if there is no eligible requester distinct from the required approver, STOP.
 3. Freeze old-key Preview dispatches/reruns. Establish an approved Preview-only quiet window with no
    active users, reconnectable seats, hands, pending financial operations or unsafe recovery state.
+   This freeze includes direct restarts by the existing broad `copilot` account, as well as Actions
+   dispatches/reruns; those existing permissions are not revoked by this PR.
    The new catalog deliberately does not provide an unchecked stop/restart. If Preview is active or
    there is no existing reviewed way to quiesce/stop it under that window, **STOP**: obtain a separately
    reviewed, approved quiesce operation before activation. Never work around this precondition.
@@ -122,6 +126,11 @@ A changed policy, unexpected inode or incomplete/unverifiable state is STOP for 
 The owner must approve subsequent Preview startup; never silently switch GitHub back to the broad key.
 
 Risks: Preview downtime until the separately approved acceptance run; temporary loss of deploy access;
-read-permission/umask or signing/hold dependency mismatches; interrupted provisioning requiring recovery;
+read-permission/umask or signing/hold dependency mismatches (root-owned home/key directories are
+explicitly chmodded, independently of installer umask); interrupted provisioning requiring recovery;
 loss of local file persistence is prevented by refusal. Production changes, secret migration and cleanup
 of old repository secrets are excluded. This does not remediate the existing broad `copilot` authority.
+
+The symlink inventory is a lexical boundary check. Root never follows copied links; it is not a proof
+that every later unprivileged path traversal remains inside Preview when links are chained with `..`.
+Filesystem DAC, distinct UIDs and the verified service sandbox remain the authority boundary.
