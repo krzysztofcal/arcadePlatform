@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
 import {
@@ -12,6 +13,8 @@ import {
 } from "../../scripts/ops/chips-ledger-archive-export.mjs";
 import {
   acquireInitialAutomaticLock,
+  assertAutomaticBotOnlyRows,
+  STAGE_OWN_BATCHES_SQL,
   assertBotOnlyActiveManifestMatch,
   assertBotOnlyExecuteBatch,
   assertClosedHumanAutomaticPolicy,
@@ -1593,6 +1596,8 @@ const completedRow = {
 };
 assert.equal(findOwnCycle([]).active, null);
 assert.equal(findOwnCycle([completedRow]).latestCompleted, completedRow);
+// #1157 R-A2: an expired latest batch is terminal, so nothing re-downloads it.
+assert.equal(findOwnCycle([{ ...completedRow, objects_expired_at: "2027-08-15 00:00:00+00" }]).latestCompleted, null);
 const resumableRow = {
   ...completedRow,
   pruned_at: null,
@@ -4527,6 +4532,18 @@ await assert.rejects(runProductionAutomation({policy:"existing-30d",mode:"automa
  deps:{...missingTerminalRecovery.deps,read:async()=>activatedState,sqlRead:async()=>activatedState,
  pruneArchive:async()=>({state:"already_pruned",evidence:productionResumeEvidence}),inspectDurableRecovery:async()=>null}}),/durable recovery/);
 assert.equal(missingTerminalRecovery.calls.export,0);
+// #1157 R-A2: an expired latest completed batch is not re-downloaded or re-inspected.
+const expiredTerminal=makeProductionResumeHarness({...makeProductionResumeRow(),pruned_at:"2026-08-15T00:03:00Z"});
+const expiredTerminalSql=expiredTerminal.deps.sql.unsafe;
+let expiredRevalidations=0;
+await assert.rejects(runProductionAutomation({policy:"existing-30d",mode:"automatic",env:terminalAutomaticEnv,
+ deps:{...expiredTerminal.deps,read:async()=>activatedState,sqlRead:async()=>activatedState,
+ sql:{...expiredTerminal.deps.sql,unsafe:async(query,values)=>{const rows=await expiredTerminalSql(query,values);
+  return query.includes("'objects_expired_at' as objects_expired_at")?rows.map(row=>({...row,objects_expired_at:"2027-08-15 00:00:00+00"})):rows;}},
+ pruneArchive:async()=>{expiredRevalidations+=1;throw new Error("expired batch revalidated");},
+ inspectDurableRecovery:async()=>{expiredRevalidations+=1;throw new Error("expired batch inspected");}}}),
+ error=>!/expired batch (revalidated|inspected)|terminal|durable recovery/.test(error.message));
+assert.equal(expiredRevalidations,0,"R-A2 skips the expired latest batch and goes on to a new export");
 const escrowActivatedState={...activatedState,policies:[...activatedState.policies,{policy_id:"production-ledger-escrow-account-retention-v1",enabled:true,activated_at:"2026-10-14",canary_batch_id:"3"}]};
 const escrowGateSql={unsafe:async query=>{
  if(query.includes("pg_try_advisory_lock"))return[{acquired:true,backend_pid:"escrow-gate"}];
@@ -4537,3 +4554,154 @@ const escrowGateSql={unsafe:async query=>{
 },begin:async()=>{throw new Error("unexpected escrow write");}};
 await assert.rejects(runProductionAutomation({policy:"escrow",mode:"automatic",env:terminalAutomaticEnv,
  deps:{sql:escrowGateSql,read:async()=>escrowActivatedState,sqlRead:async()=>escrowActivatedState}}),/fresh escrow automatic policy gate rejected/);
+// #1159 incident: an automatic bot-only run lost its lock session after the
+// archive commit, leaving no proof. Only the complete absence of proof,
+// receipts and destructive GO may resume through PREPARE before cleanup.
+// Batch 440 holds 6 transactions / 12 entries: above the manual cap of 2.
+const botResumeEvidence = { ...productionResumeEvidence,
+  transactionIds: Array.from({ length: 6 }, (_, index) => `00000000-0000-4000-8000-00000000020${index}`),
+  entryIds: Array.from({ length: 12 }, (_, index) => 2001 + index), transactionCount: 6, entryCount: 12 };
+function makeBotMissingProofHarness({ row: overrides = {}, badBytes = false, loseLockOnDownload = false, recoveryExisted = false } = {}) {
+  const row = { ...makeProductionResumeRow(), source_policy_id: "production-ledger-bot-only-retention-7d-v1", batch_id: "440",
+    transaction_count: 6, entry_count: 12,
+    archive_proof_verified_at: null, archived_transaction_ids_sha256: null, archived_entry_ids_sha256: null, ...overrides };
+  const harness = makeProductionResumeHarness(row);
+  const calls = { proof: 0, dry: 0, persist: 0, execute: 0 };
+  let lockLost = false;
+  const unsafe = harness.deps.sql.unsafe;
+  harness.deps.sql.unsafe = async (query, values) => (lockLost && query.includes("pg_backend_pid") && !query.includes("pg_try_advisory_lock")
+    ? [{ backend_pid: "reconnected-production-session" }] : unsafe(query, values));
+  harness.deps.inspectDurableRecoveryState = async () => ({ state: "both_missing" });
+  harness.deps.downloadPrivateArchiveObject = async () => {
+    if (loseLockOnDownload) lockLost = true;
+    return { bytes: badBytes ? Buffer.from("wrong archive") : productionResumeArchiveBytes };
+  };
+  harness.deps.persistDurableRecovery = async () => {
+    calls.persist += 1;
+    return { state: "complete", archive: { sha256: row.compressed_sha256 }, recoveryArchive: { sha256: row.compressed_sha256, uploaded: !recoveryExisted },
+      recoveryManifest: { sha256: "4".repeat(64), uploaded: !recoveryExisted } };
+  };
+  harness.deps.pruneArchive = async ({ argv }) => {
+    if (argv.includes("--register-proof")) {
+      calls.proof += 1;
+      Object.assign(row, { archive_proof_verified_at: "2026-11-03T13:09:46Z", archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+        archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256 });
+      return { state: "proof_registered", evidence: botResumeEvidence };
+    }
+    if (argv.includes("--execute")) { calls.execute += 1; return { state: "cleaned", evidence: botResumeEvidence }; }
+    calls.dry += 1;
+    return { state: "ready", read_only: true, evidence: botResumeEvidence };
+  };
+  const run = () => runProductionAutomation({ policy: "bot-only-7d", mode: "automatic", env: terminalAutomaticEnv,
+    deps: { ...harness.deps, read: async () => botActivatedState, sqlRead: async () => botActivatedState } });
+  return { row, calls, run, harness };
+}
+const botMissingProof = makeBotMissingProofHarness();
+const botMissingProofResult = await botMissingProof.run();
+assert.equal(botMissingProofResult.state, "cleaned");
+assert.equal(botMissingProofResult.batchId, "440");
+assert.equal(botMissingProofResult.transactions, 6);
+assert.equal(botMissingProofResult.entries, 12);
+assert.equal(botMissingProofResult.maxTransactions, 5000);
+assert.equal(botMissingProofResult.storageWrites, 2, "newly created recovery objects are reported");
+assert.equal((await makeBotMissingProofHarness({ recoveryExisted: true }).run()).storageWrites, 0, "existing recovery objects are not writes");
+assert.deepEqual(botMissingProof.calls, { proof: 1, dry: 2, persist: 1, execute: 1 });
+assert.equal(botMissingProof.harness.calls.export, 0);
+assert.equal(botMissingProof.harness.calls.store, 0);
+const manualSixPrepare = makeProductionPrepareResumeHarness({ row: { transaction_count: 6, entry_count: 12 } });
+await assert.rejects(prepareProductionResume(manualSixPrepare), /PREPARE batch identity, archive or cap differs/);
+assert.deepEqual(manualSixPrepare.prepareCalls, { proof: 0, dry: 0, persist: 0 }, "manual PREPARE keeps the cap of 2");
+const botPartialProof = makeBotMissingProofHarness({ row: { archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256 } });
+await assert.rejects(botPartialProof.run(), /missing its immutable archive proof/);
+assert.deepEqual(botPartialProof.calls, { proof: 0, dry: 0, persist: 0, execute: 0 });
+const botBadArchive = makeBotMissingProofHarness({ badBytes: true });
+await assert.rejects(botBadArchive.run(), /archive SHA differs/);
+assert.deepEqual(botBadArchive.calls, { proof: 0, dry: 0, persist: 0, execute: 0 });
+const botLostLock = makeBotMissingProofHarness({ loseLockOnDownload: true });
+await assert.rejects(botLostLock.run(), /advisory lock session changed/);
+assert.deepEqual(botLostLock.calls, { proof: 0, dry: 0, persist: 0, execute: 0 });
+assert.equal((await fs.promises.readFile(new URL("../../scripts/ops/chips-ledger-production-automation.mjs", import.meta.url), "utf8"))
+  .match(/idle_timeout: 0, max_lifetime: 0 \}\);/g)?.length, 2, "Production advisory-lock sessions must never be recycled");
+
+// Full-history lifecycle checks must survive bounded transfer, including old corruption.
+{
+  const db = new PGlite();
+  try {
+    const fields = [
+      "object_path", "project_ref", "source_policy_id", "status", "batch_id", "format_version",
+      "cutoff", "cursor_start_created_at", "cursor_start_id", "transaction_count", "entry_count",
+      "raw_bytes", "compressed_bytes", "raw_sha256", "compressed_sha256", "credits", "debits",
+      "net_amount", "committed_at", "archive_proof_verified_at", "archived_transaction_ids_sha256",
+      "archived_entry_ids_sha256", "pruned_at", "pruned_transaction_count", "pruned_entry_count",
+      "pruned_transaction_ids_sha256", "pruned_entry_ids_sha256", "bot_only_table_id",
+      "bot_only_table_count", "bot_only_newest_created_at", "bot_only_registry_keys_sha256",
+      "bot_only_out_of_scope_keys_sha256", "bot_only_identity_count", "bot_only_eligible_count",
+      "registry_cleaned_at", "registry_cleaned_key_count", "registry_cleaned_keys_sha256",
+      "destructive_go_at", "destructive_go_batch_id",
+    ];
+    await db.exec(`create table public.chips_ledger_archive_batches (
+      ${fields.map((name) => `${name} text`).join(",")}, created_at timestamptz);
+      create table public.poker_tables (id text, bot_only_retention_complete_at timestamptz);`);
+    await db.query(`insert into public.chips_ledger_archive_batches (
+      object_path, project_ref, source_policy_id, status, batch_id, created_at,
+      archive_proof_verified_at, archived_transaction_ids_sha256, archived_entry_ids_sha256,
+      pruned_at, pruned_transaction_count, pruned_entry_count,
+      pruned_transaction_ids_sha256, pruned_entry_ids_sha256,
+      registry_cleaned_at, registry_cleaned_key_count, registry_cleaned_keys_sha256)
+      select lpad(n::text, 5, '0'), $1, $2, 'committed', n::text,
+        '2026-10-01'::timestamptz + n * interval '1 second',
+        'proof', 'tx', 'entry', 'pruned', '1', '2', 'tx', 'entry', 'cleaned', '1', 'keys'
+      from generate_series(1, 10000) n`, [STAGE_PROJECT_REF, BOT_ONLY_RETENTION_POLICY_ID]);
+    const select = async (policy = BOT_ONLY_RETENTION_POLICY_ID) =>
+      (await db.query(STAGE_OWN_BATCHES_SQL, [STAGE_PROJECT_REF, policy])).rows;
+    assert.deepEqual((await select()).map((r) => r.batch_id), ["10000"], "only latest completed crosses the wire");
+    // Same timestamp: preserve the original descending object_path tie-breaker.
+    await db.exec("update public.chips_ledger_archive_batches set created_at = '2027-01-01' where batch_id in ('9998','9999')");
+    assert.deepEqual((await select()).map((r) => r.batch_id), ["9999"]);
+    for (const [id, update, message] of [
+      ["1", "archive_proof_verified_at = null", /proof is partial/],
+      ["2", "pruned_entry_count = null", /receipt is partial/],
+      ["3", "registry_cleaned_key_count = null", /cleanup receipt is partial/],
+      ["4", "status = 'invalid'", /invalid state/],
+      ["5", "status = null", /invalid state/],
+    ]) {
+      await db.exec("begin");
+      await db.exec(`update public.chips_ledger_archive_batches set ${update} where batch_id = '${id}'`);
+      const rows = await select();
+      assert.ok(rows.length <= 4);
+      // Exercise the same validator as the automatic runner, without any Stage execution.
+      assert.throws(() => assertAutomaticBotOnlyRows(rows), message);
+      await db.exec("rollback");
+    }
+    assert.equal(assertAutomaticBotOnlyRows(await select()), null);
+    await db.exec("update public.chips_ledger_archive_batches set status = 'pending' where batch_id = '1'");
+    assert.equal(assertAutomaticBotOnlyRows(await select()).batch_id, "1", "old active row survives many completed rows");
+    await db.exec("update public.chips_ledger_archive_batches set status = 'pending' where batch_id in ('2','3')");
+    const ambiguous = await select();
+    assert.ok(ambiguous.length <= 4);
+    assert.throws(() => assertAutomaticBotOnlyRows(ambiguous), /multiple incomplete/);
+    assert.deepEqual(await select("unrelated-policy"), []);
+    assert.deepEqual((await db.query(STAGE_OWN_BATCHES_SQL, ["other-project", BOT_ONLY_RETENTION_POLICY_ID])).rows, []);
+    // The shared 30d caller must ignore absent registry receipts and retain its
+    // latest-completed selection and ambiguity check after SQL compaction.
+    await db.query(`update public.chips_ledger_archive_batches set source_policy_id = $1,
+      status = 'committed', registry_cleaned_at = null, registry_cleaned_key_count = null,
+      registry_cleaned_keys_sha256 = null`, [STAGE_AUTOMATION_POLICY_ID]);
+    const completed = findOwnCycle(await select(STAGE_AUTOMATION_POLICY_ID));
+    assert.equal(completed.active, null);
+    assert.equal(completed.latestCompleted.batch_id, "9999");
+    await db.exec(`update public.chips_ledger_archive_batches set pruned_at = null,
+      pruned_transaction_count = null, pruned_entry_count = null,
+      pruned_transaction_ids_sha256 = null, pruned_entry_ids_sha256 = null where batch_id = '1'`);
+    assert.equal(findOwnCycle(await select(STAGE_AUTOMATION_POLICY_ID)).active.batch_id, "1");
+    await db.exec(`update public.chips_ledger_archive_batches set pruned_at = null,
+      pruned_transaction_count = null, pruned_entry_count = null,
+      pruned_transaction_ids_sha256 = null, pruned_entry_ids_sha256 = null where batch_id in ('2','3')`);
+    const ambiguous30d = await select(STAGE_AUTOMATION_POLICY_ID);
+    assert.throws(() => findOwnCycle(ambiguous30d), /multiple incomplete/);
+    await db.exec("delete from public.chips_ledger_archive_batches");
+    assert.equal(assertAutomaticBotOnlyRows(await select()), null);
+  } finally {
+    await db.close();
+  }
+}

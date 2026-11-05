@@ -4,7 +4,7 @@ set -euo pipefail
 # Deployment/provisioning is owner-gated. Missing switch/token never falls back
 # to the Stage or an operator's ambient gh login. No DB/Storage credentials.
 [[ "${CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:-0}" == "1" ]] || exit 0
-GH_BIN="${GH_BIN:-/home/copilot/.local/bin/gh}"
+GH_BIN="${GH_BIN:-/usr/bin/gh}"
 REPO="krzysztofcal/arcadePlatform"
 WORKFLOW="chips-ledger-production-scheduled-automation.yml"
 slot="$(date -u +%H:%M)"

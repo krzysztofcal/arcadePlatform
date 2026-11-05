@@ -731,7 +731,7 @@ export async function runClosedHumanPolicyDiagnostic({ env = process.env, deps =
   return result;
 }
 
-export const STAGE_OWN_BATCHES_SQL = `select
+const STAGE_OWN_BATCHES_SELECT_SQL = `select
     object_path,
     project_ref,
     source_policy_id,
@@ -778,10 +778,51 @@ export const STAGE_OWN_BATCHES_SQL = `select
        from public.poker_tables tables
       where tables.id = chips_ledger_archive_batches.bot_only_table_id) as bot_only_retention_complete_at,
     destructive_go_at::text as destructive_go_at,
-    destructive_go_batch_id::text as destructive_go_batch_id
+    destructive_go_batch_id::text as destructive_go_batch_id,
+    -- #1157; read through jsonb so this works before the column exists.
+    to_jsonb(chips_ledger_archive_batches.*) ->> 'objects_expired_at' as objects_expired_at
+  from public.chips_ledger_archive_batches`;
+
+// Recovery diagnostics need the complete ambiguous-candidate list. Manual bot-only
+// preparation uses a different active predicate; keep its existing selection intact.
+const STAGE_OWN_BATCHES_HISTORY_SQL = `${STAGE_OWN_BATCHES_SELECT_SQL}
+  where project_ref = $1 and source_policy_id = $2
+  order by created_at desc, object_path desc;`;
+
+// Inspect ALL scoped lifecycle evidence before selecting bounded witnesses. Two
+// active rows preserve ambiguity rejection; one invalid row preserves fail-closed
+// validation even when it is older than every completed/active batch. Only selected
+// rows pay for the wide projection and correlated poker_tables lookups.
+// Keep these NULL-count predicates aligned with the JS lifecycle validators.
+export const STAGE_OWN_BATCHES_SQL = `with lifecycle as materialized (
+  select object_path, created_at, status,
+    num_nonnulls(archive_proof_verified_at, archived_transaction_ids_sha256,
+      archived_entry_ids_sha256) as proof_count,
+    num_nonnulls(pruned_at, pruned_transaction_count, pruned_entry_count,
+      pruned_transaction_ids_sha256, pruned_entry_ids_sha256) as receipt_count,
+    num_nonnulls(registry_cleaned_at, registry_cleaned_key_count,
+      registry_cleaned_keys_sha256) as cleanup_count
   from public.chips_ledger_archive_batches
-  where project_ref = $1
-  and source_policy_id = $2
+  where project_ref = $1 and source_policy_id = $2
+), selected_paths as (
+  (select object_path from lifecycle
+    where status = 'pending' or receipt_count <> 5
+      or ($2 = '${BOT_ONLY_RETENTION_POLICY_ID}' and cleanup_count <> 3)
+    order by created_at desc, object_path desc limit 2)
+  union
+  (select object_path from lifecycle
+    where status is null or status not in ('pending', 'committed')
+      or proof_count not in (0, 3) or receipt_count not in (0, 5)
+      or ($2 = '${BOT_ONLY_RETENTION_POLICY_ID}' and cleanup_count not in (0, 3))
+    order by created_at desc, object_path desc limit 1)
+  union
+  (select object_path from lifecycle
+    where status = 'committed' and receipt_count = 5
+    order by created_at desc, object_path desc limit 1)
+)
+${STAGE_OWN_BATCHES_SELECT_SQL}
+  where project_ref = $1 and source_policy_id = $2
+    and object_path in (select object_path from selected_paths)
   order by created_at desc, object_path desc;`;
 
 export const STAGE_EXACT_BATCH_SQL = `select
@@ -840,8 +881,8 @@ export const STAGE_EXACT_BATCH_SQL = `select
   from public.chips_ledger_archive_batches
   where batch_id = $1;`;
 
-async function loadOwnBatches(sql, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
-  return sql.unsafe(STAGE_OWN_BATCHES_SQL, [STAGE_PROJECT_REF, sourcePolicyId]);
+async function loadOwnBatches(sql, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID, { fullHistory = false } = {}) {
+  return sql.unsafe(fullHistory ? STAGE_OWN_BATCHES_HISTORY_SQL : STAGE_OWN_BATCHES_SQL, [STAGE_PROJECT_REF, sourcePolicyId]);
 }
 
 export function botOnlyExportArgs(row, artifactPath, manifestPath) {
@@ -1678,6 +1719,10 @@ async function loadExactBatch(sql, approvedBatchId, label = "approved bot-only b
   return rows[0];
 }
 
+function latestUnexpired(row) {
+  return row && !row.objects_expired_at ? row : null;
+}
+
 export function findOwnCycle(rows, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
   let sharedCycle;
   try {
@@ -1703,7 +1748,8 @@ export function findOwnCycle(rows, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) 
   }
   return {
     active: sharedCycle.active || active[0] || null,
-    latestCompleted: rows.find((row) => row.status === "committed" && receiptFieldCount(row) === 5) || null,
+    // #1157: an expired latest batch is terminal and has no objects to re-download.
+    latestCompleted: latestUnexpired(rows.find((row) => row.status === "committed" && receiptFieldCount(row) === 5)),
   };
 }
 
@@ -3148,7 +3194,7 @@ export async function runStageRecoveryDiagnostic({
     let selection = null;
     const exactBatchId = batchId == null ? null : String(batchId);
     if (exactBatchId == null) {
-      const ownRows = await loadOwnBatches(sql, recoveryPolicyId);
+      const ownRows = await loadOwnBatches(sql, recoveryPolicyId, { fullHistory: true });
       let ownCycle;
       try {
         ownCycle = findOwnCycle(ownRows, recoveryPolicyId);
@@ -5884,7 +5930,7 @@ export async function runBotOnlyStageAutomation({
         });
       } else {
         await verifyBucket(storageTarget);
-        const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
+        const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID, { fullHistory: true });
         const activeRows = ownRows.filter((row) => row.status === "pending" || (row.status === "committed" && !row.registry_cleaned_at));
         if (activeRows.length > 1) fail("multiple incomplete bot-only Stage manifests; refusing to choose one");
 
@@ -5963,7 +6009,7 @@ export async function runBotOnlyStageAutomation({
           deployedCommitSha,
         });
       } else {
-        const latestCompleted = ownRows.find((row) => row.status === "committed" && row.registry_cleaned_at);
+        const latestCompleted = latestUnexpired(ownRows.find((row) => row.status === "committed" && row.registry_cleaned_at));
         if (latestCompleted) {
           const completed = await runPruneStep({
             row: await refreshPolicyRow(pruneStore, latestCompleted.object_path, BOT_ONLY_RETENTION_POLICY_ID),
@@ -6054,7 +6100,7 @@ function cleanupReceiptFieldCount(row) {
   ].filter((value) => value != null).length;
 }
 
-function assertAutomaticBotOnlyRows(rows) {
+export function assertAutomaticBotOnlyRows(rows) {
   const active = rows.filter((row) => row.status === "pending"
     || receiptFieldCount(row) !== 5
     || cleanupReceiptFieldCount(row) !== 3);
@@ -6226,11 +6272,15 @@ export async function runAutomaticBotOnlyStageAutomation({
           discoveredTables = assertBotOnlyDiscoveryResult(exported);
           return discoveredTables;
         };
+        markAutomaticPhase("automatic.select");
+        await assertAdvisoryLock(sql, lockSession);
+        const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
+        let activeRow = assertAutomaticBotOnlyRows(ownRows);
+        // All cooperating retention writers hold this same session lock. Validate
+        // history once; each cycle below must confirm completion before advancing.
         for (let index = 0; index < BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN; index += 1) {
           markAutomaticPhase("automatic.select");
           await assertAdvisoryLock(sql, lockSession);
-          const ownRows = await loadOwnBatches(sql, BOT_ONLY_RETENTION_POLICY_ID);
-          let activeRow = assertAutomaticBotOnlyRows(ownRows);
           if (activeRow) markAutomaticPhase("automatic.manifest", activeRow);
 
           let activeArchiveStorageModified = false;
@@ -6420,6 +6470,7 @@ export async function runAutomaticBotOnlyStageAutomation({
                 dryRunRetryCount: dryRunResult.dryRunRetryCount,
                 dryRunSqlstates: dryRunResult.dryRunSqlstates,
               });
+              if (assertAutomaticBotOnlyRows([row])) fail("automatic bot-only cycle did not complete its receipts");
               return {
                 row,
                 dry,
@@ -6623,6 +6674,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               fail("automatic bot-only retry did not return already_cleaned");
             }
             const finalRow = await refreshPolicyRow(pruneStore, row.object_path, BOT_ONLY_RETENTION_POLICY_ID);
+            if (assertAutomaticBotOnlyRows([finalRow])) fail("automatic bot-only cycle did not complete its receipts");
             currentBatch = automaticBatchProgress({
               row: finalRow,
               identity,
@@ -6697,6 +6749,7 @@ export async function runAutomaticBotOnlyStageAutomation({
               retry: cycle.retry?.state || null,
             });
             currentBatch = null;
+            activeRow = null;
             continue;
           }
 

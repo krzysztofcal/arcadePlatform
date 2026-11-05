@@ -63,6 +63,13 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.doesNotMatch(validateSection, /PREVIEW_RELEASES_DIR/);
 });
 
+test("ws preview secret-using jobs require owner main dispatch", () => {
+  const text = workflowText();
+  const guard = "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}";
+  for (const job of ["validate", "deploy"]) assert.ok(text.includes(`  ${job}:\n${guard}\n`), `${job} must require owner/owner main`);
+  assert.doesNotMatch(text, /WS_RELEASE_AGENT/);
+});
+
 test("ws preview deploy validates workflow files from workflow ref and builds app from inputs.ref", () => {
   const text = workflowText();
   const validateSection = text.split(/^  deploy:\n/m)[0];

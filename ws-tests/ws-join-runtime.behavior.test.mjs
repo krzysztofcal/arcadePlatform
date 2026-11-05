@@ -693,6 +693,101 @@ test("authoritative WS table_join can progress through human act and bot timeout
   }
 });
 
+test("restart preflight stays unsafe during a live hand and reports safe only when held, drained and persisted", async () => {
+  const secret = "auth-join-preflight-secret";
+  const tableId = "table_auth_join_preflight";
+  const token = "preflight-internal-token";
+  const store = {
+    accounts: [{ user_id: "preflight_human", account_type: "USER", balance: 120 }],
+    tables: {
+      [tableId]: {
+        tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
+        seatRows: [],
+        stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
+      }
+    }
+  };
+  const { dir, filePath } = await writePersistedFile(store);
+  const holdFile = path.join(dir, "hold-new-hands");
+  const { port, child } = await createServer({
+    env: {
+      ...runtimeJoinEnv({ secret, filePath }),
+      WS_POKER_TURN_MS: "60000",
+      WS_POKER_SETTLED_REVEAL_MS: "0",
+      WS_POKER_NEW_HANDS_HOLD_FILE: holdFile,
+      POKER_WS_INTERNAL_TOKEN: token,
+      WS_DEPLOY_ENVIRONMENT: "preview"
+    }
+  });
+  const holdStatus = async () => (await (await fetch(`http://127.0.0.1:${port}/internal/admin/poker-maintenance`, {
+    headers: { authorization: `Bearer ${token}` }
+  })).json()).newHandsHold;
+  const waitForHoldStatus = async (predicate) => {
+    let status = null;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      status = await holdStatus();
+      if (predicate(status)) return status;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return status;
+  };
+
+  try {
+    await waitForListening(child, 5000);
+    const ws = await connectClient(port);
+    await hello(ws);
+    await auth(ws, makeHs256Jwt({ secret, sub: "preflight_human" }), "auth-preflight");
+    sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-preflight", ts: "2026-02-28T06:30:00Z", payload: { tableId, seatNo: 1, buyIn: 100 } });
+    assert.equal((await nextCommandResultForRequest(ws, "join-preflight")).payload.status, "accepted");
+    sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "preflight-snapshot", ts: "2026-02-28T06:30:01Z", payload: { tableId, view: "snapshot" } });
+    const initial = await nextMessageOfType(ws, "stateSnapshot");
+    const humanTurn = await waitForHumanTurn(ws, { userId: "preflight_human", baseline: initial.payload, timeoutMs: 5000 });
+
+    await fs.writeFile(holdFile, "drain\n");
+    const live = await holdStatus();
+    assert.equal(live.drain, true);
+    assert.equal(live.loadedHandsInProgress, 1);
+    assert.equal(live.dbHandsInProgress, 1);
+    assert.equal(live.restartSafe, false);
+    sendFrame(ws, { version: "1.0", type: "act", requestId: "preflight-drained-fold", ts: "2026-02-28T06:30:02Z", payload: { tableId, handId: humanTurn.public.hand.handId, action: "fold" } });
+    const drained = await nextMessageMatching(ws, (frame) => frame?.type === "error" && frame?.payload?.requestId === "preflight-drained-fold", { description: "drained act error" });
+    assert.equal(drained.payload.message, "ws_drain_active");
+
+    await fs.writeFile(holdFile, "");
+    sendFrame(ws, { version: "1.0", type: "act", requestId: "preflight-fold", ts: "2026-02-28T06:30:02Z", payload: { tableId, handId: humanTurn.public.hand.handId, action: "fold" } });
+    assert.equal((await nextCommandResultForRequest(ws, "preflight-fold")).payload.status, "accepted");
+    const settled = await waitForHoldStatus((status) => status.loadedHandsInProgress === 0 && status.tableCommandsInFlight === 0);
+    assert.equal(settled.dbHandsInProgress, 0);
+    assert.equal(settled.restartSafe, false);
+
+    await fs.writeFile(holdFile, "drain\n");
+    // Unverifiable money keeps the restart blocked: the file store has no table escrow yet.
+    const noEscrow = await waitForHoldStatus((status) => status.dbFinancialIssues !== null && status.tableCommandsInFlight === 0);
+    assert.equal(noEscrow.dbFinancialIssues.missingEscrow, 1);
+    assert.equal(noEscrow.restartSafe, false);
+    const persisted = await readPersistedFile(filePath);
+    const stackTotal = Object.values(persisted.tables[tableId].stateRow.state.stacks).reduce((total, amount) => total + amount, 0);
+    persisted.accounts.push({ account_type: "ESCROW", status: "active", system_key: `POKER_TABLE:${tableId}`, balance: stackTotal + 1 });
+    await fs.writeFile(filePath, `${JSON.stringify(persisted)}\n`, "utf8");
+    assert.equal((await holdStatus()).dbFinancialIssues.balanceMismatches, 1);
+    persisted.accounts.at(-1).balance = stackTotal;
+    await fs.writeFile(filePath, `${JSON.stringify(persisted)}\n`, "utf8");
+    const quiet = await waitForHoldStatus((status) => status.restartSafe === true);
+    assert.deepEqual(quiet, {
+      configured: true, active: true, drain: true, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
+      supervisorSweepInProgress: false, dbHandsInProgress: 0, dbVersionMismatches: 0,
+      dbFinancialIssues: { missingState: 0, missingEscrow: 0, invalidAmounts: 0, balanceMismatches: 0, unresolvedRequests: 0 },
+      restartSafe: true
+    });
+    assert.equal((await readPersistedFile(filePath)).tables[tableId].stateRow.state.phase, "SETTLED");
+    ws.close();
+  } finally {
+    child.kill("SIGTERM");
+    await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("authoritative repeated and replayed table_join keep bot seating stable and still allow later act flow", async () => {
   const secret = "auth-join-replay-secret";
   const tableId = "table_auth_join_replay";

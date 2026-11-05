@@ -17,6 +17,7 @@ import {
 } from "../engine/poker-engine.mjs";
 import { deriveDeterministicRuntimeHandState } from "../shared/runtime-hand-state.mjs";
 import { stampTurnDeadline } from "../shared/poker-turn-timeout.mjs";
+import { isNewHandsHoldActive } from "../runtime/new-hands-hold.mjs";
 import {
   calculateCanonicalPokerStakes,
   DEFAULT_CASH_TABLE_BUY_IN_CHIPS,
@@ -1076,6 +1077,9 @@ export function createTableManager({
     const managedBotsOnlyAllowed = allowManagedBotsOnly === true
       && table.tableMeta?.lifecycleKind === "CONTINUOUS_BOT"
       && table.tableMeta?.managedProfileKey === "CONTINUOUS_BOT_DEFAULT";
+    if (!existingLiveState && !settlementPending && isNewHandsHoldActive()) {
+      return { ok: true, changed: false, bootstrap: "new_hands_on_hold", stateVersion: table.coreState.version, handId: null };
+    }
     if (!existingLiveState && !settlementPending && !managedBotsOnlyAllowed && !hasHandEligibleHumanMember({ table, nowMs: resolvedNowMs })) {
       return {
         ok: true,
@@ -1415,6 +1419,9 @@ export function createTableManager({
     }
     if (settledState.phase !== "SETTLED") {
       return { ok: true, changed: false, reason: "hand_not_settled", stateVersion: table.coreState.version };
+    }
+    if (isNewHandsHoldActive()) {
+      return { ok: true, changed: false, reason: "new_hands_on_hold", stateVersion: table.coreState.version };
     }
 
     const nextVersion = Number(table.coreState.version || 0) + 1;

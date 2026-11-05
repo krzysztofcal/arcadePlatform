@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   monitor:
-    if: ${{ github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.actor == github.repository_owner) }}
+    environment: stage-automation
+    if: ${{ github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && github.triggering_actor == github.repository_owner && (github.event_name == 'schedule' || github.actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

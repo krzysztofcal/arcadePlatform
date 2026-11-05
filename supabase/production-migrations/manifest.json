@@ -1173,6 +1173,18 @@
       ]
     },
     {
+      "file": "20261105160500_chips_settled_retention_12m_production_contract.sql",
+      "sha256": "ef87c2959cf57a03da74170360224a2acc1400754df3a1a375d5629bd6e61db8",
+      "purpose": "#1157 dark settled retention contract; separate exact-file owner GO required, not applied; deletes nothing; no activation",
+      "prerequisites": [
+        "20260914092000_chips_ledger_production_retention_activation.sql",
+        "20261022091126_account_avatar_known_capability_policy.sql"
+      ],
+      "source_versions": [
+        "20261105160000"
+      ]
+    },
+    {
       "file": "20261027173627_profile_phase_a_bio_contract.sql",
       "sha256": "f297185dfeb1df38e32b681d2db2a20edc4c83e8f54d7dda2e151cf55a013bcd",
       "purpose": "#1114 prepared BIO-only contract; separate Production schema/runtime/history preflight and exact-file GO required. No activation, profile data or Storage change.",
@@ -1251,6 +1263,13 @@
       "sha256": "f2d4c1b9a1c461581af922e17d5d0f920cfb52ffce48b5207d36a938ce6f1f8c",
       "category": "needs-production-equivalent",
       "purpose": "#1117 owner-approved unobserved capability risk: optional truthful waiver of fixed global wait only; known capabilities and unresolved operations remain fail-closed. No remote application or activation."
+    },
+    {
+      "file": "20261105160000_chips_settled_retention_12m.sql",
+      "version": "20261105160000",
+      "sha256": "f63cd59acc8dca34fd84588194ad6c1ca958fe1d87c13c544888973c5d8845f0",
+      "category": "needs-production-equivalent",
+      "purpose": "#1157 dark 12-month settled retention contract (archive objects expiry marker, guarded expiry and small-table functions); Stage apply needs a separate owner DB Stage Apply PR dispatch; no activation"
     },
     {
       "file": "20261026120000_profile_phase_a.sql",

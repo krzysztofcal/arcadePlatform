@@ -8,6 +8,7 @@ import { buildSeatBotMap, isBotTurn } from "../../netlify/functions/_shared/poke
 import { deriveCommunityCards, deriveRemainingDeck } from "../../netlify/functions/_shared/poker-deal-deterministic.mjs";
 import { isHoleCardsTableMissing, loadHoleCardsByUserId } from "../../netlify/functions/_shared/poker-hole-cards-store.mjs";
 import { hasParticipatingHumanInHand, runAdvanceLoop, runBotAutoplayLoop } from "../../netlify/functions/_shared/poker-autoplay.mjs";
+import { materializeShowdownAndPayout } from "../../netlify/functions/_shared/poker-materialize-showdown.mjs";
 import { executeTerminalPokerCloseInTx } from "./terminal-close.mjs";
 
 const REQUEST_PENDING_STALE_SEC = 30;
@@ -209,6 +210,21 @@ const applyTerminalSettlementLeave = (state, userId) => ({
   },
   events: [{ type: "PLAYER_LEFT_TABLE", userId }],
 });
+
+// applyLeaveTable ends a live hand won by fold as HAND_DONE without awarding the pot.
+// WS hands end as SETTLED with handSettlement, so award the pot to the reducer's fold winner.
+const settleHandEndedByLeave = (beforeState, leaveApplied) => {
+  const state = leaveApplied?.state;
+  if (!hasLiveHandSignal(beforeState) || state?.phase !== "HAND_DONE") return state;
+  const winnerUserId = (leaveApplied.events || []).find((event) => event?.type === "HAND_DONE")?.winnerUserId;
+  if (typeof winnerUserId !== "string" || !winnerUserId) throw makeError(409, "state_invalid");
+  const { nextState } = materializeShowdownAndPayout({
+    state: { ...state, pot: Number(state.potTotal ?? state.pot ?? 0) },
+    seatUserIdsInOrder: [winnerUserId],
+  });
+  if (nextState?.phase !== "SETTLED") throw makeError(409, "state_invalid");
+  return { ...nextState, potTotal: 0, sidePots: [] };
+};
 
 const isUserInCurrentHand = (state, userId) => {
   const handSeats = Array.isArray(state?.handSeats) ? state.handSeats : parseSeats(state?.seats);
@@ -540,7 +556,8 @@ export async function executePokerLeave({
   includeState = false,
   runPostLeaveBotAutoplay = true,
   hasConnectedHumanPresence = () => false,
-  inactivityEjection = false
+  inactivityEjection = false,
+  writeSettlementAudit = null
 }) {
   void nowMs;
   const result = await beginSql(async (tx) => {
@@ -701,7 +718,11 @@ export async function executePokerLeave({
           throw makeError(409, "state_invalid");
         }
 
-        const leaveState = normalizeState(leaveApplied.state);
+        const leaveState = normalizeState(settleHandEndedByLeave(currentState, leaveApplied));
+        const handSettledByLeave = leaveState.phase === "SETTLED" && hasLiveHandSignal(currentState);
+        if (handSettledByLeave && typeof writeSettlementAudit !== "function") {
+          throw makeError(409, "settlement_audit_unavailable");
+        }
         const deferDetachUntilHandComplete = hasLiveHandSignal(leaveState) && isUserInCurrentHand(currentState, userId);
         const baseSeats = deferDetachUntilHandComplete
           ? parseSeats(currentState.seats)
@@ -758,6 +779,12 @@ export async function executePokerLeave({
           throw makeError(409, "state_invalid");
         }
         mutated = true;
+        if (handSettledByLeave) {
+          // Same HAND_SETTLED row as the WS writer, so action and hole-card retention can complete.
+          // A throw or a skipped row rejects the whole Leave transaction, cash-out included.
+          const audit = await writeSettlementAudit({ tx, tableId, stateVersion: updateResult.newVersion, state: updatedState, klog });
+          if (audit?.ok !== true || audit.skipped) throw makeError(409, "settlement_audit_unavailable");
+        }
 
         let latestState = updatedState;
         let latestVersion = updateResult.newVersion;

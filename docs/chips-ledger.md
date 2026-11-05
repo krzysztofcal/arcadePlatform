@@ -150,6 +150,32 @@ These will be built on top of this ledger.
 
 ---
 
+## 12-month settled history cap (#1157)
+
+`scripts/ops/chips-ledger-settled-retention.mjs --target stage|production --mode diagnostic|canary|automatic` (spec: `specs/1157-settled-data-retention/`). Owner dispatch from `main`: Production policy `retention-12m` in `Chips Ledger Production Automation`; Stage workflow `Chips Ledger Stage Settled Retention`.
+
+- **Archive expiry.** A committed, pruned archive batch whose newest row is older than 12 months loses its Storage objects: the primary archive, the `recovery/` copy and manifest, and its `account-recovery/` object, if it has one. The script only sends DELETE requests and never downloads or lists objects. `public.chips_expire_archive_batch` then sets `objects_expired_at` and deletes that batch's archived `chips_transaction_idempotency` rows (decision D1). The metadata row stays as non-personal evidence. A recovery older than 12 months is therefore no longer possible.
+- **Never expired:**
+  - a batch whose escrow retirement is still pending;
+  - a closed-human batch while WS still holds its table, which WS deletes only after the lifecycle marker;
+  - unpruned batches.
+- **Expired batches in existing cycles.** The existing cycles treat an expired latest batch as terminal and skip re-downloading it. Manual exact-batch tools (`lifecycle-completion`, recovery repair, legacy audit, timeout diagnostic) fail closed on an expired batch.
+- **Small tables.** `public.chips_settled_retention_12m_run` deletes or minimizes older than 12 months, with at most 5000 rows per run in total. It returns counts only.
+  - `poker_gift_purchases` of CLOSED or deleted tables: deleted.
+  - COMPLETED `account_deletion_requests`: `progress` and the status token are cleared; `old_user_id` stays as the reuse tombstone (D3).
+  - finished `poker_requests`: deleted; an `ACT` without a result is kept.
+- **Kept as exceptions:**
+  - live balances and the hot USER ledger of active accounts (D2);
+  - the ledger history and snapshots of retired accounts (D5).
+- **Gates:**
+  - `chips_settled_retention_control` is OFF by default.
+  - `canary` processes exactly one batch with the confirmation `EXPIRE ARCHIVE <batch-id>`.
+  - `automatic` needs the owner workflow on `main` and the enabled control, and processes at most 10 batches per run.
+  - Both modes use the target's existing retention advisory lock.
+  - Only canonical Stage accepts a `--cutoff` override (T002).
+
+---
+
 ## Mental Model (Summary)
 
 > Chips are money.

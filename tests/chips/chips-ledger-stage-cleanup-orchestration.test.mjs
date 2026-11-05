@@ -218,6 +218,7 @@ function fakeScheduler({
   for (const [objectPath, bytes] of initialArchiveBytes) archiveBytesByPath.set(objectPath, Buffer.from(bytes));
   const executionCounts = new Map();
   const state = {
+    ownBatchReads: 0,
     candidateCalls: 0,
     discoveryCalls: 0,
     revalidationCalls: 0,
@@ -289,7 +290,7 @@ function fakeScheduler({
           ? [{ policy_id: "stage-ledger-bot-only-retention-7d-v1", enabled: true, activated_at: "2026-08-25T00:00:00Z", canary_batch_id: "1" }]
           : [{ policy_id: "stage-ledger-bot-only-retention-7d-v1", enabled: false, activated_at: null, canary_batch_id: null }];
       }
-      if (query.includes("from public.chips_ledger_archive_batches")) return ownRows;
+      if (query.includes("from public.chips_ledger_archive_batches")) { state.ownBatchReads += 1; return ownRows; }
       throw new Error(`unexpected fake scheduler SQL: ${query}`);
     },
   };
@@ -1888,8 +1889,24 @@ async function schedulerContracts() {
   const capacity = fakeScheduler({ enabled: true, candidateCount: BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN + 5 });
   const capacityResult = await runAutomaticBotOnlyStageAutomation(capacity);
   assert.equal(capacityResult.processed.length, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
+  assert.equal(capacity.state.ownBatchReads, 1, "six batches must share one locked history validation");
   assert.equal(capacity.state.storeCalls, BOT_ONLY_AUTOMATIC_MAX_BATCHES_PER_RUN);
   assert.equal(capacityResult.stopReason, "batch_limit_reached", "the bounded run must report its full capacity");
+
+  const unconfirmed = fakeScheduler({ enabled: true, candidateCount: 2 });
+  const executeUnconfirmed = unconfirmed.deps.executeVerifiedCycle;
+  unconfirmed.deps.executeVerifiedCycle = async (options) => {
+    const result = await executeUnconfirmed(options);
+    if (result.state === "already_cleaned") {
+      const row = unconfirmed.manifests.get(options.row.object_path);
+      row.registry_cleaned_at = null;
+      row.registry_cleaned_key_count = null;
+      row.registry_cleaned_keys_sha256 = null;
+    }
+    return result;
+  };
+  await assert.rejects(runAutomaticBotOnlyStageAutomation(unconfirmed), /did not complete its receipts/);
+  assert.equal(unconfirmed.state.storeCalls, 1, "unconfirmed completion must block the next batch");
 
   const interrupted = fakeScheduler({ enabled: true, candidateCount: 1, failExecuteOnce: true });
   await assert.rejects(runAutomaticBotOnlyStageAutomation(interrupted), /simulated interruption/);

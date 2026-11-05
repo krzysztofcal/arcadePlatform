@@ -6,7 +6,7 @@ readonly RELEASES_ROOT='/opt/ws-server/releases'
 readonly CURRENT_RELEASE_LINK='/opt/ws-server/current'
 readonly TMP_ROOT='/tmp'
 readonly LOCK_FILE='/opt/ws-server/.deploy-maintenance.lock'
-readonly DEPLOY_USER='copilot'
+readonly DEPLOY_USER='arcade-release'
 readonly RELEASE_RETENTION_SECONDS=604800
 readonly TMP_RETENTION_MINUTES=2880
 

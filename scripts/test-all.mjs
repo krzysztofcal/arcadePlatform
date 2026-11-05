@@ -23,6 +23,8 @@ const has = s => !!(process.env[s] && process.env[s] !== "0");
 
 run("node", ["scripts/syntax-check.mjs"], "syntax");
 run("node", ["--test", "tests/account-page.test.mjs"], "account-page");
+run("node", ["--test", "tests/mobile-poker-security.test.mjs", "tests/mobile-poker-preview.test.mjs"], "mobile-poker-fundamentals");
+run("node", ["--test", "tests/www-production-release.test.mjs"], "www-production-release");
 
 run("node", ["tests/xp-client.test.mjs"], "xp-client");
 run("node", ["tests/xp-client-contract.test.mjs"], "xp-client-contract");
@@ -55,6 +57,7 @@ run("node", ["tests/chips-ledger-pagination.behavior.test.mjs"], "chips-ledger-p
 run("node", ["tests/chips/chips-ledger-archive-export.test.mjs"], "chips-ledger-archive-export");
 run("node", ["tests/chips/chips-ledger-archive-storage.test.mjs"], "chips-ledger-archive-storage");
 run("node", ["tests/chips/chips-ledger-archive-pruning.test.mjs"], "chips-ledger-archive-pruning");
+run("node", ["tests/chips/chips-ledger-settled-retention.test.mjs"], "chips-ledger-settled-retention");
 run("node", ["tests/chips/chips-ledger-prunable-candidate-sql.behavior.test.mjs"], "chips-ledger-prunable-candidate-sql");
 run("node", ["tests/chips/chips-ledger-closed-human-candidate-sql.behavior.test.mjs"], "chips-ledger-closed-human-candidate-sql");
 run("node", ["tests/chips/chips-ledger-bot-only-retention.test.mjs"], "chips-ledger-bot-only-retention");

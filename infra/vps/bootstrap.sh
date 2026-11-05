@@ -102,12 +102,33 @@ getent group arcade-deploy >/dev/null || groupadd --system arcade-deploy
 usermod --append --groups arcade-deploy copilot
 gpasswd --delete arcade arcade-deploy >/dev/null 2>&1 || true
 
+# WS Production release account: reachable only with the ws-production environment key (#1159 T004).
+# It owns the Production release tree; the agent account copilot is never a member of its group.
+getent group arcade-release >/dev/null || groupadd --system arcade-release
+id arcade-release >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-release --shell /bin/bash --gid arcade-release arcade-release
+gpasswd --delete copilot arcade-release >/dev/null 2>&1 || true
+install -d -o arcade-release -g arcade-release -m 0700 /home/arcade-release/.ssh
+
+# VPS admin account: reachable only with the vps-admin environment key; runs only the admin helper's catalog.
+getent group arcade-admin >/dev/null || groupadd --system arcade-admin
+id arcade-admin >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/arcade-admin --shell /bin/bash --gid arcade-admin arcade-admin
+gpasswd --delete copilot arcade-admin >/dev/null 2>&1 || true
+install -d -o arcade-admin -g arcade-admin -m 0700 /home/arcade-admin/.ssh
+
+# Ledger dispatchers: owner Actions tokens only from root-owned 0600 env files (#1159 T004-3).
+# No login, no home and no group shared with the agent account copilot.
+getent group arcade-dispatch >/dev/null || groupadd --system arcade-dispatch
+id arcade-dispatch >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid arcade-dispatch arcade-dispatch
+gpasswd --delete copilot arcade-dispatch >/dev/null 2>&1 || true
+
 getent group arcade-stage-runner >/dev/null || groupadd --system arcade-stage-runner
 id arcade-stage-runner >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /var/lib/arcade-stage-runner --shell /usr/sbin/nologin --gid arcade-stage-runner arcade-stage-runner
 
 install -d -o root -g root -m 0755 /etc/arcadeplatform
-install -d -o root -g arcade-deploy -m 2775 /opt/ws-server /opt/ws-server/releases
-install -o root -g arcade-deploy -m 0660 /dev/null /opt/ws-server/.deploy-maintenance.lock
+# New hosts only: an existing host moves /opt/ws-server through the reviewed ownership migration
+# (specs/1159-ci-cd-release-safety/t004/plan.md), never by re-running this script.
+install -d -o root -g arcade-release -m 2775 /opt/ws-server /opt/ws-server/releases
+install -o arcade-release -g arcade-release -m 0660 /dev/null /opt/ws-server/.deploy-maintenance.lock
 install -d -o arcade -g arcade -m 0755 /opt/arcade-ws-preview
 install -d -o root -g arcade-deploy -m 2775 \
   /opt/arcade-ws-preview/ws-server \
@@ -135,6 +156,11 @@ install -D -o root -g root -m 0755 \
   "$REPO_ROOT/infra/vps/ws-production-env-preflight.mjs" \
   /usr/local/sbin/arcade-ws-production-env-preflight
 
+install -D -o root -g root -m 0755 \
+  "$REPO_ROOT/infra/vps/ws-restart-gate.mjs" \
+  /usr/local/sbin/arcade-ws-restart-gate
+install -d -o root -g root -m 0755 /etc/arcadeplatform/ws-hold
+
 if ! visudo -cf "$REPO_ROOT/infra/vps/arcade-deploy.sudoers"; then
   echo "refusing bootstrap: invalid arcade deploy sudoers contract" >&2
   exit 1
@@ -142,6 +168,14 @@ fi
 install -o root -g root -m 0440 \
   "$REPO_ROOT/infra/vps/arcade-deploy.sudoers" \
   /etc/sudoers.d/arcade-deploy
+visudo -c
+
+install -D -o root -g root -m 0755 "$REPO_ROOT/infra/vps/vps-admin.mjs" /usr/local/sbin/arcade-vps-admin
+if ! visudo -cf "$REPO_ROOT/infra/vps/arcade-admin.sudoers"; then
+  echo "refusing bootstrap: invalid arcade admin sudoers contract" >&2
+  exit 1
+fi
+install -o root -g root -m 0440 "$REPO_ROOT/infra/vps/arcade-admin.sudoers" /etc/sudoers.d/arcade-admin
 visudo -c
 
 install -d -o root -g root -m 0755 /etc/sysctl.d
@@ -170,6 +204,7 @@ ufw --force enable
 
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server.service" /etc/systemd/system/ws-server.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server.service.d/override.conf" /etc/systemd/system/ws-server.service.d/override.conf
+install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server.service.d/50-new-hands-hold.conf" /etc/systemd/system/ws-server.service.d/50-new-hands-hold.conf
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server-preview.service.example" /etc/systemd/system/ws-server-preview.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.service" /etc/systemd/system/arcade-chips-ledger-dispatch.service
 install -D -o root -g root -m 0644 "$REPO_ROOT/infra/vps/arcade-chips-ledger-dispatch.timer" /etc/systemd/system/arcade-chips-ledger-dispatch.timer
