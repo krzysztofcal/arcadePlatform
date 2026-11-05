@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { operate, UNIT, STAGE, TTL, DATABASE_SQL } from '../infra/vps/ws-preview-safe-stop.mjs';
+import { operate, UNIT, STAGE, TTL, DATABASE_SQL, StopUncertain } from '../infra/vps/ws-preview-safe-stop.mjs';
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-stop-'));
@@ -22,6 +22,7 @@ function fixture(t) {
     db: 'on\n0|0|0|0|0|0\n0|0\n0|1|1', mutate: () => {} };
   const host = { boundary: root, uid: process.getuid(), gid: process.getgid(), envFile, hold, preflight, bundle: root,
     receipt: path.join(root, 'receipt.json'), now: () => state.now,
+    cgroupReady: () => {},
     cgroupEmpty: () => assert.equal(state.empty, true, 'cgroup_processes'),
     runtime: async token => { assert.equal(token, 'fixture-secret'); state.runtimeCalls++; return structuredClone(state.runtime); },
     run(argv, timeout, input, env) {
@@ -84,6 +85,7 @@ test('missing runtime proof, live humans, work, finance, bot controls and stale 
     f => { f.state.db = 'off\n0|0|0|0|0|0\n0|0\n0|1|1'; },
     f => { fs.writeFileSync(f.host.hold, 'hold'); },
     f => { fs.chmodSync(f.host.hold, 0o666); },
+    f => { f.host.cgroupReady = () => { throw new Error('cgroup_v2_required'); }; },
     f => { fs.writeFileSync(f.host.envFile, fs.readFileSync(f.host.envFile, 'utf8').replaceAll(STAGE, 'wrongproject')); },
     f => { f.host.runtime = async () => { f.state.now += 10001; return f.state.runtime; }; },
     f => { f.state.mutate = argv => { if (argv[1] === 'show' && f.state.shows > 1) f.state.pid = '456'; }; }
@@ -102,7 +104,7 @@ test('timeout, surviving cgroup and post-stop DB uncertainty never create usable
       if (argv[1] === 'stop' && failure === 'cgroup') f.state.empty = false;
       if (argv[1] === 'stop' && failure === 'database') f.state.db = 'unknown';
     };
-    await assert.rejects(operate('stop', '42', f.host));
+    await assert.rejects(operate('stop', '42', f.host), StopUncertain);
     assert.equal(f.stopCalls().length, 1); assert.equal(fs.existsSync(f.host.receipt), false);
     assert.equal(f.state.calls.some(a => ['start', 'restart'].includes(a[1])), false);
     assert.equal(fs.readFileSync(f.host.hold, 'utf8'), 'drain\n');

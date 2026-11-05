@@ -179,7 +179,7 @@ class Isolation:
     def safe_stop_receipt(self, run_id=None):
         mode = 'verify-receipt' if run_id is None else 'consume-receipt'
         result = self.run(['/usr/bin/node', '/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs',
-                           mode, '1' if run_id is None else str(run_id)])
+                           mode, '1' if run_id is None else str(run_id)], expected=(0, 1))
         require(result == ('SAFE_STOP_OK verified' if run_id is None else 'SAFE_STOP_OK consumed'),
                 'fresh_safe_stop_receipt_required')
 

@@ -18,6 +18,7 @@ const HOLD = '/etc/arcadeplatform/ws-hold-preview/new-hands';
 const CGROUP = '/sys/fs/cgroup/system.slice/ws-server-preview.service';
 const PROPERTIES = ['LoadState', 'ActiveState', 'MainPID', 'ExecMainStartTimestampMonotonic', 'User', 'WorkingDirectory',
   'EnvironmentFiles', 'Environment', 'ControlGroup', 'ExecStartEx', 'ExecStop', 'ExecStopPost', 'KillMode', 'NeedDaemonReload', 'Result'];
+export class StopUncertain extends Error {}
 const require = (ok, reason) => { if (!ok) throw new Error(reason); };
 const hash = data => createHash('sha256').update(data).digest('hex');
 const envParse = source => {
@@ -53,9 +54,13 @@ export function createHost(overrides = {}) {
       }
       return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     },
-    cgroupEmpty() {
-      // A removed unit cgroup is proof of absence only after loaded/inactive/MainPID=0 was verified.
+    cgroupReady() {
       require(fs.lstatSync('/sys/fs/cgroup/system.slice').isDirectory(), 'cgroup_parent');
+      require(fs.lstatSync('/sys/fs/cgroup/cgroup.controllers').isFile(), 'cgroup_v2_required');
+    },
+    cgroupEmpty() {
+      this.cgroupReady();
+      // A removed unit cgroup is proof of absence only after loaded/inactive/MainPID=0 was verified.
       try {
         require(fs.lstatSync(CGROUP).isDirectory(), 'cgroup_type');
         require(/^populated 0$/m.test(fs.readFileSync(`${CGROUP}/cgroup.events`, 'utf8')), 'cgroup_populated');
@@ -185,21 +190,24 @@ export async function operate(mode, runId, overrides = {}) {
   if (mode === 'stop') {
     parents(host, host.receipt);
     require(!fs.existsSync(host.receipt), 'receipt_exists_owner_recovery_required');
+    host.cgroupReady();
     const first = await proof(host);
     const final = await proof(host, first);
     require(final.config.fingerprint === first.config.fingerprint, 'configuration_changed');
     // No retry and no auto restart, even if systemctl times out or a later assertion fails.
     require(configuration(host, unit(host)).fingerprint === final.config.fingerprint, 'configuration_changed');
     require(JSON.stringify(unit(host)) === JSON.stringify(final.unit), 'process_or_unit_changed');
-    host.run(['/usr/bin/systemctl', 'stop', UNIT], 100000);
-    const stopped = unit(host, true), config = configuration(host, stopped);
-    require(stopped.ExecMainStartTimestampMonotonic === first.unit.ExecMainStartTimestampMonotonic
-      && config.fingerprint === first.config.fingerprint, 'stopped_context_changed');
-    database(host, config);
-    const now = host.now();
-    writeReceipt(host, { version: 1, phase: 'pending_audit', run: String(runId), stoppedAt: now, expiresAt: now + TTL,
-      previousPID: first.unit.MainPID, context: context(host, stopped, config) });
-    return 'stopped_pending_audit';
+    try {
+      host.run(['/usr/bin/systemctl', 'stop', UNIT], 100000);
+      const stopped = unit(host, true), config = configuration(host, stopped);
+      require(stopped.ExecMainStartTimestampMonotonic === first.unit.ExecMainStartTimestampMonotonic
+        && config.fingerprint === first.config.fingerprint, 'stopped_context_changed');
+      database(host, config);
+      const now = host.now();
+      writeReceipt(host, { version: 1, phase: 'pending_audit', run: String(runId), stoppedAt: now, expiresAt: now + TTL,
+        previousPID: first.unit.MainPID, context: context(host, stopped, config) });
+      return 'stopped_pending_audit';
+    } catch { throw new StopUncertain('stop_attempted_uncertain_no_retry'); }
   }
   require(['finalize', 'verify-receipt', 'consume-receipt'].includes(mode), 'mode');
   const receipt = JSON.parse(read(host, host.receipt, 0o600));
@@ -225,8 +233,10 @@ if (main) {
     require(process.getuid() === 0 && process.argv.length === 4, 'root_and_exact_arguments_required');
     const result = await operate(process.argv[2], process.argv[3]);
     process.stdout.write(`SAFE_STOP_OK ${result}\n`);
-  } catch {
+  } catch (error) {
     // Exceptions may contain connection URLs or response bodies: never print them.
-    process.stdout.write('SAFE_STOP_BLOCKED inspect_read_only_no_retry\n'); process.exitCode = 1;
+    process.stdout.write(error instanceof StopUncertain
+      ? 'SAFE_STOP_FAILED stop_attempted_uncertain_no_retry\n' : 'SAFE_STOP_BLOCKED inspect_read_only_no_retry\n');
+    process.exitCode = 1;
   }
 }

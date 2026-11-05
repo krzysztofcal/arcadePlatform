@@ -21,6 +21,12 @@ for required in "$HELPER_SRC" "$SUDOERS_SRC" /usr/bin/node /usr/bin/logger; do
     exit 1
   fi
 done
+# Distribution-managed Python/psql may be root-owned symlinks; validate their resolved files too.
+for binary in /usr/bin/python3 /usr/bin/psql /usr/bin/systemctl /usr/bin/flock; do
+  [[ -f "$binary" && -x "$binary" && "$(stat -c %U "$binary")" == root && "$(stat -Lc %U "$binary")" == root ]] || exit 1
+  (( (8#$(stat -Lc %a "$binary") & 8#022) == 0 )) || exit 1
+done
+[[ -d /sys/fs/cgroup/system.slice && ! -L /sys/fs/cgroup/system.slice && -f /sys/fs/cgroup/cgroup.controllers && ! -L /sys/fs/cgroup/cgroup.controllers ]] || exit 1
 if ! visudo -cf "$SUDOERS_SRC"; then
   echo "refusing staging: invalid arcade admin sudoers contract in repository" >&2
   exit 1

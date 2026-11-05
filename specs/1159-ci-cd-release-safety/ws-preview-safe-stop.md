@@ -26,7 +26,8 @@ commands, state writes, supervisor sweep, DB hands/version discrepancies and
 financial inconsistencies/unresolved requests. SQL additionally requires zero OPEN
 tables, exactly one disabled CONTINUOUS_BOT_DEFAULT profile with desired count zero,
 and no active human seats or closed-table escrow. Missing evidence blocks; TCP
-counts and default-zero counters are never accepted. Each proof is limited to ten
+counts and default-zero counters are never accepted. These are table-presence
+counters, not a promise that lobby-only sockets remain connected during maintenance. Each proof is limited to ten
 seconds; HTTP timeout is five seconds and SQL statement timeout five seconds.
 Configuration and PID are rechecked immediately before the one stop command.
 
@@ -34,7 +35,10 @@ After stop, require loaded/inactive, MainPID=0, successful systemd result, no cg
 processes (including descendants via `cgroup.events populated=0`, or a removed
 cgroup under the verified system.slice), unchanged process start identity and
 protected configuration, and another read-only DB proof. An error or timeout
-creates no usable receipt, even if the service actually stopped. No automatic
+creates no usable receipt, even if the service actually stopped. Pre-stop refusal
+reports BLOCKED; an attempted stop with uncertain result reports FAILED. The end
+audit records the stop outcome; the workflow also reports receipt finalization
+failure (a pending receipt is not usable), so read both records during recovery. No automatic
 restart, retry, rollback or HOLD removal follows.
 
 Receipt: `/var/lib/arcade-admin/ws-preview-safe-stop/receipt.json`, root:root 0600

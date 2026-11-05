@@ -282,9 +282,11 @@ export const OPERATIONS = Object.freeze({
   "copilot-secret-snapshots-quarantine": quarantineSnapshots,
   "ws-preview-safe-stop": (host, runId) => {
     const result = host.run(["/usr/bin/node", "/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs", "stop", String(runId)], 180000);
-    return result.status === 0 && result.stdout === "SAFE_STOP_OK stopped_pending_audit"
-      ? { ok: true, details: "stopped_pending_audit" }
-      : { ok: false, blocked: "preview_safe_stop_uncertain_no_retry" };
+    if (result.status === 0 && result.stdout === "SAFE_STOP_OK stopped_pending_audit")
+      return { ok: true, details: "stopped_pending_audit" };
+    if (result.status === 1 && result.stdout === "SAFE_STOP_BLOCKED inspect_read_only_no_retry")
+      return { ok: false, blocked: "preview_safe_stop_refused_before_stop" };
+    return { ok: false, failed: "preview_safe_stop_uncertain_no_retry" };
   },
   ...Object.fromEntries(["preflight", "provision", "rollback"].map((action) => [
     `ws-preview-isolation-${action}`, (host, runId) => {
