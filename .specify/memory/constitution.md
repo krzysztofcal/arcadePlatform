@@ -72,16 +72,17 @@ source of truth for current code; a conflicting snapshot MUST NOT override it.
 
 ## Deployment and Safety Gates
 
-Same-repository pull requests changing supabase/migrations/** can automatically
-trigger DB Stage Apply PR and apply migrations to the shared Stage database.
-This is a shared-environment mutation, NOT a read-only CI check. Agents MAY
-deliberately use this mechanism to apply Stage migrations; ordinary Stage
-migrations do not require a separate manual GO. Before push/PR, the current
-specification, plan, and tasks MUST explicitly record that automatic Stage
-apply is an intended effect. Agents MUST NOT accidentally include migrations
-without accounting for their shared Stage impact. Once applied to shared Stage,
-corrections MUST be forward-only in new migrations; applied migrations MUST
-NOT be edited.
+Pull request creation, Draft/Ready and synchronize events never apply
+supabase/migrations/** to the shared Stage database. Shared Stage SQL is
+applied only by an explicitly authorized DB Stage Apply PR workflow_dispatch
+from main, in the stage-automation environment, for the exact approved source
+SHA, file and hash set; apply is owner-dispatched (see agents.md "Explicit
+Stage migrations" and docs/operations.md "Stage DB migrations"). This is a
+shared-environment mutation, NOT a read-only CI check, and needs its own
+explicit scope. The specification, plan, and tasks MUST record which
+migrations need a Stage apply and that the apply is a separate owner step.
+Once applied to shared Stage, corrections MUST be forward-only in new
+migrations; applied migrations MUST NOT be edited.
 
 Definition of Done is target-aware. Green CI, mocks, and unit tests do not prove
 runtime configuration or integration. For WS-affecting changes, Codex MUST
@@ -182,4 +183,4 @@ resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.1.1 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-13
+**Version**: 1.1.2 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-05
