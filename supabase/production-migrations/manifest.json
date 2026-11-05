@@ -1174,7 +1174,7 @@
     },
     {
       "file": "20261105160500_chips_settled_retention_12m_production_contract.sql",
-      "sha256": "b80d8b718ef00a8a477af573850b5e98a352221b16b039697b98f03a54230541",
+      "sha256": "ef87c2959cf57a03da74170360224a2acc1400754df3a1a375d5629bd6e61db8",
       "purpose": "#1157 dark settled retention contract; separate exact-file owner GO required, not applied; deletes nothing; no activation",
       "prerequisites": [
         "20260914092000_chips_ledger_production_retention_activation.sql",
