@@ -36,4 +36,6 @@
 
 - [ ] T050 Stage: diagnostic, then one capped automatic run; verify objects absent by HEAD/not-found only.
   - Apply of `20261105160000` (owner `DB Stage Apply PR` from `main`, source: the T050 evidence PR): in progress. Results of inspect, apply and diagnostic are recorded here as the steps complete.
+  - Stage history contains three profile migrations from the open Draft PRs #1155/#1160 (applied to Stage on 2026-10-28), which `main` does not have. The executor fails closed on them (`unknown_remote_migration`). Owner decision 2026-11-05: the source PR #1201 carries byte-identical copies of only those three files from #1155 (`f8a97723`), verified against the Stage history SHA-256 values; the approval lists only `20261105160000`. The executor is unchanged.
+  - **Follow-up (required):** reconcile the `main` migration catalog with the Stage history permanently, by merging #1155/#1160 or by a separate owner decision. Until then, every Stage apply from `main` hits the same block. #1201 must not be merged while it carries these copies.
 - [ ] T051 Production: apply the production-migration equivalent, diagnostic, one canary of 1 batch, then enable the policy. Install the T031 dispatcher through the T032 VPS Admin request; the owner's `vps-admin` approval is the GO.
