@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { deletePrivateObjectIfExists } from "../../scripts/ops/chips-ledger-archive-store.mjs";
+import { validateRetentionEnvironment } from "../../scripts/ops/_shared/chips-ledger-retention-profile.mjs";
 import {
   archiveObjectPaths,
   parseSettledRetentionArgs,
   requireSettledRetentionAuthorization,
   runSettledRetention,
+  storageTargetFor,
 } from "../../scripts/ops/chips-ledger-settled-retention.mjs";
 
 // #1157 fundamental contracts: DELETE-only Storage access, lock checked before
@@ -171,6 +173,29 @@ function harness({ candidates = 2, control = true, loseLockAfterDeletes = Infini
   assert.deepEqual(h.log.find(([kind]) => kind === "expire"), ["expire", "2", "EXPIRE ARCHIVE 2"]);
   assert.equal(h.log.some(([kind]) => kind === "tables"), false);
   await assert.rejects(runSettledRetention({ target: "stage", mode: "canary", batchId: "9", confirmation: "EXPIRE ARCHIVE 9", deps: harness().deps, env: OWNER_ENV }), /not an eligible canary/);
+}
+
+// Real Storage target resolution from the workflow environment (T050 canary
+// regression: the Stage target needs the Stage DB URL as well).
+{
+  const sha40 = "a".repeat(40);
+  const stageEnv = {
+    EXPECTED_SUPABASE_STAGE_PROJECT_REF: "krydukthwdvccggbyjfw", DEPLOYED_COMMIT_SHA: sha40,
+    SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw:x@aws-0-eu-central-1.pooler.supabase.com:5432/postgres",
+    SUPABASE_STAGE_URL: "https://krydukthwdvccggbyjfw.supabase.co", SUPABASE_STAGE_SERVICE_ROLE_KEY: "stage-key",
+  };
+  const stage = storageTargetFor(validateRetentionEnvironment("stage", stageEnv, { requireCommitSha: true }), stageEnv);
+  assert.equal(stage.projectRef, "krydukthwdvccggbyjfw");
+  assert.equal(stage.baseUrl, "https://krydukthwdvccggbyjfw.supabase.co");
+  assert.equal(stage.serviceKey, "stage-key");
+  const prodEnv = {
+    EXPECTED_SUPABASE_PROD_PROJECT_REF: "otbqfijerkieoxwpxjnm", DEPLOYED_COMMIT_SHA: sha40,
+    SUPABASE_PROD_DB_URL: "postgresql://postgres.otbqfijerkieoxwpxjnm:x@aws-0-eu-central-1.pooler.supabase.com:5432/postgres",
+    SUPABASE_PROD_URL: "https://otbqfijerkieoxwpxjnm.supabase.co", SUPABASE_PROD_SERVICE_ROLE_KEY: "prod-key",
+  };
+  const prod = storageTargetFor(validateRetentionEnvironment("production", prodEnv, { requireCommitSha: true }), prodEnv);
+  assert.equal(prod.baseUrl, "https://otbqfijerkieoxwpxjnm.supabase.co");
+  assert.equal(prod.serviceKey, "prod-key");
 }
 
 console.log("chips-ledger-settled-retention tests passed");
