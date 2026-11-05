@@ -37,6 +37,7 @@ Each remaining gap from research.md has an owner decision: expire, minimize, or 
 - **FR-006** Uses the existing Production global advisory lock, the `production-ledger` environment and the canonical target checks in `scripts/ops/chips-ledger-production-automation.mjs`. Default OFF behind a new policy enable flag, like the four existing classes.
 - **FR-007** Stage runs first through the existing Stage automation with the Stage profile. Production needs a separate explicit owner GO for migration, diagnostic, canary and activation.
 - **FR-008** Never deletes or edits rows that define a live balance: USER `chips_entries`/`chips_transactions` of active accounts, `chips_account_snapshot`, unsettled ESCROW.
+- **FR-010** Never expire the active batch, nor a batch still pending escrow retirement (`bot_only_table_id is not null and account_retirement_at is null`). Escrow selectors ignore expired batches. The latest completed batch per policy follows D7 (research.md T003).
 - **FR-009** Logging via `klog` with counts and batch IDs only, no user IDs.
 
 ## Owner decisions required
@@ -46,6 +47,7 @@ Each remaining gap from research.md has an owner decision: expire, minimize, or 
 - **D3 tombstones** (`account_deletion_requests.old_user_id`, retired `chips_accounts`). Recommendation: keep the UUID indefinitely as a security exception. It prevents a deleted UUID being reused as an anonymous XP/account identity (`store-upstash.mjs`). After minimization, no other personal data remains.
 - **D5 retired accounts' ledger history and snapshots** (USER rows incl. the deletion burn, `chips_account_snapshot` of retired accounts). Recommendation: a financial-record exception for now, because deleting them breaks entry-sequence and conservation proofs. The UUID is pseudonymous once the profile is gone. A follow-up compaction issue can set a dated expiry. Alternative: owner sets a fixed maximum (e.g. 24 months) now.
 - **D6 `poker_requests` on long-lived OPEN tables.** Rows are removed only by cascade when the table is deleted. Recommendation: add to `chips_settled_retention_12m_run` a bounded delete of rows older than 12 months, excluding `kind = 'ACT'` with `result_json is null` (unfinished, as `closed-table-cleanup.mjs` already treats them). Alternative: document as an exception if no table can stay OPEN that long.
+- **D7 latest completed batch per policy** (T003 R-A). Recommendation R-A2: the revalidation skips batches with `objects_expired_at`. Alternative R-A1: never expire it, with a documented exception.
 - **D4 provider copies** (Supabase backups/PITR, logs). Recommendation: document provider windows only.
 
 ## Edge Cases
@@ -55,7 +57,7 @@ Batch with NULL `last_created_at`; `pending` batch; batch of another project; re
 ## Success Criteria
 
 - **SC-001** On Stage, one diagnostic run reports the candidate counts, then one capped run expires at least one eligible batch and its objects are gone (verified by HEAD/not-found, no download).
-- **SC-002** Every research.md gap has a recorded decision (D1–D6) and a matching sentence in the Privacy/Data safety evidence list.
+- **SC-002** Every research.md gap has a recorded decision (D1–D7) and a matching sentence in the Privacy/Data safety evidence list.
 - **SC-003** The egress assessment in the PR shows that per-run transfer is bounded by request overhead (no object bodies).
 
 ## Breaking / operational impact

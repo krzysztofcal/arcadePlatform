@@ -38,3 +38,35 @@ Supabase backups/PITR, VPS journald, Netlify function logs, GitHub Actions logs/
 ## Egress constraints (agents.md "Supabase egress")
 
 Archive objects are already read by the store/prune verification (`STORAGE_GET_*`). Expiry must not download objects. Selection uses `chips_ledger_archive_batches` metadata in SQL; deletion uses Storage object DELETE by exact path; SQL cleanup returns counts only and is bounded per run.
+
+## T003 — archive reader audit (2026-11-05, code only)
+
+**Verdict: STOP for the plan as written; PASS once R-A and R-B below are in the plan.** No DB, Storage, VPS or workflow access was used.
+
+| Reader (file:function) | Batches it reaches | Storage access | Objects gone → |
+|---|---|---|---|
+| `chips-ledger-production-automation.mjs` main cycle, `cycle.latestCompleted` branch (non-human policies) | newest pruned batch per policy (`findOwnCycle`, `_shared/chips-ledger-retention-cycle.mjs`), **any age** | `pruneArchive` dry-run download + `inspectDurableRecovery` (recovery copies) | `fail("completed Production cycle did not revalidate ...")` on **every** run → policy blocked |
+| same, closed-human `finalize(cycle.latestCompleted)` → `verifyProductionHumanCompletedEvidence` | newest pruned closed-human batch, any age | primary download + recovery inspect | fail → closed-human policy blocked |
+| same, `cycle.active` resume (`resumeProductionCanaryBatch`/`PrepareBatch`) | unpruned batch only | download | not reachable (expiry requires `pruned_at`) |
+| same, escrow (`PRODUCTION_ESCROW_CANDIDATE_SQL`) | pruned bot-only batches with `account_retirement_at is null`, any age | no archive download; **writes a new** `account-recovery/...` object and records it on the batch | would attach a new personal-data object to an already expired batch, never expired afterwards |
+| `chips-ledger-stage-automation.mjs` `resumeOwnCycle` / automatic `latestCompleted` (lines ~4279, ~5661; definition ~1745) | newest completed Stage batch per policy, any age | download + recovery inspect | Stage policy blocked (same as Production) |
+| `chips-ledger-stage-escrow-retention.mjs` `verifyPrimaryArchiveAndDurableRecovery` | Stage escrow candidates, any age | primary download | fail closed; Stage escrow blocked for that batch |
+| `chips-ledger-archive-prune.mjs` `pruneArchive` / legacy retry | exact `--object-path` given by caller or operator | download | fail closed |
+| `chips-ledger-production-automation.mjs` `lifecycle-completion` (manual, exact batch) | exact batch | download | fail closed |
+| `chips-ledger-stage-automation.mjs` `runBotOnlyExactRecoveryRepair` (manual) | exact batch | download | fail closed |
+| `chips-ledger-legacy-stage-allowlist-audit.mjs` (manual, Stage) | legacy Stage batches | primary + recovery download | fail closed |
+| `chips-ledger-stage-timeout-diagnostic.mjs` `runExactBotOnlyProofDiagnostic` (manual, pinned batch 481) | exact batch | download | fail closed |
+| `netlify/functions/admin-ops-summary.mjs` | metadata rows | none | unaffected |
+| SQL functions in `supabase/migrations/**` / `production-migrations/**` referencing `chips_ledger_archive_batches` | metadata, `status='committed'` | none (DB cannot read Storage) | unaffected (status unchanged) |
+
+### Required plan changes
+
+- **R-A (STOP) — latest completed batch per policy.** Every automatic run of every policy re-downloads its newest completed batch. If that batch expires, the policy fails on every run. Options:
+  - **R-A1:** exclude the active and the latest completed batch per `(project_ref, source_policy_id)` from expiry. No change to existing cycles, but an idle policy keeps one archive older than 12 months (needs a documented exception, D7).
+  - **R-A2 (recommended):** the `latestCompleted` revalidation in `chips-ledger-production-automation.mjs` and in `chips-ledger-stage-automation.mjs` treats `objects_expired_at is not null` as terminal and skips the download. That is two small branches in hot paths, plus tests. It still never expires the active batch.
+- **R-B (STOP) — pending escrow retirement.** Exclude batches with `bot_only_table_id is not null and account_retirement_at is null`, and add `objects_expired_at is null` to `PRODUCTION_ESCROW_CANDIDATE_SQL` and to the Stage escrow selector. Then no new `account-recovery` object is attached to an expired batch.
+- Manual exact-batch tools fail closed on an expired batch. That is acceptable; it is documented in `docs/chips-ledger.md`.
+
+### Side finding (existing egress, outside #1157)
+
+Each scheduled automatic invocation of each policy downloads the newest completed batch archive and inspects its recovery copies, even when there is no new candidate. This is existing Storage egress, proportional to dispatcher cadence × policies × archive size. It is not measured here; `sum(compressed_bytes)` of the latest batch per policy (a server-side aggregate) would bound it. Recommendation: a separate small issue; it is not part of #1157.

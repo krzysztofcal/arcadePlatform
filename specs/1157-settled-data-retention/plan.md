@@ -17,11 +17,15 @@ Add one dark-by-default retention class, `retention-12m`, to the existing ledger
 | Workflows | `.github/workflows/chips-ledger-production-scheduled-automation.yml`: add `retention-12m` to the `policy` choice. The Stage workflow likewise. Workflow edits need an owner push (the App has no Workflows permission). |
 | Docs | `docs/chips-ledger.md` retention section; Privacy/Data safety evidence list in `specs/1157-settled-data-retention/research.md`. No legal text is published. |
 
+T003 (research.md) adds the following:
+- `PRODUCTION_ESCROW_CANDIDATE_SQL` and the Stage escrow selector get `objects_expired_at is null`.
+- Per D7: R-A2 adds a skip of the download for `objects_expired_at` batches in the `cycle.latestCompleted` branches of `chips-ledger-production-automation.mjs` (including the closed-human `finalize`) and of `chips-ledger-stage-automation.mjs`; R-A1 adds a latest-per-policy exclusion to the selector instead.
+
 The D1 idempotency branch is added to `chips_settled_retention_12m_run` only if the owner chooses "expire". It needs the same guards plus the FR-004 interaction. The D6 branch (delete `poker_requests` older than 12 months except `kind = 'ACT' and result_json is null`) is added only if the owner chooses "delete". All branches share the single per-run row limit.
 
 ## Selection and egress
 
-- Archive candidates: `select object_path, ... from chips_ledger_archive_batches where status='committed' and pruned_at is not null and objects_expired_at is null and project_ref=$1 and last_created_at < now() - interval '12 months' and not exists (select 1 from chips_transaction_idempotency i where i.archive_batch_id = b.batch_id and i.replay_transaction is not null) order by last_created_at limit $2 for update`. A few small metadata rows per run.
+- Archive candidates: `select object_path, ... from chips_ledger_archive_batches where status='committed' and pruned_at is not null and objects_expired_at is null and project_ref=$1 and last_created_at < now() - interval '12 months' and not (b.bot_only_table_id is not null and b.account_retirement_at is null) and not exists (select 1 from chips_transaction_idempotency i where i.archive_batch_id = b.batch_id and i.replay_transaction is not null) order by last_created_at limit $2 for update`. A few small metadata rows per run.
 - Storage: up to 4 DELETE requests per batch, i.e. at most 40 requests per run, with no object bodies. Expected egress per run is a few KB (request/response overhead). Not Shared Pooler egress.
 - SQL function: deletes in-database with `limit` via CTE and returns `{gifts_deleted, requests_minimized}`. No rows cross the wire.
 - Frequency: existing Production dispatcher cadence, one class invocation per run. Daily transfer stays in the KB range regardless of backlog size; a backlog drains at 10 batches per run.
