@@ -143,9 +143,16 @@ begin
   return jsonb_build_object('state', 'expired', 'batch_id', p_batch_id, 'registry_deleted', deleted);
 end;
 $$;
+-- The non-superuser Production owner keeps its existing admin-only membership;
+-- add a temporary SET grant and schema CREATE for the ownership change (as E3).
+grant chips_ledger_archive_pruner to postgres with admin false, inherit true, set true granted by postgres;
+grant create on schema public to chips_ledger_archive_pruner;
 alter function public.chips_expire_archive_batch(text, bigint, timestamptz, boolean, text) owner to chips_ledger_archive_pruner;
+-- ACL changes need the owner's rights, so they run before the delegation ends.
 revoke all on function public.chips_expire_archive_batch(text, bigint, timestamptz, boolean, text) from public, anon, authenticated, service_role;
 grant execute on function public.chips_expire_archive_batch(text, bigint, timestamptz, boolean, text) to postgres;
+revoke create on schema public from chips_ledger_archive_pruner;
+revoke chips_ledger_archive_pruner from postgres granted by postgres;
 
 -- Small user-linked tables (US2, D6). One shared row budget per run; counts only.
 create function public.chips_settled_retention_12m_run(p_limit integer, p_cutoff timestamptz, p_execute boolean)
