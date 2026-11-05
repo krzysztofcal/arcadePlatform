@@ -6,6 +6,9 @@ Cmnd_Alias ARCADE_ADMIN_COMMANDS = \
     /usr/local/sbin/arcade-vps-admin ledger-dispatchers-pause *, \
     /usr/local/sbin/arcade-vps-admin ledger-dispatchers-resume *, \
     /usr/local/sbin/arcade-vps-admin systemd-daemon-reload *, \
-    /usr/local/sbin/arcade-vps-admin copilot-secret-snapshots-quarantine *
+    /usr/local/sbin/arcade-vps-admin copilot-secret-snapshots-quarantine *, \
+    /usr/local/sbin/arcade-vps-admin ws-preview-isolation-preflight *, \
+    /usr/local/sbin/arcade-vps-admin ws-preview-isolation-provision *, \
+    /usr/local/sbin/arcade-vps-admin ws-preview-isolation-rollback *
 
 arcade-admin ALL=(root) NOPASSWD: ARCADE_ADMIN_COMMANDS

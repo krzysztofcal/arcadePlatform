@@ -280,6 +280,14 @@ export const OPERATIONS = Object.freeze({
     ? { ok: true, details: "reloaded" }
     : { ok: false, failed: "daemon-reload" }),
   "copilot-secret-snapshots-quarantine": quarantineSnapshots,
+  ...Object.fromEntries(["preflight", "provision", "rollback"].map((action) => [
+    `ws-preview-isolation-${action}`, (host, runId) => {
+      const result = host.run(["/usr/bin/python3", "-I", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, String(runId)], 480000);
+      if (result.status === 0 && /^PREVIEW_OK [a-z0-9_]+$/.test(result.stdout)) return { ok: true, details: result.stdout };
+      if (/^PREVIEW_BLOCKED [a-z0-9_]+$/.test(result.stdout)) return { ok: false, blocked: result.stdout.slice(16) };
+      return { ok: false, failed: "preview_isolation_inspect_protected_manifest" };
+    },
+  ])),
 });
 
 function audit(host, fields) {

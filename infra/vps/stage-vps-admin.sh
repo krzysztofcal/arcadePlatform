@@ -75,6 +75,22 @@ for entry in /home/arcade-admin /home/arcade-admin/.ssh /home/arcade-admin/.ssh/
 done
 install -d -o arcade-admin -g arcade-admin -m 0700 /home/arcade-admin/.ssh
 
+# Fixed Preview isolation catalog dependencies; installing these does not provision Preview.
+for directory in /usr/local/libexec /usr/local/libexec/arcade-vps-admin /var/lib/arcade-admin; do
+  if [[ -e "$directory" || -L "$directory" ]]; then
+    [[ -d "$directory" && ! -L "$directory" && "$(stat -c %U:%G "$directory")" == root:root ]] || exit 1
+    (( (8#$(stat -c %a "$directory") & 8#022) == 0 )) || exit 1
+  fi
+done
+install -d -o root -g root -m 0755 /usr/local/libexec/arcade-vps-admin
+install -d -o root -g root -m 0700 /var/lib/arcade-admin
+for asset in ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub; do
+  test -f "$REPO_ROOT/infra/vps/$asset" && test ! -L "$REPO_ROOT/infra/vps/$asset" || exit 1
+  install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"
+done
+install -d -o root -g root -m 0755 /usr/local/libexec/arcade-vps-admin/ws-server-preview.service.d
+install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server-preview.service.d/99-preview-isolation.conf" /usr/local/libexec/arcade-vps-admin/ws-server-preview.service.d/99-preview-isolation.conf
+
 install -D -o root -g root -m 0755 "$HELPER_SRC" "$HELPER_DEST"
 install -o root -g root -m 0440 "$SUDOERS_SRC" "$SUDOERS_DEST"
 visudo -c

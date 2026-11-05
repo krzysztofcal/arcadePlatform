@@ -467,5 +467,153 @@ try {runPreflight({envFile,allowTestUid:true,requireRedisV3:true,queryRedisV3:()
         with self.assertRaises(prod.secure.Refused): self.action('restore')
 
 
+# Isolation tests use only temporary paths, synthetic public material and fake commands.
+isolation_spec = importlib.util.spec_from_file_location('preview_isolation', Path(__file__).parents[1] / 'infra/vps/ws-preview-isolation.py')
+isolation = importlib.util.module_from_spec(isolation_spec)
+isolation_spec.loader.exec_module(isolation)
+
+
+class PreviewIsolation(unittest.TestCase):
+    def setUp(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        outer = self
+
+        class Fixture(isolation.Isolation):
+            def clean_accounts(self):
+                pass
+
+            def run(self, argv, expected=(0,)):
+                outer.calls.append(argv)
+                if 'ActiveState' in argv:
+                    return 'ActiveState=' + outer.active + '\nMainPID=' + ('0' if outer.active == 'inactive' else '123')
+                if 'SupplementaryGroups' in argv:
+                    return 'User=arcade-preview\nGroup=arcade-preview\nSupplementaryGroups='
+                if '-T' in argv:
+                    return '\n'.join(k + ' ' + v for k, v in {
+                        'authorizedkeysfile': str(self.auth), 'authorizedkeyscommand': 'none',
+                        'pubkeyacceptedalgorithms': 'ssh-ed25519', 'authenticationmethods': 'publickey',
+                        'passwordauthentication': 'no', 'kbdinteractiveauthentication': 'no',
+                        'disableforwarding': 'yes', 'permittty': 'no', 'permituserrc': 'no'}.items())
+                if '-G' in argv:
+                    return str(outer.accounts[argv[-1]].pw_gid)
+                if 'EnvironmentFiles' in argv:
+                    return str(self.base / '.env.preview') + ' (ignore_errors=no)'
+                if '-U' in argv:
+                    if argv[-1] == isolation.RUNTIME:
+                        return 'User arcade-preview is not allowed to run sudo on fixture.'
+                    return 'User arcade-preview-deploy may run the following commands on fixture:\n    (root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight \"\", /usr/bin/systemctl restart ws-server-preview.service'
+                if '--config-only' in argv:
+                    return 'PASS CONFIG ONLY Redis V3 stage; live verification required'
+                return ''
+
+        self.task = Fixture()
+        self.task.base = root / 'preview'
+        self.task.base.mkdir(mode=0o755)
+        self.task.backup = root / 'backup'
+        self.task.files = isolation.secure.SecureFiles(os.getuid(), os.getgid(), root)
+        self.task.key = root / 'owner.pub'
+        wire = b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20' + bytes(32)
+        self.task.key.write_bytes(b'ssh-ed25519 ' + base64.b64encode(wire))
+        self.task.key.chmod(0o644)
+        self.task.auth = root / 'authorized-key'
+        self.task.targets = {root / 'isolation.conf': isolation.DROPIN, root / 'sudo': isolation.SUDO, root / 'ssh': isolation.SSH}
+        (self.task.base / '.env.preview').write_bytes(BASE)
+        (self.task.base / '.env.preview').chmod(0o600)
+        for name in isolation.SYNC:
+            d = self.task.base / name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / 'fixture.mjs').write_text('original')
+        self.production = root / 'production-sentinel'
+        self.production.write_bytes(b'unchanged')
+        self.active = 'inactive'
+        self.calls = []
+        self.accounts = {
+            isolation.DEPLOY: SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(root / 'deploy-home')),
+            isolation.RUNTIME: SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid() + 1, pw_dir='/nonexistent')}
+        mock = patch.object(isolation.pwd, 'getpwnam', side_effect=lambda name: self.accounts[name])
+        mock.start()
+        self.addCleanup(mock.stop)
+
+    def test_public_key_and_active_service_block_before_mutation(self):
+        self.task.key.write_bytes(b'')
+        with self.assertRaisesRegex(isolation.secure.Refused, 'owner_public_key_missing'):
+            self.task.preflight()
+        self.assertFalse(self.task.backup.exists())
+        self.active = 'active'
+        with self.assertRaisesRegex(isolation.secure.Refused, 'preview_must_be_stopped'):
+            self.task.provision('123')
+        self.assertFalse(self.task.backup.exists())
+
+    def test_provision_and_rollback_preserve_original_inodes_and_production(self):
+        before = {name: (self.task.base / name).stat().st_ino for name in isolation.ROOTS}
+        self.assertEqual(self.task.provision('123'), 'provisioned_runtime_not_started')
+        self.assertTrue(self.task.auth.read_bytes().startswith(b'restrict ssh-ed25519 '))
+        for name in isolation.ROOTS:
+            self.assertEqual((self.task.backup / ('before-' + name)).stat().st_ino, before[name])
+            self.assertNotEqual((self.task.base / name).stat().st_ino, before[name])
+        self.assertEqual(self.task.rollback(), 'rolled_back_not_started')
+        self.assertFalse(self.task.auth.exists())
+        for name in isolation.ROOTS:
+            self.assertEqual((self.task.base / name).stat().st_ino, before[name])
+        self.assertEqual(self.production.read_bytes(), b'unchanged')
+        self.assertFalse(any(cmd[0].endswith('systemctl') and any(x in cmd for x in ['start','stop','restart']) for cmd in self.calls))
+        self.assertFalse(any('ws-server.service' in cmd for cmd in self.calls))
+
+    def test_external_symlink_blocks_without_touching_target_or_live_trees(self):
+        (self.task.base / 'ws-server' / 'escape').symlink_to(self.production)
+        before = (self.task.base / 'ws-server').stat().st_ino
+        with self.assertRaisesRegex(isolation.secure.Refused, 'symlink_outside_preview'):
+            self.task.provision('124')
+        self.assertEqual((self.task.base / 'ws-server').stat().st_ino, before)
+        self.assertEqual(self.production.read_bytes(), b'unchanged')
+        self.assertFalse(self.task.auth.exists())
+        self.assertEqual(self.task.rollback(), 'rolled_back_not_started')
+
+    def test_interruption_after_backup_rename_can_be_rolled_back(self):
+        from unittest.mock import patch
+        original = isolation.os.rename
+        before = {name: (self.task.base / name).stat().st_ino for name in isolation.ROOTS}
+        count = 0
+
+        def interrupted(source, destination):
+            nonlocal count
+            original(source, destination)
+            count += 1
+            if count == 1:
+                raise OSError('injected interruption')
+
+        with patch.object(isolation.os, 'rename', side_effect=interrupted):
+            with self.assertRaises(OSError):
+                self.task.provision('126')
+        self.assertFalse(self.task.auth.exists())
+        self.assertEqual(self.task.rollback(), 'rolled_back_not_started')
+        self.assertEqual({name: (self.task.base / name).stat().st_ino for name in isolation.ROOTS}, before)
+        self.assertEqual(self.production.read_bytes(), b'unchanged')
+
+    def test_rollback_refuses_changed_policy_and_active_runtime(self):
+        self.task.provision('125')
+        self.task.auth.write_bytes(b'changed')
+        with self.assertRaisesRegex(isolation.secure.Refused, 'target_changed'):
+            self.task.rollback()
+        self.active = 'active'
+        with self.assertRaisesRegex(isolation.secure.Refused, 'preview_must_be_stopped'):
+            self.task.rollback()
+
+    def test_local_financial_state_and_preexisting_config_block(self):
+        env = self.task.base / '.env.preview'
+        env.write_bytes(BASE + b'WS_PERSISTED_STATE_FILE=/tmp/local-state.json\n')
+        with self.assertRaisesRegex(isolation.secure.Refused, 'local_financial_state_requires_separate_migration'):
+            self.task.preflight()
+        env.write_bytes(BASE)
+        self.task.auth.write_bytes(b'existing key')
+        with self.assertRaisesRegex(isolation.secure.Refused, 'target_already_exists'):
+            self.task.preflight()
+        self.assertFalse(self.task.backup.exists())
+
+
 if __name__ == '__main__':
     unittest.main()
