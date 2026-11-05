@@ -1174,7 +1174,7 @@
     },
     {
       "file": "20261105160500_chips_settled_retention_12m_production_contract.sql",
-      "sha256": "c145d2a621a5170762a08fd9e426d73b034f5b628eb225b660a7cd4419ad43f3",
+      "sha256": "77a31d673b601d30c47addac4ba87ac70995021288eb9731237443c626709b8b",
       "purpose": "#1157 dark settled retention contract; separate exact-file owner GO required, not applied; deletes nothing; no activation",
       "prerequisites": [
         "20260914092000_chips_ledger_production_retention_activation.sql",
@@ -1243,7 +1243,7 @@
     {
       "file": "20261105160000_chips_settled_retention_12m.sql",
       "version": "20261105160000",
-      "sha256": "eb58d61ef4ef93d66596d6b9a530f01173a2f466d4138bc224f6a178c2c52b9a",
+      "sha256": "eec1008b7afc6f3787258abe78b65363c4c2d4bdae24d341e89e141a156cee31",
       "category": "needs-production-equivalent",
       "purpose": "#1157 dark 12-month settled retention contract (archive objects expiry marker, guarded expiry and small-table functions); Stage apply needs a separate owner DB Stage Apply PR dispatch; no activation"
     }
