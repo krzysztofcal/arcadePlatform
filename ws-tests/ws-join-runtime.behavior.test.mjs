@@ -771,13 +771,16 @@ test("restart preflight stays unsafe during a live hand and reports safe only wh
     await fs.writeFile(filePath, `${JSON.stringify(persisted)}\n`, "utf8");
     const quiet = await waitForHoldStatus((status) => status.restartSafe === true);
     assert.deepEqual(quiet, {
-      configured: true, active: true, drain: true, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
+      configured: true, active: true, drain: true, loadedHandsInProgress: 0, humanMemberTables: 1, connectedHumanTables: 1, tableCommandsInFlight: 0, stateWritesInFlight: 0,
       supervisorSweepInProgress: false, dbHandsInProgress: 0, dbVersionMismatches: 0,
       dbFinancialIssues: { missingState: 0, missingEscrow: 0, invalidAmounts: 0, balanceMismatches: 0, unresolvedRequests: 0 },
       restartSafe: true
     });
     assert.equal((await readPersistedFile(filePath)).tables[tableId].stateRow.state.phase, "SETTLED");
     ws.close();
+    const disconnected = await waitForHoldStatus((status) => status.connectedHumanTables === 0);
+    assert.equal(disconnected.connectedHumanTables, 0);
+    assert.equal(disconnected.humanMemberTables, 1, "a disconnected reconnectable member still blocks Preview safe stop");
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);

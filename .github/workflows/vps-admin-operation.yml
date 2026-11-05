@@ -16,6 +16,10 @@ on:
           - ledger-dispatchers-resume
           - systemd-daemon-reload
           - copilot-secret-snapshots-quarantine
+          - ws-preview-safe-stop
+          - ws-preview-isolation-preflight
+          - ws-preview-isolation-provision
+          - ws-preview-isolation-rollback
       reason:
         description: One line, 10-200 letters, digits, spaces or .,:;()/+=_- (shown to the approver before approval)
         required: true

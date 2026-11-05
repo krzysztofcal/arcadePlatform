@@ -956,3 +956,45 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
   ]) assert.equal(verifies(out, exit), false, label);
   fs.rmSync(bin, { recursive: true, force: true });
 });
+
+
+test("Preview isolation catalog uses fixed actions and unprivileged fundamental fixtures", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const action of ["preflight", "provision", "rollback"]) {
+    const fx = fakeAdminHost();
+    const originalRun = fx.host.run;
+    fx.host.run = (argv, ...args) => {
+      if (argv[0] === "/usr/bin/python3") {
+        assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, "123"]);
+        return { status: 1, stdout: "PREVIEW_BLOCKED owner_public_key_missing_or_invalid" };
+      }
+      return originalRun(argv, ...args);
+    };
+    assert.match(runOperation(`ws-preview-isolation-${action}`, "123", fx.host).line, /ADMIN_BLOCKED .* owner_public_key_missing_or_invalid$/);
+  }
+  const result = spawnSync("python3", ["tests/ws-preview-config.test.py", "PreviewIsolation"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+
+test("Preview safe-stop fundamentals and audit-gated receipt run without privileged commands", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const auditEnd of [0, 1]) {
+    const fx = fakeAdminHost({}, { loggerStatus: [0, auditEnd] });
+    const original = fx.host.run;
+    const modes = [];
+    fx.host.run = (argv, ...args) => {
+      if (argv[0] === "/usr/bin/node") {
+        assert.deepEqual(argv.slice(0, 2), ["/usr/bin/node", "/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs"]);
+        assert.equal(argv[3], "123"); modes.push(argv[2]);
+        return { status: 0, stdout: argv[2] === "stop" ? "SAFE_STOP_OK stopped_pending_audit" : "SAFE_STOP_OK ready" };
+      }
+      return original(argv, ...args);
+    };
+    const result = runOperation("ws-preview-safe-stop", "123", fx.host);
+    assert.equal(result.ok, auditEnd === 0);
+    assert.deepEqual(modes, auditEnd === 0 ? ["stop", "finalize"] : ["stop"]);
+  }
+  const result = spawnSync(process.execPath, ["--test", "ws-tests/ws-preview-safe-stop.behavior.test.mjs"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
