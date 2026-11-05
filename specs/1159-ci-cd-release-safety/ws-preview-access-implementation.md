@@ -2,8 +2,9 @@
 
 Implements [the approved design](ws-preview-access.md). This PR is code preparation only: no live
 installation, key generation, SSH change, dispatch, restart or deploy. `ws-preview-deploy.yml` and
-all secrets remain unchanged. Missing OWNER public key and the running Preview service currently
-block activation; this is deliberate, not runtime acceptance.
+all secrets remain unchanged. OWNER supplied the dedicated public key; it is pinned in this PR.
+The running Preview service and missing approved quiesce/installation path still block activation;
+this is deliberate, not runtime acceptance.
 
 ## Implementation / checks
 
@@ -15,7 +16,8 @@ block activation; this is deliberate, not runtime acceptance.
   (and fresh-host bootstrap), never the private key. No new package or service.
 - [x] Add only fundamental fixture tests to the existing Preview configuration tests and infra guard.
 - [ ] Independent Claude Code review and hosted CI on the final diff.
-- [ ] OWNER public key, approved administrative activation and runtime acceptance (not executed here).
+- [x] OWNER dedicated public key supplied and pinned (public material only).
+- [ ] Approved administrative activation and runtime acceptance (not executed here).
 
 The Python module is not a separate sudo grant. The catalog executes one installed root-owned module
 with `python3 -I -B`, one fixed action and numeric run ID. It accepts no path, username, unit, key or shell
@@ -30,9 +32,11 @@ SCP/SSH actions) and `arcade-preview` (different UID/group, no login). The deplo
 sudo listing must equal the two-command Preview allowlist; the runtime must have no sudo rights.
 Unexpected inherited rules or groups block before enabling the key.
 
-Only a public Ed25519 key is accepted in `infra/vps/ws-preview-owner.pub`. It is intentionally empty:
-OWNER has not created a dedicated key. No generated substitute or reused broad key is embedded.
-Adding it later requires review of the updated diff and reinstalling the reviewed public asset.
+Only a public Ed25519 key is accepted in `infra/vps/ws-preview-owner.pub`. OWNER supplied the
+dedicated public key with fingerprint `SHA256:CcBapvgkJbBbcg6WpR6a59xx4NwEpZxDzfRmH7anVAI`.
+It differs from the keys in the read-only `copilot` authorized_keys audit. No private key was received,
+generated or copied. The public asset is not installed on the VPS by this PR. Replacing it requires
+review of the updated diff and reinstalling the reviewed public asset.
 Root owns `/var/lib/arcade-preview-deploy`, its `.ssh` directory and `authorized_keys`; all are
 unwritable by the deployer. It cannot add keys or replace the default second authorized_keys file.
 `restrict` disables forwarding, PTY and user rc for this key, retaining exec/SCP. The account has an
