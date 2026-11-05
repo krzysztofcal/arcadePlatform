@@ -95,10 +95,11 @@ export function requireSettledRetentionAuthorization({ target, mode, batchId = n
   }
 }
 
-function storageTargetFor(profile, env) {
+export function storageTargetFor(profile, env) {
   if (profile.target === "production") return resolveStorageTarget("prod", env, { singleTarget: true });
   return resolveStorageTarget("stage", {
     EXPECTED_SUPABASE_STAGE_PROJECT_REF: profile.projectRef,
+    SUPABASE_STAGE_DB_URL: profile.dbUrl,
     SUPABASE_URL: profile.apiUrl,
     SUPABASE_SERVICE_ROLE_KEY: profile.serviceRoleKey,
   }, { singleTarget: true });
