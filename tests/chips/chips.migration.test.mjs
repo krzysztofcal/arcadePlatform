@@ -578,6 +578,29 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
 }
 
+// #1157 Production equivalent: exact confirmation, dark install, no deletion, no replay.
+async function assertProductionSettledRetentionInstall(sql) {
+  const [identity] = await sql.unsafe("select system_identifier::text from pg_catalog.pg_control_system();");
+  const install = fs.readFileSync(path.join(process.cwd(), "supabase", "production-migrations", "20261105160500_chips_settled_retention_12m_production_contract.sql"), "utf8")
+    .replaceAll("7575202818581710058", identity.system_identifier);
+  await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
+  await sql.unsafe("set chips.production_settled_retention_confirmation = '';");
+  await assert.rejects(() => sql.unsafe(install), /exact owner confirmation/);
+  await sql.unsafe("rollback;");
+  await sql.unsafe("set chips.production_settled_retention_confirmation = 'INSTALL SETTLED RETENTION 12M otbqfijerkieoxwpxjnm';");
+  await sql.unsafe(install);
+  const [state] = await sql.unsafe(`select (select enabled from public.chips_settled_retention_control) as enabled,
+      (select count(*)::int from public.chips_ledger_archive_batches where objects_expired_at is not null) as expired,
+      (select count(*)::int from public.chips_transaction_idempotency where archive_batch_id = 9000) as registry,
+      (select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, null, false, null)->>'state') as batch_9000;`);
+  assert.deepEqual([state.enabled, state.expired, state.registry, state.batch_9000], [false, 0, 3, "not_eligible"],
+    "install is dark and a batch younger than 12 months is never eligible");
+  await assert.rejects(() => sql.unsafe("select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, now() - interval '1 day', false, null);"), /only on canonical Stage/);
+  await assert.rejects(() => sql.unsafe(install), /own migration absent/);
+  await sql.unsafe("rollback;");
+  await sql.unsafe("set chips.production_settled_retention_confirmation = '';");
+}
+
 // #1119: real Production-equivalent marker and the unchanged WS cleanup SQL.
 // The orchestration/immutable Storage cases live in the existing automation suite.
 async function assertProductionHumanCompletedCleanup(sql, observer) {
@@ -4836,6 +4859,118 @@ async function assertDeletionDriverReceipts(sql) {
   } finally { if(previous===undefined)delete process.env.ACCOUNT_DELETION_ENABLED;else process.env.ACCOUNT_DELETION_ENABLED=previous; }
 }
 
+// #1157: archive objects expiry and the small-table 12-month cleanup. All
+// fixtures live in one rolled-back transaction.
+async function assertSettledRetention12mContracts(sql) {
+  const rollback = new Error("settled retention fixture rollback");
+  await sql.begin(async (tx) => {
+    const old = "now() - interval '13 months'";
+    const insertBatch = async (sha, { lastCreatedAt = old, pruned = true, projectRef = "krydukthwdvccggbyjfw", botOnlyTable = null, policy = null } = {}) => {
+      await tx.unsafe("set local session_replication_role = 'replica';");
+      const receipt = pruned ? "now(), 1, 2, $3, $3" : "null, null, null, null, null";
+      const botOnly = botOnlyTable
+        ? "2, 'stage-ledger-bot-only-retention-7d-v1', $4::uuid, 1, now(), $3, $3, 1, 1"
+        : `1, ${policy ? "'" + policy + "'" : "null"}, null, null, null, null, null, null, null`;
+      const [row] = await tx.unsafe(`insert into public.chips_ledger_archive_batches (
+          object_path, project_ref, cutoff, first_created_at, last_created_at, transaction_count, entry_count,
+          tx_types, raw_bytes, compressed_bytes, raw_sha256, compressed_sha256, credits, debits, net_amount, status, committed_at,
+          archived_transaction_ids_sha256, archived_entry_ids_sha256, archive_proof_verified_at,
+          pruned_at, pruned_transaction_count, pruned_entry_count, pruned_transaction_ids_sha256, pruned_entry_ids_sha256,
+          format_version, source_policy_id, bot_only_table_id, bot_only_table_count, bot_only_newest_created_at,
+          bot_only_registry_keys_sha256, bot_only_out_of_scope_keys_sha256, bot_only_identity_count, bot_only_eligible_count
+        ) values ($1, $2, now(), ${lastCreatedAt}, ${lastCreatedAt}, 1, 2, '{"MINT":1}'::jsonb, 10, 8, $3, $3, 1, 1, 0,
+          'committed', now(), $3, $3, now(), ${receipt}, ${botOnly}) returning batch_id::text;`,
+      [`v1/sha256/${sha}.jsonl.gz`, projectRef, sha, ...(botOnlyTable ? [botOnlyTable] : [])]);
+      await tx.unsafe("set local session_replication_role = 'origin';");
+      return row.batch_id;
+    };
+    const expire = (batchId, execute, confirmation = null, cutoff = null) => tx.unsafe(
+      "select public.chips_expire_archive_batch('krydukthwdvccggbyjfw', $1::bigint, $2::timestamptz, $3, $4) as result;",
+      [batchId, cutoff, execute, confirmation]).then((rows) => rows[0].result);
+
+    const eligible = await insertBatch("a".repeat(64));
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe(`insert into public.chips_transaction_idempotency (idempotency_key, transaction_id, payload_hash, tx_type,
+        transaction_created_at, archive_batch_id) values ('settled-12m:a', gen_random_uuid(), $1, 'MINT', now() - interval '13 months', $2::bigint);`,
+    ["c".repeat(64), eligible]);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+    assert.equal((await expire(eligible, false)).state, "eligible");
+    await assert.rejects(() => tx.savepoint((sp) => sp.unsafe(
+      "select public.chips_expire_archive_batch('krydukthwdvccggbyjfw', $1::bigint, null, true, null);", [eligible])), /P8959|enabled control/);
+    await assert.rejects(() => tx.savepoint((sp) => sp.unsafe(
+      "update public.chips_ledger_archive_batches set objects_expired_at = now() where batch_id = $1::bigint;", [eligible])), /objects expiry/);
+    await assert.rejects(() => tx.savepoint(async (sp) => {
+      await sp.unsafe("set local role chips_ledger_archive_pruner;");
+      await sp.unsafe("set local chips.settled_retention_12m = '1';");
+      await sp.unsafe("update public.chips_ledger_archive_batches set objects_expired_at = now() where batch_id = $1::bigint;", [eligible]);
+    }), /objects expiry/, "only the expiry function may set the marker, even as the pruner with the GUC");
+    await assert.rejects(() => tx.savepoint((sp) => sp.unsafe(
+      "select public.chips_expire_archive_batch('krydukthwdvccggbyjfw', $1::bigint, now() - interval '1 day', false, null);", [eligible])), /only on canonical Stage/);
+    const expired = await expire(eligible, true, `EXPIRE ARCHIVE ${eligible}`);
+    assert.deepEqual([expired.state, Number(expired.registry_deleted)], ["expired", 1]);
+    const [marked] = await tx.unsafe("select objects_expired_at is not null as marked, (select count(*)::int from public.chips_transaction_idempotency where archive_batch_id = $1::bigint) as registry from public.chips_ledger_archive_batches where batch_id = $1::bigint;", [eligible]);
+    assert.deepEqual([marked.marked, marked.registry], [true, 0]);
+    assert.equal((await expire(eligible, true, `EXPIRE ARCHIVE ${eligible}`)).state, "already_expired");
+
+    assert.equal((await expire(await insertBatch("b".repeat(64), { lastCreatedAt: "now() - interval '11 months'" }), false)).state, "not_eligible");
+    assert.equal((await expire(await insertBatch("d".repeat(64), { pruned: false }), false)).state, "not_eligible");
+    assert.equal((await expire(await insertBatch("e".repeat(64), { botOnlyTable: crypto.randomUUID() }), false)).state, "not_eligible");
+    assert.equal((await expire(await insertBatch("f".repeat(64), { projectRef: "otbqfijerkieoxwpxjnm" }), false)).state, "not_found");
+
+    const [humanTable] = await tx.unsafe("insert into public.poker_tables (status) values ('CLOSED') returning id::text;");
+    const human = await insertBatch("9".repeat(64), { policy: "stage-ledger-closed-human-table-retention-30d-v1" });
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe(`insert into public.chips_transaction_idempotency (idempotency_key, transaction_id, payload_hash, tx_type,
+        transaction_created_at, archive_batch_id, table_id) values ('settled-12m:h', gen_random_uuid(), $1, 'MINT', now() - interval '13 months', $2::bigint, $3::uuid);`,
+    ["c".repeat(64), human, humanTable.id]);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+    assert.equal((await expire(human, false)).state, "not_eligible", "closed-human archive stays while WS still holds the table");
+    await tx.unsafe("delete from public.poker_tables where id = $1::uuid;", [humanTable.id]);
+    assert.equal((await expire(human, false)).state, "eligible");
+
+    const [closedTable] = await tx.unsafe("insert into public.poker_tables (status) values ('CLOSED') returning id::text;");
+    const [openTable] = await tx.unsafe("insert into public.poker_tables (status) values ('OPEN') returning id::text;");
+    const gift = (key, tableId, age) => tx.unsafe(`insert into public.poker_gift_purchases (purchase_key, payment_source, payment_reference,
+        buyer_user_id, sender_seat_no, sender_joined_at, recipient_user_id, recipient_seat_no, recipient_joined_at, table_id, gift_key, amount_ch, created_at)
+      values ($1, 'CH', 'ref', gen_random_uuid(), 1, now(), gen_random_uuid(), 2, now(), $2::uuid, 'coffee', 1, now() - $3::interval);`, [key, tableId, age]);
+    await gift("g-old-closed", closedTable.id, "13 months");
+    await gift("g-old-missing", crypto.randomUUID(), "13 months");
+    await gift("g-old-open", openTable.id, "13 months");
+    await gift("g-young", closedTable.id, "1 month");
+    const requestIds = await tx.unsafe(`insert into public.account_deletion_requests (request_id, old_user_id, status, phase, accepted_at, completed_at, progress, status_token_hash)
+      values (gen_random_uuid(), gen_random_uuid(), 'COMPLETED', 'completed', now() - interval '13 months', now() - interval '13 months', '{"cleanup":{"done":true}}', 'hash'),
+             (gen_random_uuid(), gen_random_uuid(), 'COMPLETED', 'completed', now() - interval '1 month', now() - interval '1 month', '{"cleanup":{"done":true}}', 'hash'),
+             (gen_random_uuid(), gen_random_uuid(), 'PROCESSING', 'cleanup', now() - interval '13 months', null, '{"cleanup":{"done":false}}', null)
+      returning request_id;`).then((rows) => rows.map((row) => row.request_id));
+    const pokerRequest = (id, kind, result, age) => tx.unsafe(`insert into public.poker_requests (table_id, user_id, request_id, kind, result_json, created_at)
+      values ($1::uuid, gen_random_uuid(), $2, $3, $4::jsonb, now() - $5::interval);`, [openTable.id, id, kind, result, age]);
+    await pokerRequest("r-old-done", "JOIN", '{"ok":true}', "13 months");
+    await pokerRequest("r-old-act-open", "ACT", null, "13 months");
+    await pokerRequest("r-old-act-done", "ACT", '{"ok":true}', "13 months");
+    await pokerRequest("r-young", "JOIN", '{"ok":true}', "1 month");
+
+    const run = (limit, execute) => tx.unsafe("select public.chips_settled_retention_12m_run($1, null, $2) as result;", [limit, execute]).then((rows) => rows[0].result);
+    const diagnosed = await run(100, false);
+    assert.deepEqual([diagnosed.gifts, diagnosed.deletion_requests, diagnosed.poker_requests].map(Number), [2, 1, 2]);
+    await assert.rejects(() => tx.savepoint((sp) => sp.unsafe("select public.chips_settled_retention_12m_run(100, null, true);")), /control is disabled/);
+    await tx.unsafe("update public.chips_settled_retention_control set enabled = true, activated_at = now() where control_id;");
+    const limited = await run(3, true);
+    assert.equal(Number(limited.gifts) + Number(limited.deletion_requests) + Number(limited.poker_requests), 3, "one shared row budget per run");
+    const rest = await run(100, true);
+    assert.equal(Number(limited.gifts) + Number(rest.gifts), 2);
+    const [left] = await tx.unsafe(`select
+        (select array_agg(purchase_key order by purchase_key) from public.poker_gift_purchases where purchase_key like 'g-%') as gifts,
+        (select array_agg(request_id order by request_id) from public.poker_requests where request_id like 'r-%') as requests,
+        (select array_agg(progress = '{}'::jsonb and status_token_hash is null order by array_position($1::uuid[], request_id))
+          from public.account_deletion_requests where request_id = any($1::uuid[])) as minimized;`, [requestIds]);
+    assert.deepEqual(left.gifts, ["g-old-open", "g-young"]);
+    assert.deepEqual(left.requests, ["r-old-act-open", "r-young"]);
+    assert.deepEqual(left.minimized, [true, false, false], "only the old COMPLETED request is minimized");
+    assert.deepEqual([(await run(100, true)).gifts, (await run(100, false)).poker_requests].map(Number), [0, 0]);
+    throw rollback;
+  }).catch((error) => { if (error !== rollback) throw error; });
+}
+
 async function main() {
   // Fundamental consent regressions run before any connection or fixture DDL.
   let reads = 0;
@@ -4921,12 +5056,14 @@ async function main() {
   await assertEscrowAccountRetirementContracts(sql);
   await assertEscrowDryRunReadOnlyConcurrency(sql);
   await assertDeletionDriverReceipts(sql);
+  await assertSettledRetention12mContracts(sql);
   await runProductionEquivalentFixture(sql);
   // This already-authorized disposable DB fixture also isolates XP from Redis.
   process.env.XP_TEST_MODE = "1";
   process.env.ACCOUNT_DELETION_ENABLED = "0";
   const { assertProductionDeletionCompatibility } = await import("./account-deletion-production.fixture.mjs");
   await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
+  await assertProductionSettledRetentionInstall(sql);
 
   // The integration workflow reuses this disposable database for the
   // following Stage contract jobs. Leave it in the normal main-migration

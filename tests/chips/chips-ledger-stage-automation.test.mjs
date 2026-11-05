@@ -1596,6 +1596,8 @@ const completedRow = {
 };
 assert.equal(findOwnCycle([]).active, null);
 assert.equal(findOwnCycle([completedRow]).latestCompleted, completedRow);
+// #1157 R-A2: an expired latest batch is terminal, so nothing re-downloads it.
+assert.equal(findOwnCycle([{ ...completedRow, objects_expired_at: "2027-08-15 00:00:00+00" }]).latestCompleted, null);
 const resumableRow = {
   ...completedRow,
   pruned_at: null,
@@ -4530,6 +4532,18 @@ await assert.rejects(runProductionAutomation({policy:"existing-30d",mode:"automa
  deps:{...missingTerminalRecovery.deps,read:async()=>activatedState,sqlRead:async()=>activatedState,
  pruneArchive:async()=>({state:"already_pruned",evidence:productionResumeEvidence}),inspectDurableRecovery:async()=>null}}),/durable recovery/);
 assert.equal(missingTerminalRecovery.calls.export,0);
+// #1157 R-A2: an expired latest completed batch is not re-downloaded or re-inspected.
+const expiredTerminal=makeProductionResumeHarness({...makeProductionResumeRow(),pruned_at:"2026-08-15T00:03:00Z"});
+const expiredTerminalSql=expiredTerminal.deps.sql.unsafe;
+let expiredRevalidations=0;
+await assert.rejects(runProductionAutomation({policy:"existing-30d",mode:"automatic",env:terminalAutomaticEnv,
+ deps:{...expiredTerminal.deps,read:async()=>activatedState,sqlRead:async()=>activatedState,
+ sql:{...expiredTerminal.deps.sql,unsafe:async(query,values)=>{const rows=await expiredTerminalSql(query,values);
+  return query.includes("'objects_expired_at' as objects_expired_at")?rows.map(row=>({...row,objects_expired_at:"2027-08-15 00:00:00+00"})):rows;}},
+ pruneArchive:async()=>{expiredRevalidations+=1;throw new Error("expired batch revalidated");},
+ inspectDurableRecovery:async()=>{expiredRevalidations+=1;throw new Error("expired batch inspected");}}}),
+ error=>!/expired batch (revalidated|inspected)|terminal|durable recovery/.test(error.message));
+assert.equal(expiredRevalidations,0,"R-A2 skips the expired latest batch and goes on to a new export");
 const escrowActivatedState={...activatedState,policies:[...activatedState.policies,{policy_id:"production-ledger-escrow-account-retention-v1",enabled:true,activated_at:"2026-10-14",canary_batch_id:"3"}]};
 const escrowGateSql={unsafe:async query=>{
  if(query.includes("pg_try_advisory_lock"))return[{acquired:true,backend_pid:"escrow-gate"}];
