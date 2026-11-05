@@ -778,7 +778,9 @@ const STAGE_OWN_BATCHES_SELECT_SQL = `select
        from public.poker_tables tables
       where tables.id = chips_ledger_archive_batches.bot_only_table_id) as bot_only_retention_complete_at,
     destructive_go_at::text as destructive_go_at,
-    destructive_go_batch_id::text as destructive_go_batch_id
+    destructive_go_batch_id::text as destructive_go_batch_id,
+    -- #1157; read through jsonb so this works before the column exists.
+    to_jsonb(chips_ledger_archive_batches.*) ->> 'objects_expired_at' as objects_expired_at
   from public.chips_ledger_archive_batches`;
 
 // Recovery diagnostics need the complete ambiguous-candidate list. Manual bot-only
@@ -1717,6 +1719,10 @@ async function loadExactBatch(sql, approvedBatchId, label = "approved bot-only b
   return rows[0];
 }
 
+function latestUnexpired(row) {
+  return row && !row.objects_expired_at ? row : null;
+}
+
 export function findOwnCycle(rows, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) {
   let sharedCycle;
   try {
@@ -1742,7 +1748,8 @@ export function findOwnCycle(rows, sourcePolicyId = STAGE_AUTOMATION_POLICY_ID) 
   }
   return {
     active: sharedCycle.active || active[0] || null,
-    latestCompleted: rows.find((row) => row.status === "committed" && receiptFieldCount(row) === 5) || null,
+    // #1157: an expired latest batch is terminal and has no objects to re-download.
+    latestCompleted: latestUnexpired(rows.find((row) => row.status === "committed" && receiptFieldCount(row) === 5)),
   };
 }
 
@@ -6002,7 +6009,7 @@ export async function runBotOnlyStageAutomation({
           deployedCommitSha,
         });
       } else {
-        const latestCompleted = ownRows.find((row) => row.status === "committed" && row.registry_cleaned_at);
+        const latestCompleted = latestUnexpired(ownRows.find((row) => row.status === "committed" && row.registry_cleaned_at));
         if (latestCompleted) {
           const completed = await runPruneStep({
             row: await refreshPolicyRow(pruneStore, latestCompleted.object_path, BOT_ONLY_RETENTION_POLICY_ID),
