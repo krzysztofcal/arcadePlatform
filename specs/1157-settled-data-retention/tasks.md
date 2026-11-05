@@ -35,4 +35,5 @@
 ## Phase 5 — Rollout (each step a separate owner GO)
 
 - [ ] T050 Stage: diagnostic, then one capped automatic run; verify objects absent by HEAD/not-found only.
+  - Apply of `20261105160000` (owner `DB Stage Apply PR` from `main`, source: the T050 evidence PR): in progress. Results of inspect, apply and diagnostic are recorded here as the steps complete.
 - [ ] T051 Production: apply the production-migration equivalent, diagnostic, one canary of 1 batch, then enable the policy. Install the T031 dispatcher through the T032 VPS Admin request; the owner's `vps-admin` approval is the GO.
