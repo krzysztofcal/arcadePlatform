@@ -70,3 +70,18 @@ Archive objects are already read by the store/prune verification (`STORAGE_GET_*
 ### Side finding (existing egress, outside #1157)
 
 Each scheduled automatic invocation of each policy downloads the newest completed batch archive and inspects its recovery copies, even when there is no new candidate. This is existing Storage egress, proportional to dispatcher cadence × policies × archive size. It is not measured here; `sum(compressed_bytes)` of the latest batch per policy (a server-side aggregate) would bound it. Recommendation: a separate small issue; it is not part of #1157.
+
+## Owner decisions (2026-11-05)
+
+The owner accepted all recommendations in spec.md:
+- **D1:** expire idempotency rows older than 12 months whose transaction is no longer hot.
+- **D2:** active-account ledger rows are an exception (current balance).
+- **D3:** deleted-account UUID tombstones are kept as a security exception.
+- **D4:** provider copies are documented only.
+- **D5:** retired-account ledger history and snapshots are a financial-record exception for now.
+- **D6:** expire finished `poker_requests` older than 12 months.
+- **D7:** R-A2, i.e. the latest-completed revalidation skips expired batches.
+- **T002:** Stage-only test cutoff, provably unreachable in Production.
+- **R-A2 and R-B** (T003) are plan requirements.
+
+Pending before implementation: measuring the existing latest-batch revalidation egress (research T003 side finding).
