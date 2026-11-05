@@ -124,7 +124,7 @@ begin
         where r.archive_batch_id = batch.batch_id)) then
     return jsonb_build_object('state', 'not_eligible', 'batch_id', p_batch_id);
   end if;
-  if not p_execute then
+  if p_execute is not true then
     return jsonb_build_object('state', 'eligible', 'batch_id', p_batch_id);
   end if;
   select c.enabled into enabled from public.chips_settled_retention_control c where c.control_id;
@@ -167,7 +167,7 @@ begin
   if p_limit is null or p_limit < 1 or p_limit > 5000 then
     raise exception using errcode = 'P8959', message = 'Settled retention limit must be 1..5000';
   end if;
-  if not p_execute then
+  if p_execute is not true then
     if pg_catalog.to_regclass('public.poker_gift_purchases') is not null then
       execute 'select count(*) from public.poker_gift_purchases g where g.created_at < $1
         and not exists (select 1 from public.poker_tables t where t.id = g.table_id and t.status <> ''CLOSED'')'
