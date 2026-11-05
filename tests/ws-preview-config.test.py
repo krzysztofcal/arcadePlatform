@@ -501,6 +501,9 @@ class PreviewIsolation(unittest.TestCase):
                         'CapabilityBoundingSet':'', 'WorkingDirectory':str(self.base / 'ws-server')}.items())
                 if 'ExecStartEx' in argv:
                     return 'ExecStartEx={ path=/usr/bin/node ; argv[]=/usr/bin/node server.mjs ; flags= ; pid=0 }'
+                if 'BindPaths' in argv:
+                    return '\n'.join(k + '=' for k in ['BindPaths', 'BindReadOnlyPaths', 'StateDirectory',
+                        'RuntimeDirectory', 'CacheDirectory', 'LogsDirectory', 'ConfigurationDirectory', 'RootDirectory', 'RootImage'])
                 if 'DropInPaths' in argv:
                     return '/etc/systemd/system/ws-server-preview.service.d/99-preview-isolation.conf' if any(p.exists() for p in self.targets) else ''
                 if '-T' in argv:
@@ -515,7 +518,7 @@ class PreviewIsolation(unittest.TestCase):
                 if '-U' in argv:
                     if argv[-1] == isolation.RUNTIME:
                         return 'User arcade-preview is not allowed to run sudo on fixture.'
-                    return 'Matching Defaults entries for arcade-preview-deploy on fixture:\n    env_reset, use_pty\nUser arcade-preview-deploy may run the following commands on fixture:\n    (root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight \"\", /usr/bin/systemctl restart ws-server-preview.service'
+                    return 'Matching Defaults entries for arcade-preview-deploy on fixture:\n    env_reset, secure_path=/usr/bin:/bin, use_pty\nUser arcade-preview-deploy may run the following commands on fixture:\n    (root) NOPASSWD: /usr/local/sbin/arcade-ws-preview-env-preflight \"\", /usr/bin/systemctl restart ws-server-preview.service'
                 if '--config-only' in argv:
                     return 'PASS CONFIG ONLY Redis V3 stage; live verification required'
                 return ''
@@ -629,6 +632,26 @@ class PreviewIsolation(unittest.TestCase):
         self.active = 'active'
         with self.assertRaisesRegex(isolation.secure.Refused, 'preview_must_be_stopped'):
             self.task.rollback()
+
+    def test_existing_start_hook_is_not_silently_cleared(self):
+        run = self.task.run
+        def existing_hook(argv, **kwargs):
+            value = run(argv, **kwargs)
+            return value + '\nExecStartPre={ path=/fixture-existing-gate ; }' if 'ExecStartEx' in argv else value
+        self.task.run = existing_hook
+        with self.assertRaisesRegex(isolation.secure.Refused, 'unexpected_exec_hooks'):
+            self.task.provision('131')
+        self.assertFalse(self.task.backup.exists())
+        self.assertFalse(any(cmd[0].endswith('useradd') for cmd in self.calls))
+
+    def test_missing_sync_root_blocks_before_creating_accounts_or_backup(self):
+        root = self.task.base / 'netlify/functions/_generated'
+        (root / 'fixture.mjs').unlink()
+        root.rmdir()
+        with self.assertRaisesRegex(isolation.secure.Refused, 'missing_or_symlinked_sync_root'):
+            self.task.provision('132')
+        self.assertFalse(self.task.backup.exists())
+        self.assertFalse(any(cmd[0].endswith('useradd') for cmd in self.calls))
 
     def test_optional_foreign_environment_is_not_ignored(self):
         run = self.task.run
