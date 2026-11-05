@@ -18,3 +18,9 @@ test('retired HTTP poker sweep has no scheduler or workflow authority', () => {
   assert.match(tombstone, /statusCode: 410/);
   assert.match(tombstone, /sweep_http_retired/);
 });
+
+test('nightly poker with secrets runs only on owner main dispatch', () => {
+  assert.match(nightly, /^  poker-nightly:\n    if: /m);
+  assert.ok(nightly.includes("    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}"));
+  assert.equal((nightly.match(/^  [a-z-]+:\n    if: /gm) ?? []).length, 1);
+});

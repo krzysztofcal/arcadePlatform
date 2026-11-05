@@ -688,12 +688,19 @@ const stageOwnerConditions = {
   "stage-archive": stageJobIfExpression,
   "stage-supabase-resource-health": YAML.parse(fs.readFileSync(".github/workflows/stage-supabase-resource-health.yml", "utf8")).jobs.monitor.if,
   "stage-bonus-campaigns": YAML.parse(fs.readFileSync(".github/workflows/stage-bonus-campaigns.yml", "utf8")).jobs["stage-operator"].if,
+  "chips-ledger-stage-legacy-allowlist": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-legacy-allowlist.yml", "utf8")).jobs.prepare.if,
+  "chips-ledger-stage-legacy-allowlist-freeze": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-legacy-allowlist-freeze.yml", "utf8")).jobs.freeze.if,
+  "chips-ledger-stage-timeout-diagnostic": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-timeout-diagnostic.yml", "utf8")).jobs["stage-timeout-diagnostic"].if,
 };
 for (const [name, condition] of Object.entries(stageOwnerConditions)) {
   assert.equal(evaluateStageCondition(condition), true, `${name}: owner main dispatch`);
   assert.equal(evaluateStageCondition(condition, { ref: "refs/heads/feature" }), false, `${name}: other branch`);
   assert.equal(evaluateStageCondition(condition, { triggeringActor: "release-agent[bot]" }), false, `${name}: foreign re-run of an owner run`);
   assert.equal(evaluateStageCondition(condition, { actor: "release-agent[bot]" }), false, `${name}: foreign dispatch`);
+}
+for (const name of ["chips-ledger-stage-legacy-allowlist", "chips-ledger-stage-legacy-allowlist-freeze", "chips-ledger-stage-timeout-diagnostic"]) {
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { enabled: "0" }), false, `${name}: automation switch still applies`);
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule" }), false, `${name}: only workflow_dispatch`);
 }
 for (const name of ["stage-archive", "stage-supabase-resource-health"]) {
   assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule" }), true, `${name}: schedule keeps running`);

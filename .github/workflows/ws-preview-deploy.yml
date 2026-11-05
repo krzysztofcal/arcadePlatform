@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   validate:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,6 +54,7 @@ jobs:
           node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
 
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
     needs: validate
     runs-on: ubuntu-latest
     permissions:
