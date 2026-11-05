@@ -1,0 +1,95 @@
+name: VPS Admin Operation
+
+# #1159 root on demand: an agent (or the owner) requests one operation from the fixed catalog of
+# infra/vps/vps-admin.mjs; the owner approves the vps-admin environment, whose secrets alone reach the VPS account
+# arcade-admin. That account may run only the root helper's catalog (infra/vps/arcade-admin.sudoers).
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operation from the reviewed catalog
+        required: true
+        type: choice
+        options:
+          - ledger-dispatchers-status
+          - ledger-dispatchers-pause
+          - ledger-dispatchers-resume
+          - systemd-daemon-reload
+          - copilot-secret-snapshots-quarantine
+      reason:
+        description: One line, 10-200 letters, digits, spaces or .,:;()/+=_- (shown to the approver before approval)
+        required: true
+        type: string
+      confirmation:
+        description: Exact RUN <operation>
+        required: true
+        type: string
+
+concurrency:
+  group: vps-admin
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Unprivileged: no environment and no secret. It finishes before the approval request, so the owner sees the
+  # operation, reason, revision and requester in this job's summary while approving the operate job.
+  request:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate and show the request before approval
+        env:
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          [[ "$OPERATION" =~ ^[a-z0-9-]{1,64}$ ]] || { echo "invalid operation name"; exit 1; }
+          [[ "$CONFIRMATION" == "RUN $OPERATION" ]] || { echo "confirmation phrase mismatch"; exit 1; }
+          # One plain line: no newline, markdown, HTML or backtick can shape the summary the owner approves.
+          REASON_RE='^[A-Za-z0-9 .,:;()/+=_-]{10,200}$'
+          [[ "$REASON" =~ $REASON_RE ]] || { echo "reason must be one line of 10-200 letters, digits, spaces or .,:;()/+=_-"; exit 1; }
+          {
+            echo "### VPS admin operation request (approve the operate job only if this is expected)"
+            echo "- operation: \`$OPERATION\`"
+            echo "- reason: \`$REASON\`"
+            echo "- revision: \`$GITHUB_SHA\` (main)"
+            echo "- requested by: \`$GITHUB_ACTOR\`, triggered by \`$GITHUB_TRIGGERING_ACTOR\`"
+            echo "- run: $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The vps-admin environment holds the only credential that reaches arcade-admin; its secrets exist only after
+  # the owner approves this job.
+  operate:
+    needs: request
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    runs-on: ubuntu-latest
+    environment: vps-admin
+    timeout-minutes: 15
+    steps:
+      - name: Run the operation on the VPS as arcade-admin
+        id: operate
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          OPERATION: ${{ inputs.operation }}
+          ADMIN_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.VPS_ADMIN_HOST }}
+          username: ${{ secrets.VPS_ADMIN_USER }}
+          key: ${{ secrets.VPS_ADMIN_SSH_KEY }}
+          fingerprint: SHA256:dDmTXhjkTP/9hCchXlrkpjnFT/a21QcpcmuvNO/ZBEY
+          timeout: 2m
+          command_timeout: 10m
+          envs: OPERATION,ADMIN_RUN_ID
+          script: |
+            set -eu
+            [ "$(id -un)" = "arcade-admin" ] || { echo "VPS admin operations must run as arcade-admin"; exit 1; }
+            RESULT="$(sudo -n /usr/local/sbin/arcade-vps-admin "$OPERATION" "$ADMIN_RUN_ID" || true)"
+            echo "$RESULT"
+            case "$RESULT" in
+              "ADMIN_OK $OPERATION "*) ;;
+              *) echo "STOP: operation did not complete; nothing is retried (owner decision)"; exit 1 ;;
+            esac

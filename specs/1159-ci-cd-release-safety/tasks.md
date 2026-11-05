@@ -33,3 +33,29 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [ ] Administrator executes already authorized protected C/Redis exact-parent copy using existing root custody; no copilot privilege expansion.
 - [ ] Native parent then child exact-SHA READY and nonfinancial acceptance, with mandatory exact-SHA WS Preview runtime gate still outstanding.
 - [ ] Separate technical debt: historical snapshot/replay derivation after a future deal-key change lacks key provenance; preserve materialized cards and refuse unsupported reconstruction. Do not implement dual-key or rotate in PR2.
+
+## PR3 implementation (current)
+
+- [x] Own-PR/source binding, bounded pending→ready prerequisite, stale/foreign/failed/timeout fail-closed, explicit dispatch inputs, no CI static-origin fallback.
+- [x] Conservative synchronize classification skips known docs/test-only compilation without changing other CI/Preview checks; enrich existing receipt and verify packaged CSP/SRI.
+- [x] Local fundamental tests, actionlint, syntax and guards; read-only stacked #1160 validation binds child source/deploy rather than parent.
+- [x] Hosted own-PR READY → automatic APK run40975904744, embedded receipt/checksum/debug signature PASS, 22.779s wait. All hosted checks PASS at a1ed1ace. Physical installation NOT TESTED. Documentation-only synchronize acceptance recorded in PR #1166 without relabelling the existing artifact.
+
+## PR4 — WS Production explicit dispatch (T002)
+
+- [x] Push/merge validates only; deploy requires OWNER main dispatch with exact current-main `releaseSha` and confirmation; existing safety/rollback unchanged. See `pr4-ws-production-dispatch.md`.
+- [x] Hosted CI on Draft PR, including the workflow guard in `validate`.
+- [ ] OWNER GO: squash merge with `[skip netlify]` (no `[skip actions]`) and observed post-merge acceptance.
+- [ ] OPEN: `ws-production` Environment; T004 automatic human/resume/escrow preflight. Current dispatch is not a complete safe release process.
+
+## PR5 — WWW Production publication separated from merge (T003)
+
+- [x] Read-only Netlify audit; official lock, `ignore` and build-hook behavior; design, coverage table, limitations and breaking impact in `pr5-www-production-publish.md`.
+- [x] Unpublished Production permalinks can mutate Production: `ignore` skips `main` Git builds (Previews/branch deploys kept); candidates only from an OWNER build hook.
+- [x] OWNER-run `scripts/www-production-release.mjs`: dry-run default; lock, exact main HEAD, ready Production deploy, build-info identity, function names, root CSP/HSTS; WS release proven from GitHub deploy evidence; relock-or-uncertain; receipt on every outcome; rollback mode removed until T004. Fundamental tests registered.
+- [x] WS evidence: read-only VPS `current`/metadata/service start must agree with GitHub deploy history; unfinished/queued WS runs block; both rechecked before restore. Mandatory candidate discard with API+permalink 404 proof, else STOP.
+- [x] WS compatibility surface derived from the WS Server Deploy package step (incl. packaged `netlify/functions/_shared` modules and the deploy-context generator); fail closed if unparseable.
+- [x] OWNER GO 1 (2026-10-30): #1168 merge published `6ae52b31a745a6e69b60b668` (`83c8da88`, backlog included, accepted by OWNER); auto publishing then locked on it via API; verified `locked=true`, id unchanged, `stop_builds=false`. PR4 push acceptance on `83c8da88`: validate SUCCESS, notice present, deploy SKIPPED.
+- [x] OWNER GO 2 (2026-10-31): #1169 merged as `3fe60fc5` without a Netlify marker. The main Git Production build was skipped by `ignore`: deploy record `6ae5a688d0733085c009316b` (`production`, `state=error`, "Canceled build due to no content change", no files or functions, never published; permalink answers 500). Published deploy still `6ae52b31a745a6e69b60b668`, `locked=true`, `stop_builds=false`, no build hooks. Push workflows all success; WS Server Deploy validate SUCCESS, deploy SKIPPED (`deploy_ws=false`, so no notice). PR Preview built with this `ignore` on `d14c1b91`; no PR Preview after the merge yet.
+- [ ] OWNER GO 3/4: OWNER-only build hook; first release with WS compatibility decision, recorded receipt and restore/lock behavior.
+- [ ] OPEN: historical permalink exposure / visitor protection; WS `/healthz` release SHA; redirects and function digest coverage.

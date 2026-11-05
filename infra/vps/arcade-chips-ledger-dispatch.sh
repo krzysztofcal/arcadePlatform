@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GH_BIN="${GH_BIN:-/home/copilot/.local/bin/gh}"
+GH_BIN="${GH_BIN:-/usr/bin/gh}"
 REPO="krzysztofcal/arcadePlatform"
 WORKFLOW_ID="349412824"
 REF="main"
@@ -9,6 +9,15 @@ MODE="external-scheduled-automatic"
 DAILY_MODE="external-existing-30d"
 WORKFLOW_FILE=".github/workflows/chips-ledger-stage-scheduled-automation.yml"
 RESOURCE_WORKFLOW_ID="353254812"
+
+# Only the dedicated root-owned token file authenticates; never an ambient gh login.
+: "${GH_TOKEN:?dedicated Stage GH_TOKEN is required}"
+: "${RUNTIME_DIRECTORY:?private service runtime directory is required}"
+export GH_HOST=github.com
+export GH_PROMPT_DISABLED=1
+export GH_CONFIG_DIR="$RUNTIME_DIRECTORY/gh-stage"
+mkdir -p "$GH_CONFIG_DIR"
+chmod 700 "$GH_CONFIG_DIR"
 
 minute="$(date -u +%M)"
 hour="$(date -u +%H)"

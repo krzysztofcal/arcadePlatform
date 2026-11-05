@@ -100,7 +100,7 @@ test('apply requires OWNER dispatch and OWNER rerun, before Stage credentials or
  const s=read('.github/workflows/db-stage-apply-pr.yml');
  assert.match(s,/github\.actor == 'krzysztofcal' && github\.triggering_actor == 'krzysztofcal'/);
  assert.match(s,/inputs\.operation == 'inspect' \|\|/);
- assert.doesNotMatch(s,/^\s+environment:/m,'no unconfigured Environment auto-creation');
+ assert.deepEqual(s.match(/^ +environment:.*$/gm),['    environment: stage-automation'],'only the preconfigured Stage Environment is allowed');
  const script=read('scripts/stage-db-migrate.mjs');assert.ok(script.indexOf("if(args[0]==='--apply')authorizeApply()")<script.indexOf('const file=process.env.STAGE_MIGRATION_BUNDLE'));
  const deniedRun=spawnSync(process.execPath,['scripts/stage-db-migrate.mjs','--apply'],{env:{PATH:process.env.PATH,...env,GITHUB_TRIGGERING_ACTOR:'other-writer'},encoding:'utf8'});
  assert.equal(deniedRun.status,1);assert.match(deniedRun.stderr,/owner_apply_required/);assert.equal(deniedRun.stdout,'');

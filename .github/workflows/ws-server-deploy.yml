@@ -1,9 +1,20 @@
 name: WS Server Deploy
 on:
   pull_request:
+  # Release procedure and post-merge acceptance: specs/1159-ci-cd-release-safety/pr4-ws-production-dispatch.md
   push:
     branches: [ main ]
+  # Production deploy is explicit only: an ordinary main push validates and never deploys.
   workflow_dispatch:
+    inputs:
+      releaseSha:
+        description: Exact approved SHA; must be the current main HEAD this run was dispatched on
+        required: true
+        type: string
+      confirmation:
+        description: 'Exact phrase: DEPLOY WS PRODUCTION <releaseSha>'
+        required: true
+        type: string
 
 concurrency:
   group: ws-server-${{ github.ref }}
@@ -332,12 +343,20 @@ jobs:
       - name: WS poker protocol compliance test
         if: ${{ github.event_name != 'pull_request' }}
         run: node --test ws-tests/ws-poker-protocol-compliance.test.mjs
+
+      - name: Report pending explicit WS Production release
+        if: ${{ github.event_name == 'push' && needs.impact.outputs.deploy_ws == 'true' }}
+        run: |
+          echo "::notice::WS Production was NOT deployed. This main commit changes the WS deploy surface; release it only by OWNER dispatch with releaseSha=$GITHUB_SHA."
+          echo "WS Production NOT deployed: explicit release required for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
   deploy:
     needs: [impact, validate]
-    # #1018 T108 Production DB compatibility gate completed under owner GO.
-    # Restore the normal main-push Production deployment path; manual dispatch remains available.
-    if: ${{ needs.impact.outputs.deploy_ws == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    # #1159 T004: the owner or the release agent App (vars.WS_RELEASE_AGENT) dispatches the main definition, and only
+    # the same identity may re-run it (no owner/agent mix);
+    # the owner approves the ws-production environment, whose secrets alone reach the VPS release account.
+    if: ${{ needs.impact.outputs.deploy_ws == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
     runs-on: ubuntu-latest
+    environment: ws-production
     env:
       WS_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-${{ github.run_id }}-${{ github.run_attempt }}
     permissions:
@@ -345,6 +364,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Authorize exact approved main release
+        env:
+          RELEASE_SHA_INPUT: ${{ inputs.releaseSha }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]] || { echo "releaseSha must be a full lowercase commit SHA"; exit 1; }
+          [[ "$RELEASE_SHA_INPUT" == "$GITHUB_SHA" ]] || { echo "releaseSha does not match the dispatched main revision"; exit 1; }
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA_INPUT" ]] || { echo "checkout does not match releaseSha"; exit 1; }
+          [[ "$RELEASE_CONFIRMATION" == "DEPLOY WS PRODUCTION $RELEASE_SHA_INPUT" ]] || { echo "confirmation phrase mismatch"; exit 1; }
+          # A stale rerun must not silently roll Production back to an older main commit.
+          MAIN_HEAD="$(git ls-remote origin refs/heads/main | cut -f1)"
+          [[ "$MAIN_HEAD" == "$RELEASE_SHA_INPUT" ]] || { echo "main advanced to $MAIN_HEAD; approve and dispatch the current main SHA"; exit 1; }
+          echo "WS Production release authorized for $RELEASE_SHA_INPUT" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -354,9 +388,9 @@ jobs:
       - name: Pre-stage shared deploy/maintenance lock on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.WS_HOST }}
-          username: ${{ secrets.WS_USER }}
-          key: ${{ secrets.WS_SSH_KEY }}
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
           timeout: 2m
           command_timeout: 10m
           script: |
@@ -372,10 +406,10 @@ jobs:
             BASE_DIR="/opt/ws-server"
             RELEASES_DIR="$BASE_DIR/releases"
             LOCK_FILE="$BASE_DIR/.deploy-maintenance.lock"
-            DEPLOY_GROUP="arcade-deploy"
+            DEPLOY_GROUP="arcade-release"
 
-            if [[ "$(id -un)" != "copilot" ]]; then
-              echo "Production deploy must run as copilot"
+            if [[ "$(id -un)" != "arcade-release" ]]; then
+              echo "Production deploy must run as arcade-release"
               exit 1
             fi
             if ! test -d "$BASE_DIR" || test -L "$BASE_DIR" || ! test -w "$BASE_DIR" || ! test -x "$BASE_DIR"; then
@@ -432,7 +466,7 @@ jobs:
             fi
 
             lock_owner="$(stat -Lc '%U' -- "/proc/$$/fd/9")"
-            if [[ "$lock_owner" != root && "$lock_owner" != copilot ]]; then
+            if [[ "$lock_owner" != root && "$lock_owner" != arcade-release ]]; then
               echo "deploy maintenance lock has an unexpected owner"
               exit 1
             fi
@@ -539,24 +573,53 @@ jobs:
       - name: Upload ws-server artifact to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.WS_HOST }}
-          username: ${{ secrets.WS_USER }}
-          key: ${{ secrets.WS_SSH_KEY }}
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
           source: .artifacts/ws-server/ws-server-dist.tgz
           target: ${{ env.WS_REMOTE_TMP_DIR }}
+
+      # Holds new hands, waits for running hands, drains and waits for RESTART_SAFE. Any other outcome
+      # removes only this run's hold (or keeps it on a process change) and nothing is switched.
+      - name: Prepare running WS for the release on VPS
+        id: prepare
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 15m
+          envs: RELEASE_RUN_ID
+          script: |
+            set -eu
+            [ "$(id -un)" = "arcade-release" ] || { echo "Production deploy must run as arcade-release"; exit 1; }
+            PREPARE_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate prepare "$RELEASE_RUN_ID" || true)"
+            printf '%s\n' "$PREPARE_RESULT"
+            [ "$PREPARE_RESULT" = "PREPARED" ] || { echo "STOP: WS not prepared; nothing switched"; exit 1; }
+
+      # main may advance during packaging/upload/preparation; recheck immediately before the switch.
+      - name: Revalidate current main HEAD before release switch
+        run: |
+          set -euo pipefail
+          MAIN_HEAD="$(git ls-remote origin refs/heads/main | cut -f1)"
+          [[ "$MAIN_HEAD" == "$GITHUB_SHA" ]] || { echo "main advanced to $MAIN_HEAD before release switch; nothing switched"; exit 1; }
 
       - name: Atomic release switch + restart + health gate on VPS
         uses: appleboy/ssh-action@v1.0.3
         env:
           RELEASE_SHA: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
           WS_REMOTE_TMP_DIR: ${{ env.WS_REMOTE_TMP_DIR }}
         with:
-          host: ${{ secrets.WS_HOST }}
-          username: ${{ secrets.WS_USER }}
-          key: ${{ secrets.WS_SSH_KEY }}
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
           timeout: 2m
           command_timeout: 20m
-          envs: RELEASE_SHA,WS_REMOTE_TMP_DIR
+          envs: RELEASE_SHA,RELEASE_RUN_ID,WS_REMOTE_TMP_DIR
           script: |
             set -eu
             if ! command -v bash >/dev/null 2>&1; then
@@ -571,8 +634,8 @@ jobs:
             RELEASES_DIR="$BASE_DIR/releases"
             CURRENT_LINK="$BASE_DIR/current"
             DEPLOY_MAINTENANCE_LOCK="/opt/ws-server/.deploy-maintenance.lock"
-            if [[ "$(id -un)" != "copilot" ]]; then
-              echo "Production deploy must run as copilot"
+            if [[ "$(id -un)" != "arcade-release" ]]; then
+              echo "Production deploy must run as arcade-release"
               exit 1
             fi
             if [[ ! "$WS_REMOTE_TMP_DIR" =~ ^/tmp/arcadeplatform-ws-[0-9]+-[0-9]+$ ]]; then
@@ -590,6 +653,7 @@ jobs:
             NEW_RELEASE_APP_DIR="$NEW_RELEASE_DIR/ws-server"
             PREVIOUS_TARGET=""
             HAVE_SWITCHED=0
+            HAVE_RESTARTED=0
             HEALTH_RETRIES=30
             HEALTH_SLEEP_SEC=1
 
@@ -660,14 +724,35 @@ jobs:
               if [ "$HAVE_SWITCHED" != "1" ] || [ -z "$PREVIOUS_TARGET" ]; then
                 return 0
               fi
+              # A restart was attempted with an unknown outcome: never guess, leave everything to the operator.
+              if [ "$HAVE_RESTARTED" = "uncertain" ]; then
+                echo "RESTART_UNCERTAIN: service state unknown after the restart attempt; no automatic rollback, operator decision required"
+                return 0
+              fi
+              # Not restarted yet: the previous process still runs, so only the release link is restored.
+              if [ "$HAVE_RESTARTED" != "1" ]; then
+                ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
+                mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+                echo "release link restored; no restart was performed"
+                return 0
+              fi
               # Never restore a V2 runtime after the coordinated V3 cutover.
               if ! node --input-type=module -e 'const p=process.argv[1]; const c=await import("file://"+p+"/../netlify/functions/_generated/deploy-context.mjs"); if(c.BUILD_XP_REDIS_VERSION!=="3" || c.BUILD_XP_REDIS_ENV!=="prod") process.exit(1)' "$PREVIOUS_TARGET"; then
                 echo "Previous release is not V3 prod; roll-forward required"
                 return 0
               fi
+              # Automatic rollback restarts only through the gated helper; otherwise the operator decides.
               ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK.tmp"
               mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
-              sudo -n /usr/bin/systemctl restart ws-server.service || true
+              ROLLBACK_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"
+              printf '%s\n' "$ROLLBACK_RESULT"
+              if [[ "$ROLLBACK_RESULT" == RESTART_BLOCKED* ]]; then
+                ln -sfn -- "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
+                mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
+                echo "ROLLBACK_BLOCKED: restart gate is not safe; current release left in place for operator decision"
+              elif [[ "$ROLLBACK_RESULT" != RESTARTED* ]]; then
+                echo "RESTART_UNCERTAIN: rollback restart outcome unknown; release link left as is, operator decision required"
+              fi
             }
 
             on_error() {
@@ -715,11 +800,41 @@ jobs:
             printf '%s\n' "$PROD_PREFLIGHT"
             [[ "$PROD_PREFLIGHT" == 'PASS LIVE Redis V3 prod' ]]
 
+            # Fail-closed restart gate under the deploy lock: a running WS must be held, drained and verified;
+            # a stopped one needs root's single-use safe-stop evidence and a quiet database.
+            RESTART_GATE="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate check || true)"
+            printf '%s\n' "$RESTART_GATE"
+            if [[ "$RESTART_GATE" != RESTART_SAFE* ]]; then
+              echo "STOP: restart gate is not safe; nothing switched"
+              exit 1
+            fi
+
+            # Point of no return, marked by root before the link changes: from here every failure keeps the hold (C7).
+            SWITCH_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate switching "$RELEASE_RUN_ID" || true)"
+            printf '%s\n' "$SWITCH_RESULT"
+            if [[ "$SWITCH_RESULT" != "SWITCH_MARKED" ]]; then
+              echo "STOP: switch not marked; nothing switched"
+              exit 1
+            fi
+
             ln -sfn "$NEW_RELEASE_APP_DIR" "$CURRENT_LINK.tmp"
             mv -Tf "$CURRENT_LINK.tmp" "$CURRENT_LINK"
             HAVE_SWITCHED=1
 
-            sudo -n /usr/bin/systemctl restart ws-server.service
+            # The helper re-runs the gate as root and restarts only if it still passes.
+            RESTART_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate restart || true)"
+            printf '%s\n' "$RESTART_RESULT"
+            if [[ "$RESTART_RESULT" == RESTART_BLOCKED* ]]; then
+              echo "STOP: gate refused before restart; nothing was restarted"
+              false
+            fi
+            if [[ "$RESTART_RESULT" != RESTARTED* ]]; then
+              # RESTART_FAILED, empty or unknown output: systemctl may have run, so the service state is uncertain.
+              HAVE_RESTARTED=uncertain
+              echo "STOP: restart outcome uncertain; no automatic rollback"
+              false
+            fi
+            HAVE_RESTARTED=1
 
             LOCAL_HEALTHZ_BODY=""
             for i in $(seq 1 "$HEALTH_RETRIES"); do
@@ -891,3 +1006,69 @@ jobs:
           socket.on('error', (err) => fail(`socket-error:${err && err.code ? err.code : 'unknown'}`));
           socket.on('end', () => fail('socket-end-before-helloAck'));
           NODE
+
+      # Only after authorize, RESTARTED, both health checks and the smoke succeeded in this run.
+      - name: Resume new hands after the verified release on VPS
+        if: ${{ success() }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 5m
+          envs: RELEASE_SHA,RELEASE_RUN_ID
+          script: |
+            set -eu
+            RESUME_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate resume "$RELEASE_RUN_ID" "$RELEASE_SHA" || true)"
+            printf '%s\n' "$RESUME_RESULT"
+            [ "$RESUME_RESULT" = "RESUMED" ] || { echo "STOP: hold kept; owner decision (C7)"; exit 1; }
+            printf 'release=%s pid=%s\n' "$(readlink -f /opt/ws-server/current)" "$(systemctl show ws-server.service -p MainPID --value)"
+
+      # A failure before the switch was marked reopens play on the untouched release; anything later keeps the hold (C7).
+      - name: Abort the release before the switch on VPS
+        if: ${{ failure() && steps.prepare.outcome == 'success' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        with:
+          host: ${{ secrets.WS_PRODUCTION_HOST }}
+          username: ${{ secrets.WS_PRODUCTION_USER }}
+          key: ${{ secrets.WS_PRODUCTION_SSH_KEY }}
+          timeout: 2m
+          command_timeout: 5m
+          envs: RELEASE_RUN_ID
+          script: |
+            set -eu
+            ABORT_RESULT="$(sudo -n /usr/local/sbin/arcade-ws-restart-gate abort "$RELEASE_RUN_ID" || true)"
+            printf '%s\n' "$ABORT_RESULT"
+            case "$ABORT_RESULT" in
+              ABORTED*) echo "release aborted before the switch; previous release keeps running" ;;
+              *) echo "STOP: hold kept; owner decision (C7)"; exit 1 ;;
+            esac
+
+      # #1159 Addendum B: evidence for the Release Record workflow (release-manifest.json). Recording deploys nothing.
+      # Last on purpose: it runs only after a verified, resumed release and a failure here cannot trigger the abort.
+      - name: Record the WS release receipt
+        if: ${{ success() }}
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          DIST_SHA256="$(sha256sum .artifacts/ws-server/ws-server-dist.tgz | cut -d' ' -f1)"
+          mkdir -p .artifacts/ws-release-receipt
+          DIST_SHA256="$DIST_SHA256" node -e 'process.stdout.write(JSON.stringify({ releaseSha: process.env.RELEASE_SHA, runId: process.env.RELEASE_RUN_ID, environment: "ws-production", distSha256: process.env.DIST_SHA256 }) + "\n")' > .artifacts/ws-release-receipt/ws-release-receipt.json
+          echo "WS release receipt: $RELEASE_SHA dist sha256 $DIST_SHA256" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the WS release receipt
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws-release-receipt
+          path: .artifacts/ws-release-receipt/ws-release-receipt.json
+          retention-days: 90
+          if-no-files-found: error

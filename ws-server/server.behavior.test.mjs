@@ -1377,12 +1377,15 @@ test("internal poker log control requires auth and exposes bounded no-store enab
 
 test("internal poker maintenance route is token-protected and does not expose a public browser path", async () => {
   const token = "internal-maintenance-token";
+  const holdFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "ws-hold-")), "hold-new-hands");
+  await fs.writeFile(holdFile, "");
   const { port, child } = await createServer({
     env: {
       POKER_WS_INTERNAL_TOKEN: token,
       WS_DEPLOY_ENVIRONMENT: "preview",
       SUPABASE_DB_URL: "",
-      WS_POKER_LOG_LEVEL: "INFO"
+      WS_POKER_LOG_LEVEL: "INFO",
+      WS_POKER_NEW_HANDS_HOLD_FILE: holdFile
     }
   });
   const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
@@ -1391,7 +1394,18 @@ test("internal poker maintenance route is token-protected and does not expose a 
     assert.equal((await fetch(url)).status, 401);
     const authorized = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     assert.equal(authorized.status, 503);
-    assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable" });
+    const newHandsHold = {
+      configured: true, active: true, drain: false, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
+      supervisorSweepInProgress: false, dbHandsInProgress: null, dbVersionMismatches: null, dbFinancialIssues: null, restartSafe: false
+    };
+    assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable", newHandsHold });
+    await fs.writeFile(holdFile, "drain\n");
+    const draining = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    // Without persisted state to compare, a restart is never reported safe.
+    assert.deepEqual((await draining.json()).newHandsHold, { ...newHandsHold, drain: true });
+    await fs.rm(holdFile);
+    const released = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    assert.deepEqual((await released.json()).newHandsHold, { ...newHandsHold, active: false });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
