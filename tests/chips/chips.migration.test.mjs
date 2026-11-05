@@ -713,6 +713,9 @@ async function assertSettledRetentionOwnerTransferAsNonSuperuser(sql) {
     owner: (await admin.unsafe("select proowner::regrole::text owner from pg_proc where oid=to_regprocedure($1)", [signature]))[0].owner,
     membership: Array.from(await admin.unsafe("select grantor::regrole::text grantor,admin_option,inherit_option,set_option from pg_auth_members where roleid='chips_ledger_archive_pruner'::regrole and member=to_regrole('postgres') order by 1")),
     create: (await admin.unsafe("select has_schema_privilege('chips_ledger_archive_pruner','public','CREATE') allowed"))[0].allowed,
+    execute: Array.from(await admin.unsafe(`select coalesce(nullif(a.grantee, 0)::regrole::text, 'PUBLIC') grantee from pg_proc p,
+      aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid=to_regprocedure($1) and a.privilege_type='EXECUTE'
+      and coalesce(nullif(a.grantee, 0)::regrole::text, 'PUBLIC') in ('PUBLIC','anon','authenticated','service_role','postgres')`, [signature])).map((row) => row.grantee).sort(),
   });
   try {
     await admin.unsafe("alter role postgres rename to chips_settled_fixture_bootstrap"); renamed = true;
@@ -724,7 +727,11 @@ async function assertSettledRetentionOwnerTransferAsNonSuperuser(sql) {
     assert.equal((await owner.unsafe("select rolsuper from pg_roles where rolname=current_user"))[0].rolsuper, false);
     for (const [index, sqlBlock] of blocks.entries()) {
       await admin.unsafe(`alter function ${signature} owner to postgres`);
+      // Re-open the API so the block must close it with the owner's rights.
+      await admin.unsafe(`grant execute on function ${signature} to public, anon, authenticated, service_role`);
+      await admin.unsafe(`revoke execute on function ${signature} from postgres`);
       const baseline = await state();
+      assert.deepEqual(baseline.execute, ["PUBLIC", "anon", "authenticated", "service_role"]);
       assert.equal(baseline.owner, "postgres");
       assert.equal(baseline.create, false);
       const withoutDelegation = sqlBlock.split("\n").filter((line) => !line.startsWith("grant ")).join("\n");
@@ -732,8 +739,8 @@ async function assertSettledRetentionOwnerTransferAsNonSuperuser(sql) {
         `block ${index}: the ownership transfer needs the temporary delegation`);
       assert.deepEqual(await state(), baseline, `block ${index}: a failed transfer leaks nothing`);
       await owner.begin((tx) => tx.unsafe(sqlBlock));
-      assert.deepEqual(await state(), { ...baseline, owner: "chips_ledger_archive_pruner" },
-        `block ${index}: transfer succeeds and restores membership and schema CREATE`);
+      assert.deepEqual(await state(), { ...baseline, owner: "chips_ledger_archive_pruner", execute: ["postgres"] },
+        `block ${index}: transfer succeeds, closes the API and restores membership and schema CREATE`);
     }
   } finally {
     if (owner) await owner.end({ timeout: 5 });
