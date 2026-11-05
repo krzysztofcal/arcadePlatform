@@ -10,7 +10,7 @@ Add one dark-by-default retention class, `retention-12m`, to the existing ledger
 
 | Layer | Change |
 |---|---|
-| DB (Stage) | `supabase/migrations/<ts>_settled_data_retention_12m.sql`: add `chips_ledger_archive_batches.objects_expired_at timestamptz` (status and its constraints unchanged); `public.chips_settled_retention_12m_run(p_limit int)` (security definer, `service_role` only) for gifts and deletion-request minimization, returning counts; `chips_settled_retention_12m_policy` row (enabled false). Auto-applies to shared Stage on PR (intended). |
+| DB (Stage) | `supabase/migrations/<ts>_settled_data_retention_12m.sql`: add `chips_ledger_archive_batches.objects_expired_at timestamptz` (status and its constraints unchanged); `public.chips_settled_retention_12m_run(p_limit int)` (security definer, `service_role` only) for gifts and deletion-request minimization, returning counts; `chips_settled_retention_12m_policy` row (enabled false). Applied to Stage only by a separate owner `DB Stage Apply PR` dispatch. |
 | DB (Production) | `supabase/production-migrations/<ts>_settled_data_retention_12m_production_contract.sql`: same contract with the canonical Production identity guard. Applied only with a separate owner GO via the existing operator route. |
 | Ops script | `scripts/ops/chips-ledger-production-automation.mjs`: add `retention-12m` to `PRODUCTION_POLICIES` and `selectorForPolicy`; modes `diagnostic` (counts only), `canary` (exactly one confirmed `batch_id`, reusing `requireCanaryAuthorization`) and `automatic` (limit 10). New function `expireArchiveBatches({ sql, storageTarget, storageDeps, limit })` reusing `productionStorageDeps` and the request helper in `scripts/ops/chips-ledger-archive-store.mjs` (add `method: "DELETE"`, single attempt, treat 200/404 as done). |
 | Stage | Stage profile through `scripts/ops/chips-ledger-stage-automation.mjs` calling the same `expireArchiveBatches` and SQL function with the Stage identity. |
@@ -43,7 +43,7 @@ Global advisory lock (also held by prune writers) → re-check policy enabled, c
 - **III Fail-closed / environments**: canonical identity checks, dark default, Stage first, Production by separate GO, no partial status transition. PASS
 - **IV Logging/style**: `klog` in the script, counts only. No browser JS or CSS. PASS
 - **V Tests**: extend only existing fundamental suites (see tasks). No UI tests. PASS
-- **Gates**: the migration auto-applies to Stage (recorded as intended). No Production apply, Play or legal publication from merge.
+- **Gates**: opening or updating the PR does not apply SQL. The Stage migration needs a separate owner `DB Stage Apply PR` dispatch from `main` (`apply`), done after the #1159 move of the `stage-automation` secrets. No Production apply, Play or legal publication from merge.
 
 ## Risks
 

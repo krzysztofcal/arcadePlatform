@@ -8,7 +8,7 @@
 - [x] T002 Owner accepts the Stage-only cutoff override (plan "Risks") or an alternative Stage proof.
 - [x] T003 Read-only code audit (no DB, Storage, VPS or workflow access): list every reader of `chips_ledger_archive_batches` rows and of `chips-ledger-archive` objects in `scripts/ops/**`, `netlify/functions/**`, `supabase/**` (functions/views) and `.github/workflows/**`. For each one record: file:function, which batches it can reach (latest/active only or any `committed`), whether it downloads or HEADs objects, and what happens when objects are gone (fail closed, no-op, or wrong success). Result: `research.md` table plus a PASS/STOP verdict. STOP when any path can reach a batch with `objects_expired_at` set and would then fail open, retry-loop with Storage GETs (egress), or block normal retention. Fixes become T010/T021 requirements before implementation.
 
-## Phase 1 — Schema (Stage auto-apply is an intended effect)
+## Phase 1 — Schema (no SQL is applied by the PR; Stage apply is a separate owner `DB Stage Apply PR` dispatch)
 
 - [ ] T010 `supabase/migrations/<ts>_settled_data_retention_12m.sql`: add `objects_expired_at`, policy row (disabled), `public.chips_settled_retention_12m_run(p_limit int)` with the D1 and D6 branches only if approved; ACL `service_role` only.
 - [ ] T011 Extend the existing DB migration contract test for the archive tables (`objects_expired_at` column, ACL, function returns counts, limit honoured, younger/non-COMPLETED rows and an old gift on an OPEN table untouched; if D6 is approved: old finished `poker_requests` deleted, old `ACT` with `result_json is null` and younger rows kept; the shared per-run row limit holds across all branches).

@@ -62,4 +62,4 @@ Batch with NULL `last_created_at`; `pending` batch; batch of another project; re
 
 ## Breaking / operational impact
 
-Expired archives can no longer restore pruned ledger rows older than 12 months; this is the intended behaviour. No change to WS, the browser, OAuth, the CH economy or account deletion. New migrations under `supabase/migrations/**` auto-apply to shared Stage (an intended effect). The Production equivalent goes in `supabase/production-migrations/` and is never auto-applied.
+Expired archives can no longer restore pruned ledger rows older than 12 months; this is the intended behaviour. No change to WS, the browser, OAuth, the CH economy or account deletion. New migrations under `supabase/migrations/**` reach shared Stage only through a separate owner `DB Stage Apply PR` dispatch. The Production equivalent goes in `supabase/production-migrations/` and is never auto-applied.
