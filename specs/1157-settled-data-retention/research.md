@@ -97,4 +97,8 @@ A read-only Supabase MCP query against Stage `krydukthwdvccggbyjfw` returned the
 | stage-ledger-bot-only-retention-7d-v1 | 1,763 | 6 |
 | legacy_stage_allowlist_v1 | 5,161 | 25 |
 
-That is about 150 B per transaction compressed. The Stage revalidation cost is under about 1 MB/day. A Production worst case at the cap of 5000 transactions is about 0.75 MB per archive; with about 2 copies per run and about 47 runs/day this gives about 70 MB/day, or roughly 2 GB/month. The estimate is unverified, because there is no Production MCP. This cost is material but cannot explain the reported ~300 GB/month. It is not a prerequisite for #1157 and can be a separate small optimization.
+That is about 150 B per transaction compressed on these small Stage batches. The Stage revalidation cost is therefore small (under about 1 MB/day, assuming one primary plus one recovery-copy read per run).
+
+An **illustrative Production scenario, not an upper bound**: if Production batches had the same average size, a 5000-transaction batch would be about 0.75 MB; at about 2 object reads per run and about 47 runs/day that is about 70 MB/day, or about 2 GB/month. This is not a bound for three reasons. The cap limits the transaction count, not transaction or entry size. The exact number of recovery-object reads and retries per run is not confirmed from code. Production sizes were not measured. It therefore neither explains nor excludes the reported ~300 GB/month.
+
+A real bound needs the Production sizes of all objects read per run, the read and retry counts, and the run frequency. That is a separate read-only task needing owner GO (there is no Production MCP). It is not a prerequisite for #1157.

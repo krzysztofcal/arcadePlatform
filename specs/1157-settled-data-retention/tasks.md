@@ -24,6 +24,8 @@
 
 - [ ] T030 Add `retention-12m` to the policy choices in `.github/workflows/chips-ledger-production-scheduled-automation.yml` and the Stage scheduled automation workflow; extend the existing workflow guard tests.
 
+- [ ] T031 `infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh`: daily `03:39` slot for `retention-12m`; extend `ws-tests/infra-vps-workflow.guard.test.mjs` (slot selects only `retention-12m`, and other slots are unchanged). Coordinate with #1159 T004-3 before starting.
+
 ## Phase 4 — Docs and evidence
 
 - [ ] T040 `docs/chips-ledger.md` retention section; Privacy/Data safety evidence list (D1–D7 wording, provider windows).
@@ -32,4 +34,4 @@
 ## Phase 5 — Rollout (each step a separate owner GO)
 
 - [ ] T050 Stage: diagnostic, then one capped automatic run; verify objects absent by HEAD/not-found only.
-- [ ] T051 Production: apply the production-migration equivalent, diagnostic, one canary of 1 batch, then enable the policy on the existing dispatcher.
+- [ ] T051 Production: apply the production-migration equivalent, diagnostic, one canary of 1 batch, then enable the policy. Install the T031 dispatcher as a separate owner root GO, following `infra/vps/README.md`.
