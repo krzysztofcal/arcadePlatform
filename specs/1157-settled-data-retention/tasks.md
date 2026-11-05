@@ -22,7 +22,7 @@
 
 ## Phase 3 — Workflows (owner push)
 
-- [ ] T030 Add `retention-12m` to the policy choices in `.github/workflows/chips-ledger-production-scheduled-automation.yml` and the Stage scheduled automation workflow; extend the existing workflow guard tests.
+- [x] T030 Add `retention-12m` to the policy choices in `.github/workflows/chips-ledger-production-scheduled-automation.yml` (modes `diagnostic`, `canary`, `automatic`; no cutoff). Stage gets its own owner-dispatch workflow `.github/workflows/chips-ledger-stage-settled-retention.yml` in the `chips-ledger-stage-automation` concurrency group: the Stage automation workflow already has 10 dispatch inputs, and a separate job keeps its `stage-archive` condition unchanged. Guard tests extended in `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs`.
 
 - [ ] T031 `infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh`: daily `03:39` slot for `retention-12m`; extend `ws-tests/infra-vps-workflow.guard.test.mjs` (slot selects only `retention-12m`, and other slots are unchanged). Install through root on demand: T032.
 - [ ] T032 Separate reviewed PR: VPS Admin operation `ledger-production-dispatcher-install` (see plan). Available after the one-time helper reinstall (`infra/vps/stage-vps-admin.sh`) and the release-agent App activation; it is reusable for later dispatcher changes.
