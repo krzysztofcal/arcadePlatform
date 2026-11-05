@@ -34,7 +34,7 @@
 
 ## Phase 5 — Rollout (each step a separate owner GO)
 
-- [x] T050 Stage: diagnostic, then one capped automatic run; verify objects absent by HEAD/not-found only. Done 2026-11-05; every step was an owner dispatch or owner SQL with a separate GO.
+- [ ] T050 Stage: diagnostic, then one capped automatic run; verify objects absent by HEAD/not-found only. Diagnostic, canary and the capped automatic run are done (2026-11-05); every step was an owner dispatch or owner SQL with a separate GO. **Open:** the HEAD/not-found check of the three batch-6 objects (see below).
   - **Apply source.** The Stage history held three profile migrations from the open Draft PRs #1155/#1160 that `main` lacks, and the unchanged executor fails closed on them (`unknown_remote_migration`). Owner decision: apply from the Draft PR #1201, which carries byte-identical copies of only those three files, verified against the Stage history SHA-256 values. The approval listed only `20261105160000`. #1201 is closed without merge once this record is accepted, and the copies never reach `main`.
   - **Apply 1** (run `42110915806`): `stage_sql_failed`, rolled back. Inspect `42111502460` showed Stage unchanged. Cause: the pruner ownership transfer needs a temporary delegation for the non-superuser Supabase `postgres`. Fixed in #1202, which also ran the function ACL before the delegation ends and applies the same fix to the Production contract; a non-superuser regression test was added.
   - **Apply 2** (run `42116230654`, source `ab5430c4`, migration SHA-256 `f63cd59a…45f0`): `COMMITTED_OR_VERIFIED_NOOP`, history 121 → 122 rows (`329ed7b7…fc8b`, the expected fingerprint). Inspect `42116598479`: nothing pending.
@@ -44,7 +44,8 @@
   - **Canary.**
     - Canary 1 (run `42117647674`) failed before any DELETE: the Stage Storage target lacked the DB URL. Fixed in #1203.
     - Canary 2 (run `42119577000`, batch `6`, cutoff `2026-11-01`): 3 objects deleted, 2 registry rows deleted, `objects_expired_at` set.
-    - Not-found check through a read-only `storage.objects` metadata query: batch 6 has 0 of 3 objects, while batch 7 (control) still has 3 of 3.
+    - Supporting check only, not the required HEAD/not-found: a read-only `storage.objects` metadata query shows 0 of 3 objects for batch 6, while batch 7 (control) still has 3 of 3. Together with the canary's DELETE result (`objectsDeleted: 3`) this is consistent with the deletion, but it does not replace the HEAD/not-found responses.
+    - **Pending:** a HEAD request for each of the three batch-6 object paths, expecting not-found. It needs the Stage service-role key, which the agent does not hold, so the owner runs it or decides otherwise.
   - **Capped automatic run** (one-off). The owner enabled the control by SQL at 22:53 UTC. Run `42125480846` (`automatic`, default cutoff, no override) returned `complete`, `expired: []`, tables 0/0/0. The control was disabled again at 22:58 UTC.
     - Read-only check afterwards: control OFF (`activated_at` null), still 1 expired batch, 0 eligible, oldest data unchanged.
   - **Follow-up (separate task).** Reconcile the `main` migration catalog with the Stage history permanently, by merging #1155/#1160 or by an owner decision. Until then every Stage apply from `main` hits the same block.
