@@ -28,6 +28,7 @@ permissions:
 
 jobs:
   apply-stage:
+    environment: stage-automation
     # Only OWNER may dispatch/rerun apply; the phrase pins the approved scope.
     # Both original dispatch and any rerun must be OWNER-authenticated.
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.operation == 'inspect' || (inputs.operation == 'apply' && github.actor == 'krzysztofcal' && github.triggering_actor == 'krzysztofcal')) }}

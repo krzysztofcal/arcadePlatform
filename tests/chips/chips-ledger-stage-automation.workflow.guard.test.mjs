@@ -713,3 +713,17 @@ for (const mode of RETAINED_MODES) {
 assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "external-existing-30d" }), true, "VPS daily dispatch");
 assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "missing-table-bot-retirement-canary", enabled: "0" }), true, "owner canary without automation");
 assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "external-scheduled-automatic", enabled: "0" }), false, "automation switch still applies");
+
+const STAGE_ENVIRONMENT_JOBS = [
+  ["chips-ledger-stage-legacy-allowlist.yml", "prepare"],
+  ["chips-ledger-stage-legacy-allowlist-freeze.yml", "freeze"],
+  ["chips-ledger-stage-timeout-diagnostic.yml", "stage-timeout-diagnostic"],
+  ["chips-ledger-stage-scheduled-automation.yml", "stage-archive"],
+  ["stage-bonus-campaigns.yml", "stage-operator"],
+  ["stage-supabase-resource-health.yml", "monitor"],
+  ["db-stage-apply-pr.yml", "apply-stage"],
+];
+for (const [file, job] of STAGE_ENVIRONMENT_JOBS) {
+  const stageWorkflow = YAML.parse(fs.readFileSync(`.github/workflows/${file}`, "utf8"));
+  assert.equal(stageWorkflow.jobs?.[job]?.environment, "stage-automation", `${file}: ${job} must use stage-automation`);
+}

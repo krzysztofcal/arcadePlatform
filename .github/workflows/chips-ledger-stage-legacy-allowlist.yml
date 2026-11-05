@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   prepare:
+    environment: stage-automation
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
