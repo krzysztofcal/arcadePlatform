@@ -85,3 +85,16 @@ The owner accepted all recommendations in spec.md:
 - **R-A2 and R-B** (T003) are plan requirements.
 
 Pending before implementation: measuring the existing latest-batch revalidation egress (research T003 side finding).
+
+### Side-finding measurement (Stage, 2026-11-05)
+
+A read-only Supabase MCP query against Stage `krydukthwdvccggbyjfw` returned the latest pruned batch per policy as aggregates only:
+
+| Policy | compressed_bytes | transactions |
+|---|---|---|
+| stage-ledger-auto-retention-30d-v1 | 26,855 | 180 |
+| stage-ledger-closed-human-table-retention-30d-v1 | 2,216 | 10 |
+| stage-ledger-bot-only-retention-7d-v1 | 1,763 | 6 |
+| legacy_stage_allowlist_v1 | 5,161 | 25 |
+
+That is about 150 B per transaction compressed. The Stage revalidation cost is under about 1 MB/day. A Production worst case at the cap of 5000 transactions is about 0.75 MB per archive; with about 2 copies per run and about 47 runs/day this gives about 70 MB/day, or roughly 2 GB/month. The estimate is unverified, because there is no Production MCP. This cost is material but cannot explain the reported ~300 GB/month. It is not a prerequisite for #1157 and can be a separate small optimization.
