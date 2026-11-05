@@ -176,12 +176,20 @@ class Isolation:
             else:
                 raise secure.Refused('group_already_exists')
 
+    def safe_stop_receipt(self, run_id=None):
+        mode = 'verify-receipt' if run_id is None else 'consume-receipt'
+        result = self.run(['/usr/bin/node', '/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs',
+                           mode, '1' if run_id is None else str(run_id)], expected=(0, 1))
+        require(result == ('SAFE_STOP_OK verified' if run_id is None else 'SAFE_STOP_OK consumed'),
+                'fresh_safe_stop_receipt_required')
+
     def preflight(self):
         self.stopped()
+        self.safe_stop_receipt()
         key = public_key(self.files.read(self.key, 0o644))
         self.files.parents(self.base / '.env.preview')
         env = secure.parse_env(self.files.read(self.base / '.env.preview', 0o600))
-        env_files = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'EnvironmentFiles', '--value'])
+        env_files = ' '.join(self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'EnvironmentFiles', '--value']).splitlines())
         records = re.findall(r'(/[^ ]+) \(ignore_errors=(no|yes)\)', env_files)
         require(' '.join(re.findall(r'/[^ ]+ \(ignore_errors=(?:no|yes)\)', env_files)) == env_files, 'unexpected_environment_files')
         paths = [path for path, _ in records]
@@ -294,6 +302,7 @@ class Isolation:
 
     def provision(self, run_id):
         key = self.preflight()  # no mutation before all prerequisites, including a dedicated OWNER public key
+        self.safe_stop_receipt(run_id)  # one-use proof, rechecked immediately before the first mutation
         self.backup.mkdir(mode=0o700)
         self.files.sync_dir(self.backup.parent)
         state = {'version': 1, 'phase': 'preparing', 'run': run_id, 'original': {}, 'installed': {},

@@ -480,6 +480,7 @@ class PreviewIsolation(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
+        self.receipt_ready = True
         outer = self
 
         class Fixture(isolation.Isolation):
@@ -491,6 +492,13 @@ class PreviewIsolation(unittest.TestCase):
 
             def run(self, argv, expected=(0,)):
                 outer.calls.append(argv)
+                if argv[0:2] == ['/usr/bin/node', '/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs']:
+                    if not outer.receipt_ready:
+                        return 'SAFE_STOP_BLOCKED inspect_read_only_no_retry'
+                    if argv[2] == 'consume-receipt':
+                        outer.receipt_ready = False
+                        return 'SAFE_STOP_OK consumed'
+                    return 'SAFE_STOP_OK verified'
                 if 'ActiveState' in argv:
                     return 'ActiveState=' + outer.active + '\nMainPID=' + ('0' if outer.active == 'inactive' else '123') + '\nLoadState=loaded'
                 if 'SupplementaryGroups' in argv:
@@ -566,6 +574,14 @@ class PreviewIsolation(unittest.TestCase):
         key = isolation.public_key(self.task.key.read_bytes())
         self.assertIn(b'command="cd /var/lib/arcade-preview-deploy/staging', key)
         self.assertIn(b'\\"$SSH_ORIGINAL_COMMAND\\"', key)
+
+    def test_inactive_without_safe_stop_receipt_cannot_provision(self):
+        self.receipt_ready = False
+        for action in (self.task.preflight, lambda: self.task.provision('123')):
+            with self.assertRaisesRegex(isolation.secure.Refused, 'fresh_safe_stop_receipt_required'):
+                action()
+            self.assertFalse(self.task.backup.exists())
+        self.assertFalse(any('useradd' in command[0] for command in self.calls))
 
     def test_public_key_and_active_service_block_before_mutation(self):
         self.task.key.write_bytes(b'')
