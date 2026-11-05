@@ -36,6 +36,9 @@ Use a dedicated Preview deployment group. Neither identity joins `arcade-deploy`
 `arcade-admin`, `adm`, `systemd-journal` or `wslogs`, or any other group giving Production authority.
 The runtime cannot modify deployed executable code. The SSH identity cannot modify the systemd unit,
 sudoers, root-owned helpers, `.env.preview`, or its server-side SSH authorization policy.
+The runtime is not a member of the Preview deployment group: it reads code through other-read/search
+permissions only. Verify the existing artifact's modes grant that access without granting write access
+to any of the five installed sync roots or their executable contents; do not add it to the writable group.
 
 The deployer's complete sudo allowlist is:
 
@@ -57,7 +60,8 @@ groups, paths or metadata, and specify safe handling of existing files before an
 Use a new key generated on OWNER's Termux. Only its public part/fingerprint enters server setup.
 Private material remains on OWNER's device and is uploaded directly to GitHub by OWNER; never place
 it in a PR, agent session, command argument or artifact. Root controls the authorized key policy;
-disable forwarding, agent forwarding, PTY and user SSH startup hooks while retaining compatibility
+pin the public key/fingerprint in the reviewed provisioning change, not a free-form catalog input.
+Disable forwarding, agent forwarding, PTY and user SSH startup hooks while retaining compatibility
 with the existing SCP and noninteractive SSH actions. Verify the effective SSH policy before use.
 
 Alternatives rejected: reusing the broad `copilot` key preserves its existing authority; adding a new
@@ -69,7 +73,8 @@ the shared runtime identity. A new deployment service or generic root command in
 1. Prepare the account/runtime isolation implementation for review. Reuse the existing
    [VPS Admin Operation](../../docs/vps-admin-operations.md) approval and fixed catalog. The current
    catalog has no Preview account provisioning operation: adding a narrowly bounded operation and
-   installing that reviewed helper requires a separately approved administrative activation path.
+   installing that reviewed helper requires a separately approved administrative activation path
+   (the owner-controlled reinstall from merged `main` documented in the admin runbook).
    Do not claim the existing workflow can install its own new operation. Do not use manual SSH,
    root/sudo, the full fresh-host bootstrap or release-agent activation as an alternative.
 2. Review the complete implementation with Claude Code (at most three rounds, zero P0/P1/P2 for
@@ -81,6 +86,8 @@ the shared runtime identity. A new deployment service or generic root command in
    Runtime-user activation requires a Preview restart and may interrupt connections; do not restart
    Production. On failure report STOP and recover only by the reviewed, separately approved path;
    never silently fall back to the broad `copilot` credential.
+   Freeze old-credential dispatches/reruns throughout provisioning and acceptance. Separate the runtime
+   identity before enabling the new deployer's write/login authority; verify preflight compatibility.
 4. After authorized provisioning, independently verify both identities' effective SSH, filesystem,
    process and sudo boundaries. Confirm Stage configuration without printing values. Keep the old
    workflow credential intact until replacement acceptance; do not remove or change OWNER's key.
