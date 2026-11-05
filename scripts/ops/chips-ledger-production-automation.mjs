@@ -88,7 +88,9 @@ const PRODUCTION_OWN_BATCHES_SQL = `select object_path, source_policy_id, status
     account_retirement_at::text as account_retirement_at,
     account_retirement_account_count, account_retirement_account_ids_sha256,
     account_retirement_recovery_object_path, account_retirement_recovery_object_sha256,
-    account_retirement_snapshot_sha256
+    account_retirement_snapshot_sha256,
+    -- #1157; read through jsonb so this works before the column exists.
+    to_jsonb(chips_ledger_archive_batches.*) ->> 'objects_expired_at' as objects_expired_at
   from public.chips_ledger_archive_batches
   where project_ref = $1 and source_policy_id = $2
   order by created_at desc, batch_id desc;`;
@@ -128,6 +130,7 @@ const PRODUCTION_ESCROW_CANDIDATE_SQL = `select batches.*,
     and batches.pruned_at is not null
     and batches.registry_cleaned_at is not null
     and batches.account_retirement_at is null
+    and to_jsonb(batches.*) ->> 'objects_expired_at' is null
     and batches.bot_only_table_id is not null
     and batches.bot_only_table_count = 1
     and not exists (select 1 from public.poker_tables tables where tables.id = batches.bot_only_table_id)
@@ -1080,13 +1083,15 @@ async function runProductionArchiveCycle({
     }
     if (mode === "prepare" && batchId != null) fail("exact active Production batch ID is not available for PREPARE");
     let completedLifecycle = null;
-    if (cycle.latestCompleted && policy === "closed-human-30d") {
-      completedLifecycle = await finalize(cycle.latestCompleted, { allowComplete: mode === "automatic" });
+    // #1157: an expired batch is terminal and its objects are gone; never re-download it.
+    const latestCompleted = cycle.latestCompleted?.objects_expired_at ? null : cycle.latestCompleted;
+    if (latestCompleted && policy === "closed-human-30d") {
+      completedLifecycle = await finalize(latestCompleted, { allowComplete: mode === "automatic" });
       if (completedLifecycle.state === "completed") return { ...completedLifecycle, mode, policy, policyId: sourcePolicyId, resumed: true };
     }
-    if (cycle.latestCompleted && policy !== "closed-human-30d") {
+    if (latestCompleted && policy !== "closed-human-30d") {
       const completed = await (deps.pruneArchive || pruneArchive)({
-        argv: ["--target", "prod", "--object-path", cycle.latestCompleted.object_path, "--confirm-sha", cycle.latestCompleted.compressed_sha256],
+        argv: ["--target", "prod", "--object-path", latestCompleted.object_path, "--confirm-sha", latestCompleted.compressed_sha256],
         env: moduleEnv,
         cwd: tempRoot,
         deps: { ...storageDeps, sql, pruneStore, storageTarget, targetOptions: productionTargetOptions(), verifyBucket, emit: false },
@@ -1095,7 +1100,7 @@ async function runProductionArchiveCycle({
       if (completed.state !== expectedTerminal) {
         fail(`completed Production cycle did not revalidate as terminal: ${completed.state}`);
       }
-      const terminalRow = await pruneStore.getManifest(cycle.latestCompleted.object_path);
+      const terminalRow = await pruneStore.getManifest(latestCompleted.object_path);
       const durable = await (deps.inspectDurableRecovery || inspectDurableRecovery)(storageTarget, terminalRow, profile, completed.evidence, storageDeps);
       assertResumeRecoveryState(terminalRow, durable, profile);
     }
