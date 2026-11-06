@@ -16,6 +16,7 @@ on:
           - ledger-dispatchers-resume
           - systemd-daemon-reload
           - copilot-secret-snapshots-quarantine
+          - ledger-production-dispatcher-install
       reason:
         description: One line, 10-200 letters, digits, spaces or .,:;()/+=_- (shown to the approver before approval)
         required: true
