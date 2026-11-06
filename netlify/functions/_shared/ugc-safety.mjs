@@ -1,5 +1,5 @@
 import { accountDeletionEnabled, assertAccountActive } from "../../../shared/account-deletion.mjs";
-import { beginSql, executeSql } from "./supabase-admin.mjs";
+import { beginSql } from "./supabase-admin.mjs";
 
 // #1140 UGC phase B: user reports and private blocks. A report names a target by profile handle (profile page) or
 // by user id (poker table, where seats already carry it), with a fixed reason code and no free text. A block is the
@@ -92,13 +92,15 @@ function blockedUser(row) {
 
 export async function listBlocks(blockerId, deps = {}) {
   const blocker = requireUser(blockerId);
-  const rows = await (deps.executeSql || executeSql)(
-    `select b.blocked_user_id::text as user_id, p.handle, p.display_name
-     from private.user_blocks b left join public.user_profiles p on p.user_id = b.blocked_user_id
-     where b.blocker_user_id = $1 order by b.created_at desc, b.blocked_user_id limit ${MAX_BLOCKS};`,
-    [blocker],
-  );
-  return rows.map(blockedUser);
+  return inTransaction(deps, blocker, async (tx) => {
+    const rows = await tx.unsafe(
+      `select b.blocked_user_id::text as user_id, p.handle, p.display_name
+       from private.user_blocks b left join public.user_profiles p on p.user_id = b.blocked_user_id
+       where b.blocker_user_id = $1 order by b.created_at desc, b.blocked_user_id limit ${MAX_BLOCKS};`,
+      [blocker],
+    );
+    return rows.map(blockedUser);
+  });
 }
 
 export async function blockUser(blockerId, input = {}, deps = {}) {
@@ -121,13 +123,14 @@ export async function blockUser(blockerId, input = {}, deps = {}) {
   });
 }
 
-// Unblocking only removes the caller's own row, so it is allowed in every account state.
 export async function unblockUser(blockerId, targetUserId, deps = {}) {
   const blocker = requireUser(blockerId);
   const { userId } = parseTarget({ targetUserId });
-  const removed = await (deps.executeSql || executeSql)(
-    "delete from private.user_blocks where blocker_user_id = $1 and blocked_user_id = $2 returning blocked_user_id;",
-    [blocker, userId],
-  );
-  return { status: removed.length ? "unblocked" : "not_blocked" };
+  return inTransaction(deps, blocker, async (tx) => {
+    const removed = await tx.unsafe(
+      "delete from private.user_blocks where blocker_user_id = $1 and blocked_user_id = $2 returning blocked_user_id;",
+      [blocker, userId],
+    );
+    return { status: removed.length ? "unblocked" : "not_blocked" };
+  });
 }
