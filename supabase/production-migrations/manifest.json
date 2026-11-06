@@ -1246,6 +1246,13 @@
       "sha256": "f63cd59acc8dca34fd84588194ad6c1ca958fe1d87c13c544888973c5d8845f0",
       "category": "needs-production-equivalent",
       "purpose": "#1157 dark 12-month settled retention contract (archive objects expiry marker, guarded expiry and small-table functions); Stage apply needs a separate owner DB Stage Apply PR dispatch; no activation"
+    },
+    {
+      "file": "20261107120000_ugc_reports_blocks.sql",
+      "version": "20261107120000",
+      "sha256": "cc949864ffd5aceb02891c1674310765bfce406c7feb2439a6af4b93c9acb499",
+      "category": "needs-production-equivalent",
+      "purpose": "#1140 UGC phase B dark private report and block tables (no flag activation, empty tables); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
     }
   ]
 }
