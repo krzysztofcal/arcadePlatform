@@ -45,9 +45,13 @@ export function checkRequest({ releaseSha, confirmation, githubSha, headSha, mai
 }
 
 // The run being approved is in progress by definition, so it is left out; any other unfinished run gives no evidence.
-export function lastConfirmedDeploy(runs, currentRunId) {
-  if (!Array.isArray(runs)) return null;
-  return latestWsDeploy(runs.filter((run) => String(run.id) !== String(currentRunId)));
+// unfinished: every unfinished dispatch run on main, queried by status, so a run beyond the recent page still counts.
+export const UNFINISHED = Object.freeze(['requested', 'queued', 'pending', 'waiting', 'in_progress']);
+export function lastConfirmedDeploy(runs, currentRunId, unfinished) {
+  if (!Array.isArray(runs) || !Array.isArray(unfinished)) return null;
+  const other = (run) => String(run.id) !== String(currentRunId);
+  if (unfinished.some(other)) return null;
+  return latestWsDeploy(runs.filter(other));
 }
 
 // Commit subjects and paths are shown only inside code spans, so no Markdown (links, images, emphasis) renders;
@@ -135,9 +139,12 @@ async function main(env) {
   let scope = null;
   let scopeError = false;
   try {
-    const { workflow_runs: runs } = await api(`actions/workflows/ws-server-deploy.yml/runs?branch=main&event=workflow_dispatch&per_page=50`);
+    const route = 'actions/workflows/ws-server-deploy.yml/runs?branch=main&event=workflow_dispatch';
+    const unfinished = [];
+    for (const status of UNFINISHED) unfinished.push(...(await api(`${route}&status=${status}&per_page=100`)).workflow_runs);
+    const { workflow_runs: runs } = await api(`${route}&per_page=50`);
     for (const run of runs) run.jobs = (await api(`actions/runs/${run.id}/jobs?filter=all&per_page=100`)).jobs;
-    last = lastConfirmedDeploy(runs, env.GITHUB_RUN_ID);
+    last = lastConfirmedDeploy(runs, env.GITHUB_RUN_ID, unfinished);
   } catch {
     last = null;
   }

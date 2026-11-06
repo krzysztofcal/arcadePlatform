@@ -352,10 +352,12 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
   const current = { id: 30, head_sha: target, status: 'in_progress', jobs: [job(null, null, 'waiting')] };
   const done = { id: 20, head_sha: ws, status: 'completed', jobs: [job('success', '2026-11-05T10:00:00Z')] };
   const older = { id: 10, head_sha: sha, status: 'completed', jobs: [job('success', '2026-11-01T10:00:00Z')] };
-  assert.deepEqual(lastConfirmedDeploy([current, done, older], 30), { sha: ws, runId: 20 }, 'the run being approved is left out');
-  assert.equal(lastConfirmedDeploy([current, done, older], 99), null, 'another unfinished run gives no evidence');
-  assert.equal(lastConfirmedDeploy([{ ...done, jobs: [job('failure', '2026-11-05T10:00:00Z')] }, older], 30), null, 'a failed newest deploy is not a confirmed release');
-  assert.equal(lastConfirmedDeploy(null, 30), null);
+  assert.deepEqual(lastConfirmedDeploy([current, done, older], 30, [current]), { sha: ws, runId: 20 }, 'the run being approved is left out');
+  assert.equal(lastConfirmedDeploy([current, done, older], 99, [current]), null, 'another unfinished run gives no evidence');
+  assert.equal(lastConfirmedDeploy([current, done, older], 30, [current, { id: 5, status: 'waiting' }]), null, 'an unfinished run beyond the recent page counts');
+  assert.equal(lastConfirmedDeploy([{ ...done, jobs: [job('failure', '2026-11-05T10:00:00Z')] }, older], 30, []), null, 'a failed newest deploy is not a confirmed release');
+  assert.equal(lastConfirmedDeploy(null, 30, []), null);
+  assert.equal(lastConfirmedDeploy([done], 30, null), null, 'unknown unfinished runs give no evidence');
 
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-approval-'));
   const git = (args) => spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
