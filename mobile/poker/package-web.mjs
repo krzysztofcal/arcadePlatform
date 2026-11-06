@@ -87,6 +87,8 @@ for (const name of pages) {
   if (name === 'poker/index.html') {
     html = html.replace('<head>', '<head>' + launchStyle + launch.match(/<script src="\/mobile\/poker\/launch\.js"[^>]*><\/script>/)[0]);
     html = html.replace('<body class="poker-lobby">', '<body class="poker-lobby">' + launchBody);
+    // sidebar.js owns the one shared APK navigation on Lobby and Account.
+    html = html.replace(/<nav class="shortcuts"[\s\S]*?<\/nav>/, '');
   }
   // Only the table draws behind cutouts; other pages retain native viewport margins.
   if (name !== 'poker/table-v2.html') html = html.replace('viewport-fit=cover', 'viewport-fit=auto');

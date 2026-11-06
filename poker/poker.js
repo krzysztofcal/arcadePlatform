@@ -1736,13 +1736,39 @@
     }); });
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
+      if (button.dataset.panel === 'daily') { openDailyBonus(); return; }
       if (dialog && !dialog.open) dialog.showModal();
-      if (button.dataset.panel === 'daily') claimDailyBonus();
     }); });
     document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){ button.closest('dialog').close(); }); });
     document.querySelectorAll('[data-view]').forEach(function(button){ button.addEventListener('click', function(){
       showLobbyView(button.dataset.view);
     }); });
+    var mobileLinkPending = true;
+    var mobileAuthReady = false;
+    function setMobileLobbyView(view){
+      if (!window.MOBILE_POKER_CONFIG) return;
+      if (view === 'modes' && dailyDialog && dailyDialog.open) view = 'bonus';
+      if (document.body.dataset.mobileLobbyView === view) return;
+      document.body.dataset.mobileLobbyView = view;
+      document.dispatchEvent(new CustomEvent('poker:lobby-view', {detail:{view:view}}));
+    }
+    function openDailyBonus(){
+      if (!dailyDialog) return;
+      if (window.MOBILE_POKER_CONFIG) showLobbyView('modes', false);
+      if (!dailyDialog.open) dailyDialog.showModal();
+      setMobileLobbyView('bonus');
+      refreshDailyBonus().catch(function(){ dailyLoadError = true; renderDailyBonus(); });
+    }
+    function applyMobileLobbyLink(){
+      if (!window.MOBILE_POKER_CONFIG || !mobileAuthReady || !mobileLinkPending) return;
+      mobileLinkPending = false;
+      var view = (window.location.hash || '').slice(1);
+      if (view === 'bonus') { openDailyBonus(); return; }
+      if (dailyDialog && dailyDialog.open) dailyDialog.close();
+      showLobbyView(['modes','tables','progression'].indexOf(view) !== -1 ? view : 'modes');
+    }
+    if (window.MOBILE_POKER_CONFIG) window.addEventListener('hashchange', function(){ mobileLinkPending = true; applyMobileLobbyLink(); }); // xp-lifecycle-allow:poker-mobile-nav(2027-01-01)
+    if (dailyDialog) dailyDialog.addEventListener('close', function(){ if (document.body.dataset.mobileLobbyView === 'bonus') setMobileLobbyView('modes'); });
     function showLobbyView(view, focusTarget){
       if (view !== 'modes' && !lobbyAuthenticated){
         view = 'modes';
@@ -1752,6 +1778,7 @@
         var node = document.getElementById('poker' + name.charAt(0).toUpperCase() + name.slice(1) + 'View');
         if (node) node.hidden = name !== view;
       });
+      setMobileLobbyView(view);
       var target = document.getElementById(view === 'modes' ? 'pokerQuickSeat' : view === 'tables' ? 'pokerTablesTitle' : 'pokerProgressTitle');
       if (view === 'modes' && !lobbyAuthenticated) target = guestPlayBtn;
       if (target && focusTarget !== false){
@@ -2375,6 +2402,7 @@
         if (singleLobbyContent) singleLobbyContent.hidden = true;
         if (tableList) tableList.innerHTML = '';
         startAuthWatch();
+        mobileAuthReady = true; applyMobileLobbyLink();
         return false;
       }
       // JWT subject is UI identity only; all authorization remains server-side.
@@ -2390,6 +2418,7 @@
       refreshWelcomeBonusBanner();
       refreshProgression();
       if (dailyDialog && dailyDialog.open) refreshDailyBonus();
+      mobileAuthReady = true; applyMobileLobbyLink();
       return true;
     }
 
