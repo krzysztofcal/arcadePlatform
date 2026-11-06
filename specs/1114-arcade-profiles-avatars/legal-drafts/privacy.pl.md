@@ -50,6 +50,8 @@ Pliki cookie i dane zapisane na urządzeniu służą utrzymaniu sesji, ustawień
 
 ## Twoje prawa i usunięcie konta
 
+Jeżeli sprzeciw dotyczący widoczności profilu zostanie uwzględniony, operator może zablokować udostępnianie profilu innym zalogowanym użytkownikom bez usuwania konta. Nie jest to przełącznik w ustawieniach użytkownika. Blokada profilu nie usuwa tożsamości potrzebnej uczestnikom trwającej gry; zakres żądania dotyczącego rankingu rozpatrujemy oddzielnie.
+
 Możesz żądać dostępu, sprostowania, usunięcia i ograniczenia przetwarzania, a gdy ma zastosowanie — przeniesienia danych. Możesz wnieść sprzeciw wobec przetwarzania opartego na prawnie uzasadnionym interesie, także dotyczącego publicznego profilu, przez contact@kcswh.pl. Wyłączenie widoczności w rankingu jest odrębnym ustawieniem i nie zastępuje prawa do sprzeciwu. Wniosek może dotyczyć również zapisów pozostałych po usunięciu konta. Przy jego rozpatrywaniu trzeba ustalić, jakie dane są nadal potrzebne, do jakiego konkretnego celu i na jakiej podstawie. Ewentualna odmowa usunięcia wymaga uzasadnienia. Nie każdy wniosek oznacza usunięcie całej historii rozliczeń lub wszystkich plików. Rozpatrujemy także wnioski dotyczące danych osób niepełnoletnich.
 
 Usunięcie konta zgłosisz w Koncie, gdy funkcja jest dostępna, albo przez e-mail. Proces usuwa profil i tożsamość logowania po bezpiecznej obsłudze udziału w grze i wirtualnego salda. Nie obiecujemy natychmiastowego usunięcia wszystkich logów, kopii i zapisów integralności. Akceptacja nowej wersji regulaminu nie jest warunkiem złożenia wniosku ani uzyskania pomocy.
