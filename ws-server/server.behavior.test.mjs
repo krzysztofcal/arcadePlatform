@@ -1395,7 +1395,7 @@ test("internal poker maintenance route is token-protected and does not expose a 
     const authorized = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     assert.equal(authorized.status, 503);
     const newHandsHold = {
-      configured: true, active: true, drain: false, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
+      configured: true, active: true, drain: false, loadedHandsInProgress: 0, humanMemberTables: 0, connectedHumanTables: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
       supervisorSweepInProgress: false, dbHandsInProgress: null, dbVersionMismatches: null, dbFinancialIssues: null, restartSafe: false
     };
     assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable", newHandsHold });
@@ -1409,6 +1409,24 @@ test("internal poker maintenance route is token-protected and does not expose a 
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
+  }
+});
+
+test("Production maintenance status retains its existing contract without Preview human counters", async () => {
+  const token = "production-status-fixture-token";
+  const { port, child } = await createServer({ env: {
+    POKER_WS_INTERNAL_TOKEN: token, WS_DEPLOY_ENVIRONMENT: "production", SUPABASE_DB_URL: "", WS_POKER_LOG_LEVEL: "INFO"
+  } });
+  try {
+    await waitForListening(child, 5000);
+    const response = await fetch(`http://127.0.0.1:${port}/internal/admin/poker-maintenance`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const { newHandsHold } = await response.json();
+    assert.equal(Object.hasOwn(newHandsHold, "humanMemberTables"), false);
+    assert.equal(Object.hasOwn(newHandsHold, "connectedHumanTables"), false);
+  } finally {
+    child.kill("SIGTERM"); await waitForExit(child);
   }
 });
 

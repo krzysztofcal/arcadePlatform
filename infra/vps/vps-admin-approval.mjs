@@ -62,6 +62,38 @@ export const APPROVAL = Object.freeze({
     sideEffects: "The result and the journal record the commit and the new and previous SHA-256 of the script.",
     rollback: "Merge the previous script to main through a reviewed PR and request this operation again, then ledger-dispatchers-resume.",
   },
+  "ws-preview-safe-stop": {
+    title: "Stop WS Preview only after fresh safety proofs",
+    readOnly: false,
+    changes: "Requires protected DRAIN, Stage identity, fresh runtime and database proofs, no active or reconnectable human seats, no financial work and no open bot tables before stopping WS Preview. Successful stop, end audit and finalization issue a one-use safe-stop receipt valid for 15 minutes.",
+    risk: "WS Preview becomes unavailable. Refusal before stop is BLOCKED; an attempted stop with uncertain outcome is FAILED and requires read-only inspection, not an automatic retry. Production WS is not stopped.",
+    sideEffects: "Stops the Preview service and records audit entries and the protected receipt. Does not restart WS, remove DRAIN or deploy code.",
+    rollback: "No automatic restart or retry. Inspect the result and obtain separate OWNER approval for recovery or a later Preview start.",
+  },
+  "ws-preview-isolation-preflight": {
+    title: "Validate Preview isolation prerequisites while WS stays stopped",
+    readOnly: false,
+    changes: "Verifies the stopped Preview service, fresh safe-stop receipt, Stage configuration, trusted paths, dedicated public key and isolation prerequisites. Creates and removes temporary policy-validation files; does not provision accounts or consume the receipt.",
+    risk: "WS Preview must already be stopped and remains unavailable. This is not strictly read-only because policy validation writes temporary files. No Production configuration changes.",
+    sideEffects: "Temporary validation files and operation journal entries. No service start, restart or isolation switch.",
+    rollback: "No persistent isolation change to undo. A refusal requires inspection before any separate provision request.",
+  },
+  "ws-preview-isolation-provision": {
+    title: "Provision the reviewed Preview deploy and runtime isolation",
+    readOnly: false,
+    changes: "Rechecks prerequisites and consumes the one-use safe-stop receipt, creates the dedicated identities, copies and switches trusted Preview trees, installs the fixed dedicated key and isolation policies, and runs daemon-reload. Requires WS Preview stopped throughout.",
+    risk: "Changes Preview ownership, files, SSH and sudo policy and the service identity. WS remains stopped; partial failure requires inspection of the protected backup manifest. daemon-reload re-reads all changed VPS unit files, not only Preview.",
+    sideEffects: "Protected backup and journal entries; dedicated accounts and authorization are installed. No automatic WS start or restart, Production deployment or DRAIN removal.",
+    rollback: "Separate ws-preview-isolation-rollback request with OWNER approval, while Preview is stopped and protected backup checks pass. No automatic retry or restart.",
+  },
+  "ws-preview-isolation-rollback": {
+    title: "Restore the protected pre-isolation Preview files while WS stays stopped",
+    readOnly: false,
+    changes: "Checks the protected backup manifest and installed identities, revokes the dedicated key, restores the saved Preview trees, removes isolation policies and runs daemon-reload. Requires Preview stopped and no dedicated-user processes.",
+    risk: "Restores the previous shared Preview identity and files. Unexpected or changed paths block recovery for inspection. daemon-reload re-reads all changed VPS unit files. WS remains unavailable.",
+    sideEffects: "Updates the protected backup manifest and journal; dedicated accounts remain inert. No automatic WS start, restart or DRAIN removal.",
+    rollback: "No automatic undo or retry. Inspect the protected recovery state and obtain a separate reviewed recovery decision from OWNER.",
+  },
 });
 
 const SHA = /^[0-9a-f]{40}$/;
