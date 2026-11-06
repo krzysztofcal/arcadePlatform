@@ -12,7 +12,7 @@ Przetwarzamy adres e-mail, identyfikator konta, dane uwierzytelniania i sesji, p
 
 Jeśli wybierzesz logowanie Google, Supabase otrzymuje dane identyfikujące konto oraz podstawowe informacje z konta Google, w tym nazwę i zdjęcie. Nie otrzymujemy Twojego hasła Google. Nazwa i zdjęcie z konta Google nie są automatycznie publikowane w profilu gracza. Ewentualna publikacja zdjęcia wymaga osobnego świadomego zezwolenia.
 
-Konto i automatyczny profil mogą powstać przy rejestracji, przed potwierdzeniem regulaminu. Profil jest domyślnie publiczny: także osoby niezalogowane mogą zobaczyć nazwę gracza, identyfikator gracza, avatar z katalogu, XP i poziom. Konto jest domyślnie widoczne w rankingu. Wyłączenie widoczności w rankingu nie ukrywa publicznego profilu. Nie publikujemy w nim e-maila, prawdziwego nazwiska, danych logowania, salda ani prywatnych zapisów gry. Nazwa i avatar przy stole pomagają rozpoznać uczestników gry. Publiczny profil na stronie jest dostępny także osobom spoza gry.
+Konto i automatyczny profil mogą powstać przy rejestracji, przed potwierdzeniem regulaminu. Profil jest domyślnie dostępny dla zalogowanych użytkowników: po zalogowaniu mogą oni zobaczyć nazwę gracza, identyfikator gracza, avatar z katalogu, XP i poziom. Dane rankingu są dostępne po zalogowaniu. Konto jest domyślnie widoczne w rankingu. Wyłączenie widoczności w rankingu nie ukrywa publicznego profilu. Nie publikujemy w nim e-maila, prawdziwego nazwiska, danych logowania, salda ani prywatnych zapisów gry. Nazwa i avatar przy stole pomagają rozpoznać uczestników gry. Profil na stronie jest dostępny także zalogowanym osobom spoza danej gry.
 
 ## Cele i podstawy prawne
 

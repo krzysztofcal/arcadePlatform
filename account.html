@@ -223,7 +223,7 @@
             <h2 class="xp-card__title" data-i18n="signIn">Sign in</h2>
             <form class="account-form" id="signinForm">
               <div id="googleProfileNotice" hidden>
-                <p class="account-note" data-i18n="publicProfileSignupNotice">Creating an account gives you a public player profile with an automatically generated name and avatar. Anyone, including people who are not signed in, can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
+                <p class="account-note" data-i18n="publicProfileSignupNotice">Creating an account gives you a player profile with an automatically generated name and avatar. Signed-in users can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
                 <p class="account-note"><a href="/legal/terms.en.html" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> · <a href="/legal/privacy.en.html" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy</a></p>
               </div>
               <button type="button" class="account-google" id="googleSignInButton" aria-describedby="googleProfileNotice" hidden>
@@ -264,7 +264,7 @@
               <label for="signupPasswordConfirm" data-i18n="confirmPassword">Confirm password</label>
               <input id="signupPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" minlength="8" required placeholder="••••••••">
               <p class="account-note" data-i18n="passwordRequirements">Use at least 8 characters.</p>
-              <p class="account-note" id="signupProfileNotice" data-i18n="publicProfileSignupNotice">Creating an account gives you a public player profile with an automatically generated name and avatar. Anyone, including people who are not signed in, can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
+              <p class="account-note" id="signupProfileNotice" data-i18n="publicProfileSignupNotice">Creating an account gives you a player profile with an automatically generated name and avatar. Signed-in users can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
               <p class="account-note"><span data-i18n="profileTermsSignupNote">After email verification, accept the current Terms before using your account.</span> <a href="/legal/terms.en.html" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> · <a href="/legal/privacy.en.html" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy</a>.</p>
               <button type="submit" data-i18n="signUp">Sign up</button>
             </form>
@@ -294,13 +294,14 @@
                 <a class="public-profile-editor__url" id="publicProfileUrl" href="#">/u/handle</a>
               </div>
             </div>
-            <p class="account-note" data-i18n="publicProfileNotice">Your Arcade name, handle and avatar are public. Your account email stays private.</p>
+            <p class="account-note" id="publicProfileBrowserHint" data-i18n="profileBrowserSessionHint" hidden>This link opens in your browser. You may need to sign in there separately from the app.</p>
+            <p class="account-note" data-i18n="publicProfileNotice">Signed-in users can view your Arcade name, handle and avatar. Your account email stays private.</p>
             <p><strong id="publicDisplayName"></strong> <span id="publicHandle"></span></p>
             <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" data-i18n-aria="arcadeAvatarGallery" aria-label="Arcade avatars"></div>
             <button id="publicAvatarSave" type="button" class="account-panel__btn account-panel__btn--primary arcade-avatar-save" aria-describedby="publicAvatarStatus" aria-busy="false" disabled><span id="publicAvatarSaveLabel" data-i18n="arcadeAvatarSet">Set avatar</span></button>
             <p id="publicAvatarStatus" class="account-note" role="status" aria-live="polite" aria-atomic="true"></p>
             <form class="account-form" id="publicProfileForm">
-              <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note" data-i18n="profileRemainsPublic">This does not hide your public profile.</p></fieldset>
+              <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note" data-i18n="profileRemainsPublic">This does not hide your player profile from signed-in users.</p></fieldset>
               <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel" data-i18n="profileSaveVisibility">Save visibility</span></button>
               <span id="publicProfileSaveStatus" role="status"></span>
             </form>
