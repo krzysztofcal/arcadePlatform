@@ -247,5 +247,6 @@ test('APK Account and Lobby use one five-destination renderer; tables have none'
   assert.equal(active[0].getAttribute('data-nav-id'),pathname==='/account.html'?'profile':'modes');
   h.document.body.dataset.mobileLobbyView='tables';h.document.fireEvent('poker:lobby-view',{});
   assert.equal(h.document.body.children.length,1);assert.equal(nav.children.length,5);
+  assert.equal(nav.children.find(n=>n.getAttribute('aria-current')==='page').getAttribute('data-nav-id'),pathname==='/account.html'?'profile':'tables');
  }
 });

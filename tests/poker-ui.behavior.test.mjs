@@ -255,11 +255,12 @@ function loadLobbyHarness(options = {}){
     const welcomeHeading = makeElement('welcomeHeading');
     elements.pokerWelcomeBonusBanner.querySelector = (selector) => selector === 'strong' ? welcomeHeading : null;
   }
-  if (options.mobileNav) {
+  if (options.mobileNav || options.dailyPanel) {
     for (const id of ['pokerModesView','pokerTablesView','pokerProgressionView','dailyDialog','dailyClaim','dailyProgress','dailyReset','dailySuccess','dailySignIn','dailyDisclaimer']) elements[id] = makeElement(id);
+    elements.dailyShortcut = makeElement('dailyShortcut'); elements.dailyShortcut.dataset.panel = 'daily';
     elements.dailyDialog.querySelectorAll = () => [];
     elements.dailyDialog.showModal = () => { elements.dailyDialog.open = true; };
-    elements.dailyDialog.close = () => { elements.dailyDialog.open = false; (elements.dailyDialog._listeners.close || []).forEach(fn => fn()); };
+    elements.dailyDialog.close = () => { elements.dailyDialog.open = false; setImmediate(() => (elements.dailyDialog._listeners.close || []).forEach(fn => fn())); };
   }
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
@@ -351,7 +352,7 @@ function loadLobbyHarness(options = {}){
       readyState: 'complete',
       visibilityState: 'visible',
       querySelector: () => null,
-      querySelectorAll: () => [],
+      querySelectorAll: selector => options.dailyPanel && selector === '[data-panel]' ? [elements.dailyShortcut] : [],
       addEventListener: (type, fn) => { registerEvent(documentEvents, type, fn); },
       getElementById: (id) => elements[id] || null,
       createElement: (tag) => makeElement(tag),
@@ -386,8 +387,8 @@ function loadLobbyHarness(options = {}){
   sandbox.window.atob = sandbox.atob;
   sandbox.window.btoa = sandbox.btoa;
 
-  if (options.mobileNav) {
-    sandbox.window.MOBILE_POKER_CONFIG = {};
+  if (options.mobileNav || options.dailyPanel) {
+    if (options.mobileNav) sandbox.window.MOBILE_POKER_CONFIG = {};
     sandbox.window.location.hash = options.hash || '#modes';
     sandbox.document.dispatchEvent = event => (documentEvents[event.type] || []).forEach(fn => fn(event));
     sandbox.CustomEvent = function(type, init){ this.type = type; this.detail = init && init.detail; };
@@ -739,8 +740,24 @@ test('mobile lobby destinations use actual auth-gated view and Bonus opening nev
     assert.equal(h.elements.dailyDialog.open,true);assert.equal(h.mobileView(),'bonus');assert.equal(claims,0);
     assert.equal(h.elements.dailyClaim.disabled,!authenticated);
     if(authenticated){ h.elements.dailyClaim.click(); await settle(); assert.equal(claims,1); }
-    h.elements.dailyDialog.close();assert.equal(h.mobileView(),'modes');
+    h.navigateMobile(authenticated?'tables':'modes');await settle();assert.equal(h.mobileView(),authenticated?'tables':'modes');
     h.navigateMobile('modes');assert.equal(h.mobileView(),'modes');
     h.navigateMobile('invalid');assert.equal(h.mobileView(),'modes');assert.equal(claims,authenticated?1:0);
   }
+});
+
+
+test('WWW Daily Bonus entry reads status; only explicit Claim writes', async()=>{
+  let claims=0, reads=0, releaseClaim;
+  const h=loadLobbyHarness({dailyPanel:true,chips:{
+    fetchWelcomeBonusStatus:async()=>null,
+    fetchBonusCampaigns:async()=>{reads++;return {items:[],dailyBonus:{eligible:true,alreadyClaimed:false,code:'daily',serverNow:new Date().toISOString(),nextEligibleAt:new Date(Date.now()+60000).toISOString()}};},
+    claimBonusCampaign:()=>{claims++;return new Promise(resolve=>{releaseClaim=resolve;});}
+  }});
+  await new Promise(resolve=>setImmediate(resolve));
+  h.elements.dailyShortcut.click();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.elements.dailyDialog.open,true);assert.equal(claims,0);assert.equal(h.elements.dailyClaim.disabled,false);
+  h.elements.dailyClaim.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(claims,1);
+  const before=reads;h.elements.dailyDialog.close();h.elements.dailyShortcut.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,before);assert.equal(claims,1);
+  releaseClaim({alreadyClaimed:true});await new Promise(resolve=>setImmediate(resolve));
 });

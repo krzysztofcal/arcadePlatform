@@ -1755,7 +1755,7 @@
       if (window.MOBILE_POKER_CONFIG) showLobbyView('modes', false);
       if (!dailyDialog.open) dailyDialog.showModal();
       setMobileLobbyView('bonus');
-      refreshDailyBonus(true).catch(function(){ dailyLoadError = true; renderDailyBonus(); });
+      refreshDailyBonus().catch(function(){ dailyLoadError = true; renderDailyBonus(); });
     }
     function applyMobileLobbyLink(){
       if (!window.MOBILE_POKER_CONFIG || !mobileAuthReady || !mobileLinkPending) return;
@@ -1766,7 +1766,7 @@
       showLobbyView(['modes','tables','progression'].indexOf(view) !== -1 ? view : 'modes');
     }
     if (window.MOBILE_POKER_CONFIG) window.addEventListener('hashchange', function(){ mobileLinkPending = true; applyMobileLobbyLink(); }); // xp-lifecycle-allow:poker-mobile-nav(2027-01-01)
-    if (dailyDialog) dailyDialog.addEventListener('close', function(){ setMobileLobbyView('modes'); });
+    if (dailyDialog) dailyDialog.addEventListener('close', function(){ if (document.body.dataset.mobileLobbyView === 'bonus') setMobileLobbyView('modes'); });
     function showLobbyView(view, focusTarget){
       if (view !== 'modes' && !lobbyAuthenticated){
         view = 'modes';

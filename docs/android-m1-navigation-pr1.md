@@ -18,7 +18,9 @@ The original static lobby shortcuts remain on WWW. The APK packager removes
 that duplicate; the same existing `renderBottomNav()` renders the five items on
 both packaged screens, using the accepted shortcut artwork and visual style.
 The APK stylesheet reserves 88px and fixes this one bar to the native WebView
-bottom. Native margins remain the single owner of system insets.
+bottom. Native margins remain the single owner of system insets. The existing
+Account footer stays in document flow above the reserved bar space, so legal
+links remain reachable in portrait and landscape rather than being covered.
 
 Opening Daily Bonus only reads/displays status. Both WWW and APK require the
 existing Claim button to send a claim. This is the intentional shared-web
