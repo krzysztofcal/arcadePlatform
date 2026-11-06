@@ -957,6 +957,24 @@ test("VPS admin installs the Production dispatcher only from the approved run's 
       fs.rmSync(fx.dir, { recursive: true, force: true });
     }
   }
+  // An error after the rename is reported with the ids and the read-back state, never as a bare failure.
+  const late = dispatcherInstallFixture();
+  try {
+    late.host.rename = (from, to) => { fs.renameSync(from, to); throw new Error("after rename"); };
+    const line = runOperation(op, "41700000020", late.host).line;
+    assert.equal(line, `ADMIN_FAILED ${op} install replaced=yes commit=${late.commit} sha256=${hash(NEW_SCRIPT)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_left_stopped`);
+    assert.match(late.admin.audits[1], /result=failed detail=install replaced=yes commit=/);
+  } finally {
+    fs.rmSync(late.dir, { recursive: true, force: true });
+  }
+  const early = dispatcherInstallFixture();
+  try {
+    early.host.rename = () => { throw new Error("rename failed"); };
+    assert.match(runOperation(op, "41700000020", early.host).line, new RegExp(`^ADMIN_FAILED ${op} install replaced=no commit=${early.commit} sha256=`));
+    assert.equal(fs.readFileSync(early.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(early.dir, { recursive: true, force: true });
+  }
   // A failed stop of the first timer still stops the second, and nothing is installed.
   const stopFails = dispatcherInstallFixture({ state: { "exit:stop arcade-chips-ledger-dispatch.timer": 1 } });
   try {

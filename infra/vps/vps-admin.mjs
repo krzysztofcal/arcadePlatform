@@ -293,6 +293,7 @@ function installProductionDispatcher(host, runId) {
   const paused = OPERATIONS["ledger-dispatchers-pause"](host);
   if (!paused.ok) return paused;
   const tmp = path.join(path.dirname(d.dest), `.${path.basename(d.dest)}.${runId}`);
+  let ids = null;
   try {
     fs.rmSync(tmp, { force: true });
     if (curl(host, `https://raw.githubusercontent.com/${REPO}/${run.head_sha}/${d.source}`, ["-o", tmp]).status !== 0) {
@@ -303,16 +304,23 @@ function installProductionDispatcher(host, runId) {
       return { ok: false, blocked: "unexpected_script timers_left_stopped" };
     }
     if (gitBlob(bytes) !== blob.sha) return { ok: false, blocked: "content_mismatch timers_left_stopped" };
-    const previous = current ? sha256(fs.readFileSync(d.dest)) : "none";
+    ids = { sha: sha256(bytes), text: `commit=${run.head_sha} sha256=${sha256(bytes)} previous=${current ? sha256(fs.readFileSync(d.dest)) : "none"}` };
+    const reload = read(host, "arcade-chips-ledger-production-dispatch.service", "NeedDaemonReload");
     fs.chownSync(tmp, d.uid, d.gid);
     fs.chmodSync(tmp, 0o755);
     fsyncFd(fs.openSync(tmp, "r"), true);
     host.rename(tmp, d.dest);
     fsyncFd(fs.openSync(path.dirname(d.dest), O_DIR), true);
-    const reload = read(host, "arcade-chips-ledger-production-dispatch.service", "NeedDaemonReload");
-    return { ok: true, details: `installed commit=${run.head_sha} sha256=${sha256(bytes)} previous=${previous} timers_stopped reload:${reload}` };
+    return { ok: true, details: `installed ${ids.text} timers_stopped reload:${reload}` };
   } catch {
-    return { ok: false, failed: "install timers_left_stopped" };
+    // The journal must say whether the script was already replaced: the destination is read back, not assumed.
+    let replaced = "unknown";
+    try {
+      replaced = ids && sha256(fs.readFileSync(d.dest)) === ids.sha ? "yes" : "no";
+    } catch {
+      // stays unknown
+    }
+    return { ok: false, failed: `install replaced=${replaced}${ids ? ` ${ids.text}` : ""} timers_left_stopped` };
   } finally {
     fs.rmSync(tmp, { force: true });
   }
