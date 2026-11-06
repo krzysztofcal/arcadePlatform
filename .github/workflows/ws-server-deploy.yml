@@ -1,4 +1,6 @@
 name: WS Server Deploy
+# An owner/agent release dispatch is named after its SHA; other events keep GitHub's default run name.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('WS Production release {0} (requested by {1})', inputs.releaseSha, github.triggering_actor) || '' }}
 on:
   pull_request:
   # Release procedure and post-merge acceptance: specs/1159-ci-cd-release-safety/pr4-ws-production-dispatch.md
@@ -349,8 +351,40 @@ jobs:
         run: |
           echo "::notice::WS Production was NOT deployed. This main commit changes the WS deploy surface; release it only by OWNER dispatch with releaseSha=$GITHUB_SHA."
           echo "WS Production NOT deployed: explicit release required for $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-  deploy:
+  # #1159 Approval UX: unprivileged (no environment, no secret, read-only token). It finishes before the ws-production
+  # approval request, so the owner reads target, exact SHA, scope since the last confirmed deploy, risk, side effects
+  # and way back in its summary (scripts/ws-release-approval.mjs) first. It repeats the authorize checks so a run that
+  # would be refused stops before the approval; the deploy job still checks everything again after approval.
+  request:
+    name: Review WS Production release request
     needs: [impact, validate]
+    if: ${{ needs.impact.outputs.deploy_ws == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check and show the release before approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA_INPUT: ${{ inputs.releaseSha }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/ws-release-approval.mjs
+
+  deploy:
+    needs: [impact, validate, request]
     # #1159 T004: the owner or the release agent App (vars.WS_RELEASE_AGENT) dispatches the main definition, and only
     # the same identity may re-run it (no owner/agent mix);
     # the owner approves the ws-production environment, whose secrets alone reach the VPS release account.

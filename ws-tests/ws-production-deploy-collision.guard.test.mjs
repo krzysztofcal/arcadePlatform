@@ -6,6 +6,6 @@ test('retired WS Deploy cannot be reintroduced; WS Server Deploy owns the valida
   const source = fs.readFileSync('.github/workflows/ws-server-deploy.yml', 'utf8');
   assert.match(source, /appleboy\/scp-action@v0\.1\.7/);
   assert.match(source, /appleboy\/ssh-action@v1\.0\.3/);
-  assert.match(source, /deploy:\n    needs: \[impact, validate\]/);
+  assert.match(source, /deploy:\n    needs: \[impact, validate, request\]/);
   assert.match(source, /needs\.impact\.outputs\.deploy_ws == 'true'/);
 });
