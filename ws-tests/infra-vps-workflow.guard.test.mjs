@@ -1002,7 +1002,9 @@ test("VPS admin approval summary describes every catalog operation from reviewed
   const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
   assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
   assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
-  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status"], "only the status read is read-only");
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status", "ws-preview-isolation-preflight"], "only the two inspections are read-only");
+  assert.match(APPROVAL["ws-preview-safe-stop"].risk, /DRAIN stays in place/);
+  assert.match(APPROVAL["ws-preview-isolation-provision"].risk, /stays stopped/);
   assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
   assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
 
@@ -1113,4 +1115,56 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
     ["unindented garbage", header + helperLine(["ledger-dispatchers-status"]) + "unexpected\n", 0],
   ]) assert.equal(verifies(out, exit), false, label);
   fs.rmSync(bin, { recursive: true, force: true });
+});
+
+
+test("Preview isolation catalog uses fixed actions and unprivileged fundamental fixtures", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const action of ["preflight", "provision", "rollback"]) {
+    const fx = fakeAdminHost();
+    const originalRun = fx.host.run;
+    fx.host.run = (argv, ...args) => {
+      if (argv[0] === "/usr/bin/python3") {
+        assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, "123"]);
+        return { status: 1, stdout: "PREVIEW_BLOCKED owner_public_key_missing_or_invalid" };
+      }
+      return originalRun(argv, ...args);
+    };
+    assert.match(runOperation(`ws-preview-isolation-${action}`, "123", fx.host).line, /ADMIN_BLOCKED .* owner_public_key_missing_or_invalid$/);
+  }
+  const result = spawnSync("python3", ["tests/ws-preview-config.test.py", "PreviewIsolation"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+
+test("Preview safe-stop fundamentals and audit-gated receipt run without privileged commands", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const auditEnd of [0, 1]) {
+    const fx = fakeAdminHost({}, { loggerStatus: [0, auditEnd] });
+    const original = fx.host.run;
+    const modes = [];
+    fx.host.run = (argv, ...args) => {
+      if (argv[0] === "/usr/bin/node") {
+        assert.deepEqual(argv.slice(0, 2), ["/usr/bin/node", "/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs"]);
+        assert.equal(argv[3], "123"); modes.push(argv[2]);
+        return { status: 0, stdout: argv[2] === "stop" ? "SAFE_STOP_OK stopped_pending_audit" : "SAFE_STOP_OK ready" };
+      }
+      return original(argv, ...args);
+    };
+    const result = runOperation("ws-preview-safe-stop", "123", fx.host);
+    assert.equal(result.ok, auditEnd === 0);
+    assert.deepEqual(modes, auditEnd === 0 ? ["stop", "finalize"] : ["stop"]);
+  }
+  for (const [stdout, status, outcome] of [
+    ["SAFE_STOP_BLOCKED inspect_read_only_no_retry", 1, "ADMIN_BLOCKED"],
+    ["SAFE_STOP_FAILED stop_attempted_uncertain_no_retry", 1, "ADMIN_FAILED"],
+    ["", null, "ADMIN_FAILED"]
+  ]) {
+    const fx = fakeAdminHost(); const original = fx.host.run;
+    fx.host.run = (argv, ...args) => argv[0] === "/usr/bin/node" ? { status, stdout } : original(argv, ...args);
+    assert.ok(runOperation("ws-preview-safe-stop", "123", fx.host).line.startsWith(outcome + " "));
+    assert.ok(fx.audits.at(-1).includes("result=" + (outcome === "ADMIN_BLOCKED" ? "blocked" : "failed")));
+  }
+  const result = spawnSync(process.execPath, ["--test", "ws-tests/ws-preview-safe-stop.behavior.test.mjs"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
