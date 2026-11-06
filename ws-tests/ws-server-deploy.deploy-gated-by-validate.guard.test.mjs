@@ -11,7 +11,7 @@ test("ws-server deploy job is gated by validate completion before mutation steps
 
   assert.match(text, /validate:[\s\S]*?runs-on: ubuntu-latest/);
   assert.doesNotMatch(text, /validate:\n\s+if: github\.event_name == 'pull_request'/);
-  assert.match(text, /deploy:\n\s+needs: \[impact, validate\]/);
+  assert.match(text, /deploy:\n\s+needs: \[impact, validate, request\]/);
 
   const deployStart = text.indexOf("deploy:");
   assert.notEqual(deployStart, -1);
@@ -28,7 +28,7 @@ test("ws-server deploy job is gated by validate completion before mutation steps
 
 test('main validation contains the retained runtime/build and unique deploy safety contracts exactly once', () => {
   const text = workflowText();
-  const validate = text.slice(text.indexOf('  validate:'), text.indexOf('  deploy:'));
+  const validate = text.slice(text.indexOf('  validate:'), text.indexOf('\n  request:\n'));
   const commands = [...validate.matchAll(/node --test ([\w./-]+)/g)].map(m => m[1]);
   assert.equal(commands.length, new Set(commands).size, 'no repeated main test command');
   for (const file of [
@@ -53,9 +53,9 @@ test('deploy-context-only changes require deploy validation without the full WS 
   assert.equal(impact.ws_poker, false);
 
   const text = workflowText();
-  const validate = text.slice(text.indexOf('  validate:'), text.indexOf('  deploy:'));
+  const validate = text.slice(text.indexOf('  validate:'), text.indexOf('\n  request:\n'));
   assert.match(validate, /if: \$\{\{ needs\.impact\.outputs\.ws_poker == 'true' \|\| needs\.impact\.outputs\.deploy_ws == 'true' \}\}/);
-  assert.match(text, /deploy:\n\s+needs: \[impact, validate\]/);
+  assert.match(text, /deploy:\n\s+needs: \[impact, validate, request\]/);
   const pr = fs.readFileSync('.github/workflows/ws-pr-checks.yml', 'utf8');
   const harness = pr.slice(pr.indexOf('  ws-harness:'));
   assert.match(harness, /if: \$\{\{ needs\.impact\.outputs\.ws_poker == 'true' \}\}/);

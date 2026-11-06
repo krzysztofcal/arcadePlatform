@@ -51,10 +51,15 @@ request blocks with `file_<i>_missing` until the list is changed by a reviewed P
 1. Dispatch `VPS Admin Operation` from `main` with `operation`, `reason` and `confirmation` exactly
    `RUN <operation>`. The reason is one plain line of 10–200 letters, digits, spaces or `.,:;()/+=_-`, so it
    cannot add lines, markdown or HTML to the summary.
-2. The unprivileged job `request` (no environment, no secret) checks the inputs and writes operation, reason,
-   `main` revision, requester and triggering actor to its summary. It finishes before the approval request.
-3. The owner reads that summary in the pending run and approves the `vps-admin` environment for the job
-   `operate`. Before that approval no job has a VPS secret. A re-run needs a new approval.
+2. The unprivileged job `request` ("1. Review request: <operation>"; no environment, no secret) checks the
+   inputs and writes the approval summary: the operation's reviewed description from
+   `infra/vps/vps-admin-approval.mjs` (changes, risk and downtime, side effects, way back, read-only or not),
+   target, `main` revision, requester, triggering actor and, labelled as free text, the reason. A catalog
+   operation without exactly one description fails this job, so nothing can be approved without one. It finishes
+   before the approval request.
+3. The owner reads that summary in the pending run (see [Before you approve](#before-you-approve)) and approves
+   the `vps-admin` environment for the job `operate` ("2. Run on the VPS after approval: <operation>"). Before
+   that approval no job has a VPS secret. A re-run needs a new approval.
 4. `operate` connects as `arcade-admin` (the step fails for any other account) and runs the helper once.
 
 `ADMIN_OK <operation> <details>` is success. `ADMIN_BLOCKED <operation> <reason>` (for example `busy`,
@@ -62,6 +67,21 @@ request blocks with `file_<i>_missing` until the list is changed by a reviewed P
 `ADMIN_FAILED <operation> <step>` fail the job. A systemd read that fails or returns an undocumented value blocks
 the operation; a status is never reported from unverified data. Nothing is retried automatically; the owner
 decides the next step.
+
+### Before you approve
+
+GitHub's `Review deployments` dialog shows only the environment and a comment field; it cannot show a custom
+description. The run page shows it instead, so read it there before opening the dialog:
+
+1. Open the run from the link or from Actions → `VPS Admin Operation`. The run title is
+   `VPS Admin: <operation> (requested by <actor>)`.
+2. Stay on the `Summary` tab. The annotation at the top says `Read-only` or `Changes the VPS` with the title of the
+   operation; scroll below the job graph to `Approve only if expected: <operation>`.
+3. Check operation, revision, requester, changes, risk, side effects and the way back. The reason is the
+   requester's free text; the reviewed description is what the helper does.
+4. Only then use `Review deployments` → `vps-admin` → `Approve and deploy`; otherwise `Reject`.
+
+The same applies to `WS Server Deploy` (job `Review WS Production release request`, environment `ws-production`).
 
 ## Audit
 
@@ -79,7 +99,9 @@ decides the next step.
 ## Adding an operation
 
 A reviewed PR adds the operation to `OPERATIONS` in `infra/vps/vps-admin.mjs`, to the workflow choice list and to
-`infra/vps/arcade-admin.sudoers` (the guard test keeps the three identical), with a fundamental test. It becomes
+`infra/vps/arcade-admin.sudoers` (the guard test keeps the three identical), with a fundamental test, and its
+approval description to `APPROVAL` in `infra/vps/vps-admin-approval.mjs` in catalog order (facts of the helper code;
+no backticks, pipes, angle brackets or line breaks). It becomes
 available on the VPS only after the helper and sudoers file are reinstalled with `infra/vps/stage-vps-admin.sh`.
 
 ## Activation (owner, each step a separate GO)

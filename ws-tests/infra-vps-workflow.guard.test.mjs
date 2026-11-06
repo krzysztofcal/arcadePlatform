@@ -993,6 +993,32 @@ test("VPS admin installs the Production dispatcher only from the approved run's 
   }
 });
 
+test("VPS admin approval summary describes every catalog operation from reviewed code, never from the reason", async () => {
+  const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
+  const { APPROVAL, checkCatalog, approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
+  checkCatalog();
+  assert.deepEqual(Object.keys(APPROVAL), Object.keys(OPERATIONS), "one description per helper operation, same order");
+  assert.throws(() => checkCatalog({ ...OPERATIONS, "new-operation": () => ({}) }), /approval_catalog_mismatch/);
+  const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
+  assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
+  assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status"], "only the status read is read-only");
+  assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
+  assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
+
+  const request = { operation: "ledger-dispatchers-pause", reason: "Pause dispatchers for the T004-3 cutover (step 4)", sha: "a".repeat(40),
+    actor: "arcade-code-agent[bot]", triggeringActor: "arcade-code-agent[bot]", runId: "42223180928", attempt: "1" };
+  const text = approvalSummary(request);
+  for (const part of ["## Approve only if expected: ledger-dispatchers-pause", "CHANGES THE VPS", `| Revision | \`${"a".repeat(40)}\` (main) |`,
+    "| Requested by | `arcade-code-agent[bot]`, triggered by `arcade-code-agent[bot]` |", APPROVAL["ledger-dispatchers-pause"].risk,
+    APPROVAL["ledger-dispatchers-pause"].rollback, "environment vps-admin", "Nothing has run on the VPS yet"]) assert.ok(text.includes(part), part);
+  assert.match(text, /Requester's reason \(free text, not part of the reviewed description\): `Pause dispatchers/);
+  assert.doesNotMatch(text, /ADMIN_OK ledger|PASS/);
+  for (const [field, value] of [["operation", "rm-rf"], ["reason", "ok\n## Approved"], ["reason", "see `x` now ok"], ["sha", "abc"], ["actor", "a b"], ["runId", "0"]]) {
+    assert.throws(() => approvalSummary({ ...request, [field]: value }), Error, field);
+  }
+});
+
 test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
   const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
   const catalog = Object.keys(OPERATIONS);
@@ -1014,8 +1040,12 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
   const request = workflow.slice(workflow.indexOf("\n  request:\n"), workflow.indexOf("\n  operate:\n"));
   const operate = workflow.slice(workflow.indexOf("\n  operate:\n"));
   assert.doesNotMatch(request, /environment:|secrets\./, "the summary job has no environment and no secret");
-  assert.match(request, /GITHUB_STEP_SUMMARY/);
-  for (const field of ["operation: \\`$OPERATION\\`", "reason: \\`$REASON\\`", "revision: \\`$GITHUB_SHA\\`", "requested by: \\`$GITHUB_ACTOR\\`"]) assert.ok(request.includes(field), field);
+  // The reviewed description is rendered only after the inputs passed the bash checks, from main's own code.
+  assert.ok(request.indexOf("[[ \"$REASON\" =~ $REASON_RE ]]") < request.indexOf("node infra/vps/vps-admin-approval.mjs"));
+  assert.match(request, /uses: actions\/checkout@v4\n        with:\n          persist-credentials: false\n/);
+  assert.match(workflow, /^run-name: "VPS Admin: \$\{\{ inputs\.operation \}\} \(requested by \$\{\{ github\.triggering_actor \}\}\)"$/m);
+  assert.match(request, /\n    name: "1\. Review request: \$\{\{ inputs\.operation \}\}"\n/);
+  assert.match(operate, /\n    name: "2\. Run on the VPS after approval: \$\{\{ inputs\.operation \}\}"\n/);
   assert.match(operate, /\n    needs: request\n/);
   assert.match(operate, /\n    environment: vps-admin\n/);
   assert.doesNotMatch(operate, /GITHUB_STEP_SUMMARY/);
