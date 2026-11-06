@@ -698,7 +698,7 @@ test("restart preflight stays unsafe during a live hand and reports safe only wh
   const tableId = "table_auth_join_preflight";
   const token = "preflight-internal-token";
   const store = {
-    accounts: [{ user_id: "preflight_human", account_type: "USER", balance: 120 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000007", account_type: "USER", balance: 120 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
@@ -736,12 +736,12 @@ test("restart preflight stays unsafe during a live hand and reports safe only wh
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "preflight_human" }), "auth-preflight");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000007" }), "auth-preflight");
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-preflight", ts: "2026-02-28T06:30:00Z", payload: { tableId, seatNo: 1, buyIn: 100 } });
     assert.equal((await nextCommandResultForRequest(ws, "join-preflight")).payload.status, "accepted");
     sendFrame(ws, { version: "1.0", type: "table_state_sub", requestId: "preflight-snapshot", ts: "2026-02-28T06:30:01Z", payload: { tableId, view: "snapshot" } });
     const initial = await nextMessageOfType(ws, "stateSnapshot");
-    const humanTurn = await waitForHumanTurn(ws, { userId: "preflight_human", baseline: initial.payload, timeoutMs: 5000 });
+    const humanTurn = await waitForHumanTurn(ws, { userId: "00000000-0000-4000-8000-000000000007", baseline: initial.payload, timeoutMs: 5000 });
 
     await fs.writeFile(holdFile, "drain\n");
     const live = await holdStatus();
