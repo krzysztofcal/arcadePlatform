@@ -62,6 +62,38 @@ export const APPROVAL = Object.freeze({
     sideEffects: "The result and the journal record the commit and the new and previous SHA-256 of the script.",
     rollback: "Merge the previous script to main through a reviewed PR and request this operation again, then ledger-dispatchers-resume.",
   },
+  "ws-preview-safe-stop": {
+    title: "Stop the Stage WS Preview service after proving it is empty, and issue a 15-minute provisioning receipt",
+    readOnly: false,
+    changes: "Requires an operator DRAIN that already exists, then two authenticated runtime and Stage database proofs: no human member or connected human tables, no loaded hands, queued commands, state writes or financial inconsistencies, no OPEN tables and bots disabled. Then stops only ws-server-preview.service once, checks it is inactive with an empty cgroup and writes a root-only, single-use receipt valid for 15 minutes.",
+    risk: "WS Preview (Stage) is down from the stop until a separately approved deploy; DRAIN stays in place, so Stage gameplay stays unavailable. Production WS is not touched. An uncertain stop is ADMIN_FAILED and keeps DRAIN for the owner.",
+    sideEffects: "Read-only Stage database queries (four aggregate rows per proof). The receipt expires after 15 minutes; isolation preflight and provision must both be approved within that window.",
+    rollback: "No automatic restart, retry or DRAIN removal. Starting Preview again is a separately approved Preview deploy or recovery; an existing receipt blocks another stop.",
+  },
+  "ws-preview-isolation-preflight": {
+    title: "Check, without changes, that WS Preview can be moved to its own deploy and runtime accounts",
+    readOnly: true,
+    changes: "None. Verifies the safe-stop receipt, the stopped Preview unit, accounts, SSH policy, sudo rules, environment files and application trees that provision would change.",
+    risk: "None; nothing on the VPS is changed and the receipt is not consumed.",
+    sideEffects: "Journal entries and one read-only Stage database proof. Time spent waiting for approval counts against the 15-minute receipt.",
+    rollback: "Not needed: read-only.",
+  },
+  "ws-preview-isolation-provision": {
+    title: "Move the stopped WS Preview to separate deploy and runtime accounts (one-shot)",
+    readOnly: false,
+    changes: "Consumes the safe-stop receipt, creates arcade-preview-deploy and arcade-preview, installs the owner public key for the deploy account only, a two-command Preview sudo rule and the Preview unit hardening drop-in, and replaces the four Preview application trees with new copies; the originals are kept in root-only backup.",
+    risk: "WS Preview stays stopped (result provisioned_runtime_not_started). Preview deploy access is temporarily lost until the separately approved environment binding for the new deploy account. One-shot: a failure needs owner recovery. Production is not touched.",
+    sideEffects: "New accounts and a root-only manifest and backup under /var/lib/arcade-admin/ws-preview-isolation. The receipt is consumed even if provisioning fails.",
+    rollback: "ws-preview-isolation-rollback while Preview is stopped. The new accounts stay inert and block a second provision; a new attempt needs a reviewed recovery change.",
+  },
+  "ws-preview-isolation-rollback": {
+    title: "Undo WS Preview isolation while Preview is stopped",
+    readOnly: false,
+    changes: "Validates the protected manifest, withdraws the new deploy key, restores the original Preview application trees and removes only its own unchanged drop-in, policy and sudo file, then reloads systemd metadata.",
+    risk: "WS Preview stays stopped; blocks if any process of the new accounts runs or the state does not match the manifest. Production is not touched.",
+    sideEffects: "The new accounts remain, inert and without a key; original and replaced trees stay in the backup. A later provision is still refused.",
+    rollback: "None for the rollback itself; starting Preview again is a separately approved Preview deploy or recovery.",
+  },
 });
 
 const SHA = /^[0-9a-f]{40}$/;

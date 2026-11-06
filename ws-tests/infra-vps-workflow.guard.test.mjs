@@ -1002,7 +1002,9 @@ test("VPS admin approval summary describes every catalog operation from reviewed
   const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
   assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
   assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
-  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status"], "only the status read is read-only");
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status", "ws-preview-isolation-preflight"], "only the two inspections are read-only");
+  assert.match(APPROVAL["ws-preview-safe-stop"].risk, /DRAIN stays in place/);
+  assert.match(APPROVAL["ws-preview-isolation-provision"].risk, /stays stopped/);
   assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
   assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
 
