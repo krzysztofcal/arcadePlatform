@@ -22,6 +22,7 @@ function run(cmd, args, name){
 const has = s => !!(process.env[s] && process.env[s] !== "0");
 
 run("node", ["scripts/syntax-check.mjs"], "syntax");
+run("node", ["--test", "tests/netlify-preview-retention.test.mjs", "tests/netlify-preview-retention-api.test.mjs"], "netlify-preview-retention");
 run("node", ["--test", "tests/account-page.test.mjs"], "account-page");
 run("node", ["--test", "tests/mobile-poker-security.test.mjs", "tests/mobile-poker-preview.test.mjs"], "mobile-poker-fundamentals");
 run("node", ["--test", "tests/www-production-release.test.mjs"], "www-production-release");

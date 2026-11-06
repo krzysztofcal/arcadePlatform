@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "siteId": "f7e19a84-28f7-41f7-978a-f3b4552a404d",
+  "automaticDeletionAuthorized": false,
+  "productionRotationPass": false,
+  "stageRotationPass": false,
+  "rules": [
+    {
+      "reviewId": 1095,
+      "reason": "historical_Android_API_pin_not_explicitly_retired"
+    },
+    {
+      "reviewId": 1141,
+      "reason": "APK_M0_API_alias_and_rotation_evidence_temporary_PR_wide_hold"
+    },
+    {
+      "reviewId": 1155,
+      "reason": "active_Stage_API_APK_and_rotation_recovery_temporary_PR_wide_hold"
+    },
+    {
+      "reviewId": 1160,
+      "reason": "stacked_validation_required_no_independent_deploy_in_snapshot"
+    },
+    {
+      "reviewId": 1161,
+      "reason": "physical_Android_test_APK_API_pin_closed_PR_still_protected"
+    },
+    {
+      "reviewId": 1162,
+      "reason": "1159_PR1_check_receipts_and_recovery_evidence"
+    },
+    {
+      "reviewId": 1163,
+      "reason": "1159_PR2_active_Stage_and_rotation_evidence"
+    },
+    {
+      "deployId": "6ae19488f50eb5ff7e60f7e6",
+      "reason": "current_Production_publication"
+    }
+  ],
+  "canaryDeletionAuthorized": false,
+  "productionRotationEvidence": null,
+  "stageRotationEvidence": null,
+  "apkPinsReviewedAt": null
+}
