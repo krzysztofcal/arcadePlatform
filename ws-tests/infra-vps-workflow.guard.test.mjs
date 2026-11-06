@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -866,23 +867,27 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
 });
 
 // GitHub answers come from a fake curl; the script is written to a temporary destination owned by the current user.
-function dispatcherInstallFixture({ run = {}, main, script = "#!/usr/bin/env bash\nset -euo pipefail\necho new\n", downloadExit = 0, state = {} } = {}) {
+const NEW_SCRIPT = "#!/usr/bin/env bash\nset -euo pipefail\necho new\n";
+function dispatcherInstallFixture({ run = {}, main, script = NEW_SCRIPT, published = NEW_SCRIPT, downloadExit = 0, state = {}, extra = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-dispatcher-"));
   const dest = path.join(dir, "arcade-chips-ledger-production-dispatch.sh");
   fs.writeFileSync(dest, "#!/usr/bin/env bash\necho old\n", { mode: 0o755 });
   const commit = "a".repeat(40);
   const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
   const urls = [];
-  const admin = fakeAdminHost(state);
+  const admin = fakeAdminHost(state, extra);
+  const source = "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh";
+  const blob = crypto.createHash("sha1").update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest("hex");
   const host = {
     ...admin.host,
-    dispatcher: { source: "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh", dest, uid: process.getuid(), gid: process.getgid() },
+    dispatcher: { source, dest, uid: process.getuid(), gid: process.getgid() },
     run(argv) {
       if (argv[0] !== "/usr/bin/curl") return admin.host.run(argv);
       const url = argv.at(-1);
       urls.push(url);
       if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
       if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+      if (url.endsWith(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: "file", path: source, sha: blob }) };
       if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
         if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
         return { status: downloadExit, stdout: "" };
@@ -896,7 +901,6 @@ function dispatcherInstallFixture({ run = {}, main, script = "#!/usr/bin/env bas
 test("VPS admin installs the Production dispatcher only from the approved run's current main commit and leaves the timers stopped", async () => {
   const { runOperation } = await import("../infra/vps/vps-admin.mjs");
   const op = "ledger-production-dispatcher-install";
-  const crypto = await import("node:crypto");
   const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
   const stopped = (fx) => fx.admin.calls.filter((c) => c.startsWith("stop") || c.startsWith("start"));
   const ok = dispatcherInstallFixture();
@@ -941,7 +945,8 @@ test("VPS admin installs the Production dispatcher only from the approved run's 
 
   // After the pause: a failed or unexpected download keeps the old script and the timers stopped.
   for (const [options, line] of [[{ downloadExit: 22 }, `ADMIN_FAILED ${op} download timers_left_stopped`],
-    [{ script: "<html>rate limited</html>" }, `ADMIN_BLOCKED ${op} unexpected_script timers_left_stopped`]]) {
+    [{ script: "<html>rate limited</html>" }, `ADMIN_BLOCKED ${op} unexpected_script timers_left_stopped`],
+    [{ script: "#!/usr/bin/env bash\necho tampered\n" }, `ADMIN_BLOCKED ${op} content_mismatch timers_left_stopped`]]) {
     const fx = dispatcherInstallFixture(options);
     try {
       assert.equal(runOperation(op, "41700000020", fx.host).line, line);
@@ -951,6 +956,15 @@ test("VPS admin installs the Production dispatcher only from the approved run's 
     } finally {
       fs.rmSync(fx.dir, { recursive: true, force: true });
     }
+  }
+  // A failed stop of the first timer still stops the second, and nothing is installed.
+  const stopFails = dispatcherInstallFixture({ state: { "exit:stop arcade-chips-ledger-dispatch.timer": 1 } });
+  try {
+    assert.equal(runOperation(op, "41700000020", stopFails.host).line, `ADMIN_FAILED ${op} stop_arcade-chips-ledger-dispatch.timer`);
+    assert.deepEqual(stopped(stopFails), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"]);
+    assert.equal(fs.readFileSync(stopFails.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(stopFails.dir, { recursive: true, force: true });
   }
   const busy = dispatcherInstallFixture({ state: { "arcade-chips-ledger-production-dispatch.service:ActiveState": "activating" } });
   try {

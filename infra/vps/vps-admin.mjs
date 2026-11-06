@@ -255,11 +255,14 @@ function quarantineSnapshots(host, runId) {
 
 const curl = (host, url, extra = []) => host.run(["/usr/bin/curl", "-fsS", "--proto", "=https", "--max-time", "20", ...extra, url]);
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+const gitBlob = (bytes) => crypto.createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 
 // Installs the Production dispatcher script from GitHub at the commit of this run. The run must be the in-progress
 // VPS Admin workflow_dispatch on main and main must still point at that commit, so only reviewed main code is
-// installed. Both timers are paused first and stay stopped: resuming is the separate ledger-dispatchers-resume.
-// The result (and so the journal) records the commit and both SHA-256 values. Nothing is retried.
+// installed. The downloaded bytes must match the file's git object id at that commit, read separately from the
+// contents API, before they replace anything. Both timers are paused first and stay stopped: resuming is the
+// separate ledger-dispatchers-resume. The result (and so the journal) records the commit and both SHA-256 values.
+// Nothing is retried.
 function installProductionDispatcher(host, runId) {
   const d = host.dispatcher;
   const api = (route, accept) => curl(host, `https://api.github.com/repos/${REPO}/${route}`, ["-H", `Accept: ${accept}`]);
@@ -276,6 +279,14 @@ function installProductionDispatcher(host, runId) {
   const main = api("commits/main", "application/vnd.github.sha");
   if (main.status !== 0 || !COMMIT.test(main.stdout)) throw new Unverifiable("github_main");
   if (main.stdout !== run.head_sha) return { ok: false, blocked: "main_advanced" };
+  const entry = api(`contents/${d.source}?ref=${run.head_sha}`, "application/vnd.github.object+json");
+  let blob;
+  try {
+    blob = entry.status === 0 ? JSON.parse(entry.stdout) : null;
+  } catch {
+    blob = null;
+  }
+  if (!blob || blob.type !== "file" || blob.path !== d.source || !/^[0-9a-f]{40}$/.test(String(blob.sha))) throw new Unverifiable("github_contents");
   const current = lstatOrNull(d.dest);
   if (current && !current.isFile()) return { ok: false, blocked: "dest_not_regular_file" };
 
@@ -291,6 +302,7 @@ function installProductionDispatcher(host, runId) {
     if (bytes.length > 65536 || !bytes.toString("utf8", 0, 20).startsWith("#!/usr/bin/env bash\n")) {
       return { ok: false, blocked: "unexpected_script timers_left_stopped" };
     }
+    if (gitBlob(bytes) !== blob.sha) return { ok: false, blocked: "content_mismatch timers_left_stopped" };
     const previous = current ? sha256(fs.readFileSync(d.dest)) : "none";
     fs.chownSync(tmp, d.uid, d.gid);
     fs.chmodSync(tmp, 0o755);
@@ -316,9 +328,9 @@ export const OPERATIONS = Object.freeze({
   // dispatchers and every systemctl call. On timeout the timers stay stopped: the owner decides what comes next.
   "ledger-dispatchers-pause": (host) => {
     const deadline = host.now() + PAUSE_DEADLINE_MS;
-    for (const u of LEDGER) {
-      if (host.run(["/usr/bin/systemctl", "stop", `${u}.timer`]).status !== 0) return { ok: false, failed: `stop_${u}.timer` };
-    }
+    // Both stops are attempted even if one fails, so a failure never leaves the other timer running unnoticed.
+    const notStopped = LEDGER.filter((u) => host.run(["/usr/bin/systemctl", "stop", `${u}.timer`]).status !== 0);
+    if (notStopped.length) return { ok: false, failed: notStopped.map((u) => `stop_${u}.timer`).join(",") };
     for (;;) {
       const states = LEDGER.map((u) => `${u}.service=${read(host, `${u}.service`, "ActiveState")}`);
       // The deadline is checked first: a result read after it is never a success.
