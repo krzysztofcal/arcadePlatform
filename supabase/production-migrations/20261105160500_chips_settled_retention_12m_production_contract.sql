@@ -124,7 +124,7 @@ begin
         where r.archive_batch_id = batch.batch_id)) then
     return jsonb_build_object('state', 'not_eligible', 'batch_id', p_batch_id);
   end if;
-  if not p_execute then
+  if p_execute is not true then
     return jsonb_build_object('state', 'eligible', 'batch_id', p_batch_id);
   end if;
   select c.enabled into enabled from public.chips_settled_retention_control c where c.control_id;
@@ -143,9 +143,16 @@ begin
   return jsonb_build_object('state', 'expired', 'batch_id', p_batch_id, 'registry_deleted', deleted);
 end;
 $$;
+-- The non-superuser Production owner keeps its existing admin-only membership;
+-- add a temporary SET grant and schema CREATE for the ownership change (as E3).
+grant chips_ledger_archive_pruner to postgres with admin false, inherit true, set true granted by postgres;
+grant create on schema public to chips_ledger_archive_pruner;
 alter function public.chips_expire_archive_batch(text, bigint, timestamptz, boolean, text) owner to chips_ledger_archive_pruner;
+-- ACL changes need the owner's rights, so they run before the delegation ends.
 revoke all on function public.chips_expire_archive_batch(text, bigint, timestamptz, boolean, text) from public, anon, authenticated, service_role;
 grant execute on function public.chips_expire_archive_batch(text, bigint, timestamptz, boolean, text) to postgres;
+revoke create on schema public from chips_ledger_archive_pruner;
+revoke chips_ledger_archive_pruner from postgres granted by postgres;
 
 -- Small user-linked tables (US2, D6). One shared row budget per run; counts only.
 create function public.chips_settled_retention_12m_run(p_limit integer, p_cutoff timestamptz, p_execute boolean)
@@ -160,7 +167,7 @@ begin
   if p_limit is null or p_limit < 1 or p_limit > 5000 then
     raise exception using errcode = 'P8959', message = 'Settled retention limit must be 1..5000';
   end if;
-  if not p_execute then
+  if p_execute is not true then
     if pg_catalog.to_regclass('public.poker_gift_purchases') is not null then
       execute 'select count(*) from public.poker_gift_purchases g where g.created_at < $1
         and not exists (select 1 from public.poker_tables t where t.id = g.table_id and t.status <> ''CLOSED'')'

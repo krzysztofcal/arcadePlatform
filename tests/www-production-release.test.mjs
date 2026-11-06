@@ -339,3 +339,64 @@ test('release record workflow publishes one manifest asset and cannot reach any 
   const script = fs.readFileSync(new URL('../scripts/release-manifest.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(script, /spawn|exec|fetch\(|writeFileSync\((?!'release-(manifest\.json|notes\.md)')/, 'the builder only reads files and writes the two outputs');
 });
+
+test('WS release approval: request checks, last confirmed deploy, scope and summary never claim unrun checks', async () => {
+  const { AFTER_APPROVAL, checkRequest, lastConfirmedDeploy, releaseScope, renderSummary } = await import('../scripts/ws-release-approval.mjs');
+  const target = 'd'.repeat(40);
+  const ok = { releaseSha: target, confirmation: `DEPLOY WS PRODUCTION ${target}`, githubSha: target, headSha: target, mainSha: target };
+  assert.equal(checkRequest(ok).length, 3);
+  for (const [field, value, reason] of [['releaseSha', 'D'.repeat(40), /full lowercase/], ['githubSha', sha, /dispatched main/], ['headSha', sha, /checkout/],
+    ['confirmation', `DEPLOY WS PRODUCTION ${sha}`, /phrase/], ['mainSha', sha, /main advanced/]]) assert.throws(() => checkRequest({ ...ok, [field]: value }), reason, field);
+
+  const job = (conclusion, startedAt, status = 'completed') => ({ name: 'deploy', status, conclusion, started_at: startedAt });
+  const current = { id: 30, head_sha: target, status: 'in_progress', jobs: [job(null, null, 'waiting')] };
+  const done = { id: 20, head_sha: ws, status: 'completed', jobs: [job('success', '2026-11-05T10:00:00Z')] };
+  const older = { id: 10, head_sha: sha, status: 'completed', jobs: [job('success', '2026-11-01T10:00:00Z')] };
+  assert.deepEqual(lastConfirmedDeploy([current, done, older], 30, [current]), { sha: ws, runId: 20 }, 'the run being approved is left out');
+  assert.equal(lastConfirmedDeploy([current, done, older], 99, [current]), null, 'another unfinished run gives no evidence');
+  assert.equal(lastConfirmedDeploy([current, done, older], 30, [current, { id: 5, status: 'waiting' }]), null, 'an unfinished run beyond the recent page counts');
+  assert.equal(lastConfirmedDeploy([{ ...done, jobs: [job('failure', '2026-11-05T10:00:00Z')] }, older], 30, []), null, 'a failed newest deploy is not a confirmed release');
+  assert.equal(lastConfirmedDeploy(null, 30, []), null);
+  assert.equal(lastConfirmedDeploy([done], 30, null), null, 'unknown unfinished runs give no evidence');
+
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-approval-'));
+  const git = (args) => spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+  const commit = (file, text, message) => {
+    fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    fs.writeFileSync(path.join(repo, file), text);
+    git(['add', '-A']);
+    git(['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', message]);
+    return git(['rev-parse', 'HEAD']).stdout.trim();
+  };
+  git(['init', '-q']);
+  fs.mkdirSync(path.join(repo, '.github/workflows'), { recursive: true });
+  fs.copyFileSync('.github/workflows/ws-server-deploy.yml', path.join(repo, '.github/workflows/ws-server-deploy.yml'));
+  const a = commit('ws-server/server.mjs', 'one\n', 'base');
+  const b = commit('README.md', 'docs\n', 'docs only | `x` <b> [Approve](https://example.com) ![i](https://example.com/i.png)');
+  const c = commit('ws-server/server.mjs', 'two\n', 'ws change');
+  const wf = commit('.github/workflows/ws-server-deploy.yml', `${fs.readFileSync('.github/workflows/ws-server-deploy.yml', 'utf8')}# build change\n`, 'workflow only');
+  assert.deepEqual(releaseScope(a, a, git), { relation: 'same', commits: [], commitCount: 0, wsFiles: [] });
+  const docs = releaseScope(a, b, git);
+  assert.equal(docs.relation, 'ahead');
+  assert.equal(docs.commitCount, 1);
+  assert.deepEqual(docs.wsFiles, [], 'a docs commit changes no packaged WS file');
+  const change = releaseScope(a, c, git);
+  assert.equal(change.commitCount, 2);
+  assert.deepEqual(change.wsFiles, ['ws-server/server.mjs']);
+  assert.deepEqual(releaseScope(c, wf, git).wsFiles, ['.github/workflows/ws-server-deploy.yml'], 'a deploy workflow change is a WS input change');
+  assert.equal(releaseScope(c, a, git).relation, 'not_ancestor');
+  assert.throws(() => releaseScope('e'.repeat(40), c, git), /scope_unknown/);
+
+  const input = { releaseSha: c, actor: 'arcade-code-agent[bot]', triggeringActor: 'arcade-code-agent[bot]', runId: '30', attempt: '1', checks: checkRequest({ ...ok, releaseSha: c, confirmation: `DEPLOY WS PRODUCTION ${c}`, githubSha: c, headSha: c, mainSha: c }) };
+  const text = renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: change });
+  for (const part of [`## Approve only if expected: WS Production release ${c}`, `| Last confirmed deploy | \`${a}\` (run 20). GitHub evidence`, 'not read from the VPS',
+    '2 commit(s) since the last confirmed deploy; 1 WS input file(s) changed', '- `ws-server/server.mjs`', '- NOT RUN YET', 'the impact and validate jobs succeeded (their logs show which steps ran)', ...AFTER_APPROVAL]) assert.ok(text.includes(part), part);
+  assert.match(text, /\n- `[a-f0-9]{12}` `docs only x b \[Approve\]\(https:\/\/example\.com\) !\[i\]\(https:\/\/example\.com\/i\.png\)`\n/, 'a subject is one closed code span');
+  assert.doesNotMatch(text, /PASS|<b>|\| `x`|^- `[a-f0-9]{12}` [^`]/m, 'no unrun check is reported as passed and no subject renders as Markdown');
+  assert.match(renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: docs }), /no WS input file changed \(packaged files and the deploy workflow\); the artifact is rebuilt, not compared/);
+  assert.match(renderSummary({ ...input, last: null, scope: null }), /\| Last confirmed deploy \| unknown: [^|]+\|\n\| Scope \| unknown: /);
+  assert.match(renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: null, scopeError: true }), /\| Scope \| unknown: the history/);
+  assert.match(renderSummary({ ...input, last: { sha: c, runId: 20 }, scope: releaseScope(c, a, git) }), /NOT an ancestor/);
+  assert.throws(() => renderSummary({ ...input, actor: 'a b', last: null }), /invalid_summary_input/);
+  fs.rmSync(repo, { recursive: true, force: true });
+});

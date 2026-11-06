@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -865,6 +866,181 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
   }
 });
 
+// GitHub answers come from a fake curl; the script is written to a temporary destination owned by the current user.
+const NEW_SCRIPT = "#!/usr/bin/env bash\nset -euo pipefail\necho new\n";
+function dispatcherInstallFixture({ run = {}, main, script = NEW_SCRIPT, published = NEW_SCRIPT, downloadExit = 0, state = {}, extra = {} } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-dispatcher-"));
+  const dest = path.join(dir, "arcade-chips-ledger-production-dispatch.sh");
+  fs.writeFileSync(dest, "#!/usr/bin/env bash\necho old\n", { mode: 0o755 });
+  const commit = "a".repeat(40);
+  const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
+  const urls = [];
+  const admin = fakeAdminHost(state, extra);
+  const source = "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh";
+  const blob = crypto.createHash("sha1").update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest("hex");
+  const host = {
+    ...admin.host,
+    dispatcher: { source, dest, uid: process.getuid(), gid: process.getgid() },
+    run(argv) {
+      if (argv[0] !== "/usr/bin/curl") return admin.host.run(argv);
+      const url = argv.at(-1);
+      urls.push(url);
+      if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
+      if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+      if (url.endsWith(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: "file", path: source, sha: blob }) };
+      if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
+        if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
+        return { status: downloadExit, stdout: "" };
+      }
+      return { status: 22, stdout: "" };
+    },
+  };
+  return { dir, dest, commit, host, urls, admin };
+}
+
+test("VPS admin installs the Production dispatcher only from the approved run's current main commit and leaves the timers stopped", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "ledger-production-dispatcher-install";
+  const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const stopped = (fx) => fx.admin.calls.filter((c) => c.startsWith("stop") || c.startsWith("start"));
+  const ok = dispatcherInstallFixture();
+  try {
+    const result = runOperation(op, "41700000020", ok.host);
+    const installed = fs.readFileSync(ok.dest, "utf8");
+    assert.equal(installed, "#!/usr/bin/env bash\nset -euo pipefail\necho new\n");
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${ok.commit} sha256=${hash(installed)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_stopped reload:no`);
+    assert.equal(fs.statSync(ok.dest).mode & 0o777, 0o755);
+    assert.deepEqual(stopped(ok), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"], "paused, never resumed");
+    assert.deepEqual(fs.readdirSync(ok.dir), [path.basename(ok.dest)], "no temporary file is left");
+    assert.match(ok.admin.audits[1], new RegExp(`result=ok detail=installed commit=${ok.commit} sha256=`));
+  } finally {
+    fs.rmSync(ok.dir, { recursive: true, force: true });
+  }
+
+  // Refused before anything changes: no timer stopped, no download, old script kept.
+  for (const [label, options, line] of [
+    ["main advanced", { main: "b".repeat(40) }, "main_advanced"],
+    ["feature branch", { run: { head_branch: "feature" } }, "run_not_main_vps_admin_dispatch"],
+    ["other workflow", { run: { path: ".github/workflows/infra-vps.yml" } }, "run_not_main_vps_admin_dispatch"],
+    ["finished run", { run: { status: "completed" } }, "run_not_main_vps_admin_dispatch"],
+    ["other run id", { run: { id: 1 } }, "run_not_main_vps_admin_dispatch"],
+    ["unreadable main", { main: "not-a-sha" }, "unverifiable_github_main"],
+  ]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, `ADMIN_BLOCKED ${op} ${line}`, label);
+      assert.deepEqual(stopped(fx), [], label);
+      assert.equal(fx.urls.some((u) => u.startsWith("https://raw.githubusercontent.com/")), false, label);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", label);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  const unknownRun = dispatcherInstallFixture();
+  try {
+    assert.equal(runOperation(op, "41700000021", unknownRun.host).line, `ADMIN_BLOCKED ${op} unverifiable_github_run`);
+  } finally {
+    fs.rmSync(unknownRun.dir, { recursive: true, force: true });
+  }
+
+  // After the pause: a failed or unexpected download keeps the old script and the timers stopped.
+  for (const [options, line] of [[{ downloadExit: 22 }, `ADMIN_FAILED ${op} download timers_left_stopped`],
+    [{ script: "<html>rate limited</html>" }, `ADMIN_BLOCKED ${op} unexpected_script timers_left_stopped`],
+    [{ script: "#!/usr/bin/env bash\necho tampered\n" }, `ADMIN_BLOCKED ${op} content_mismatch timers_left_stopped`]]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, line);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+      assert.equal(stopped(fx).length, 2);
+      assert.deepEqual(fs.readdirSync(fx.dir), [path.basename(fx.dest)]);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  // An error after the rename is reported with the ids and the read-back state, never as a bare failure.
+  const late = dispatcherInstallFixture();
+  try {
+    late.host.rename = (from, to) => { fs.renameSync(from, to); throw new Error("after rename"); };
+    const line = runOperation(op, "41700000020", late.host).line;
+    assert.equal(line, `ADMIN_FAILED ${op} install replaced=yes commit=${late.commit} sha256=${hash(NEW_SCRIPT)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_left_stopped`);
+    assert.match(late.admin.audits[1], /result=failed detail=install replaced=yes commit=/);
+  } finally {
+    fs.rmSync(late.dir, { recursive: true, force: true });
+  }
+  const early = dispatcherInstallFixture();
+  try {
+    early.host.rename = () => { throw new Error("rename failed"); };
+    assert.match(runOperation(op, "41700000020", early.host).line, new RegExp(`^ADMIN_FAILED ${op} install replaced=no commit=${early.commit} sha256=`));
+    assert.equal(fs.readFileSync(early.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(early.dir, { recursive: true, force: true });
+  }
+  // A failed stop of the first timer still stops the second, and nothing is installed.
+  const stopFails = dispatcherInstallFixture({ state: { "exit:stop arcade-chips-ledger-dispatch.timer": 1 } });
+  try {
+    assert.equal(runOperation(op, "41700000020", stopFails.host).line, `ADMIN_FAILED ${op} stop_arcade-chips-ledger-dispatch.timer`);
+    assert.deepEqual(stopped(stopFails), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"]);
+    assert.equal(fs.readFileSync(stopFails.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(stopFails.dir, { recursive: true, force: true });
+  }
+  const busy = dispatcherInstallFixture({ state: { "arcade-chips-ledger-production-dispatch.service:ActiveState": "activating" } });
+  try {
+    assert.match(runOperation(op, "41700000020", busy.host).line, new RegExp(`^ADMIN_BLOCKED ${op} timeout_timers_left_stopped `));
+    assert.equal(fs.readFileSync(busy.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", "a running dispatcher is never replaced");
+  } finally {
+    fs.rmSync(busy.dir, { recursive: true, force: true });
+  }
+});
+
+test("VPS admin approval summary describes every catalog operation from reviewed code, never from the reason", async () => {
+  const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
+  const { APPROVAL, checkCatalog, approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
+  checkCatalog();
+  assert.deepEqual(Object.keys(APPROVAL), Object.keys(OPERATIONS), "one description per helper operation, same order");
+  assert.throws(() => checkCatalog({ ...OPERATIONS, "new-operation": () => ({}) }), /approval_catalog_mismatch/);
+  const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
+  assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
+  assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status"], "only the status read is read-only");
+  assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
+  assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
+
+  const request = { operation: "ledger-dispatchers-pause", reason: "Pause dispatchers for the T004-3 cutover (step 4)", sha: "a".repeat(40),
+    actor: "arcade-code-agent[bot]", triggeringActor: "arcade-code-agent[bot]", runId: "42223180928", attempt: "1" };
+  const text = approvalSummary(request);
+  for (const part of ["## Approve only if expected: ledger-dispatchers-pause", "CHANGES THE VPS", `| Revision | \`${"a".repeat(40)}\` (main) |`,
+    "| Requested by | `arcade-code-agent[bot]`, triggered by `arcade-code-agent[bot]` |", APPROVAL["ledger-dispatchers-pause"].risk,
+    APPROVAL["ledger-dispatchers-pause"].rollback, "environment vps-admin", "Nothing has run on the VPS yet"]) assert.ok(text.includes(part), part);
+  assert.match(text, /Requester's reason \(free text, not part of the reviewed description\): `Pause dispatchers/);
+  assert.doesNotMatch(text, /ADMIN_OK ledger|PASS/);
+  for (const [field, value] of [["operation", "rm-rf"], ["reason", "ok\n## Approved"], ["reason", "see `x` now ok"], ["sha", "abc"], ["actor", "a b"], ["runId", "0"]]) {
+    assert.throws(() => approvalSummary({ ...request, [field]: value }), Error, field);
+  }
+});
+
+test("Preview approval descriptions retain the stopped-service and recovery limits", async () => {
+  const { approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
+  const request = { reason: "Inspect reviewed Preview isolation request", sha: "b".repeat(40),
+    actor: "release-agent[bot]", triggeringActor: "release-agent[bot]", runId: "42223180929", attempt: "1" };
+  for (const operation of ["ws-preview-safe-stop", "ws-preview-isolation-preflight", "ws-preview-isolation-provision", "ws-preview-isolation-rollback"]) {
+    const text = approvalSummary({ ...request, operation });
+    assert.ok(text.includes(`## Approve only if expected: ${operation}`));
+    assert.match(text, /CHANGES THE VPS/);
+    assert.match(text, /Nothing has run on the VPS yet/);
+    assert.match(text, /stopped|stopping/);
+    assert.match(text, /separate/i);
+  }
+  const stop = approvalSummary({ ...request, operation: "ws-preview-safe-stop" });
+  assert.match(stop, /uncertain outcome is FAILED/);
+  assert.match(stop, /not an automatic retry/);
+  const preflight = approvalSummary({ ...request, operation: "ws-preview-isolation-preflight" });
+  assert.match(preflight, /temporary policy-validation files/);
+  const provision = approvalSummary({ ...request, operation: "ws-preview-isolation-provision" });
+  assert.match(provision, /daemon-reload re-reads all changed VPS unit files/);
+  assert.match(provision, /one-use safe-stop receipt/);
+});
+
 test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
   const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
   const catalog = Object.keys(OPERATIONS);
@@ -886,8 +1062,12 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
   const request = workflow.slice(workflow.indexOf("\n  request:\n"), workflow.indexOf("\n  operate:\n"));
   const operate = workflow.slice(workflow.indexOf("\n  operate:\n"));
   assert.doesNotMatch(request, /environment:|secrets\./, "the summary job has no environment and no secret");
-  assert.match(request, /GITHUB_STEP_SUMMARY/);
-  for (const field of ["operation: \\`$OPERATION\\`", "reason: \\`$REASON\\`", "revision: \\`$GITHUB_SHA\\`", "requested by: \\`$GITHUB_ACTOR\\`"]) assert.ok(request.includes(field), field);
+  // The reviewed description is rendered only after the inputs passed the bash checks, from main's own code.
+  assert.ok(request.indexOf("[[ \"$REASON\" =~ $REASON_RE ]]") < request.indexOf("node infra/vps/vps-admin-approval.mjs"));
+  assert.match(request, /uses: actions\/checkout@v4\n        with:\n          persist-credentials: false\n/);
+  assert.match(workflow, /^run-name: "VPS Admin: \$\{\{ inputs\.operation \}\} \(requested by \$\{\{ github\.triggering_actor \}\}\)"$/m);
+  assert.match(request, /\n    name: "1\. Review request: \$\{\{ inputs\.operation \}\}"\n/);
+  assert.match(operate, /\n    name: "2\. Run on the VPS after approval: \$\{\{ inputs\.operation \}\}"\n/);
   assert.match(operate, /\n    needs: request\n/);
   assert.match(operate, /\n    environment: vps-admin\n/);
   assert.doesNotMatch(operate, /GITHUB_STEP_SUMMARY/);

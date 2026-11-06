@@ -136,3 +136,25 @@ approved maintenance runs; no cron is added. Expected result payload is well und
 1 KiB/proof (estimate, not measured billed Shared Pooler egress); TLS/protocol and
 the existing maintenance endpoint size add overhead. SQL still scans relevant
 financial state server-side; the five-second statement timeout fails closed.
+
+## Main integration preparation (#1199)
+
+The integration carrier is Draft #1199, which already contains the accepted
+#1197 commit 312aba2a07863d65da29eece3d3bc437ff8f9b86. The #1197 branch and its
+exhausted review budget remain unchanged. Reconciliation with main preserves
+#1209's request summary, OWNER environment gate and requester checks, and the
+Production dispatcher install operation and retention changes already on main.
+The workflow choices, helper catalog, sudoers and approval descriptions contain
+the same ordered union. All four Preview descriptions mark VPS changes:
+preflight writes temporary policy-validation files even without provisioning.
+
+This preparation installs nothing on the VPS. The installed catalog may therefore
+lag the repository: separately approved trusted installation and hash/metadata
+verification remain required before any operation is requested. The Preview
+runtime counters also require their separately approved exact-SHA rollout before
+safe-stop proofs can pass. Requester/OWNER separation, existing DRAIN, Stage/DB
+identity and receipt gates remain mandatory. No automatic start, retry, recovery
+or activation is introduced; Google Play, Privacy and other PR integrations are
+outside this change. Existing operation names and inputs are unchanged. A catalog
+update must keep the four repository catalogs consistent and does not authorize
+any operation merely by merging code.

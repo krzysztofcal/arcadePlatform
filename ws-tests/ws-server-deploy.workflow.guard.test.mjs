@@ -35,7 +35,7 @@ test("workflow separates validate and deploy with dependency gating", () => {
   assert.match(text, /validate:/);
   assert.match(text, /deploy:/);
   assert.doesNotMatch(text, /validate:\n\s+if: github\.event_name == 'pull_request'/);
-  assert.match(text, /deploy:\n\s+needs: \[impact, validate\]/);
+  assert.match(text, /deploy:\n\s+needs: \[impact, validate, request\]/);
   assert.match(text, /needs\.impact\.outputs\.deploy_ws == 'true'/);
   assert.match(text, /\n  push:\n\s+branches: \[ main \]/);
   assert.match(text, /\n  workflow_dispatch:\n\s+inputs:\n\s+releaseSha:[\s\S]*?required: true[\s\S]*?confirmation:[\s\S]*?required: true/);
@@ -123,7 +123,7 @@ test("the WS release receipt is recorded last, only after a verified release, an
 
 test("main push with WS deploy surface reports that Production was not deployed", () => {
   const text = workflowText();
-  const validate = text.slice(text.indexOf("  validate:"), text.indexOf("  deploy:"));
+  const validate = text.slice(text.indexOf("  validate:"), text.indexOf("\n  request:\n"));
   assert.match(validate, /if: \$\{\{ github\.event_name == 'push' && needs\.impact\.outputs\.deploy_ws == 'true' \}\}[\s\S]*?WS Production was NOT deployed/);
 });
 
@@ -175,4 +175,23 @@ test("approved release runs prepare → switching → gated restart → resume o
   assert.match(abort.body, /ABORTED\*\)[^\n]*\n\s+\*\) echo "STOP: hold kept; owner decision \(C7\)"; exit 1 ;;/);
   // Play never reopens unconditionally.
   assert.doesNotMatch(deploy, /always\(\)|continue-on-error/);
+});
+
+test("an unprivileged request job shows the release before ws-production approval and gates the deploy", () => {
+  const text = workflowText();
+  const request = text.slice(text.indexOf("\n  request:\n"), text.indexOf("\n  deploy:\n"));
+  const deploy = text.slice(text.indexOf("\n  deploy:\n"));
+  const condition = (job) => job.match(/\n    if: \$\{\{ (.+) \}\}\n/)[1];
+  assert.equal(condition(request), condition(deploy), "the request job runs exactly when the deploy job would");
+  assert.match(request, /\n    needs: \[impact, validate\]\n/);
+  assert.match(deploy, /^\n  deploy:\n    needs: \[impact, validate, request\]\n/);
+  assert.match(request, /\n    permissions:\n      contents: read\n      actions: read\n    steps:\n/);
+  assert.doesNotMatch(request, /environment:|secrets\.|ssh-action|scp-action|continue-on-error|always\(\)/, "no VPS path before approval");
+  assert.match(request, /persist-credentials: false/);
+  assert.match(request, /GH_TOKEN: \$\{\{ github\.token \}\}\n          RELEASE_SHA_INPUT: \$\{\{ inputs\.releaseSha \}\}\n          RELEASE_CONFIRMATION: \$\{\{ inputs\.confirmation \}\}\n        run: node scripts\/ws-release-approval\.mjs\n/);
+  // The deploy job keeps its own authorize step after the approval and keeps the name Release Record relies on.
+  assert.match(deploy, /\n    environment: ws-production\n/);
+  assert.match(deploy, /name: Authorize exact approved main release[\s\S]*?\[\[ "\$MAIN_HEAD" == "\$RELEASE_SHA_INPUT" \]\]/);
+  assert.doesNotMatch(deploy.slice(0, deploy.indexOf("    steps:")), /\n    name:/);
+  assert.match(text, /^run-name: \$\{\{ github\.event_name == 'workflow_dispatch' && format\('WS Production release \{0\} \(requested by \{1\}\)', inputs\.releaseSha, github\.triggering_actor\) \|\| '' \}\}$/m);
 });

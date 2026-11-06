@@ -596,6 +596,32 @@ async function assertProductionSettledRetentionInstall(sql) {
   assert.deepEqual([state.enabled, state.expired, state.registry, state.batch_9000], [false, 0, 3, "not_eligible"],
     "install is dark and a batch younger than 12 months is never eligible");
   await assert.rejects(() => sql.unsafe("select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, now() - interval '1 day', false, null);"), /only on canonical Stage/);
+  // #1157 T051 review: p_execute NULL is a dry run, even with the control
+  // enabled and an eligible batch and request. Rolled back.
+  const nullRollback = new Error("production null execute fixture rollback");
+  await assert.rejects(() => sql.begin(async (tx) => {
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe("update public.chips_ledger_archive_batches set first_created_at = now() - interval '14 months', last_created_at = now() - interval '13 months' where batch_id = 9000;");
+    const [table] = await tx.unsafe("select id from public.poker_tables limit 1;");
+    assert.ok(table, "fixture needs a poker table");
+    await tx.unsafe(`insert into public.poker_requests (table_id, user_id, request_id, kind, result_json, created_at)
+      values ($1::uuid, gen_random_uuid(), 'r-null-execute-old', 'JOIN', '{"ok":true}'::jsonb, now() - interval '13 months');`, [table.id]);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+    await tx.unsafe("update public.chips_settled_retention_control set enabled = true, activated_at = now() where control_id;");
+    const snapshot = async () => (await tx.unsafe(`select
+        (select objects_expired_at is null from public.chips_ledger_archive_batches where batch_id = 9000) as batch_live,
+        (select count(*)::int from public.chips_transaction_idempotency where archive_batch_id = 9000) as registry,
+        (select count(*)::int from public.poker_requests where request_id = 'r-null-execute-old') as old_request;`))[0];
+    const before = await snapshot();
+    assert.deepEqual(before, { batch_live: true, registry: 3, old_request: 1 });
+    const [result] = await tx.unsafe(`select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, null, null, null) as expire,
+      public.chips_settled_retention_12m_run(5000, null, null) as run;`);
+    assert.equal(result.expire.state, "eligible", "NULL execute on an eligible batch only reports it");
+    assert.equal(result.run.state, "diagnosed", "NULL execute only counts table rows");
+    assert.ok(Number(result.run.poker_requests) >= 1);
+    assert.deepEqual(await snapshot(), before, "NULL execute mutates nothing");
+    throw nullRollback;
+  }), (error) => error === nullRollback);
   await assert.rejects(() => sql.unsafe(install), /own migration absent/);
   await sql.unsafe("rollback;");
   await sql.unsafe("set chips.production_settled_retention_confirmation = '';");
@@ -683,6 +709,77 @@ async function assertDisposableRoleFixtureCluster(sql, env = process.env) {
     from pg_catalog.pg_control_system()`);
   assert.equal(cluster?.system_identifier,env.CHIPS_MIGRATIONS_EXPECTED_SYSTEM_IDENTIFIER,"Disposable cluster identity mismatch");
   assert.equal(cluster?.postgres_password_is_md5,false,"Refusing to rename an MD5-password role, even in a disposable cluster");
+}
+
+// #1157 T050 regression: Supabase runs migrations as a non-superuser postgres.
+// The ownership transfer to the archive pruner must carry its own temporary
+// membership and schema CREATE grant, and must leave both as it found them.
+async function assertSettledRetentionOwnerTransferAsNonSuperuser(sql) {
+  await assertDisposableRoleFixtureCluster(sql);
+  const signature = "public.chips_expire_archive_batch(text,bigint,timestamptz,boolean,text)";
+  const block = (file, dir) => {
+    const text = fs.readFileSync(path.join(process.cwd(), dir, file), "utf8");
+    const match = text.match(/^grant chips_ledger_archive_pruner to postgres[^;]*;\n[\s\S]*?^revoke chips_ledger_archive_pruner from postgres[^;]*;$/m);
+    assert.ok(match, `${file}: pruner ownership transfer block`);
+    assert.match(match[0], /owner to chips_ledger_archive_pruner;/);
+    return match[0];
+  };
+  const blocks = [
+    block("20261105160000_chips_settled_retention_12m.sql", "supabase/migrations"),
+    block("20261105160500_chips_settled_retention_12m_production_contract.sql", "supabase/production-migrations"),
+  ];
+  const password = crypto.randomBytes(24).toString("hex");
+  await sql.unsafe(`create role chips_settled_fixture_admin login superuser password '${password}'`);
+  const adminUrl = new URL(dbUrl); adminUrl.username = "chips_settled_fixture_admin"; adminUrl.password = password;
+  const admin = postgres(adminUrl.toString(), { max: 1, prepare: false });
+  const ownerUrl = new URL(dbUrl); ownerUrl.password = password;
+  let owner = null, renamed = false, created = false;
+  const [{ schema_owner: schemaOwner }] = await admin.unsafe("select nspowner::regrole::text schema_owner from pg_namespace where nspname='public'");
+  const state = async () => ({
+    owner: (await admin.unsafe("select proowner::regrole::text owner from pg_proc where oid=to_regprocedure($1)", [signature]))[0].owner,
+    membership: Array.from(await admin.unsafe("select grantor::regrole::text grantor,admin_option,inherit_option,set_option from pg_auth_members where roleid='chips_ledger_archive_pruner'::regrole and member=to_regrole('postgres') order by 1")),
+    create: (await admin.unsafe("select has_schema_privilege('chips_ledger_archive_pruner','public','CREATE') allowed"))[0].allowed,
+    execute: Array.from(await admin.unsafe(`select coalesce(nullif(a.grantee, 0)::regrole::text, 'PUBLIC') grantee from pg_proc p,
+      aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid=to_regprocedure($1) and a.privilege_type='EXECUTE'
+      and coalesce(nullif(a.grantee, 0)::regrole::text, 'PUBLIC') in ('PUBLIC','anon','authenticated','service_role','postgres')`, [signature])).map((row) => row.grantee).sort(),
+  });
+  try {
+    await admin.unsafe("alter role postgres rename to chips_settled_fixture_bootstrap"); renamed = true;
+    await admin.unsafe(`create role postgres login nosuperuser inherit password '${password}'`); created = true;
+    await admin.unsafe("alter schema public owner to postgres");
+    await admin.unsafe("revoke create on schema public from chips_ledger_archive_pruner");
+    await admin.unsafe("grant chips_ledger_archive_pruner to postgres with admin true, inherit false, set false");
+    owner = postgres(ownerUrl.toString(), { max: 1, prepare: false });
+    assert.equal((await owner.unsafe("select rolsuper from pg_roles where rolname=current_user"))[0].rolsuper, false);
+    for (const [index, sqlBlock] of blocks.entries()) {
+      await admin.unsafe(`alter function ${signature} owner to postgres`);
+      // Re-open the API so the block must close it with the owner's rights.
+      await admin.unsafe(`grant execute on function ${signature} to public, anon, authenticated, service_role`);
+      await admin.unsafe(`revoke execute on function ${signature} from postgres`);
+      const baseline = await state();
+      assert.deepEqual(baseline.execute, ["PUBLIC", "anon", "authenticated", "service_role"]);
+      assert.equal(baseline.owner, "postgres");
+      assert.equal(baseline.create, false);
+      const withoutDelegation = sqlBlock.split("\n").filter((line) => !line.startsWith("grant ")).join("\n");
+      await assert.rejects(() => owner.begin((tx) => tx.unsafe(withoutDelegation)), /must be able to SET ROLE|must be member|permission denied/,
+        `block ${index}: the ownership transfer needs the temporary delegation`);
+      assert.deepEqual(await state(), baseline, `block ${index}: a failed transfer leaks nothing`);
+      await owner.begin((tx) => tx.unsafe(sqlBlock));
+      assert.deepEqual(await state(), { ...baseline, owner: "chips_ledger_archive_pruner", execute: ["postgres"] },
+        `block ${index}: transfer succeeds, closes the API and restores membership and schema CREATE`);
+    }
+  } finally {
+    if (owner) await owner.end({ timeout: 5 });
+    await admin.unsafe(`alter function ${signature} owner to chips_ledger_archive_pruner`);
+    if (created) {
+      await admin.unsafe(`alter schema public owner to ${schemaOwner === "postgres" ? "chips_settled_fixture_bootstrap" : schemaOwner}`);
+      await admin.unsafe("revoke chips_ledger_archive_pruner from postgres cascade");
+      await admin.unsafe("drop owned by postgres; drop role postgres");
+    }
+    if (renamed) await admin.unsafe("alter role chips_settled_fixture_bootstrap rename to postgres");
+    await admin.end({ timeout: 5 });
+    await sql.unsafe("drop role chips_settled_fixture_admin");
+  }
 }
 
 // Only the disposable local PG16+ service is allowed to change fixture roles.
@@ -5057,6 +5154,7 @@ async function main() {
   await assertEscrowDryRunReadOnlyConcurrency(sql);
   await assertDeletionDriverReceipts(sql);
   await assertSettledRetention12mContracts(sql);
+  await assertSettledRetentionOwnerTransferAsNonSuperuser(sql);
   await runProductionEquivalentFixture(sql);
   // This already-authorized disposable DB fixture also isolates XP from Redis.
   process.env.XP_TEST_MODE = "1";

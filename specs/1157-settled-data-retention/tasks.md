@@ -22,10 +22,16 @@
 
 ## Phase 3 — Workflows (owner push)
 
-- [ ] T030 Add `retention-12m` to the policy choices in `.github/workflows/chips-ledger-production-scheduled-automation.yml` and the Stage scheduled automation workflow; extend the existing workflow guard tests.
+- [x] T030 Add `retention-12m` to the policy choices in `.github/workflows/chips-ledger-production-scheduled-automation.yml` (modes `diagnostic`, `canary`, `automatic`; no cutoff). Stage gets its own owner-dispatch workflow `.github/workflows/chips-ledger-stage-settled-retention.yml` in the `chips-ledger-stage-automation` concurrency group: the Stage automation workflow already has 10 dispatch inputs, and a separate job keeps its `stage-archive` condition unchanged. Guard tests extended in `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs`.
 
-- [ ] T031 `infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh`: daily `03:39` slot for `retention-12m`; extend `ws-tests/infra-vps-workflow.guard.test.mjs` (slot selects only `retention-12m`, and other slots are unchanged). Install through root on demand: T032.
+- [x] T031 `infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh`: daily `03:39` slot for `retention-12m`, before `??:39`; escrow skips only that hour and keeps its other 23 hourly runs. The existing Production slot test lives in `tests/chips/chips-ledger-stage-automation.workflow.guard.test.mjs` (it asserted `03:39` = escrow), so it is extended there instead of adding a second one to `ws-tests/infra-vps-workflow.guard.test.mjs`: `03:39` selects `retention-12m`, `02:39`/`04:39` still escrow, other slots unchanged. Not active on the VPS until installed through root on demand: T032.
 - [ ] T032 Separate reviewed PR: VPS Admin operation `ledger-production-dispatcher-install` (see plan). Available after the one-time helper reinstall (`infra/vps/stage-vps-admin.sh`) and the release-agent App activation; it is reusable for later dispatcher changes.
+  - **Implemented:** `ledger-production-dispatcher-install` in `infra/vps/vps-admin.mjs`, the workflow choice and `infra/vps/arcade-admin.sudoers`; fundamental test in `ws-tests/infra-vps-workflow.guard.test.mjs`. The root helper itself verifies the run (in-progress `VPS Admin Operation` dispatch on `main`) and that `main` still points at its commit, then pauses, downloads the script from that commit, checks it against the file's git object id from the contents API before replacing anything, and records commit and SHA-256. Resume stays the separate `ledger-dispatchers-resume`.
+  - **Deployment blockers (read-only check 2026-11-06):**
+    - Helper: the installed `/usr/local/sbin/arcade-vps-admin` equals current `main` (SHA-256 `6434a63d…390a`) and has no install operation. After merge the owner runs `infra/vps/stage-vps-admin.sh` once as root from the merged `main`; there is no catalog operation for that.
+    - Release-agent App: no evidence that it is active. Every `workflow_dispatch` run in the last 100 was by the owner, `vars.WS_RELEASE_AGENT` is not readable by the agent's App (403) and that App (`arcade-code-agent`) has Actions read only, so the agent cannot request the operation. The request is an owner dispatch.
+    - `vps-admin` environment: required reviewer owner, prevent self-review on, `main` only. The owner-dispatched run `42117356356` was nevertheless approved by the owner and succeeded, so an owner dispatch plus owner approval works in practice.
+  - **Rollout (each step a separate owner GO):** merge T031 and T032 → `stage-vps-admin.sh` as root → dispatch `ledger-production-dispatcher-install` (`RUN ledger-production-dispatcher-install`) and approve → check `ADMIN_OK … sha256=` equals `sha256sum` of the script on `main` → `ledger-dispatchers-resume` → `ledger-dispatchers-status`.
 
 ## Phase 4 — Docs and evidence
 
@@ -34,5 +40,25 @@
 
 ## Phase 5 — Rollout (each step a separate owner GO)
 
-- [ ] T050 Stage: diagnostic, then one capped automatic run; verify objects absent by HEAD/not-found only.
+- [x] T050 Stage: diagnostic, then one capped automatic run; verify objects absent by HEAD/not-found only. Done 2026-11-05 (owner: T050 Stage PASS); every step was an owner dispatch or owner SQL with a separate GO. **Owner exception:** no HEAD/not-found request was made; the evidence of absence is the metadata check and the DELETE result below.
+  - **Apply source.** The Stage history held three profile migrations from the open Draft PRs #1155/#1160 that `main` lacks, and the unchanged executor fails closed on them (`unknown_remote_migration`). Owner decision: apply from the Draft PR #1201, which carries byte-identical copies of only those three files, verified against the Stage history SHA-256 values. The approval listed only `20261105160000`. #1201 is closed without merge once this record is accepted, and the copies never reach `main`.
+  - **Apply 1** (run `42110915806`): `stage_sql_failed`, rolled back. Inspect `42111502460` showed Stage unchanged. Cause: the pruner ownership transfer needs a temporary delegation for the non-superuser Supabase `postgres`. Fixed in #1202, which also ran the function ACL before the delegation ends and applies the same fix to the Production contract; a non-superuser regression test was added.
+  - **Apply 2** (run `42116230654`, source `ab5430c4`, migration SHA-256 `f63cd59a…45f0`): `COMMITTED_OR_VERIFIED_NOOP`, history 121 → 122 rows (`329ed7b7…fc8b`, the expected fingerprint). Inspect `42116598479`: nothing pending.
+  - **Diagnostic.**
+    - Default 12-month cutoff (run `42116637584`): 0 batches, 0 table rows.
+    - Stage-only cutoff `2026-11-01` (run `42116948845`): 10 batches (capped), 1,661,897 B; 83 gifts, 529 poker requests, 2 deletion requests.
+  - **Canary.**
+    - Canary 1 (run `42117647674`) failed before any DELETE: the Stage Storage target lacked the DB URL. Fixed in #1203.
+    - Canary 2 (run `42119577000`, batch `6`, cutoff `2026-11-01`): 3 objects deleted, 2 registry rows deleted, `objects_expired_at` set.
+    - Supporting check only, not the required HEAD/not-found: a read-only `storage.objects` metadata query shows 0 of 3 objects for batch 6, while batch 7 (control) still has 3 of 3. Together with the canary's DELETE result (`objectsDeleted: 3`) this is consistent with the deletion, but it does not replace the HEAD/not-found responses.
+    - **Owner decision (2026-11-05):** T050 Stage PASS without a separate HEAD request. The agent holds no Stage service-role key, and the owner accepted the metadata check and the DELETE result as sufficient.
+  - **Capped automatic run** (one-off). The owner enabled the control by SQL at 22:53 UTC. Run `42125480846` (`automatic`, default cutoff, no override) returned `complete`, `expired: []`, tables 0/0/0. The control was disabled again at 22:58 UTC.
+    - Read-only check afterwards: control OFF (`activated_at` null), still 1 expired batch, 0 eligible, oldest data unchanged.
+  - **Follow-up (separate task).** Reconcile the `main` migration catalog with the Stage history permanently, by merging #1155/#1160 or by an owner decision. Until then every Stage apply from `main` hits the same block.
 - [ ] T051 Production: apply the production-migration equivalent, diagnostic, one canary of 1 batch, then enable the policy. Install the T031 dispatcher through the T032 VPS Admin request; the owner's `vps-admin` approval is the GO.
+  - **Apply** (2026-11-06 00:03 UTC, owner `psql` on the VPS, `ON_ERROR_STOP`): `20261105160500_chips_settled_retention_12m_production_contract.sql` from `main` `8a536d4e`, SHA-256 `ef87c295…1db8` checked first, with the owner confirmation settings. An earlier agent attempt through the Supabase MCP was interrupted; a read-only check showed nothing applied (69 history rows, no control table) before the owner run. Result `COMMIT`. Read-only check: history 69 → 70 rows with `20261105160500`; control `enabled=false`, `activated_at` null; the four functions have the expected owners, `SECURITY DEFINER` flags and `EXECUTE` grants (none for `public`, `anon`, `authenticated`, `service_role`); the temporary pruner delegation and schema `CREATE` are revoked again.
+  - **Diagnostic** (run `42141537560`, `main` `8a536d4e`): `diagnosed`, `controlEnabled: false`, 0 archive batches, 0 B; gifts 0, poker requests 0, deletion requests 0 (cutoff `2025-11-06`).
+  - **Canary not run.** No Production batch is older than 12 months, so there was no batch for a canary with a real DELETE. **Owner decision (2026-11-06):** enable without a Production canary. The first real expiry will therefore be an automatic run; the Stage canary (T050) is the only DELETE evidence.
+  - **Activation:** the owner enabled the control by SQL under the Production retention advisory lock at 2026-11-06 01:10:56 UTC (`enabled=true`, `activated_at` set; verified read-only).
+  - **Automatic** (run `42185756097`): PASS, `complete`, `expired: []`, tables `executed` 0/0/0.
+  - **Open:** the `03:39` dispatcher slot (T031) is not installed on the VPS yet; until the T032 install, `retention-12m` runs only on an owner dispatch.
