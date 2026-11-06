@@ -21,7 +21,7 @@ No percentage improvement is claimed: the samples are few and not matched pairs.
 | --- | --- | --- |
 | WS Production release | automatic on a `main` push, no approval | run [41606535297](https://github.com/krzysztofcal/arcadePlatform/actions/runs/41606535297): owner dispatch, `ws-production` approval, restart gate; 219s total, validate 154s, deploy 41s |
 | Root operation on the VPS | owner pastes prepared root commands in an interactive session | runs [42223180928](https://github.com/krzysztofcal/arcadePlatform/actions/runs/42223180928), [42225018370](https://github.com/krzysztofcal/arcadePlatform/actions/runs/42225018370), [42226390939](https://github.com/krzysztofcal/arcadePlatform/actions/runs/42226390939): requested by `arcade-code-agent[bot]`, one owner approval each, 2–4s request and 7–11s on the VPS; 157–290s from request to result, almost all of it the owner's approval |
-| Stage migration apply | a side effect of Draft → Ready | runs 42109960749, 42111502460, 42114784436, 42116230654, 42116598479 (2026-11-05): explicit main-definition dispatch, job `apply-stage` success |
+| Stage migration apply | a side effect of Draft → Ready | explicit main-definition owner dispatches (2026-11-05): read-only inspect runs 42109960749, 42111502460, 42114784436, 42116598479; apply run 42116230654 success after a failed attempt 42110915806 |
 
 ## Open
 

@@ -8,7 +8,8 @@ Scoped record for the independent main-based PR1; approved full design is mainta
 - [x] Remove password URL/SQL from process argv; suppress private error/NOTICE output; retire unsafe alternate DB Stage Prepare executor.
 - [x] Existing fundamental guards extended; isolated PostgreSQL17 integration (including real lock conflict/late rollback) and actionlint/local validation PASS.
 - [x] Superseded: PR1 is on `main` (`db-stage-apply-pr.yml` dispatch-only); the Draft-stage acceptance record was not kept, the real dispatches below are the evidence.
-- [x] Real main-definition Stage apply: runs 42109960749, 42111502460, 42114784436, 42116230654, 42116598479 (2026-11-05, #1157), job `apply-stage` success.
+- [x] Real main-definition Stage inspect (read-only): runs 42109960749, 42111502460, 42114784436, 42116598479 (2026-11-05, #1157), step `Read-only Stage inspect` success.
+- [x] Real main-definition Stage apply, dispatched by the owner (the workflow admits `apply` only for owner/owner): run 42116230654 success; an earlier attempt 42110915806 failed in `Apply exact approved set atomically` (#1157 follow-up fixes #1202/#1203).
 - [x] (Done in PR3 #1166; automatic run 42234126142 waited 25s for the matching Preview, no manual retry.) PR3 retained OWNER requirement: pending Netlify Preview must not routinely require manually retrying an APK build. Prefer one bounded read-only prerequisite wait for the same PR/sourceSHA/config before Gradle (e.g. up to10min/20s interval), recheck latest approved head and stop obsolete source. This polls deploy readiness, not repeated compilation/deploy. If genuinely timed out/failed/wrong-context, report NOT BUILT/failure honestly; no unbounded loop, new service or extra trigger framework. Test the pending→ready race fundamentally during PR3; do not implement it here.
 
 No environment settings, Stage/Production apply, Ready, merge, app deploy, Terms activation or Play publication in PR1. Existing manual release/WWW+WS cutover remain later coordinated scopes.
@@ -22,6 +23,7 @@ No environment settings, Stage/Production apply, Ready, merge, app deploy, Terms
 - [x] Draft PR #1163 required actionlint and Netlify Preview PASS at 24f0766a3ade7f64008557c7dc3d68373a4a7ec5; no native child acceptance implied.
 - [x] Effect observed 2026-11-06: #1160 (base `feat/1114-profiles-phase-a`) builds a native Preview of its own head; see the next item. The enrollment steps themselves are not re-audited here.
 - [x] Native #1155 → #1160 exact-SHA Netlify status: success on the child head `419f1185`; `build-info.js` names `PR #1160`, that commit and its own deploy id (`final-measurements.md`).
+- [ ] Stage identity of the #1160 Preview (its `build-info.js` does not show it; not verified on 2026-11-06).
 - [ ] Real Android CORS acceptance against the #1160 Preview (not re-verified on 2026-11-06).
 
 See `pr2-native-stacked-preview.md` for precise methods, configuration gates and breaking impact; `pr2-measurements.md` for partial baseline evidence. Future main merge can trigger WS deploy classification; no independent automatic-WS cutover is authorized.
