@@ -7,6 +7,7 @@
 // ADMIN_OK <operation> <details> | ADMIN_BLOCKED <operation> <reason> | ADMIN_FAILED <operation> <step>.
 // Nothing runs without a successful start entry, and a missing end entry is never reported as success.
 // A new operation is a reviewed code change here, in the workflow choice list and in arcade-admin.sudoers.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -17,6 +18,8 @@ const LEDGER = ["arcade-chips-ledger-dispatch", "arcade-chips-ledger-production-
 const IDLE = new Set(["inactive", "failed"]);
 const UNITS = LEDGER.flatMap((u) => [`${u}.service`, `${u}.timer`]);
 const PAUSE_DEADLINE_MS = 300000;
+const REPO = "krzysztofcal/arcadePlatform";
+const COMMIT = /^[0-9a-f]{40}$/;
 // Only values systemd documents for these properties are accepted; anything else is unverifiable.
 const EXPECTED = {
   User: /^[a-z_][a-z0-9_-]{0,31}$/,
@@ -34,6 +37,12 @@ const HOST = {
   lockFile: "/run/arcade-vps-admin.lock",
   requester: process.env.SUDO_USER || "root",
   rename: (from, to) => fs.renameSync(from, to),
+  // The reviewed Production dispatcher script; it is installed only from the exact main commit of the approved run.
+  dispatcher: {
+    source: "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh",
+    dest: "/usr/local/bin/arcade-chips-ledger-production-dispatch.sh",
+    uid: 0, gid: 0,
+  },
   // Verified files of the agent account that hold credentials or their recovery copies. They move into a root-only
   // quarantine kept for recovery; copilot cannot read them afterwards. Nothing else in copilot's home is touched.
   quarantine: {
@@ -244,6 +253,59 @@ function quarantineSnapshots(host, runId) {
   }
 }
 
+const curl = (host, url, extra = []) => host.run(["/usr/bin/curl", "-fsS", "--proto", "=https", "--max-time", "20", ...extra, url]);
+const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+
+// Installs the Production dispatcher script from GitHub at the commit of this run. The run must be the in-progress
+// VPS Admin workflow_dispatch on main and main must still point at that commit, so only reviewed main code is
+// installed. Both timers are paused first and stay stopped: resuming is the separate ledger-dispatchers-resume.
+// The result (and so the journal) records the commit and both SHA-256 values. Nothing is retried.
+function installProductionDispatcher(host, runId) {
+  const d = host.dispatcher;
+  const api = (route, accept) => curl(host, `https://api.github.com/repos/${REPO}/${route}`, ["-H", `Accept: ${accept}`]);
+  const response = api(`actions/runs/${runId}`, "application/vnd.github+json");
+  let run;
+  try {
+    run = response.status === 0 ? JSON.parse(response.stdout) : null;
+  } catch {
+    run = null;
+  }
+  if (!run) throw new Unverifiable("github_run");
+  if (String(run.id) !== String(runId) || run.path !== ".github/workflows/vps-admin-operation.yml" || run.event !== "workflow_dispatch"
+    || run.head_branch !== "main" || run.status !== "in_progress" || !COMMIT.test(String(run.head_sha))) return { ok: false, blocked: "run_not_main_vps_admin_dispatch" };
+  const main = api("commits/main", "application/vnd.github.sha");
+  if (main.status !== 0 || !COMMIT.test(main.stdout)) throw new Unverifiable("github_main");
+  if (main.stdout !== run.head_sha) return { ok: false, blocked: "main_advanced" };
+  const current = lstatOrNull(d.dest);
+  if (current && !current.isFile()) return { ok: false, blocked: "dest_not_regular_file" };
+
+  const paused = OPERATIONS["ledger-dispatchers-pause"](host);
+  if (!paused.ok) return paused;
+  const tmp = path.join(path.dirname(d.dest), `.${path.basename(d.dest)}.${runId}`);
+  try {
+    fs.rmSync(tmp, { force: true });
+    if (curl(host, `https://raw.githubusercontent.com/${REPO}/${run.head_sha}/${d.source}`, ["-o", tmp]).status !== 0) {
+      return { ok: false, failed: "download timers_left_stopped" };
+    }
+    const bytes = fs.readFileSync(tmp);
+    if (bytes.length > 65536 || !bytes.toString("utf8", 0, 20).startsWith("#!/usr/bin/env bash\n")) {
+      return { ok: false, blocked: "unexpected_script timers_left_stopped" };
+    }
+    const previous = current ? sha256(fs.readFileSync(d.dest)) : "none";
+    fs.chownSync(tmp, d.uid, d.gid);
+    fs.chmodSync(tmp, 0o755);
+    fsyncFd(fs.openSync(tmp, "r"), true);
+    host.rename(tmp, d.dest);
+    fsyncFd(fs.openSync(path.dirname(d.dest), O_DIR), true);
+    const reload = read(host, "arcade-chips-ledger-production-dispatch.service", "NeedDaemonReload");
+    return { ok: true, details: `installed commit=${run.head_sha} sha256=${sha256(bytes)} previous=${previous} timers_stopped reload:${reload}` };
+  } catch {
+    return { ok: false, failed: "install timers_left_stopped" };
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
 export const OPERATIONS = Object.freeze({
   "ledger-dispatchers-status": (host) => ({
     ok: true,
@@ -280,6 +342,7 @@ export const OPERATIONS = Object.freeze({
     ? { ok: true, details: "reloaded" }
     : { ok: false, failed: "daemon-reload" }),
   "copilot-secret-snapshots-quarantine": quarantineSnapshots,
+  "ledger-production-dispatcher-install": installProductionDispatcher,
 });
 
 function audit(host, fields) {

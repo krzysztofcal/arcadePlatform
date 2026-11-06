@@ -865,6 +865,102 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
   }
 });
 
+// GitHub answers come from a fake curl; the script is written to a temporary destination owned by the current user.
+function dispatcherInstallFixture({ run = {}, main, script = "#!/usr/bin/env bash\nset -euo pipefail\necho new\n", downloadExit = 0, state = {} } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-dispatcher-"));
+  const dest = path.join(dir, "arcade-chips-ledger-production-dispatch.sh");
+  fs.writeFileSync(dest, "#!/usr/bin/env bash\necho old\n", { mode: 0o755 });
+  const commit = "a".repeat(40);
+  const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
+  const urls = [];
+  const admin = fakeAdminHost(state);
+  const host = {
+    ...admin.host,
+    dispatcher: { source: "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh", dest, uid: process.getuid(), gid: process.getgid() },
+    run(argv) {
+      if (argv[0] !== "/usr/bin/curl") return admin.host.run(argv);
+      const url = argv.at(-1);
+      urls.push(url);
+      if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
+      if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+      if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
+        if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
+        return { status: downloadExit, stdout: "" };
+      }
+      return { status: 22, stdout: "" };
+    },
+  };
+  return { dir, dest, commit, host, urls, admin };
+}
+
+test("VPS admin installs the Production dispatcher only from the approved run's current main commit and leaves the timers stopped", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "ledger-production-dispatcher-install";
+  const crypto = await import("node:crypto");
+  const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const stopped = (fx) => fx.admin.calls.filter((c) => c.startsWith("stop") || c.startsWith("start"));
+  const ok = dispatcherInstallFixture();
+  try {
+    const result = runOperation(op, "41700000020", ok.host);
+    const installed = fs.readFileSync(ok.dest, "utf8");
+    assert.equal(installed, "#!/usr/bin/env bash\nset -euo pipefail\necho new\n");
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${ok.commit} sha256=${hash(installed)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_stopped reload:no`);
+    assert.equal(fs.statSync(ok.dest).mode & 0o777, 0o755);
+    assert.deepEqual(stopped(ok), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"], "paused, never resumed");
+    assert.deepEqual(fs.readdirSync(ok.dir), [path.basename(ok.dest)], "no temporary file is left");
+    assert.match(ok.admin.audits[1], new RegExp(`result=ok detail=installed commit=${ok.commit} sha256=`));
+  } finally {
+    fs.rmSync(ok.dir, { recursive: true, force: true });
+  }
+
+  // Refused before anything changes: no timer stopped, no download, old script kept.
+  for (const [label, options, line] of [
+    ["main advanced", { main: "b".repeat(40) }, "main_advanced"],
+    ["feature branch", { run: { head_branch: "feature" } }, "run_not_main_vps_admin_dispatch"],
+    ["other workflow", { run: { path: ".github/workflows/infra-vps.yml" } }, "run_not_main_vps_admin_dispatch"],
+    ["finished run", { run: { status: "completed" } }, "run_not_main_vps_admin_dispatch"],
+    ["other run id", { run: { id: 1 } }, "run_not_main_vps_admin_dispatch"],
+    ["unreadable main", { main: "not-a-sha" }, "unverifiable_github_main"],
+  ]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, `ADMIN_BLOCKED ${op} ${line}`, label);
+      assert.deepEqual(stopped(fx), [], label);
+      assert.equal(fx.urls.some((u) => u.startsWith("https://raw.githubusercontent.com/")), false, label);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", label);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  const unknownRun = dispatcherInstallFixture();
+  try {
+    assert.equal(runOperation(op, "41700000021", unknownRun.host).line, `ADMIN_BLOCKED ${op} unverifiable_github_run`);
+  } finally {
+    fs.rmSync(unknownRun.dir, { recursive: true, force: true });
+  }
+
+  // After the pause: a failed or unexpected download keeps the old script and the timers stopped.
+  for (const [options, line] of [[{ downloadExit: 22 }, `ADMIN_FAILED ${op} download timers_left_stopped`],
+    [{ script: "<html>rate limited</html>" }, `ADMIN_BLOCKED ${op} unexpected_script timers_left_stopped`]]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, line);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+      assert.equal(stopped(fx).length, 2);
+      assert.deepEqual(fs.readdirSync(fx.dir), [path.basename(fx.dest)]);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  const busy = dispatcherInstallFixture({ state: { "arcade-chips-ledger-production-dispatch.service:ActiveState": "activating" } });
+  try {
+    assert.match(runOperation(op, "41700000020", busy.host).line, new RegExp(`^ADMIN_BLOCKED ${op} timeout_timers_left_stopped `));
+    assert.equal(fs.readFileSync(busy.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", "a running dispatcher is never replaced");
+  } finally {
+    fs.rmSync(busy.dir, { recursive: true, force: true });
+  }
+});
+
 test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
   const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
   const catalog = Object.keys(OPERATIONS);
