@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import test from 'node:test';
 
 const root = process.cwd();
 const source = fs.readFileSync(path.join(root, 'poker/poker.js'), 'utf8');
@@ -13,7 +14,7 @@ function makeElement(id){
     textContent: '',
     value: '0',
     className: '',
-    classList: { add(){}, remove(){}, contains(){ return false; } },
+    classList: { add(){}, remove(){}, toggle(){}, contains(){ return false; } },
     disabled: false,
     dataset: {},
     style: {},
@@ -254,6 +255,12 @@ function loadLobbyHarness(options = {}){
     const welcomeHeading = makeElement('welcomeHeading');
     elements.pokerWelcomeBonusBanner.querySelector = (selector) => selector === 'strong' ? welcomeHeading : null;
   }
+  if (options.mobileNav) {
+    for (const id of ['pokerModesView','pokerTablesView','pokerProgressionView','dailyDialog','dailyClaim','dailyProgress','dailyReset','dailySuccess','dailySignIn','dailyDisclaimer']) elements[id] = makeElement(id);
+    elements.dailyDialog.querySelectorAll = () => [];
+    elements.dailyDialog.showModal = () => { elements.dailyDialog.open = true; };
+    elements.dailyDialog.close = () => { elements.dailyDialog.open = false; (elements.dailyDialog._listeners.close || []).forEach(fn => fn()); };
+  }
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
   elements.pokerBuyIn.value = '100';
@@ -379,6 +386,13 @@ function loadLobbyHarness(options = {}){
   sandbox.window.atob = sandbox.atob;
   sandbox.window.btoa = sandbox.btoa;
 
+  if (options.mobileNav) {
+    sandbox.window.MOBILE_POKER_CONFIG = {};
+    sandbox.window.location.hash = options.hash || '#modes';
+    sandbox.document.dispatchEvent = event => (documentEvents[event.type] || []).forEach(fn => fn(event));
+    sandbox.CustomEvent = function(type, init){ this.type = type; this.detail = init && init.detail; };
+    sandbox.window.ChipsClient = options.chips || null;
+  }
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: 'poker/poker.js' });
 
@@ -392,6 +406,8 @@ function loadLobbyHarness(options = {}){
     getRequestLobbySnapshotCalls: () => requestLobbySnapshotCalls,
     getSessionStorage: (key) => sandbox.window.sessionStorage.getItem(key),
     getLocationHref: () => sandbox.window.location.href,
+    mobileView: () => sandbox.document.body.dataset.mobileLobbyView,
+    navigateMobile(view){ sandbox.window.location.hash = '#' + view; (windowEvents.hashchange || []).forEach(fn => fn()); },
     advanceTime(ms){
       nowMs += Math.max(0, Number(ms) || 0);
       flushTimers();
@@ -708,3 +724,23 @@ for (const scenario of ['A-B', 'A-B-A', 'logout', 'A-B-reject']){
     assert.equal(harness.elements.pokerWelcomeBonusBanner.hidden, !eligible, scenario + ': only fresh eligibility is applied');
   }
 }
+
+
+test('mobile lobby destinations use actual auth-gated view and Bonus opening never claims', async () => {
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  for (const authenticated of [false, true]) {
+    let claims = 0;
+    const h = loadLobbyHarness({mobileNav:true, hash:'#tables', getAccessToken:async()=>authenticated?'token':null,
+      chips:{fetchWelcomeBonusStatus:async()=>null,fetchBonusCampaigns:async()=>({items:[],dailyBonus:{eligible:true,alreadyClaimed:false,code:'daily',serverNow:new Date().toISOString(),nextEligibleAt:new Date(Date.now()+60000).toISOString()}}), claimBonusCampaign:async()=>{claims++;return {alreadyClaimed:true};}}});
+    await settle();
+    assert.equal(h.mobileView(), authenticated?'tables':'modes');
+    h.navigateMobile('progression');assert.equal(h.mobileView(),authenticated?'progression':'modes');
+    h.navigateMobile('bonus');await settle();
+    assert.equal(h.elements.dailyDialog.open,true);assert.equal(h.mobileView(),'bonus');assert.equal(claims,0);
+    assert.equal(h.elements.dailyClaim.disabled,!authenticated);
+    if(authenticated){ h.elements.dailyClaim.click(); await settle(); assert.equal(claims,1); }
+    h.elements.dailyDialog.close();assert.equal(h.mobileView(),'modes');
+    h.navigateMobile('modes');assert.equal(h.mobileView(),'modes');
+    h.navigateMobile('invalid');assert.equal(h.mobileView(),'modes');assert.equal(claims,authenticated?1:0);
+  }
+});
