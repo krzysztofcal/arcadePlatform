@@ -9,14 +9,19 @@ This patch is based on #1160 source `419f1185dd472b26b90374a13e3f94d16c1d4267`. 
 - Onboarding uses the version returned by the existing policy for BOTH Terms and Privacy; the API's `privacyUrl` now points to the corresponding versioned file. No active version or acceptance behavior is changed. Adding a2 files to an APK does not activate a2.
 - The APK includes aliases plus both a1/a2 document pairs in PL/EN. Legal documents retain “Arcade Hub” and the full approved service scope; the existing Poker branding substitution remains only on nonlegal pages. Static Account links still use current aliases, not a silently activated a2.
 
-## Prepared external deletion-request URL
+## Existing Account as the external deletion-request URL
 
-After separately approved WWW publication, the existing policy can be linked directly:
+Use `https://play.kcswh.pl/account.html#account-deletion` for the future Play Console account-deletion URL after the actual published path is accepted. No new page or deletion mechanism is added. This choice supersedes the earlier proposal to use a Privacy anchor as the primary Console destination; Privacy remains supporting disclosure only.
 
-- `https://play.kcswh.pl/legal/privacy.pl.html#account-deletion`
-- `https://play.kcswh.pl/legal/privacy.en.html#account-deletion`
+A public anonymous GET of the current `/account.html` returned200 and confirmed the existing sign-in form and Delete account button. Source inspection shows that the button belongs to the signed-in Account panel, uses the existing owner-authenticated deletion endpoint and requires no native APK bridge. Browser authentication is independent of the uninstalled APK. No live login or deletion was attempted in this follow-up.
 
-Only a stable anchor is added to the already existing deletion section. The existing Account link and contact email remain the request paths. No new page, API, form or deletion executor. The same anchor is available in versioned a2 Privacy for later publication. These are prepared addresses, NOT a claim that the new anchor/a2 is already served or accepted by Play. The actual public destination must be checked before entering it in Console; when a2 is authorized, align the chosen policy/URL with the final app identity and backend behavior.
+The concrete discoverability gaps were the lack of a public deletion entry point and explicit Arcade Poker identity before sign-in. A short always-visible bilingual section at the top of the SAME Account page now identifies the app, explains sign-in -> Delete account -> confirmation, warns that this is the shared account, and links to existing sign-in and contact. It neither creates a second button/executor nor sends a deletion request itself. The existing signed-in Delete account button remains the sole UI executor.
+
+Google requires a functional web resource with a prominent request path and app/developer identity, independent of reinstalling the APK. An authenticated Account flow can serve this purpose; a separate deletion page or new API is not mandated. Source: https://support.google.com/googleplay/android-developer/answer/13327111?hl=en (checked2026-11-06).
+
+The current public page does not yet contain this new section/anchor. Therefore the prepared Console value is not being represented as a fully accepted deployed flow or as already saved in Console. Before Console entry, verify the approved published Account page, browser sign-in/recovery and actual backend deletion availability without requiring an APK or new Terms acceptance. Keep Production/backend/retention and publication gates; do not infer full lifecycle success from static HTML or mocked tests. No Console connection is configured in the available tools.
+
+The existing Privacy deletion anchors remain useful supporting links and a2 content is unchanged. No new page, API, native app requirement or extra deletion implementation.
 
 ## Validation and impact
 
