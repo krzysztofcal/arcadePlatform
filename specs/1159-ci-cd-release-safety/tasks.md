@@ -21,7 +21,7 @@ No environment settings, Stage/Production apply, Ready, merge, app deploy, Terms
 - [x] Fundamental local regression tests; readonly platform configuration gaps and secret isolation blockers documented.
 - [x] Available historical timing/manual-operation evidence collected; T001 baseline remains partial, not DONE.
 - [x] Draft PR #1163 required actionlint and Netlify Preview PASS at 24f0766a3ade7f64008557c7dc3d68373a4a7ec5; no native child acceptance implied.
-- [x] Effect observed 2026-11-06: #1160 (base `feat/1114-profiles-phase-a`) builds a native Preview of its own head; see the next item. The enrollment steps themselves are not re-audited here.
+- [ ] Separate OWNER GO for compatible parent/child code propagation, isolated branch credentials and exact parent enrollment: no evidence collected on 2026-11-06 (a working child Preview does not prove these).
 - [x] Native #1155 → #1160 exact-SHA Netlify status: success on the child head `419f1185`; `build-info.js` names `PR #1160`, that commit and its own deploy id (`final-measurements.md`).
 - [ ] Stage identity of the #1160 Preview (its `build-info.js` does not show it; not verified on 2026-11-06).
 - [ ] Real Android CORS acceptance against the #1160 Preview (not re-verified on 2026-11-06).
