@@ -1,4 +1,4 @@
-import { accountDeletionEnabled, assertAccountActive } from "../../../shared/account-deletion.mjs";
+import { assertAccountActive } from "../../../shared/account-deletion.mjs";
 import { beginSql } from "./supabase-admin.mjs";
 
 // #1140 UGC phase B: user reports and private blocks. A report names a target by profile handle (profile page) or
@@ -50,10 +50,12 @@ async function resolveTarget(tx, target) {
   return row;
 }
 
+// Every UGC operation needs an existing account with no deletion request, whether or not new deletions are
+// currently accepted (ACCOUNT_DELETION_ENABLED): an account already in deletion never reports or blocks.
+// public.account_deletion_requests precedes this feature in the migration history.
 function inTransaction(deps, actorId, work) {
-  const env = deps.env || process.env;
   return (deps.beginSql || beginSql)(async (tx) => {
-    if (accountDeletionEnabled(env)) await assertAccountActive(tx, actorId);
+    await assertAccountActive(tx, actorId);
     return work(tx);
   });
 }

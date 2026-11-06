@@ -109,15 +109,18 @@ test("account deletion cascades blocks and reports about the user and forgets a 
   assert.equal((await executeSql("select count(*)::int n from private.user_blocks where $1 in (blocker_user_id, blocked_user_id)", [target.id]))[0].n, 0);
 });
 
-test("an account in deletion cannot report, block, list or unblock once the lifecycle is enabled", async () => {
+test("an account in deletion cannot report, block, list or unblock, whether or not new deletions are enabled", async () => {
   const leaving = await user(); const target = await user();
   await executeSql("insert into public.account_deletion_requests(old_user_id) values($1)", [leaving.id]);
-  const lifecycle = { ...deps, env: { ACCOUNT_DELETION_ENABLED: "1" } };
-  await assert.rejects(createReport(leaving.id, { targetUserId: target.id, reason: "spam", context: "profile" }, lifecycle), (error) => error.code === "account_not_active");
-  await assert.rejects(blockUser(leaving.id, { targetUserId: target.id }, lifecycle), (error) => error.code === "account_not_active");
-  await assert.rejects(listBlocks(leaving.id, lifecycle), (error) => error.code === "account_not_active");
-  await assert.rejects(unblockUser(leaving.id, target.id, lifecycle), (error) => error.code === "account_not_active");
-  assert.equal((await createReport(target.id, { targetUserId: leaving.id, reason: "spam", context: "profile" }, lifecycle)).status, "reported");
+  for (const lifecycle of [{ ...deps, env: { ACCOUNT_DELETION_ENABLED: "1" } }, { ...deps, env: {} }]) {
+    await assert.rejects(createReport(leaving.id, { targetUserId: target.id, reason: "spam", context: "profile" }, lifecycle), (error) => error.code === "account_not_active");
+    await assert.rejects(blockUser(leaving.id, { targetUserId: target.id }, lifecycle), (error) => error.code === "account_not_active");
+    await assert.rejects(listBlocks(leaving.id, lifecycle), (error) => error.code === "account_not_active");
+    await assert.rejects(unblockUser(leaving.id, target.id, lifecycle), (error) => error.code === "account_not_active");
+  }
+  assert.equal((await createReport(target.id, { targetUserId: leaving.id, reason: "spam", context: "profile" }, deps)).status, "reported", "others can still report that account");
+  const gone = randomUUID();
+  await assert.rejects(blockUser(gone, { targetUserId: target.id }, deps), (error) => error.code === "account_not_active", "a deleted auth user cannot act");
 });
 
 function event(method, body, extra = {}) {
