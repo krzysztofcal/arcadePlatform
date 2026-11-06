@@ -59,3 +59,8 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [x] OWNER GO 2 (2026-10-31): #1169 merged as `3fe60fc5` without a Netlify marker. The main Git Production build was skipped by `ignore`: deploy record `6ae5a688d0733085c009316b` (`production`, `state=error`, "Canceled build due to no content change", no files or functions, never published; permalink answers 500). Published deploy still `6ae52b31a745a6e69b60b668`, `locked=true`, `stop_builds=false`, no build hooks. Push workflows all success; WS Server Deploy validate SUCCESS, deploy SKIPPED (`deploy_ws=false`, so no notice). PR Preview built with this `ignore` on `d14c1b91`; no PR Preview after the merge yet.
 - [ ] OWNER GO 3/4: OWNER-only build hook; first release with WS compatibility decision, recorded receipt and restore/lock behavior.
 - [ ] OPEN: historical permalink exposure / visitor protection; WS `/healthz` release SHA; redirects and function digest coverage.
+
+## T004: agent-initiated, owner-approved WS Production operations
+
+- [x] T4 done (WS Production `d49ce068`, gated). Revised spec, plan and PR split: `t004/spec.md`, `t004/plan.md`, `t004/tasks.md`. Approval is the `ws-production` environment; the agent and the VPS release account are separate identities; `prepare`/`resume` live in the existing gate.
+- [ ] T004-1, T004-2 and the one-time setup per `t004/tasks.md`, each under separate OWNER GO.
