@@ -127,8 +127,10 @@ const signedIn = async () => ({ valid: true, userId: "00000000-0000-4000-8000-00
 
 test("report endpoint: signed-in only, dark by default, rate limited and failing closed", async () => {
   assert.equal(ugcSafetyEnabled({}), false);
-  assert.equal(ugcSafetyEnabled({ CONTEXT: "deploy-preview" }), true);
-  assert.equal(ugcSafetyEnabled({ UGC_SAFETY_ENABLED: "0", CONTEXT: "deploy-preview" }), false);
+  assert.equal(ugcSafetyEnabled({ CONTEXT: "deploy-preview" }), false, "never inferred from the context");
+  assert.equal(ugcSafetyEnabled({ UGC_SAFETY_ENABLED: "true" }), false);
+  assert.equal(ugcSafetyEnabled({ UGC_SAFETY_ENABLED: "1" }), true);
+  assert.equal((await createUgcReportHandler({ env: {}, verifySupabaseJwt: signedIn })({ ...event("POST", { targetHandle: "abc-1", reason: "spam", context: "profile" }), headers: { origin: "https://arcade.test", authorization: "Bearer t", host: "deploy-preview-1--playkcswh.netlify.app" } })).statusCode, 404, "a preview Host header does not enable writes");
   const calls = [];
   const make = (over = {}) => createUgcReportHandler({ env: { UGC_SAFETY_ENABLED: "1" }, verifySupabaseJwt: signedIn, allowReport: async () => true,
     createReport: async (id, body) => { calls.push([id, body]); return { status: "reported" }; }, ...over });

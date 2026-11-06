@@ -1250,7 +1250,7 @@
     {
       "file": "20261107120000_ugc_reports_blocks.sql",
       "version": "20261107120000",
-      "sha256": "cc949864ffd5aceb02891c1674310765bfce406c7feb2439a6af4b93c9acb499",
+      "sha256": "c6cd0e5f31ee7dbc841d275c2fb1fde95e3b0a9e86372637b493dbb5457a83b2",
       "category": "needs-production-equivalent",
       "purpose": "#1140 UGC phase B dark private report and block tables (no flag activation, empty tables); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
     }

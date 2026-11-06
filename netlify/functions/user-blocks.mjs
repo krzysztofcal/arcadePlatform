@@ -36,7 +36,7 @@ function createUserBlocksHandler(deps = {}) {
       if (!token) return json(401, cors, { error: "unauthorized" });
       const auth = await verifyJwt(token);
       if (!auth.valid || !auth.userId) return json(401, cors, { error: "unauthorized" });
-      if (!ugcSafetyEnabled(env, event)) return json(404, cors, { error: "not_found" });
+      if (!ugcSafetyEnabled(env)) return json(404, cors, { error: "not_found" });
       if (event.httpMethod === "GET") return json(200, cors, { blocks: await list(auth.userId) });
       let body = null;
       if (event.httpMethod === "POST") {

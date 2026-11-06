@@ -17,12 +17,10 @@ export function ugcError(code, status = 400) {
   return error;
 }
 
-// Dark by default: the endpoints answer only with UGC_SAFETY_ENABLED=1; deploy previews are on unless set.
-export function ugcSafetyEnabled(env = process.env, event = {}) {
-  if (Object.hasOwn(env, "UGC_SAFETY_ENABLED")) return env.UGC_SAFETY_ENABLED === "1";
-  if (env.CONTEXT === "deploy-preview" || env.NETLIFY_CONTEXT === "deploy-preview") return true;
-  const host = event.headers?.host || event.headers?.Host || "";
-  return /^deploy-preview-[a-z0-9-]+\.netlify\.app$/i.test(String(host).split(":")[0]);
+// Dark: the endpoints answer only with UGC_SAFETY_ENABLED=1, set explicitly per Netlify context (never inferred
+// from the request), so no write path opens before the owner enables it.
+export function ugcSafetyEnabled(env = process.env) {
+  return env.UGC_SAFETY_ENABLED === "1";
 }
 
 // Exactly one of targetUserId / targetHandle.

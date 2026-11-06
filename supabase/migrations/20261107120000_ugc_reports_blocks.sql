@@ -1,5 +1,5 @@
 -- #1140 UGC phase B: user reports and private blocks for WWW and the Android app. Additive and dark: the
--- endpoints answer only when UGC_SAFETY_ENABLED=1 (deploy previews on by default), so applying this creates
+-- endpoints answer only when UGC_SAFETY_ENABLED=1 is set explicitly for a Netlify context, so applying this creates
 -- empty tables and changes no existing row. Both tables are private: only the service connection reads them.
 -- Account deletion removes the auth user through the Admin API; the foreign keys cascade (blocks, reports about the
 -- user) or forget the reporter (set null), so they never block a deletion and keep no identity of a deleted user.

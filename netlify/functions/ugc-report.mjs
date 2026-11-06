@@ -34,7 +34,7 @@ function createUgcReportHandler(deps = {}) {
       if (!token) return json(401, cors, { error: "unauthorized" });
       const auth = await verifyJwt(token);
       if (!auth.valid || !auth.userId) return json(401, cors, { error: "unauthorized" });
-      if (!ugcSafetyEnabled(env, event)) return json(404, cors, { error: "not_found" });
+      if (!ugcSafetyEnabled(env)) return json(404, cors, { error: "not_found" });
       let body;
       try {
         body = JSON.parse(event.body || "null");

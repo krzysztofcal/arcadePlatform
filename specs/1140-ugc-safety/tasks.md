@@ -25,4 +25,4 @@
 
 ## Gates (owner)
 - [ ] Privacy/Terms and Data Safety text for reports, blocks, moderation and photo consent.
-- [ ] Activation of `UGC_SAFETY_ENABLED` outside previews only after phase C.
+- [ ] Owner config: `UGC_SAFETY_ENABLED=1` for the deploy-preview context to test (after the Stage apply); outside previews only after phase C.

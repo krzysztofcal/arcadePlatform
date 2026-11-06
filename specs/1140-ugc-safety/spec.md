@@ -25,7 +25,7 @@ login-required profiles, operator profile block) is the input; this spec adds ph
   automatically. Consent and withdrawal are recorded with time and version. No free upload, name edit or bio returns.
 - **R-SAFE (all).** Signed-in, active accounts only (account deletion lifecycle respected); private tables, no
   client role access; deletion of an account cascades its blocks and reports about it and forgets it as reporter.
-  Dark until enabled (`UGC_SAFETY_ENABLED=1`; deploy previews on). No WS, poker engine, ledger or settlement change.
+  Dark until enabled: only `UGC_SAFETY_ENABLED=1`, set explicitly per Netlify context (previews included). No WS, poker engine, ledger or settlement change.
 
 ## Out of scope
 
