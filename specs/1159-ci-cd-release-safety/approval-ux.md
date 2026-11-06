@@ -17,13 +17,14 @@ SHA and phrase checks ran only after it.
 - `ws-server-deploy.yml`: run name `WS Production release <sha> (requested by <actor>)` for dispatches only. A new
   unprivileged job `request` (`contents: read`, `actions: read`, no environment, no secret) runs exactly when
   `deploy` would, repeats the authorize checks (so a refused run stops before the approval) and renders
-  `scripts/ws-release-approval.mjs`: target, exact SHA, requester, last confirmed deploy, scope (commits and
-  packaged WS files changed), risk and downtime, side effects, way back. `deploy` needs it and keeps its name, its
+  `scripts/ws-release-approval.mjs`: target, exact SHA, requester, last confirmed deploy, scope (commits and WS
+  input files changed: packaged files and the deploy workflow; the artifact itself is rebuilt, not compared), risk
+  and downtime, side effects, way back. `deploy` needs it and keeps its name, its
   environment and its own authorize step after the approval.
 - Honesty limits: the last confirmed deploy is GitHub evidence (`latestWsDeploy`: newest deploy job on `main`
   succeeded, nothing unfinished), not a read of the VPS; with any unfinished run or unreadable history it is shown as
   unknown. Every deploy-job check after the approval is listed under `NOT RUN YET`; nothing is reported as passed
-  that has not run. Commit subjects and paths are rendered inert.
+  that has not run. Commit subjects and paths are shown only inside closed code spans, so no Markdown link or image renders.
 
 ## Where to read it before approving
 

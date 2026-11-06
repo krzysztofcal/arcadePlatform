@@ -50,7 +50,8 @@ export function lastConfirmedDeploy(runs, currentRunId) {
   return latestWsDeploy(runs.filter((run) => String(run.id) !== String(currentRunId)));
 }
 
-// Commit subjects and paths become inert code text: no backtick, pipe, angle bracket or line break survives.
+// Commit subjects and paths are shown only inside code spans, so no Markdown (links, images, emphasis) renders;
+// backticks, pipes, angle brackets and line breaks are removed so the span and the table cannot be closed.
 export const inert = (text, max = 120) => String(text).replace(/[`|<>\r\n\t]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
 export function releaseScope(fromSha, toSha, git) {
@@ -65,7 +66,8 @@ export function releaseScope(fromSha, toSha, git) {
   if (!Number.isInteger(commitCount)) fail('scope_unknown');
   const commits = run(['log', '--format=%H %s', `-${MAX_LIST}`, `${fromSha}..${toSha}`]).split('\n').filter(Boolean)
     .map((line) => ({ sha: line.slice(0, 40), subject: line.slice(41) }));
-  const paths = [...new Set([...wsPackagedPaths(run(['show', `${fromSha}:${WS_WORKFLOW}`])), ...wsPackagedPaths(run(['show', `${toSha}:${WS_WORKFLOW}`]))])];
+  // The deploy workflow itself builds and packages the artifact, so a change to it counts as a WS input change.
+  const paths = [...new Set([WS_WORKFLOW, ...wsPackagedPaths(run(['show', `${fromSha}:${WS_WORKFLOW}`])), ...wsPackagedPaths(run(['show', `${toSha}:${WS_WORKFLOW}`]))])];
   const wsFiles = run(['diff', '--name-only', fromSha, toSha, '--', ...paths]).split('\n').filter(Boolean);
   return { relation, commits, commitCount, wsFiles };
 }
@@ -80,12 +82,12 @@ export function renderSummary({ releaseSha, actor, triggeringActor, runId, attem
     if (scopeError || !scope) scopeText = 'unknown: the history between the two revisions could not be read';
     else if (scope.relation === 'same') scopeText = 'same SHA as the last confirmed deploy: a restart into the same release';
     else {
-      scopeText = `${scope.commitCount} commit(s) since the last confirmed deploy; ${scope.wsFiles.length ? `${scope.wsFiles.length} packaged WS file(s) changed` : 'no packaged WS file changed (the restart refreshes the same WS code)'}`;
+      scopeText = `${scope.commitCount} commit(s) since the last confirmed deploy; ${scope.wsFiles.length ? `${scope.wsFiles.length} WS input file(s) changed (packaged files or the deploy workflow)` : 'no WS input file changed (packaged files and the deploy workflow); the artifact is rebuilt, not compared'}`;
       if (scope.relation === 'not_ancestor') scopeText += '. The last confirmed deploy is NOT an ancestor of this SHA: compare carefully';
       lines.push('', `### Commits since the last confirmed deploy (newest first, at most ${MAX_LIST})`, '');
-      for (const c of scope.commits) lines.push(`- \`${c.sha.slice(0, 12)}\` ${inert(c.subject)}`);
+      for (const c of scope.commits) lines.push(`- \`${c.sha.slice(0, 12)}\` \`${inert(c.subject) || '(no subject)'}\``);
       if (scope.commitCount > scope.commits.length) lines.push(`- … ${scope.commitCount - scope.commits.length} more`);
-      lines.push('', '### Packaged WS files changed', '');
+      lines.push('', '### WS input files changed (packaged files and the deploy workflow)', '');
       if (!scope.wsFiles.length) lines.push('- none');
       for (const f of scope.wsFiles.slice(0, MAX_LIST)) lines.push(`- \`${inert(f, 200)}\``);
       if (scope.wsFiles.length > MAX_LIST) lines.push(`- … ${scope.wsFiles.length - MAX_LIST} more`);
@@ -148,7 +150,7 @@ async function main(env) {
   }
   fs.appendFileSync(env.GITHUB_STEP_SUMMARY, renderSummary({ releaseSha: env.RELEASE_SHA_INPUT, actor: env.GITHUB_ACTOR,
     triggeringActor: env.GITHUB_TRIGGERING_ACTOR, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, checks, last, scope, scopeError }));
-  const scopeNote = !last ? 'last confirmed deploy unknown' : scopeError ? 'scope unknown' : scope.relation === 'same' ? 'same SHA as the last confirmed deploy' : `${scope.commitCount} commit(s), ${scope.wsFiles.length} packaged WS file(s) changed`;
+  const scopeNote = !last ? 'last confirmed deploy unknown' : scopeError ? 'scope unknown' : scope.relation === 'same' ? 'same SHA as the last confirmed deploy' : `${scope.commitCount} commit(s), ${scope.wsFiles.length} WS input file(s) changed`;
   process.stdout.write(`::notice title=WS Production release ${env.RELEASE_SHA_INPUT}::Restarts Production WS (${scopeNote}). Read the request job summary before approving ws-production.\n`);
 }
 

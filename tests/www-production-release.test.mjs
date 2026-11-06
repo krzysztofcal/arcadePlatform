@@ -370,8 +370,9 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
   fs.mkdirSync(path.join(repo, '.github/workflows'), { recursive: true });
   fs.copyFileSync('.github/workflows/ws-server-deploy.yml', path.join(repo, '.github/workflows/ws-server-deploy.yml'));
   const a = commit('ws-server/server.mjs', 'one\n', 'base');
-  const b = commit('README.md', 'docs\n', 'docs only | `x` <b>');
+  const b = commit('README.md', 'docs\n', 'docs only | `x` <b> [Approve](https://example.com) ![i](https://example.com/i.png)');
   const c = commit('ws-server/server.mjs', 'two\n', 'ws change');
+  const wf = commit('.github/workflows/ws-server-deploy.yml', `${fs.readFileSync('.github/workflows/ws-server-deploy.yml', 'utf8')}# build change\n`, 'workflow only');
   assert.deepEqual(releaseScope(a, a, git), { relation: 'same', commits: [], commitCount: 0, wsFiles: [] });
   const docs = releaseScope(a, b, git);
   assert.equal(docs.relation, 'ahead');
@@ -380,14 +381,17 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
   const change = releaseScope(a, c, git);
   assert.equal(change.commitCount, 2);
   assert.deepEqual(change.wsFiles, ['ws-server/server.mjs']);
+  assert.deepEqual(releaseScope(c, wf, git).wsFiles, ['.github/workflows/ws-server-deploy.yml'], 'a deploy workflow change is a WS input change');
   assert.equal(releaseScope(c, a, git).relation, 'not_ancestor');
   assert.throws(() => releaseScope('e'.repeat(40), c, git), /scope_unknown/);
 
   const input = { releaseSha: c, actor: 'arcade-code-agent[bot]', triggeringActor: 'arcade-code-agent[bot]', runId: '30', attempt: '1', checks: checkRequest({ ...ok, releaseSha: c, confirmation: `DEPLOY WS PRODUCTION ${c}`, githubSha: c, headSha: c, mainSha: c }) };
   const text = renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: change });
   for (const part of [`## Approve only if expected: WS Production release ${c}`, `| Last confirmed deploy | \`${a}\` (run 20). GitHub evidence`, 'not read from the VPS',
-    '2 commit(s) since the last confirmed deploy; 1 packaged WS file(s) changed', '- `ws-server/server.mjs`', 'docs only x b', '- NOT RUN YET', ...AFTER_APPROVAL]) assert.ok(text.includes(part), part);
-  assert.doesNotMatch(text, /PASS|<b>|\| `x`/, 'no unrun check is reported as passed and commit subjects stay inert');
+    '2 commit(s) since the last confirmed deploy; 1 WS input file(s) changed', '- `ws-server/server.mjs`', '- NOT RUN YET', ...AFTER_APPROVAL]) assert.ok(text.includes(part), part);
+  assert.match(text, /\n- `[a-f0-9]{12}` `docs only x b \[Approve\]\(https:\/\/example\.com\) !\[i\]\(https:\/\/example\.com\/i\.png\)`\n/, 'a subject is one closed code span');
+  assert.doesNotMatch(text, /PASS|<b>|\| `x`|^- `[a-f0-9]{12}` [^`]/m, 'no unrun check is reported as passed and no subject renders as Markdown');
+  assert.match(renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: docs }), /no WS input file changed \(packaged files and the deploy workflow\); the artifact is rebuilt, not compared/);
   assert.match(renderSummary({ ...input, last: null, scope: null }), /\| Last confirmed deploy \| unknown: [^|]+\|\n\| Scope \| unknown: /);
   assert.match(renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: null, scopeError: true }), /\| Scope \| unknown: the history/);
   assert.match(renderSummary({ ...input, last: { sha: c, runId: 20 }, scope: releaseScope(c, a, git) }), /NOT an ancestor/);
