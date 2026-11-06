@@ -276,6 +276,8 @@ function loadLobbyHarness(options = {}){
   const windowEvents = {};
   const documentEvents = {};
   const timeoutTimers = [];
+  const intervalTimers = new Map();
+  const mobileNavEvents = [];
   const sessionStorageEntries = new Map();
   let nextTimeoutId = 1;
   let nextIntervalId = 1;
@@ -366,8 +368,8 @@ function loadLobbyHarness(options = {}){
       return timer.id;
     },
     clearTimeout: clearTimer,
-    setInterval: () => nextIntervalId++,
-    clearInterval: () => {},
+    setInterval: (fn, delay) => { const id = nextIntervalId++; intervalTimers.set(id, {fn, delay}); return id; },
+    clearInterval: id => intervalTimers.delete(id),
     navigator: { userAgent: 'node' },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     fetch: async (url, requestOptions) => {
@@ -390,7 +392,10 @@ function loadLobbyHarness(options = {}){
   if (options.mobileNav || options.dailyPanel) {
     if (options.mobileNav) sandbox.window.MOBILE_POKER_CONFIG = {};
     sandbox.window.location.hash = options.hash || '#modes';
-    sandbox.document.dispatchEvent = event => (documentEvents[event.type] || []).forEach(fn => fn(event));
+    sandbox.document.dispatchEvent = event => {
+      if (event.type === 'poker:lobby-view') mobileNavEvents.push(event.detail.view);
+      (documentEvents[event.type] || []).forEach(fn => fn(event));
+    };
     sandbox.CustomEvent = function(type, init){ this.type = type; this.detail = init && init.detail; };
     sandbox.window.ChipsClient = options.chips || null;
   }
@@ -408,6 +413,8 @@ function loadLobbyHarness(options = {}){
     getSessionStorage: (key) => sandbox.window.sessionStorage.getItem(key),
     getLocationHref: () => sandbox.window.location.href,
     mobileView: () => sandbox.document.body.dataset.mobileLobbyView,
+    mobileNavEventCount: () => mobileNavEvents.length,
+    fireInterval(delay){ [...intervalTimers.values()].filter(timer => timer.delay === delay).forEach(timer => timer.fn()); },
     navigateMobile(view){ sandbox.window.location.hash = '#' + view; (windowEvents.hashchange || []).forEach(fn => fn()); },
     advanceTime(ms){
       nowMs += Math.max(0, Number(ms) || 0);
@@ -760,4 +767,26 @@ test('WWW Daily Bonus entry reads status; only explicit Claim writes', async()=>
   h.elements.dailyClaim.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(claims,1);
   const before=reads;h.elements.dailyDialog.close();h.elements.dailyShortcut.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,before);assert.equal(claims,1);
   releaseClaim({alreadyClaimed:true});await new Promise(resolve=>setImmediate(resolve));
+});
+
+
+test('guest auth polling preserves Bonus and never republishes unchanged navigation', async()=>{
+  const settle=()=>new Promise(resolve=>setImmediate(resolve));
+  let authChecks=0;
+  const h=loadLobbyHarness({mobileNav:true,getAccessToken:async()=>{authChecks++;return null;}});
+  await settle();
+  const initialEvents=h.mobileNavEventCount();
+  h.fireInterval(3000);await settle();
+  assert.equal(h.mobileView(),'modes');assert.equal(h.mobileNavEventCount(),initialEvents);
+  h.navigateMobile('bonus');await settle();
+  const bonusEvents=h.mobileNavEventCount(),beforePolls=authChecks;
+  for(let i=0;i<3;i++){h.fireInterval(3000);await settle();}
+  assert.equal(authChecks,beforePolls+3,'the real registered auth timer must execute');
+  assert.equal(h.elements.dailyDialog.open,true);assert.equal(h.mobileView(),'bonus');
+  assert.equal(h.mobileNavEventCount(),bonusEvents,'no event means the shared bar is not rebuilt');
+  assert.equal(h.elements.dailyClaim.disabled,true,'guest cannot claim');
+  h.navigateMobile('tables');await settle();
+  assert.equal(h.mobileView(),'modes');assert.equal(h.elements.pokerTablesView.hidden,true,'auth guard still denies guest tables');
+  const deniedEvents=h.mobileNavEventCount();h.fireInterval(3000);await settle();
+  assert.equal(h.mobileNavEventCount(),deniedEvents);
 });

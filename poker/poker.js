@@ -1747,6 +1747,8 @@
     var mobileAuthReady = false;
     function setMobileLobbyView(view){
       if (!window.MOBILE_POKER_CONFIG) return;
+      if (view === 'modes' && dailyDialog && dailyDialog.open) view = 'bonus';
+      if (document.body.dataset.mobileLobbyView === view) return;
       document.body.dataset.mobileLobbyView = view;
       document.dispatchEvent(new CustomEvent('poker:lobby-view', {detail:{view:view}}));
     }
