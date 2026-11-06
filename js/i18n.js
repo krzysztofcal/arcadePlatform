@@ -165,6 +165,7 @@
     accountDeletionSending: { en: 'Sending request…', pl: 'Wysyłanie żądania…' },
     accountDeletionConfirm: { en: 'Your account will be permanently deleted. You will lose all CH (including Poker winnings), XP, achievements and profile data. This cannot be undone.', pl: 'Twoje konto zostanie trwale usunięte. Utracisz wszystkie CH (również wygrane w Pokerze), XP, osiągnięcia i dane profilu. Tej operacji nie można cofnąć.' },
     accountDeletionReceived: { en: 'We have received your account deletion request. You do not need to take any further action.', pl: 'Przyjęliśmy żądanie usunięcia konta. Nie musisz wykonywać żadnych dodatkowych czynności.' },
+    accountDeletionLookupFailed: { en: 'Could not check your account deletion status. No deletion request was sent by this attempt.', pl: 'Nie udało się sprawdzić statusu usuwania konta. Tym razem nie wysłano żądania usunięcia.' },
     accountDeletionUnavailable: { en: 'We could not confirm receipt of your request. Try again; any saved request continues automatically.', pl: 'Nie udało się potwierdzić przyjęcia żądania. Spróbuj ponownie; zapisane żądanie jest realizowane automatycznie.' },
     availableChipBonuses: { en: 'Available chip bonuses', pl: 'Dostępne bonusy żetonów' },
     claimBonus: { en: 'Claim bonus', pl: 'Odbierz bonus' },

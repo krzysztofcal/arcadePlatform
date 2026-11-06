@@ -56,8 +56,8 @@ test('approved legal content, both policy versions and deletion links survive th
     const account = await readFile(path.join(fixture, 'mobile/poker/www/account.html'), 'utf8');
     const deletionInfo = account.match(/<section\b[^>]*id="account-deletion"[^>]*>[\s\S]*?<\/section>/)?.[0];
     assert.ok(deletionInfo, 'existing Account must expose the external deletion-request entry point');
-    assert.doesNotMatch(deletionInfo.match(/^<section[^>]*>/)[0], /\bhidden\b/);
-    assert.ok(account.indexOf(deletionInfo) < account.indexOf('id="authForms"'), 'instructions must be visible before sign-in');
+    assert.match(deletionInfo.match(/^<section[^>]*>/)[0], /\bhidden\b/);
+    assert.ok(account.indexOf(deletionInfo) < account.indexOf('id="authForms"'), 'entry point stays before sign-in; account-page resolves its WWW-only visibility');
     assert.match(deletionInfo, /Arcade Poker/);
     assert.match(deletionInfo, /href="#signinForm"/);
     assert.match(deletionInfo, /href="mailto:contact@kcswh\.pl"/);
