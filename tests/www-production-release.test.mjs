@@ -390,7 +390,7 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
   const input = { releaseSha: c, actor: 'arcade-code-agent[bot]', triggeringActor: 'arcade-code-agent[bot]', runId: '30', attempt: '1', checks: checkRequest({ ...ok, releaseSha: c, confirmation: `DEPLOY WS PRODUCTION ${c}`, githubSha: c, headSha: c, mainSha: c }) };
   const text = renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: change });
   for (const part of [`## Approve only if expected: WS Production release ${c}`, `| Last confirmed deploy | \`${a}\` (run 20). GitHub evidence`, 'not read from the VPS',
-    '2 commit(s) since the last confirmed deploy; 1 WS input file(s) changed', '- `ws-server/server.mjs`', '- NOT RUN YET', ...AFTER_APPROVAL]) assert.ok(text.includes(part), part);
+    '2 commit(s) since the last confirmed deploy; 1 WS input file(s) changed', '- `ws-server/server.mjs`', '- NOT RUN YET', 'the impact and validate jobs succeeded (their logs show which steps ran)', ...AFTER_APPROVAL]) assert.ok(text.includes(part), part);
   assert.match(text, /\n- `[a-f0-9]{12}` `docs only x b \[Approve\]\(https:\/\/example\.com\) !\[i\]\(https:\/\/example\.com\/i\.png\)`\n/, 'a subject is one closed code span');
   assert.doesNotMatch(text, /PASS|<b>|\| `x`|^- `[a-f0-9]{12}` [^`]/m, 'no unrun check is reported as passed and no subject renders as Markdown');
   assert.match(renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: docs }), /no WS input file changed \(packaged files and the deploy workflow\); the artifact is rebuilt, not compared/);

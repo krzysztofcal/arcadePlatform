@@ -115,7 +115,7 @@ export function renderSummary({ releaseSha, actor, triggeringActor, runId, attem
     '',
     '### Checks',
     '',
-    '- Passed in this run before approval: impact, validate (WS tests and Docker build contract) and the request checks:',
+    '- Passed in this run before approval: the impact and validate jobs succeeded (their logs show which steps ran) and the request checks:',
     ...checks.map((c) => `  - ${c}`),
     '- NOT RUN YET: they run only after approval, in the deploy job:',
     ...AFTER_APPROVAL.map((c) => `  - ${c}`),
