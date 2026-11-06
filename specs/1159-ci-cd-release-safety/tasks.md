@@ -1,15 +1,16 @@
 # #1159 — PR1 implementation tasks and retained PR3 requirement
 
-Scoped record for the independent main-based PR1; approved full design is maintained in #1159 / reviewed SpecKit. Mechanism inventory does not complete the performance baseline: timing/manual-intervention measurements remain OPEN.
+Scoped record for the independent main-based PR1; approved full design is maintained in #1159 / reviewed SpecKit. Mechanism inventory does not complete the performance baseline; after-state measurements from existing runs: `final-measurements.md` (2026-11-06). Checkboxes below were re-checked against `main` and run history on 2026-11-06.
 
 - [x] PR1: dispatch-only trusted-main executor; PR provides approved SQL blobs only, no executable PR tooling.
 - [x] Exact source/project/system, history fingerprint/count, pending file/hash set and canonical operator confirmation; reject changed/fork source.
 - [x] Read-only inspect without CREATE/backfill; atomic operational batch/version/hash receipts, locks/timeouts, original-approval replay/no-op and preserved CH smoke.
 - [x] Remove password URL/SQL from process argv; suppress private error/NOTICE output; retire unsafe alternate DB Stage Prepare executor.
 - [x] Existing fundamental guards extended; isolated PostgreSQL17 integration (including real lock conflict/late rollback) and actionlint/local validation PASS.
-- [ ] Draft PR hosted checks and native Netlify Preview exactSHA acceptance; no cloud SQL dispatch.
-- [ ] Real main-definition Stage inspect/apply (separate OWNER GO; never part of Draft validation).
-- [ ] PR3 retained OWNER requirement: pending Netlify Preview must not routinely require manually retrying an APK build. Prefer one bounded read-only prerequisite wait for the same PR/sourceSHA/config before Gradle (e.g. up to10min/20s interval), recheck latest approved head and stop obsolete source. This polls deploy readiness, not repeated compilation/deploy. If genuinely timed out/failed/wrong-context, report NOT BUILT/failure honestly; no unbounded loop, new service or extra trigger framework. Test the pending→ready race fundamentally during PR3; do not implement it here.
+- [x] Superseded: PR1 is on `main` (`db-stage-apply-pr.yml` dispatch-only); the Draft-stage acceptance record was not kept, the real dispatches below are the evidence.
+- [x] Real main-definition Stage inspect (read-only): runs 42109960749, 42111502460, 42114784436, 42116598479 (2026-11-05, #1157), step `Read-only Stage inspect` success.
+- [x] Real main-definition Stage apply, dispatched by the owner (the workflow admits `apply` only for owner/owner): run 42116230654 success; an earlier attempt 42110915806 failed in `Apply exact approved set atomically` (#1157 follow-up fixes #1202/#1203).
+- [x] (Done in PR3 #1166; automatic run 42234126142 waited 25s for the matching Preview, no manual retry.) PR3 retained OWNER requirement: pending Netlify Preview must not routinely require manually retrying an APK build. Prefer one bounded read-only prerequisite wait for the same PR/sourceSHA/config before Gradle (e.g. up to10min/20s interval), recheck latest approved head and stop obsolete source. This polls deploy readiness, not repeated compilation/deploy. If genuinely timed out/failed/wrong-context, report NOT BUILT/failure honestly; no unbounded loop, new service or extra trigger framework. Test the pending→ready race fundamentally during PR3; do not implement it here.
 
 No environment settings, Stage/Production apply, Ready, merge, app deploy, Terms activation or Play publication in PR1. Existing manual release/WWW+WS cutover remain later coordinated scopes.
 
@@ -20,8 +21,10 @@ No environment settings, Stage/Production apply, Ready, merge, app deploy, Terms
 - [x] Fundamental local regression tests; readonly platform configuration gaps and secret isolation blockers documented.
 - [x] Available historical timing/manual-operation evidence collected; T001 baseline remains partial, not DONE.
 - [x] Draft PR #1163 required actionlint and Netlify Preview PASS at 24f0766a3ade7f64008557c7dc3d68373a4a7ec5; no native child acceptance implied.
-- [ ] Separate OWNER GO for compatible parent/child code propagation, isolated branch credentials and exact parent enrollment; no settings changed here.
-- [ ] Native #1155 → #1160 exact-SHA Netlify status, Stage identity and real CORS acceptance after configuration GO (T014 OPEN).
+- [ ] Separate OWNER GO for compatible parent/child code propagation, isolated branch credentials and exact parent enrollment: no evidence collected on 2026-11-06 (a working child Preview does not prove these).
+- [x] Native #1155 → #1160 exact-SHA Netlify status: success on the child head `419f1185`; `build-info.js` names `PR #1160`, that commit and its own deploy id (`final-measurements.md`).
+- [ ] Stage identity of the #1160 Preview (its `build-info.js` does not show it; not verified on 2026-11-06).
+- [ ] Real Android CORS acceptance against the #1160 Preview (not re-verified on 2026-11-06).
 
 See `pr2-native-stacked-preview.md` for precise methods, configuration gates and breaking impact; `pr2-measurements.md` for partial baseline evidence. Future main merge can trigger WS deploy classification; no independent automatic-WS cutover is authorized.
 
@@ -45,8 +48,8 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 
 - [x] Push/merge validates only; deploy requires OWNER main dispatch with exact current-main `releaseSha` and confirmation; existing safety/rollback unchanged. See `pr4-ws-production-dispatch.md`.
 - [x] Hosted CI on Draft PR, including the workflow guard in `validate`.
-- [ ] OWNER GO: squash merge with `[skip netlify]` (no `[skip actions]`) and observed post-merge acceptance.
-- [ ] OPEN: `ws-production` Environment; T004 automatic human/resume/escrow preflight. Current dispatch is not a complete safe release process.
+- [x] Merged as #1167 (`f8d5a3d2`, `[skip netlify]`); post-merge acceptance on `83c8da88` recorded under PR5 OWNER GO 1.
+- [x] `ws-production` environment (owner required reviewer, prevent self-review, `main` only), restart gate with hold/drain and presence/financial preflight (#1172, #1176), separate release account (#1177); first gated release run 41606535297 (`d49ce068`, 2026-11-03).
 
 ## PR5 — WWW Production publication separated from merge (T003)
 
@@ -59,3 +62,13 @@ See `pr2-native-stacked-preview.md` for precise methods, configuration gates and
 - [x] OWNER GO 2 (2026-10-31): #1169 merged as `3fe60fc5` without a Netlify marker. The main Git Production build was skipped by `ignore`: deploy record `6ae5a688d0733085c009316b` (`production`, `state=error`, "Canceled build due to no content change", no files or functions, never published; permalink answers 500). Published deploy still `6ae52b31a745a6e69b60b668`, `locked=true`, `stop_builds=false`, no build hooks. Push workflows all success; WS Server Deploy validate SUCCESS, deploy SKIPPED (`deploy_ws=false`, so no notice). PR Preview built with this `ignore` on `d14c1b91`; no PR Preview after the merge yet.
 - [ ] OWNER GO 3/4: OWNER-only build hook; first release with WS compatibility decision, recorded receipt and restore/lock behavior.
 - [ ] OPEN: historical permalink exposure / visitor protection; WS `/healthz` release SHA; redirects and function digest coverage.
+
+## T004 activation, Approval UX and open items (2026-11-06)
+
+- [x] `arcade-code-agent` installation token: Actions write, scoped to this repository; `vars.WS_RELEASE_AGENT=arcade-code-agent[bot]`.
+- [x] VPS Admin with the App as requester and the owner as approver: runs 42223180928 (`ledger-dispatchers-status`), 42225018370 (`ledger-production-dispatcher-install`, `sha256=24ac4554…50bf81`), 42226390939 (`ledger-dispatchers-resume`, `timers_active`); `current_user_can_approve=false` for the App on `vps-admin`.
+- [ ] Approval UX (`approval-ux.md`, Draft #1209): owner push of the two workflow files, merge, then one read-only acceptance request.
+- [ ] WS Preview isolation and safe stop (Drafts #1197, #1199): rebase onto `main` (catalog list conflicts only; touches `.github/workflows`, so owner push), approval descriptions once #1209 is merged, merge, owner root reinstall with `infra/vps/stage-vps-admin.sh`, exact-SHA WS Preview rollout of the #1199 runtime counters, then safe stop and provisioning through VPS Admin, each a separate GO. Requester/approver separation, an earlier blocker of #1199, is now proven by the runs above.
+- [ ] Release Record of WS: the only record (`release-20261104-3`) holds WWW `83c8da88`; WS `d49ce068` cannot be recorded because its run predates the release receipt (#1182). The next owner-approved WS release yields a recordable receipt; its packaged WS surface is unchanged since `d49ce068` (`wsSurfaceChanged` false on 2026-11-06), so none is due now.
+- [ ] Superseded Draft #1171 (T004 SpecKit, says T004-2 Draft): close or update; owner decision.
+
