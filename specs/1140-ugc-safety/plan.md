@@ -36,6 +36,11 @@ build on the profile UI of #1160 because #1155/#1160 rewrote `js/account-page.js
   time), `private.ugc_avatar_holds` (moderator avatar hide that phase D import must respect) and
   `private.ugc_set_profile_blocked`, a security-definer function executable by `service_role` only; it is the one
   audited path to `public_profile_blocked` and fails closed (409, decision rolled back) until #1155 is applied.
+- Anonymous total `private.ugc_moderation_counters` (`key`, `value` only): an after-delete trigger on
+  `private.ugc_reports` counts a pending report only when its reported account no longer exists (the account-deletion
+  cascade); decided reports and any other deletion are not counted. Returned as `removedWithDeletedAccount`.
+- Profile actions (`hide_avatar`, `restrict_profile`, `unrestrict_profile`) take the account lifecycle lock and
+  answer 409 `account_deleting` for an account in deletion, before any write.
 - Hide avatar: `avatar_key` null (Arcade fallback), old object handed to the existing avatar cleanup
   (`private.account_avatar_objects`), hold recorded. `google_photo_suppressed` (#1155) is not required: the hold
   covers phase D.

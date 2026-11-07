@@ -1257,9 +1257,9 @@
     {
       "file": "20261107130000_ugc_moderation.sql",
       "version": "20261107130000",
-      "sha256": "300d2153d1bb7a7457740a1431b80c891580d9b0a811aeafc1d2dd6d2747d610",
+      "sha256": "a6c707ff48d55848fd94518e3760a24e757c60c38a8e6152414c0a6a1a58198c",
       "category": "needs-production-equivalent",
-      "purpose": "#1140 UGC phase C dark private moderation audit and avatar hold tables plus the audited profile restriction function (no flag activation, no notification or scheduler); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
+      "purpose": "#1140 UGC phase C dark private moderation audit, avatar hold and anonymous removed-report counter tables plus the audited profile restriction function (no flag activation, no notification or scheduler); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
     }
   ]
 }

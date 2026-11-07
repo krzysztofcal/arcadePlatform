@@ -30,7 +30,7 @@ function all(node, predicate, out = []) {
 }
 
 function setup({ confirm = true } = {}) {
-  const ids = ["adminUgcPendingCount", "adminUgcReportsMessage", "adminUgcReportsList", "adminUgcReportsMore", "adminUgcReportsStatus", "adminUgcReportsRefresh"];
+  const ids = ["adminUgcPendingCount", "adminUgcReportsMessage", "adminUgcReportsList", "adminUgcReportsMore", "adminUgcReportsStatus", "adminUgcReportsRefresh", "adminUgcReportsRemoved"];
   const byId = Object.fromEntries(ids.map((id) => [id, element("div", id)]));
   byId.adminUgcReportsStatus.value = "pending";
   const document = { getElementById: (id) => byId[id] || null, createElement: (tag) => element(tag) };
@@ -53,6 +53,7 @@ test("the tab is wired into admin.html and the module never polls or renders HTM
   assert.match(html, /data-admin-tab="ugcReports"/);
   assert.match(html, /data-admin-panel="ugcReports"/);
   assert.match(html, /id="adminUgcPendingCount"[^>]*hidden/);
+  assert.match(html, /id="adminUgcReportsRemoved"[^>]*hidden/);
   assert.ok(html.indexOf("js/admin-ugc-reports.js") < html.indexOf("js/admin-page.js"), "loaded before admin-page.js");
   assert.doesNotMatch(source, /setInterval|setTimeout|innerHTML|insertAdjacentHTML|console\./);
 });
@@ -130,4 +131,26 @@ test("a conflict is explained, a dark environment hides the badge and stale resp
   await restricted.api.load();
   const buttons = all(restricted.byId.adminUgcReportsList, (n) => n.tagName === "BUTTON").map((n) => n.textContent);
   assert.deepEqual(buttons, ["Restore profile"]);
+});
+
+test("the removed-with-deleted-account total is shown as reported by the server and hidden when unknown", async () => {
+  const env = setup();
+  env.respond(async () => ({ pendingCount: 1, removedWithDeletedAccount: 0, reports: [], next: null }));
+  await env.api.refreshCount();
+  assert.deepEqual([env.byId.adminUgcReportsRemoved.hidden, env.byId.adminUgcReportsRemoved.textContent], [false, "Pending reports removed because the reported account was deleted: 0"]);
+  env.respond(async () => ({ pendingCount: 1, removedWithDeletedAccount: 4, reports: [sample()], next: null }));
+  await env.api.load();
+  assert.equal(env.byId.adminUgcReportsRemoved.textContent, "Pending reports removed because the reported account was deleted: 4");
+  env.respond(async (path, options) => {
+    if (options.method === "POST") throw Object.assign(new Error("x"), { code: "account_deleting", status: 409 });
+    return { pendingCount: 1, removedWithDeletedAccount: 4, reports: [sample()], next: null };
+  });
+  all(env.byId.adminUgcReportsList, (n) => n.textContent === "Hide avatar" && n.tagName === "BUTTON")[0].fire("click");
+  await flush(); await flush();
+  assert.match(env.byId.adminUgcReportsMessage.textContent, /account is being deleted/);
+  env.respond(async () => { throw Object.assign(new Error("x"), { code: "server_error", status: 500 }); });
+  await env.api.load();
+  assert.equal(env.byId.adminUgcReportsRemoved.hidden, true, "no stale total after a failed read");
+  env.api.reset();
+  assert.equal(env.byId.adminUgcReportsRemoved.textContent, "");
 });

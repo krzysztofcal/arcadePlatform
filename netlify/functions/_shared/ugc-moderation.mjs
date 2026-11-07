@@ -1,3 +1,4 @@
+import { lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { ugcError } from "./ugc-safety.mjs";
 
@@ -47,7 +48,11 @@ export async function listReports(adminId, query = {}, deps = {}) {
   const after = query.after == null || query.after === "" ? 0 : Number.parseInt(query.after, 10);
   if (!Number.isSafeInteger(after) || after < 0) throw ugcError("invalid_cursor");
   const runSql = deps.executeSql || executeSql;
-  const [{ pending }] = await runSql("select count(*)::int as pending from private.ugc_reports where status = 'pending';", []);
+  const [{ pending, removed }] = await runSql(
+    `select (select count(*)::int from private.ugc_reports where status = 'pending') as pending,
+            coalesce((select value from private.ugc_moderation_counters where key = 'pending_removed_with_deleted_account'), 0)::text as removed;`,
+    [],
+  );
   const rows = await runSql(
     `select r.id, r.created_at, r.reason, r.context, r.table_id::text, r.status, r.resolution, r.resolved_at, r.evidence,
             r.target_user_id::text, p.handle, p.display_name, p.avatar_variant, p.avatar_key,
@@ -58,7 +63,12 @@ export async function listReports(adminId, query = {}, deps = {}) {
     [status, after, limit],
   );
   const reports = rows.map(reportRow);
-  return { pendingCount: Number(pending || 0), reports, next: rows.length === limit ? reports[reports.length - 1].id : null };
+  return {
+    pendingCount: Number(pending || 0),
+    removedWithDeletedAccount: Number(removed || 0),
+    reports,
+    next: rows.length === limit ? reports[reports.length - 1].id : null,
+  };
 }
 
 async function hideAvatar(tx, targetId, adminId) {
@@ -82,6 +92,14 @@ async function setProfileBlocked(tx, targetId, blocked) {
   if (rows?.[0]?.changed !== true) throw ugcError("profile_not_found", 404);
 }
 
+// Profile writes of an account in deletion are refused by the account lifecycle guard; take the same lifecycle lock
+// and answer 409 account_deleting before any write. The transaction is rolled back as before.
+async function assertNotDeleting(tx, targetId) {
+  await lockAccountLifecycle(tx, [targetId]);
+  const [row] = await tx.unsafe("select exists(select 1 from public.account_deletion_requests where old_user_id = $1) as deleting;", [targetId]);
+  if (row?.deleting === true) throw ugcError("account_deleting", 409);
+}
+
 async function audit(tx, reportId, targetId, adminId, action) {
   await tx.unsafe("insert into private.ugc_moderation_actions (report_id, target_user_id, admin_user_id, action) values ($1, $2, $3, $4);", [reportId, targetId, adminId, action]);
 }
@@ -101,6 +119,7 @@ export async function decideReport(adminId, input = {}, deps = {}) {
     if (!report) throw ugcError("report_not_found", 404);
     if (report.status !== "pending") throw ugcError("report_already_decided", 409);
     const target = report.target_user_id;
+    if (action !== "none") await assertNotDeleting(tx, target);
     if (action === "hide_avatar") await hideAvatar(tx, target, admin);
     if (action === "restrict_profile") await setProfileBlocked(tx, target, true);
     if (action !== "none") await audit(tx, reportId, target, admin, action);
@@ -119,6 +138,7 @@ export async function unrestrictProfile(adminId, userId, deps = {}) {
   if (typeof userId !== "string" || !UUID_RE.test(userId)) throw ugcError("invalid_target");
   const target = userId.toLowerCase();
   return (deps.beginSql || beginSql)(async (tx) => {
+    await assertNotDeleting(tx, target);
     await setProfileBlocked(tx, target, false);
     await audit(tx, null, target, admin, "unrestrict_profile");
     return { userId: target, status: "unrestricted" };
