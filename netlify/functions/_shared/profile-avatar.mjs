@@ -260,6 +260,11 @@ async function writeTrackedOutput(userId, body, deps = {}, outputPath = `${crypt
       body,
     }, deps);
     confirmed = true;
+  } catch (error) {
+    // Only a 4xx answer (storage_error with status 400) proves Storage refused the write. A 5xx answer, a network
+    // error or a timeout leaves the outcome unknown.
+    if (!(error?.code === "storage_error" && error?.status === 400)) error.writeUncertain = true;
+    throw error;
   } finally {
     // A lost POST response stays uncertain (finished_at null) for the deletion reconciliation, as in finalize.
     if (id && (confirmed || !attempted)) {
@@ -278,6 +283,7 @@ async function removeAvatar(userId, deps = {}) {
 }
 
 export {
+  CAPABILITY_MS,
   MAX_SOURCE_BYTES,
   PUBLIC_BUCKET,
   deleteStorageObject,

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 import { requireCurrentTerms } from "../../../shared/profile-terms.mjs";
-import { PUBLIC_BUCKET, deleteStorageObject, normalizeAvatarImage, writeTrackedOutput } from "./profile-avatar.mjs";
+import { CAPABILITY_MS, PUBLIC_BUCKET, deleteStorageObject, normalizeAvatarImage, writeTrackedOutput } from "./profile-avatar.mjs";
 import { googlePhotoEnabled } from "./profile-photo-publication.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 
@@ -55,15 +55,24 @@ async function importChecks(tx, userId, ownKey = null) {
   return sub;
 }
 
-// Deletes the listed copies and unlists each one whose Storage deletion succeeded.
-async function deletePendingCopies(userId, deps) {
+// Deletes the listed copies (only `onlyKey` when given). A copy is unlisted after a confirmed deletion unless its
+// write is still uncertain: then it stays listed (and counts as not deleted) until uncertain_until has passed.
+async function deletePendingCopies(userId, deps, onlyKey = null) {
   const runSql = deps.executeSql || executeSql;
-  const rows = await runSql("select avatar_key from private.profile_photo_pending_deletions where user_id = $1 order by avatar_key;", [userId]);
+  const rows = await runSql(
+    `select avatar_key, coalesce(uncertain_until > now(), false) as uncertain from private.profile_photo_pending_deletions
+     where user_id = $1 and ($2::text is null or avatar_key = $2) order by avatar_key;`,
+    [userId, onlyKey],
+  );
   let all = true;
-  for (const { avatar_key: key } of rows || []) {
+  for (const { avatar_key: key, uncertain } of rows || []) {
     try {
       await deleteStorageObject(PUBLIC_BUCKET, key, deps);
-      await runSql("delete from private.profile_photo_pending_deletions where user_id = $1 and avatar_key = $2;", [userId, key]);
+      if (uncertain) {
+        all = false;
+        continue;
+      }
+      await runSql("delete from private.profile_photo_pending_deletions where user_id = $1 and avatar_key = $2 and (uncertain_until is null or uncertain_until <= now());", [userId, key]);
     } catch {
       all = false;
     }
@@ -183,10 +192,21 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
   }
   // 3. Listed for deletion, then written under the avatar manifest protocol (tracked before the Storage write).
   const key = `${crypto.randomUUID()}.webp`;
-  await (deps.executeSql || executeSql)("insert into private.profile_photo_pending_deletions (user_id, avatar_key) values ($1, $2);", [user, key]);
+  // Listed as uncertain from the start, so a crash or a concurrent withdrawal during the write cannot unlist it early.
+  await (deps.executeSql || executeSql)(
+    "insert into private.profile_photo_pending_deletions (user_id, avatar_key, uncertain_until) values ($1, $2, now() + ($3::bigint * interval '1 millisecond'));",
+    [user, key, CAPABILITY_MS],
+  );
   let attached = false;
+  let writeUncertain = true;
   try {
-    await writeTrackedOutput(user, image, deps, key);
+    try {
+      await writeTrackedOutput(user, image, deps, key);
+      writeUncertain = false;
+    } catch (error) {
+      writeUncertain = error?.writeUncertain === true;
+      throw error;
+    }
     // 4. Attach under the lifecycle lock and the profile row lock, re-checking everything.
     await runTx(async (tx) => {
       const sub = await importChecks(tx, user, key);
@@ -214,12 +234,15 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
     // concurrent withdrawal already unlisted it; it is listed again until a deletion is confirmed.
     if (!attached) {
       const runSql = deps.executeSql || executeSql;
-      try {
-        await deleteStorageObject(PUBLIC_BUCKET, key, deps);
-        await runSql("delete from private.profile_photo_pending_deletions where user_id = $1 and avatar_key = $2;", [user, key]);
-      } catch {
-        await runSql("insert into private.profile_photo_pending_deletions (user_id, avatar_key) values ($1, $2) on conflict (user_id, avatar_key) do nothing;", [user, key]).catch(() => {});
-      }
+      // The write is over: listed again (defensive), with the uncertainty cleared when its outcome is known, then
+      // deleted under the same rules.
+      await runSql(
+        `insert into private.profile_photo_pending_deletions (user_id, avatar_key, uncertain_until)
+         values ($1, $2, case when $3 then now() + ($4::bigint * interval '1 millisecond') end)
+         on conflict (user_id, avatar_key) do update set uncertain_until = excluded.uncertain_until;`,
+        [user, key, writeUncertain, CAPABILITY_MS],
+      ).catch(() => {});
+      await deletePendingCopies(user, deps, key).catch(() => {});
     }
   }
   // An earlier avatar object (e.g. a legacy upload) is not deleted here; it stays tracked for the existing purge.

@@ -252,7 +252,7 @@ homeBonusLoadError: { en: 'Could not load available bonuses.', pl: 'Nie udało s
     googlePhotoNotInUse: { en: 'Your Arcade avatar is shown. To use your Google photo again, first delete the stored copy.', pl: 'Twój awatar Arcade jest wyświetlany. Aby ponownie użyć zdjęcia Google, najpierw usuń zapisaną kopię.' },
     googlePhotoOffer: { en: 'Optional: use your Google profile photo instead of an Arcade avatar.', pl: 'Opcjonalnie: użyj swojego zdjęcia profilowego Google zamiast awatara Arcade.' },
     googlePhotoWithdrawn: { en: 'Your Google photo is no longer used and our copy was deleted.', pl: 'Twoje zdjęcie Google nie jest już używane, a nasza kopia została usunięta.' },
-    googlePhotoCopyPending: { en: 'Your Google photo is no longer shown, but deleting our copy failed. Try again.', pl: 'Twoje zdjęcie Google nie jest już wyświetlane, ale nie udało się usunąć naszej kopii. Spróbuj ponownie.' },
+    googlePhotoCopyPending: { en: 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.', pl: 'Twoje zdjęcie Google nie jest już wyświetlane, ale usunięcie naszej kopii nie jest jeszcze potwierdzone. Spróbuj ponownie później.' },
     googlePhotoImported: { en: 'Your Google photo is now your avatar.', pl: 'Twoje zdjęcie Google jest teraz Twoim awatarem.' },
     googlePhotoWithdrawConfirm: { en: 'Stop using your Google photo? Your Arcade avatar will be shown and our copy will be deleted.', pl: 'Przestać używać zdjęcia Google? Twój awatar Arcade będzie wyświetlany, a nasza kopia zostanie usunięta.' },
     leaderboardSettingsTitle: { en: 'Leaderboard settings', pl: 'Ustawienia rankingu' },

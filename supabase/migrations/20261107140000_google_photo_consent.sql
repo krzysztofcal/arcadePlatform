@@ -25,6 +25,9 @@ create table private.profile_photo_pending_deletions (
   user_id uuid not null references auth.users(id) on delete cascade,
   avatar_key text not null check (avatar_key ~ '^[0-9a-f-]{36}\.webp$'),
   created_at timestamptz not null default now(),
+  -- While the write may still land (from listing until its outcome is known, or for a lost or 5xx response) a
+  -- confirmed deletion does not unlist it. Same horizon as the avatar manifest capability (2 h).
+  uncertain_until timestamptz,
   primary key (user_id, avatar_key)
 );
 
@@ -32,5 +35,5 @@ alter table private.profile_photo_consents enable row level security;
 alter table private.profile_photo_pending_deletions enable row level security;
 revoke all on private.profile_photo_consents, private.profile_photo_pending_deletions from public, anon, authenticated;
 grant select, insert, update on private.profile_photo_consents to service_role;
-grant select, insert, delete on private.profile_photo_pending_deletions to service_role;
+grant select, insert, update, delete on private.profile_photo_pending_deletions to service_role;
 commit;

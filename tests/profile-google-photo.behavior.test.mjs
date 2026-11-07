@@ -246,11 +246,50 @@ test("a copy from a failed or uncertain import stays listed until deleted: it bl
   await photo.importGooglePhoto(id, input(), network(env).deps);
   assert.equal((await env.executeSql("select count(*)::int n from private.profile_photo_pending_deletions", []))[0].n, 0, "an attached import is unlisted");
 
-  const lost = await database();
-  const lid = await lost.user();
-  await assert.rejects(photo.importGooglePhoto(lid, input(), network(lost, { deleteStatus: 500, onStorage: async (call) => { if (call.method === "POST") throw new Error("response lost"); } }).deps));
-  assert.equal((await lost.executeSql("select count(*)::int n from private.profile_photo_pending_deletions where user_id=$1", [lid]))[0].n, 1, "an uncertain write stays listed");
-  assert.equal((await photo.withdrawGooglePhoto(lid, network(lost).deps)).copyDeleted, true);
+});
+
+test("a write with a lost response stays listed as uncertain: deletions are repeated but it is unlisted only after the horizon", async () => {
+  const env = await database();
+  const id = await env.user();
+  // The POST response is lost; the compensating DELETE succeeds (nothing there yet); the object lands afterwards.
+  await assert.rejects(photo.importGooglePhoto(id, input(), network(env, { onStorage: async (call) => { if (call.method === "POST") throw new Error("response lost"); } }).deps));
+  const [row] = await env.executeSql("select uncertain_until > now() + interval '7190 seconds' as marked from private.profile_photo_pending_deletions where user_id=$1", [id]);
+  assert.equal(row?.marked, true, "still listed and marked uncertain although its deletion was confirmed");
+  assert.equal((await photo.googlePhotoStatus(id, network(env).deps)).copyStored, true);
+  await assert.rejects(photo.importGooglePhoto(id, input(), network(env).deps), (e) => e.code === "photo_copy_exists");
+
+  const early = network(env);
+  const first = await photo.withdrawGooglePhoto(id, early.deps);
+  assert.ok(early.calls.some((c) => c.method === "DELETE"), "a withdrawal deletes the late object");
+  assert.deepEqual([first.copyDeleted, first.copyStored], [false, true], "but cannot confirm before the horizon");
+
+  await env.executeSql("update private.profile_photo_pending_deletions set uncertain_until = now() - interval '1 second' where user_id=$1", [id]);
+  const later = await photo.withdrawGooglePhoto(id, network(env).deps);
+  assert.deepEqual([later.copyDeleted, later.copyStored], [true, false]);
+  assert.equal((await env.executeSql("select count(*)::int n from private.profile_photo_pending_deletions", []))[0].n, 0);
+
+  // Only a 4xx answer proves the write was refused: then the copy is unlisted once deleted. A 5xx answer stays uncertain.
+  for (const [status, listed] of [[409, 0], [502, 1]]) {
+    const other = await database();
+    const oid = await other.user();
+    const failing = network(other);
+    const original = failing.deps.fetch;
+    failing.deps.fetch = async (url, options = {}) => (options.method === "POST" && String(url).includes("/storage/") ? new Response("no", { status }) : original(url, options));
+    await assert.rejects(photo.importGooglePhoto(oid, input(), failing.deps));
+    assert.equal((await other.executeSql("select count(*)::int n from private.profile_photo_pending_deletions", []))[0].n, listed, `POST ${status}`);
+  }
+
+  // A crash during the write leaves the key listed as uncertain from the start.
+  const crash = await database();
+  const xid = await crash.user();
+  let duringWrite = null;
+  await assert.rejects(photo.importGooglePhoto(xid, input(), network(crash, { onStorage: async (call) => {
+    if (call.method === "POST") {
+      duringWrite = (await crash.executeSql("select uncertain_until > now() as marked from private.profile_photo_pending_deletions where user_id=$1", [xid]))[0];
+      throw new Error("crash");
+    }
+  } }).deps));
+  assert.equal(duringWrite?.marked, true);
 });
 
 test("a withdrawal while the copy is being written cannot orphan it", async () => {
@@ -349,6 +388,12 @@ test("withdrawal shows the Arcade avatar at once, deletes our copy and is record
 
 test("the consent record is private and follows account deletion", async () => {
   const env = await database();
+  // The application connects with service_role privileges: every statement kind used on the new tables is granted.
+  for (const [table, kinds] of [["profile_photo_consents", ["SELECT", "INSERT", "UPDATE"]], ["profile_photo_pending_deletions", ["SELECT", "INSERT", "UPDATE", "DELETE"]]]) {
+    for (const kind of kinds) {
+      assert.equal((await env.executeSql(`select has_table_privilege('service_role', 'private.${table}', '${kind}') as ok`, []))[0].ok, true, `${table} ${kind}`);
+    }
+  }
   const id = await env.user();
   await photo.importGooglePhoto(id, input(), network(env).deps);
   for (const role of ["anon", "authenticated"]) {

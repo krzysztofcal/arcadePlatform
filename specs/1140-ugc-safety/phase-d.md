@@ -28,6 +28,9 @@ or activation, no e-mail, job, scheduler or notification. Follows the Google pho
 - **R-D-ONE-COPY.** At most one Google copy exists and it is always findable: the key is listed in
   `private.profile_photo_pending_deletions` before the write and unlisted only by a successful attach or a
   confirmed deletion; a failed import deletes its own object after the write (and lists it again if that fails).
+  The key is listed as uncertain (`uncertain_until`, the 2 h manifest horizon) from the start of the write; the
+  mark is cleared only when the outcome is known (confirmed write, or a 4xx refusal). A crash, a lost response or a
+  5xx answer leaves it: deletions are repeated but never confirmed until the horizon, because the write could land.
   A new import is refused (409 `photo_copy_exists`) while a copy exists; changing the photo = withdraw, then import.
 - **R-D-WITHDRAW.** Withdrawal (also with pending Terms) shows the Arcade avatar at once, sets
   `google_photo_suppressed`, bumps `avatar_revision` (a running import loses its attach), records the time and
@@ -59,5 +62,8 @@ or activation, no e-mail, job, scheduler or notification. Follows the Google pho
 - [x] D-T3 Account panel `js/profile-google-photo.js`, photo rendering in `js/profile-client.js`, PL/EN strings.
 - [x] D-T4 Fundamental tests (PGlite with the real migration; UI with a minimal DOM); mutation-checked.
 - [x] D-T6 Review: Codex 3 rounds (R1 4, R2 1, R3 1 findings, all fixed); the R3 fix was checked by agy (1 valid
-  race fixed, 2 rejected with reasons) and by mutation tests, not re-reviewed by Codex (round limit).
+  race fixed, 2 rejected with reasons). Owner-authorized 4th Codex round: 1 finding (D7, lost write response),
+  fixed and mutation-checked; that fix was not re-reviewed by Codex. agy advisory check of it: 3 valid findings
+  (missing UPDATE grant for the upsert, uncertainty marked too late, 5xx treated as certain), all fixed with
+  mutation-checked tests.
 - [ ] D-T5 Owner: Stage apply, `GOOGLE_PHOTO_IMPORT_ENABLED=1` on a Preview, physical WWW and Android check.

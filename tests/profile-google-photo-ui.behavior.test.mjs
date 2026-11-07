@@ -140,6 +140,6 @@ test("withdrawal stays available without a linked Google identity and a failed c
   assert.equal(unlinked.byId.googlePhotoWithdraw.hidden, false);
   unlinked.byId.googlePhotoWithdraw.fire("click");
   await flush();
-  assert.match(unlinked.byId.googlePhotoState.textContent, /deleting our copy failed/);
+  assert.match(unlinked.byId.googlePhotoState.textContent, /not confirmed yet/);
   assert.equal(unlinked.byId.googlePhotoWithdraw.hidden, false, "the deletion can be retried");
 });

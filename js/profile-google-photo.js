@@ -108,7 +108,7 @@
     show('googlePhotoOffer', status.googleLinked === true && !stored);
     show('googlePhotoWithdraw', granted || stored);
     if (status.photoInUse === true) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
-    else if (!granted && stored) setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but deleting our copy failed. Try again.'));
+    else if (!granted && stored) setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
     else if (granted) setState(t('googlePhotoNotInUse', 'Your Arcade avatar is shown. To use your Google photo again, first delete the stored copy.'));
     else setState(t('googlePhotoOffer', 'Optional: use your Google profile photo instead of an Arcade avatar.'));
   }
@@ -135,7 +135,7 @@
       render(result);
       if (action !== 'withdraw') setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
       else if (result && result.copyDeleted === true) setState(t('googlePhotoWithdrawn', 'Your Google photo is no longer used and our copy was deleted.'));
-      else setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but deleting our copy failed. Try again.'));
+      else setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
       await refreshAvatar(expectedUser);
     } catch (error){
       if (expectedGeneration !== generation) return;
