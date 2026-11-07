@@ -5,8 +5,10 @@ import vm from "node:vm";
 
 // #1140 UGC phase B client: request shapes, the per-device block filter, hidden UI when off, text-only names.
 const source = await readFile(new URL("../js/ugc-client.js", import.meta.url), "utf8");
+const profileSource = await readFile(new URL("../js/public-profile-page.js", import.meta.url), "utf8");
 
 class Node {
+  classList = { add() {}, remove() {} };
   constructor(tag, text = "") { this.tagName = tag; this.children = []; this.parentNode = null; this.text = text; this.attributes = {}; this.dataset = {}; this.listeners = {}; this.hidden = false; this.disabled = false; this.checked = false; }
   get textContent() { return this.text + this.children.map((child) => child.textContent).join(""); }
   set textContent(value) { this.children.forEach((child) => { child.parentNode = null; }); this.children = []; this.text = String(value); }
@@ -32,7 +34,7 @@ class Node {
 
 const fakeJwt = (sub) => "h." + Buffer.from(JSON.stringify({ sub })).toString("base64url") + ".s";
 
-function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], elements = ["pokerSafetyPlayers", "publicProfileSafety"] } = {}) {
+function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], elements = ["pokerSafetyPlayers", "publicProfileSafety"], profilePage = null } = {}) {
   const byId = {};
   const body = new Node("body");
   const section = new Node("section"); section.dataset.ugcSection = ""; body.appendChild(section);
@@ -43,12 +45,19 @@ function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], 
   const document = { readyState: "complete", body, getElementById: (id) => byId[id] || null, createElement: (tag) => new Node(tag), createTextNode: (text) => new Node("#text", text), addEventListener() {} };
   const window = {
     document,
-    SupabaseAuth: { getCurrentUser: async () => { const user = auth.user; if (auth.holdUser) await auth.holdUser(); return user ? { id: user } : null; }, onAuthChange(listener) { auth.listener = listener; } },
+    SupabaseAuth: { getCurrentUser: async () => { const user = auth.user; if (auth.holdUser) await auth.holdUser(); return user ? { id: user } : null; }, onAuthChange(listener) { (auth.listeners ||= []).push(listener); auth.listener = () => auth.listeners.forEach((fn) => fn()); } },
     SupabaseAuthBridge: { getAccessToken: async () => { if (auth.beforeToken) await auth.beforeToken(); return auth.user ? fakeJwt(auth.user) : null; } },
     ArcadeApi: { url: (url) => "https://api.example" + url },
     I18N: { t: () => "" },
     ProfileClient: { getMe: async () => ({ handle: "own-handle-1" }) },
+    location: { pathname: "/u/" + (profilePage ? profilePage.handle : "") },
   };
+  const avatarCalls = [];
+  if (profilePage) {
+    for (const id of ["publicProfileStatus", "publicProfileCard", "publicProfileAvatar", "publicProfileIdentity", "publicProfileName", "publicProfileHandle", "publicProfileXp", "publicProfileLevel", "publicProfileSignIn"]) byId[id] = body.appendChild(new Node("div"));
+    window.ProfileClient.getPublic = async () => profilePage;
+    window.ProfileClient.applyAvatar = (node, profile) => { if (node === byId.publicProfileAvatar) avatarCalls.push(profile); };
+  }
   window.fetch = async (url, options) => {
     calls.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : null, auth: options.headers.Authorization });
     const next = responses.length ? responses.shift() : { status: 200, body: { blocks: [] } };
@@ -57,7 +66,8 @@ function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], 
   };
   const context = vm.createContext({ window, document, fetch: window.fetch, setTimeout, Promise, JSON, String, Array, Object, Number, encodeURIComponent, atob });
   vm.runInContext(source, context);
-  return { ugc: window.ArcadeUgc, calls, byId, body, section, auth };
+  if (profilePage) vm.runInContext(profileSource, context);
+  return { ugc: window.ArcadeUgc, calls, byId, body, section, auth, avatarCalls };
 }
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -269,4 +279,25 @@ test("a late 'feature off' answer to the previous account's request never hides 
   await pending; await flush(); await flush();
   assert.equal(env.section.hidden, false, "A's late 404 does not switch the feature off for B");
   assert.equal(env.calls.length, 3);
+});
+
+test("the public profile shows a blocked player with the Arcade avatar, restores it after unblock and follows account switches", async () => {
+  const photo = { type: "uploaded", url: "https://abc.supabase.co/storage/v1/object/public/profile-avatars/x.webp" };
+  const profile = { handle: "bad-player", displayName: "Bad Player", avatar: photo, xp: 1, level: 1 };
+  const shown = (call) => !!(call && call.avatar && call.avatar.type === "uploaded");
+  const env = setup({ profilePage: profile, responses: [{ status: 200, body: { blocks: [{ userId: OTHER, handle: "bad-player", displayName: "Bad Player" }] } }, { status: 200, body: {} }, { status: 200, body: { blocks: [] } }] });
+  for (let i = 0; i < 8; i += 1) await flush();
+  assert.ok(env.avatarCalls.some((call) => call && call.avatar && call.avatar.type === "default"), "masked with the Arcade avatar");
+  assert.equal(env.avatarCalls.some(shown), false, "the blocked player's own avatar is never shown, not even before the list loads");
+  await env.ugc.unblock(OTHER);
+  for (let i = 0; i < 4; i += 1) await flush();
+  assert.equal(shown(env.avatarCalls.at(-1)), true, "restored after unblock without a reload");
+
+  const switching = setup({ profilePage: profile, responses: [{ status: 200, body: { blocks: [{ userId: OTHER, handle: "bad-player", displayName: "Bad Player" }] } }] });
+  for (let i = 0; i < 8; i += 1) await flush();
+  assert.equal(switching.avatarCalls.some(shown), false);
+  switching.auth.user = B;
+  switching.auth.listener();
+  for (let i = 0; i < 10; i += 1) await flush();
+  assert.equal(shown(switching.avatarCalls.at(-1)), true, "for B, who has not blocked this player, the avatar is shown");
 });

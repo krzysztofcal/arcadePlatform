@@ -123,6 +123,11 @@
     return null;
   }
 
+  // For the public profile page (its payload has a handle, no user id): only the current session's loaded list.
+  function isBlockedHandle(handle){
+    return !!(handle && state.loaded && blockedByHandle(handle));
+  }
+
   function targetFields(target){
     return target.userId ? { targetUserId: target.userId } : { targetHandle: target.handle };
   }
@@ -369,6 +374,6 @@
     loadBlocks(false);
   }
 
-  window.ArcadeUgc = { loadBlocks: loadBlocks, isBlocked: isBlocked, report: report, block: block, unblock: unblock, onChange: onChange, profileRendered: profileRendered, tablePlayers: tablePlayers, REASONS: REASONS.map(function(reason){ return reason[0]; }) };
+  window.ArcadeUgc = { loadBlocks: loadBlocks, isBlocked: isBlocked, isBlockedHandle: isBlockedHandle, report: report, block: block, unblock: unblock, onChange: onChange, profileRendered: profileRendered, tablePlayers: tablePlayers, REASONS: REASONS.map(function(reason){ return reason[0]; }) };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();
 })();
