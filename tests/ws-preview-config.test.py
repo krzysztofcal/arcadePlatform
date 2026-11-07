@@ -880,6 +880,20 @@ class GitHubAppToken(unittest.TestCase):
         self.assertNotIn(body['token'],output.getvalue())
         self.assertEqual(json.loads(output.getvalue())['repositories'],['krzysztofcal/arcadePlatform'])
 
+    def test_prepare_refuses_unverifiable_sudo_before_enabling_signer(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        m=self.module
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);task=m.Preparation();task.files=config.SecureFiles(os.getuid(),os.getgid(),root)
+            task.directory=root/'private';task.backup=root/'backup';task.command=root/'issuer';task.policy=root/'policy'
+            task.run=lambda argv,**kwargs: '321' if argv[0]=='/usr/bin/id' else ''
+            account=SimpleNamespace(pw_uid=320,pw_gid=321,pw_dir='/nonexistent',pw_shell='/usr/sbin/nologin')
+            with patch.object(task,'preflight',return_value=b'fixture issuer'),patch.object(m.pwd,'getpwnam',return_value=account):
+                with self.assertRaisesRegex(m.Refused,'unexpected_signer_sudo_policy'):task.prepare('123')
+            self.assertTrue((task.backup/'manifest.json').exists())
+            self.assertFalse(task.directory.exists());self.assertFalse(task.command.exists());self.assertFalse(task.policy.exists())
+
     def test_prepare_preflights_before_mutation_and_retains_failure_manifest(self):
         from unittest.mock import patch
         from types import SimpleNamespace
@@ -888,7 +902,7 @@ class GitHubAppToken(unittest.TestCase):
             root=Path(directory);files=config.SecureFiles(os.getuid(),os.getgid(),root)
             task=m.Preparation();task.files=files;task.directory=root/'private';task.backup=root/'backup';task.command=root/'issuer';task.policy=root/'sudoers';task.source=root/'source';task.source.write_bytes(b'fixture issuer');task.source.chmod(0o644)
             calls=[]
-            task.run=lambda argv,**kwargs: calls.append(argv) or ('321' if argv[0]=='/usr/bin/id' else '')
+            task.run=lambda argv,**kwargs: calls.append(argv) or ('321' if argv[0]=='/usr/bin/id' else 'User arcade-github-token is not allowed to run sudo on fixture.' if '-U' in argv else '')
             with patch.object(m.pwd,'getpwnam',side_effect=KeyError),patch.object(m.grp,'getgrnam',side_effect=KeyError),patch.object(m,'trusted_parents'):
                 task.preflight()
                 self.assertFalse(task.backup.exists());self.assertFalse(calls and any('useradd' in a[0] for a in calls))

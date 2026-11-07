@@ -1,7 +1,8 @@
 # VPS admin operations (root on demand, #1159)
 
 Root work on the VPS is requested, approved and executed through one GitHub Actions workflow. Nobody gets a
-standing root shell: the agent account `copilot` keeps only its existing narrow sudo rules, and the executor
+standing root shell: the agent account `copilot` keeps its existing narrow root rules and, after separately
+approved preparation, only the fixed non-root GitHub signer rule described below; the executor
 account `arcade-admin` may run only the fixed catalog of one root helper.
 
 | Role | Who | Mechanism |
@@ -31,8 +32,10 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 See [Preview activation/recovery](../specs/1159-ci-cd-release-safety/ws-preview-access-implementation.md). After an attempted stop or partial mutation, FAILED requires inspecting protected manifest/unit state; never infer unchanged state from a failed request.
 
 Every operation uses fixed absolute commands with fixed arguments and no shell. There is no free command, file
-path, package name or unit name input. The only network access is the dispatcher install: `curl` to `api.github.com` and
+path, package name or unit name input. The dispatcher install uses `curl` to `api.github.com` and
 `raw.githubusercontent.com` for this repository, with URLs built from the validated run id and commit.
+The one-key quarantine also invokes the non-root signer proof, which requests one scoped token from
+the fixed `api.github.com` installation endpoint and discards it without printing it.
 
 ### Quarantine limits and recovery
 

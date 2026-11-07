@@ -159,7 +159,8 @@ class Preparation:
         require(0 < account.pw_uid < 1000 and 0 < account.pw_gid < 1000
                 and account.pw_dir == '/nonexistent' and account.pw_shell == '/usr/sbin/nologin', 'unexpected_signer_account')
         require(self.run(['/usr/bin/id', '-G', USER]) == str(account.pw_gid), 'unexpected_signer_groups')
-        self.run(['/usr/bin/sudo', '-n', '-l', '-U', USER], expected=(1,))
+        listing = self.run(['/usr/bin/sudo', '-n', '-l', '-U', USER], expected=(0, 1))
+        require('not allowed to run sudo' in listing or 'may not run sudo' in listing, 'unexpected_signer_sudo_policy')
         self.directory.mkdir(mode=0o750)
         os.chown(self.directory, 0, account.pw_gid)
         self.directory.chmod(0o750)
