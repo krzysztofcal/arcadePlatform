@@ -43,7 +43,7 @@ function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], 
   const document = { readyState: "complete", body, getElementById: (id) => byId[id] || null, createElement: (tag) => new Node(tag), createTextNode: (text) => new Node("#text", text), addEventListener() {} };
   const window = {
     document,
-    SupabaseAuth: { getCurrentUser: async () => (auth.user ? { id: auth.user } : null), onAuthChange(listener) { auth.listener = listener; } },
+    SupabaseAuth: { getCurrentUser: async () => { const user = auth.user; if (auth.holdUser) await auth.holdUser(); return user ? { id: user } : null; }, onAuthChange(listener) { auth.listener = listener; } },
     SupabaseAuthBridge: { getAccessToken: async () => { if (auth.beforeToken) await auth.beforeToken(); return auth.user ? fakeJwt(auth.user) : null; } },
     ArcadeApi: { url: (url) => "https://api.example" + url },
     I18N: { t: () => "" },
@@ -216,3 +216,24 @@ test("an account switch while the token is being fetched sends nothing (report, 
   }
 });
 
+test("a session switch while the user is being read never restores the previous list", async () => {
+  let release;
+  let env;
+  // The reload for A gets its answer; the user read that follows is held, the session switches to B, then A returns.
+  let releaseB;
+  const bGate = new Promise((resolve) => { releaseB = resolve; });
+  env = setup({ responses: [{ status: 200, body: { blocks: [] } }, { status: 200, body: { blocks: [{ userId: OTHER }] }, before: async () => { env.auth.holdUser = () => new Promise((resolve) => { release = resolve; }); } }, { status: 200, body: { blocks: [] }, before: () => bGate }] });
+  await flush();
+  const pending = env.ugc.loadBlocks(true);
+  for (let i = 0; i < 5 && !release; i += 1) await flush();
+  assert.ok(release, "the post-response user read is pending");
+  env.auth.holdUser = null;
+  env.auth.user = B;
+  env.auth.listener();
+  release();
+  await pending; await flush(); await flush();
+  assert.equal(env.ugc.isBlocked(OTHER), false, "A's late answer is not applied while B's list is still loading");
+  releaseB();
+  await flush(); await flush();
+  assert.equal(env.ugc.isBlocked(OTHER), false);
+});

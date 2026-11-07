@@ -93,7 +93,9 @@
     if (state.inFlight && state.inFlight.userId === userId && state.inFlight.session === session) return state.inFlight.promise;
     var promise = request(BLOCKS_URL, null, { userId: userId, session: session }).then(async function(body){
       // A sign-out or account switch during the request must not apply the previous user's list.
-      if (session !== state.session || await currentUserId() !== userId) return [];
+      var nowUser = await currentUserId();
+      // Both checks after the last await: nothing can switch the session between them and setBlocks.
+      if (session !== state.session || nowUser !== userId) return [];
       state.available = true;
       setBlocks(userId, body && body.blocks);
       return state.blocks;
@@ -218,7 +220,8 @@
   // Report and Block/Unblock buttons for one target ({displayName, handle | userId, context, tableId}).
   // The buttons belong to the account and session that rendered them; after a switch they do nothing.
   async function sameOwner(owner, session){
-    return session === state.session && !!owner && await currentUserId() === owner;
+    var nowUser = await currentUserId();
+    return session === state.session && !!owner && nowUser === owner;
   }
 
   function renderActions(container, target){
