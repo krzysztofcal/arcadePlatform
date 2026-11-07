@@ -1395,7 +1395,7 @@ test("internal poker maintenance route is token-protected and does not expose a 
     const authorized = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     assert.equal(authorized.status, 503);
     const newHandsHold = {
-      configured: true, active: true, drain: false, loadedHandsInProgress: 0, humanMemberTables: 0, connectedHumanTables: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
+      configured: true, active: true, drain: false, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
       supervisorSweepInProgress: false, dbHandsInProgress: null, dbVersionMismatches: null, dbFinancialIssues: null, restartSafe: false
     };
     assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable", newHandsHold });

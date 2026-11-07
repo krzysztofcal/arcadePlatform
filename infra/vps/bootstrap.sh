@@ -170,8 +170,8 @@ install -o root -g root -m 0440 \
   /etc/sudoers.d/arcade-deploy
 visudo -c
 
-# Fixed Preview isolation catalog dependencies; installing these does not provision Preview.
-for directory in /usr/local/libexec /usr/local/libexec/arcade-vps-admin /var/lib/arcade-admin /var/lib/arcade-admin/ws-preview-safe-stop; do
+# Fixed catalog dependencies only; installation does not provision Preview or activate the GitHub signer.
+for directory in /usr/local/libexec /usr/local/libexec/arcade-vps-admin /var/lib/arcade-admin; do
   if [[ -e "$directory" || -L "$directory" ]]; then
     [[ -d "$directory" && ! -L "$directory" && "$(stat -c %U:%G "$directory")" == root:root ]] || exit 1
     (( (8#$(stat -c %a "$directory") & 8#022) == 0 )) || exit 1
@@ -179,8 +179,7 @@ for directory in /usr/local/libexec /usr/local/libexec/arcade-vps-admin /var/lib
 done
 install -d -o root -g root -m 0755 /usr/local/libexec/arcade-vps-admin
 install -d -o root -g root -m 0700 /var/lib/arcade-admin
-install -d -o root -g root -m 0700 /var/lib/arcade-admin/ws-preview-safe-stop
-for asset in ws-preview-safe-stop.mjs ws-restart-gate.mjs ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub; do
+for asset in github-app-token.py ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub; do
   test -f "$REPO_ROOT/infra/vps/$asset" && test ! -L "$REPO_ROOT/infra/vps/$asset" || exit 1
   install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"
 done

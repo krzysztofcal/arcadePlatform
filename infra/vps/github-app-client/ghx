@@ -1,0 +1,9 @@
+#!/bin/sh
+# Isolated gh config; no OWNER credential fallback. The token exists only in this process environment.
+case "$1" in auth) echo "ghx: gh auth is disabled for the App token" >&2; exit 2 ;; esac
+GH_TOKEN=$(/home/copilot/.arcade-code-agent/arcade-agent-token.mjs) || exit 1
+export GH_TOKEN
+unset GITHUB_TOKEN GH_ENTERPRISE_TOKEN GH_ENTERPRISE_HOST GH_HOST
+GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh
+export GH_CONFIG_DIR
+exec /home/copilot/.local/bin/gh "$@"

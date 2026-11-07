@@ -363,15 +363,19 @@ export const OPERATIONS = Object.freeze({
     : { ok: false, failed: "daemon-reload" }),
   "copilot-secret-snapshots-quarantine": quarantineSnapshots,
   "ledger-production-dispatcher-install": installProductionDispatcher,
-  "ws-preview-safe-stop": (host, runId) => {
-    const result = host.run(["/usr/bin/node", "/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs", "stop", String(runId)], 180000);
-    if (result.status === 0 && result.stdout === "SAFE_STOP_OK stopped_pending_audit")
-      return { ok: true, details: "stopped_pending_audit" };
-    if (result.status === 1 && result.stdout === "SAFE_STOP_BLOCKED inspect_read_only_no_retry")
-      return { ok: false, blocked: "preview_safe_stop_refused_before_stop" };
-    return { ok: false, failed: "preview_safe_stop_uncertain_no_retry" };
+  "github-app-token-prepare": (host, runId) => {
+    const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", String(runId)], 180000);
+    return result.status === 0 && result.stdout === "GITHUB_TOKEN_OK prepared_no_key_no_client_switch"
+      ? { ok: true, details: "prepared_no_key_no_client_switch" }
+      : { ok: false, failed: "github_token_inspect_protected_manifest_no_retry" };
   },
-  ...Object.fromEntries(["preflight", "provision", "rollback"].map((action) => [
+  "github-app-key-quarantine": (host, runId) => {
+    // The fixed signer proves replacement custody/scope without disclosing its freshly issued token.
+    const proof = host.run(["/usr/sbin/runuser", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", "--info"], 30000);
+    if (proof.status !== 0) return { ok: false, blocked: "replacement_signer_not_verified" };
+    return quarantineSnapshots({ ...host, quarantine: { ...host.quarantine, files: [".arcade-code-agent/app.pem"] } }, runId);
+  },
+  ...Object.fromEntries(["provision", "rollback"].map((action) => [
     `ws-preview-isolation-${action}`, (host, runId) => {
       const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, String(runId)], 480000);
       if (result.status === 0 && /^PREVIEW_OK [a-z0-9_]+$/.test(result.stdout)) return { ok: true, details: result.stdout };
@@ -422,12 +426,6 @@ export function runOperation(operation, runId, overrides = {}) {
     const recorded = audit(host, { ...entry, result: outcome, detail: result.details || result.blocked || result.failed });
     // The operation is not repeated; an unrecorded outcome is reported as a failure of the audit itself.
     if (!recorded) return { ok: false, line: `ADMIN_FAILED ${name} audit_end_after_${outcome}` };
-    if (result.ok && operation === "ws-preview-safe-stop") {
-      const ready = host.run(["/usr/bin/node", "/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs", "finalize", String(run)], 60000);
-      if (ready.status !== 0 || ready.stdout !== "SAFE_STOP_OK ready")
-        return { ok: false, line: `ADMIN_FAILED ${name} receipt_not_ready_no_retry` };
-      result.details = "stopped_receipt_ready";
-    }
     if (result.ok) return { ok: true, line: `ADMIN_OK ${name} ${result.details}` };
     return { ok: false, line: result.blocked ? `ADMIN_BLOCKED ${name} ${result.blocked}` : `ADMIN_FAILED ${name} ${result.failed}` };
   } finally {

@@ -32,7 +32,7 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.doesNotMatch(text, /^\s+push:/m);
   assert.doesNotMatch(text, /^\s+pull_request:/m);
 
-  assert.match(text, /inputs:\n\s+ref:\n\s+description: Git ref to deploy to the preview WS host\n\s+required: true\n\s+type: string/);
+  assert.match(text, /inputs:\n\s+ref:\n\s+description: Exact approved 40-character commit SHA to deploy to the preview WS host\n\s+required: true\n\s+type: string/);
   assert.match(text, /ref: \$\{\{ inputs\.ref \}\}/);
 
   assert.match(text, /WS_PREVIEW_HOST/);
@@ -324,4 +324,11 @@ test("Stage deletion window derives ON from protected OFF and refuses missing, t
   assert.throws(check(on+"DRIFT=1\n","on"));
   assert.throws(check(on+"DRIFT=1\n","on",{on:sha(on+"DRIFT=1\n")}));
   assert.throws(check(on,"on",{baseline_record:"foreign"}));
+});
+
+test("Preview secrets are scoped and the old deployment identity has no fallback", () => {
+  const text = workflowText();
+  assert.equal((text.match(/environment: ws-preview/g) || []).length, 2);
+  assert.ok(text.includes('test "$PREVIEW_WS_USER" = arcade-preview-deploy'));
+  assert.ok(text.includes('[[ "$PREVIEW_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]'));
 });

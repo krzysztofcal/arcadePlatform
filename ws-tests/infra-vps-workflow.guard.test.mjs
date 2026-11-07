@@ -1023,7 +1023,7 @@ test("Preview approval descriptions retain the stopped-service and recovery limi
   const { approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
   const request = { reason: "Inspect reviewed Preview isolation request", sha: "b".repeat(40),
     actor: "release-agent[bot]", triggeringActor: "release-agent[bot]", runId: "42223180929", attempt: "1" };
-  for (const operation of ["ws-preview-safe-stop", "ws-preview-isolation-preflight", "ws-preview-isolation-provision", "ws-preview-isolation-rollback"]) {
+  for (const operation of ["ws-preview-isolation-provision", "ws-preview-isolation-rollback"]) {
     const text = approvalSummary({ ...request, operation });
     assert.ok(text.includes(`## Approve only if expected: ${operation}`));
     assert.match(text, /CHANGES THE VPS/);
@@ -1031,14 +1031,10 @@ test("Preview approval descriptions retain the stopped-service and recovery limi
     assert.match(text, /stopped|stopping/);
     assert.match(text, /separate/i);
   }
-  const stop = approvalSummary({ ...request, operation: "ws-preview-safe-stop" });
-  assert.match(stop, /uncertain outcome is FAILED/);
-  assert.match(stop, /not an automatic retry/);
-  const preflight = approvalSummary({ ...request, operation: "ws-preview-isolation-preflight" });
-  assert.match(preflight, /temporary policy-validation files/);
   const provision = approvalSummary({ ...request, operation: "ws-preview-isolation-provision" });
   assert.match(provision, /daemon-reload re-reads all changed VPS unit files/);
-  assert.match(provision, /one-use safe-stop receipt/);
+  assert.match(provision, /hard kick does not guarantee chip settlement/);
+  assert.match(provision, /read-only preflight, stops only ws-server-preview.service/);
 });
 
 test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
@@ -1140,7 +1136,7 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
 
 test("Preview isolation catalog uses fixed actions and unprivileged fundamental fixtures", async () => {
   const { runOperation } = await import("../infra/vps/vps-admin.mjs");
-  for (const action of ["preflight", "provision", "rollback"]) {
+  for (const action of ["provision", "rollback"]) {
     const fx = fakeAdminHost();
     const originalRun = fx.host.run;
     fx.host.run = (argv, ...args) => {
@@ -1157,34 +1153,97 @@ test("Preview isolation catalog uses fixed actions and unprivileged fundamental 
 });
 
 
-test("Preview safe-stop fundamentals and audit-gated receipt run without privileged commands", async () => {
+test("removed Preview operations fail closed and partial provisioning is FAILED", async () => {
   const { runOperation } = await import("../infra/vps/vps-admin.mjs");
-  for (const auditEnd of [0, 1]) {
-    const fx = fakeAdminHost({}, { loggerStatus: [0, auditEnd] });
-    const original = fx.host.run;
-    const modes = [];
-    fx.host.run = (argv, ...args) => {
-      if (argv[0] === "/usr/bin/node") {
-        assert.deepEqual(argv.slice(0, 2), ["/usr/bin/node", "/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs"]);
-        assert.equal(argv[3], "123"); modes.push(argv[2]);
-        return { status: 0, stdout: argv[2] === "stop" ? "SAFE_STOP_OK stopped_pending_audit" : "SAFE_STOP_OK ready" };
-      }
-      return original(argv, ...args);
-    };
-    const result = runOperation("ws-preview-safe-stop", "123", fx.host);
-    assert.equal(result.ok, auditEnd === 0);
-    assert.deepEqual(modes, auditEnd === 0 ? ["stop", "finalize"] : ["stop"]);
+  for (const operation of ["ws-preview-safe-stop", "ws-preview-isolation-preflight"]) {
+    const fx = fakeAdminHost();
+    assert.match(runOperation(operation, "123", fx.host).line, /ADMIN_BLOCKED .* unexpected_arguments$/);
   }
-  for (const [stdout, status, outcome] of [
-    ["SAFE_STOP_BLOCKED inspect_read_only_no_retry", 1, "ADMIN_BLOCKED"],
-    ["SAFE_STOP_FAILED stop_attempted_uncertain_no_retry", 1, "ADMIN_FAILED"],
-    ["", null, "ADMIN_FAILED"]
-  ]) {
-    const fx = fakeAdminHost(); const original = fx.host.run;
-    fx.host.run = (argv, ...args) => argv[0] === "/usr/bin/node" ? { status, stdout } : original(argv, ...args);
-    assert.ok(runOperation("ws-preview-safe-stop", "123", fx.host).line.startsWith(outcome + " "));
-    assert.ok(fx.audits.at(-1).includes("result=" + (outcome === "ADMIN_BLOCKED" ? "blocked" : "failed")));
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  fx.host.run = (argv, ...args) => argv[0] === "/usr/bin/python3"
+    ? { status: 1, stdout: "PREVIEW_FAILED preview_processes_still_running" } : original(argv, ...args);
+  assert.match(runOperation("ws-preview-isolation-provision", "123", fx.host).line, /^ADMIN_FAILED /);
+});
+
+test("GitHub App signer preparation is fixed and quarantine refuses an unavailable replacement", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  const calls = [];
+  fx.host.run = (argv, ...args) => {
+    calls.push(argv);
+    if (argv[0] === "/usr/bin/python3") {
+      assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", "123"]);
+      return { status: 0, stdout: "GITHUB_TOKEN_OK prepared_no_key_no_client_switch" };
+    }
+    if (argv[0] === "/usr/sbin/runuser") {
+      assert.deepEqual(argv, ["/usr/sbin/runuser", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", "--info"]);
+      return { status: 1, stdout: "" };
+    }
+    return original(argv, ...args);
+  };
+  assert.equal(runOperation("github-app-token-prepare", "123", fx.host).ok, true);
+  calls.length = 0;
+  assert.match(runOperation("github-app-key-quarantine", "123", fx.host).line, /ADMIN_BLOCKED .* replacement_signer_not_verified$/);
+  assert.equal(calls.filter(a => a[0] === "/usr/sbin/runuser").length, 1);
+  assert.equal(calls.filter(a => a[0] === "/usr/bin/id").length, 0, "no old-key quarantine begins without replacement proof");
+});
+
+test("GitHub gh and Git wrappers preserve interfaces without OWNER or old-key fallback", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "github-client-"));
+  try {
+    const provider = path.join(dir, "provider");
+    const gh = path.join(dir, "gh-real");
+    const marker = path.join(dir, "called");
+    fs.writeFileSync(provider, `#!/bin/sh\nprintf called >> '${marker}'\nprintf fixture-short-lived\n`, { mode: 0o700 });
+    fs.writeFileSync(gh, '#!/bin/sh\n[ "$GH_TOKEN" = fixture-short-lived ] || exit 9\n[ -z "${GITHUB_TOKEN:-}${GH_HOST:-}${GH_ENTERPRISE_TOKEN:-}" ] || exit 10\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
+    const wrapper = path.join(dir, "ghx");
+    fs.writeFileSync(wrapper, fileText("infra/vps/github-app-client/ghx")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider)
+      .replaceAll("/home/copilot/.local/bin/gh", gh), { mode: 0o700 });
+    const run = spawnSync(wrapper, ["workflow", "run", "vps-admin-operation.yml", "--ref", "main"], {
+      encoding: "utf8", env: { PATH: process.env.PATH, GITHUB_TOKEN: "unrelated-fixture", GH_HOST: "foreign.invalid", GH_ENTERPRISE_TOKEN: "unrelated-fixture" }
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout, "workflow\nrun\nvps-admin-operation.yml\n--ref\nmain\n");
+    assert.equal(fs.readFileSync(marker, "utf8"), "called");
+    assert.equal(spawnSync(wrapper, ["auth", "token"]).status, 2);
+    assert.equal(fs.readFileSync(marker, "utf8"), "called", "gh auth must not mint or print a token");
+    const helper = path.join(dir, "credential");
+    fs.writeFileSync(helper, fileText("infra/vps/github-app-client/git-credential-arcade-agent")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider), { mode: 0o700 });
+    assert.equal(spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" }).stdout,
+      "username=x-access-token\npassword=fixture-short-lived\n");
+    const before = fs.readFileSync(marker, "utf8");
+    for (const [action, input] of [["store", ""], ["erase", ""], ["get", "protocol=https\nhost=foreign.invalid\n\n"], ["get", "protocol=http\nhost=github.com\n\n"]]) {
+      assert.equal(spawnSync(helper, [action], { input, encoding: "utf8" }).stdout, "");
+    }
+    assert.equal(fs.readFileSync(marker, "utf8"), before);
+    fs.writeFileSync(provider, "#!/bin/sh\nexit 1\n");
+    assert.equal(spawnSync(wrapper, ["issue", "list"]).status, 1, "no OWNER fallback on issuer failure");
+    const refused = spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, "quit=1\n", "stop Git credential fallback and prompting after issuer failure");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("compatibility provider invokes only the fixed non-root isolated issuer", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const source = fileText("infra/vps/github-app-client/arcade-agent-token.mjs").replace(/^#!.*\n/, "")
+    .replace('import { spawnSync } from "node:child_process";', "");
+  for (const args of [[], ["--info"], ["--permissions=administration:write"], ["--info", "extra"]]) {
+    const calls = []; let code;
+    const process = { argv: ["node", "provider", ...args], stderr: { write() {} }, exit(value) { code = value; throw new Error("exit"); } };
+    assert.throws(() => runInNewContext(source, { process, spawnSync(...argv) { calls.push(argv); return { status: 0 }; } }), /exit/);
+    const allowed = args.length <= 1 && (args.length === 0 || args[0] === "--info");
+    assert.equal(code, allowed ? 0 : 1);
+    assert.equal(calls.length, allowed ? 1 : 0);
+    if (allowed) {
+      assert.equal(calls[0][0], "/usr/bin/sudo");
+      assert.deepEqual(Array.from(calls[0][1]), ["-n", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", ...args]);
+      assert.equal(calls[0][2].env.PATH, "/usr/bin:/bin");
+      assert.deepEqual(Array.from(calls[0][2].stdio), ["ignore", "inherit", "inherit"]);
+    }
   }
-  const result = spawnSync(process.execPath, ["--test", "ws-tests/ws-preview-safe-stop.behavior.test.mjs"], { encoding: "utf8" });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
 });

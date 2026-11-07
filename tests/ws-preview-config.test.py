@@ -480,7 +480,10 @@ class PreviewIsolation(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
-        self.receipt_ready = True
+        self.stop_error = False
+        self.stop_completes = True
+        self.stop_leaves_children = False
+        self.policy_input = None
         outer = self
 
         class Fixture(isolation.Isolation):
@@ -490,15 +493,20 @@ class PreviewIsolation(unittest.TestCase):
             def old_runtime(self):
                 return None
 
-            def run(self, argv, expected=(0,)):
+            def run(self, argv, expected=(0,), data=None):
                 outer.calls.append(argv)
-                if argv[0:2] == ['/usr/bin/node', '/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs']:
-                    if not outer.receipt_ready:
-                        return 'SAFE_STOP_BLOCKED inspect_read_only_no_retry'
-                    if argv[2] == 'consume-receipt':
-                        outer.receipt_ready = False
-                        return 'SAFE_STOP_OK consumed'
-                    return 'SAFE_STOP_OK verified'
+                if argv == ['/usr/bin/systemctl', 'stop', isolation.UNIT]:
+                    if outer.stop_error:
+                        raise isolation.secure.Refused('command_failed')
+                    if outer.stop_completes:
+                        outer.active = 'inactive'
+                    (self.cgroup / 'cgroup.events').write_text('populated ' + ('1' if outer.stop_leaves_children else '0'))
+                    return ''
+                if 'KillMode' in argv:
+                    return 'LoadState=loaded\nKillMode=control-group\nControlGroup=/system.slice/ws-server-preview.service'
+                if argv == ['/usr/sbin/visudo', '-c', '-f', '-']:
+                    outer.policy_input = data
+                    return ''
                 if 'ActiveState' in argv:
                     return 'ActiveState=' + outer.active + '\nMainPID=' + ('0' if outer.active == 'inactive' else '123') + '\nLoadState=loaded'
                 if 'SupplementaryGroups' in argv:
@@ -534,6 +542,9 @@ class PreviewIsolation(unittest.TestCase):
         self.task = Fixture()
         self.task.base = root / 'preview'
         self.task.base.mkdir(mode=0o755)
+        self.task.cgroup = root / 'preview-cgroup'
+        self.task.cgroup.mkdir()
+        (self.task.cgroup / 'cgroup.events').write_text('populated 0')
         self.task.backup = root / 'backup'
         self.task.files = isolation.secure.SecureFiles(os.getuid(), os.getgid(), root)
         self.task.key = root / 'owner.pub'
@@ -575,23 +586,81 @@ class PreviewIsolation(unittest.TestCase):
         self.assertIn(b'command="cd /var/lib/arcade-preview-deploy/staging', key)
         self.assertIn(b'\\"$SSH_ORIGINAL_COMMAND\\"', key)
 
-    def test_inactive_without_safe_stop_receipt_cannot_provision(self):
-        self.receipt_ready = False
-        for action in (self.task.preflight, lambda: self.task.provision('123')):
-            with self.assertRaisesRegex(isolation.secure.Refused, 'fresh_safe_stop_receipt_required'):
-                action()
-            self.assertFalse(self.task.backup.exists())
-        self.assertFalse(any('useradd' in command[0] for command in self.calls))
+    def test_active_stage_preflight_finishes_before_the_only_preview_stop(self):
+        self.active = 'active'
+        self.task.preflight()
+        self.assertEqual(self.active, 'active')
+        self.assertFalse(self.task.backup.exists())
+        self.assertFalse(any(c[0].endswith('systemctl') and 'stop' in c for c in self.calls))
+        self.assertEqual(self.policy_input, isolation.SUDO)
+        self.calls.clear()
+        self.assertEqual(self.task.provision('123'), 'provisioned_runtime_not_started')
+        stop = ['/usr/bin/systemctl', 'stop', isolation.UNIT]
+        self.assertEqual(self.calls.count(stop), 1)
+        self.assertLess(self.calls.index(['/usr/sbin/visudo', '-c', '-f', '-']), self.calls.index(stop))
+        self.assertLess(self.calls.index(stop), next(i for i,c in enumerate(self.calls) if c[0].endswith('useradd')))
+        self.assertFalse(any('ws-server.service' in c or c[0].endswith('psql') for c in self.calls))
+        self.assertFalse(any('safe-stop' in str(c) for c in self.calls))
+        self.assertEqual(self.production.read_bytes(), b'unchanged')
 
-    def test_public_key_and_active_service_block_before_mutation(self):
+    def test_invalid_preflight_never_stops_active_preview(self):
+        self.active = 'active'
         self.task.key.write_bytes(b'')
         with self.assertRaisesRegex(isolation.secure.Refused, 'owner_public_key_missing'):
-            self.task.preflight()
-        self.assertFalse(self.task.backup.exists())
-        self.active = 'active'
-        with self.assertRaisesRegex(isolation.secure.Refused, 'preview_must_be_stopped'):
             self.task.provision('123')
+        self.assertFalse(any('stop' in c for c in self.calls))
         self.assertFalse(self.task.backup.exists())
+
+    def test_failed_or_incomplete_stop_never_changes_accounts_or_live_trees(self):
+        for kind in ['stop_error', 'stop_completes', 'stop_leaves_children']:
+            with self.subTest(kind=kind):
+                self.active = 'active'
+                self.stop_error = kind == 'stop_error'
+                self.stop_completes = kind != 'stop_completes'
+                self.stop_leaves_children = kind == 'stop_leaves_children'
+                self.calls.clear()
+                before = (self.task.base / 'ws-server').stat().st_ino
+                with self.assertRaises(isolation.secure.Refused):
+                    self.task.provision('123')
+                self.assertTrue(self.task.mutation_started)
+                self.assertFalse(self.task.backup.exists())
+                self.assertFalse(any(c[0].endswith('useradd') for c in self.calls))
+                self.assertEqual((self.task.base / 'ws-server').stat().st_ino, before)
+                self.assertEqual(self.production.read_bytes(), b'unchanged')
+
+    def test_untrusted_stop_policy_is_refused_before_stop(self):
+        run = self.task.run
+        self.task.run = lambda argv, **kwargs: 'LoadState=loaded\nKillMode=process\nControlGroup=/system.slice/ws-server.service' if 'KillMode' in argv else run(argv, **kwargs)
+        with self.assertRaisesRegex(isolation.secure.Refused, 'unexpected_stop_policy'):
+            self.task.provision('123')
+        self.assertFalse(self.task.mutation_started)
+        self.assertFalse(self.task.backup.exists())
+        self.assertFalse(any('stop' in cmd for cmd in self.calls))
+
+    def test_cli_distinguishes_preflight_refusal_from_attempted_stop(self):
+        from types import SimpleNamespace
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        for started in [False, True]:
+            task = SimpleNamespace(mutation_started=started)
+            def fail(_):
+                raise isolation.secure.Refused('fixture_refusal')
+            task.provision = fail
+            output = io.StringIO()
+            with patch.object(isolation.os, 'geteuid', return_value=0), patch.object(isolation.sys, 'argv', ['fixture','provision','123']), patch.object(isolation, 'Isolation', return_value=task), redirect_stdout(output):
+                with self.assertRaises(SystemExit) as error:
+                    isolation.main()
+                self.assertEqual(error.exception.code, 1)
+            self.assertEqual(output.getvalue(), ('PREVIEW_FAILED' if started else 'PREVIEW_BLOCKED') + ' fixture_refusal\n')
+
+    def test_cli_has_no_external_preflight_service_or_path_argument(self):
+        from unittest.mock import patch
+        for args in [['preflight','123'],['stop','123'],['provision','123','ws-server.service'],['provision','123','/tmp/other'],['rollback','../../other']]:
+            with patch.object(isolation.os, 'geteuid', return_value=0), patch.object(isolation.sys, 'argv', ['fixture', *args]), patch.object(isolation, 'Isolation') as factory:
+                with self.assertRaisesRegex(isolation.secure.Refused, 'unexpected_arguments'):
+                    isolation.main()
+                factory.assert_not_called()
 
     def test_provision_and_rollback_preserve_original_inodes_and_production(self):
         before = {name: (self.task.base / name).stat().st_ino for name in isolation.ROOTS}
@@ -606,7 +675,7 @@ class PreviewIsolation(unittest.TestCase):
         for name in isolation.ROOTS:
             self.assertEqual((self.task.base / name).stat().st_ino, before[name])
         self.assertEqual(self.production.read_bytes(), b'unchanged')
-        self.assertFalse(any(cmd[0].endswith('systemctl') and any(x in cmd for x in ['start','stop','restart']) for cmd in self.calls))
+        self.assertEqual([cmd for cmd in self.calls if cmd[0].endswith('systemctl') and any(x in cmd for x in ['start','stop','restart'])], [['/usr/bin/systemctl','stop',isolation.UNIT]])
         self.assertFalse(any('ws-server.service' in cmd for cmd in self.calls))
 
     def test_external_symlink_blocks_without_touching_target_or_live_trees(self):
@@ -730,6 +799,120 @@ class PreviewIsolation(unittest.TestCase):
         with self.assertRaisesRegex(isolation.secure.Refused, 'home_already_exists'):
             self.task.preflight()
         self.assertFalse(self.task.backup.exists())
+
+
+class GitHubAppToken(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('github_token', Path(__file__).parents[1] / 'infra/vps/github-app-token.py')
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def test_scope_and_expiry_are_fixed_and_verified_before_disclosure(self):
+        from unittest.mock import patch
+        m = self.module
+        body = {'token':'ghs_' + 'x' * 40, 'expires_at':'2026-11-07T01:00:00Z',
+                'permissions':dict(m.PERMISSIONS), 'repository_selection':'selected',
+                'repositories':[{'id':1076414433,'full_name':'krzysztofcal/arcadePlatform'}]}
+        with patch.object(m.time, 'time', return_value=1794009600):
+            # Use a deterministic epoch matching the response, independent of fixture host time.
+            body['expires_at'] = m.datetime.datetime.fromtimestamp(m.time.time()+3600,m.datetime.timezone.utc).isoformat()
+            self.assertEqual(m.validate_response(body), body['token'])
+            self.assertEqual(m.validate_response({**body,'token':'ghs_5609023_' + 'x' * 1200}), 'ghs_5609023_' + 'x' * 1200)
+            for change in [{'permissions':{**m.PERMISSIONS,'administration':'write'}},
+                           {'permissions':{**m.PERMISSIONS,'actions':'read'}},
+                           {'repositories':[{'id':1,'full_name':'foreign/repo'}]},
+                           {'repository_selection':'all'}, {'expires_at':'2099-01-01T00:00:00Z'}, {'token':'secret\nleak'}]:
+                with self.subTest(change=next(iter(change))):
+                    with self.assertRaises(m.Refused):m.validate_response({**body,**change})
+
+    def test_mint_uses_fixed_endpoint_permissions_and_no_redirect_or_proxy(self):
+        from unittest.mock import patch, Mock
+        m = self.module
+        body = {'token':'ghs_'+'f'*40,'expires_at':m.datetime.datetime.fromtimestamp(m.time.time()+3600,m.datetime.timezone.utc).isoformat(),
+                'permissions':m.PERMISSIONS,'repository_selection':'selected',
+                'repositories':[{'id':1076414433,'full_name':'krzysztofcal/arcadePlatform'}]}
+        response=Mock();response.status=201;response.read.return_value=json.dumps(body).encode()
+        response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
+        opener=Mock();opener.open.return_value=response
+        signature=Mock(returncode=0,stdout=b'f' * 256)
+        with patch.object(m,'validate_custody'),patch.object(m.subprocess,'run',return_value=signature) as sign,patch.object(m.urllib.request,'build_opener',return_value=opener) as build:
+            self.assertEqual(m.mint()['token'],body['token'])
+        argv=sign.call_args.args[0]
+        self.assertEqual(argv,['/usr/bin/openssl','dgst','-sha256','-sign',str(m.KEY)])
+        self.assertNotIn('fixture-signature',' '.join(argv))
+        request=opener.open.call_args.args[0]
+        self.assertEqual(request.full_url,'https://api.github.com/app/installations/178502493/access_tokens')
+        self.assertEqual(json.loads(request.data),{'repository_ids':[1076414433],'permissions':m.PERMISSIONS})
+        self.assertTrue(any(isinstance(h,m.urllib.request.ProxyHandler) and h.proxies=={} for h in build.call_args.args))
+        with self.assertRaises(m.Refused):m.NoRedirect().redirect_request(None,None,302,'redirect',{},'https://foreign.invalid')
+
+    def test_key_custody_rejects_copilot_owner_symlink_acl_and_extra_groups(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        m=self.module
+        good=SimpleNamespace(st_uid=0,st_gid=321,st_mode=0o100640,st_nlink=1,st_size=1675)
+        with patch.object(m.pwd,'getpwuid',return_value=SimpleNamespace(pw_name=m.USER)),patch.object(m.os,'geteuid',return_value=320),patch.object(m.os,'getgid',return_value=321),patch.object(m.os,'getgroups',return_value=[321]),patch.object(m,'trusted_parents'),patch.object(m.os,'lstat',side_effect=lambda p: SimpleNamespace(st_gid=321,st_mode=0o40750) if p==m.KEY.parent else good),patch.object(m.os,'listxattr',return_value=[]):
+            m.validate_custody()
+            for field,value in [('st_uid',1001),('st_gid',1001),('st_mode',0o100644),('st_mode',0o120640),('st_nlink',2)]:
+                bad=SimpleNamespace(**vars(good));setattr(bad,field,value)
+                with patch.object(m.os,'lstat',side_effect=lambda p: SimpleNamespace(st_gid=321,st_mode=0o40750) if p==m.KEY.parent else bad):
+                    with self.assertRaises(m.Refused):m.validate_custody()
+            with patch.object(m.os,'listxattr',return_value=['system.posix_acl_access']):
+                with self.assertRaises(m.Refused):m.validate_custody()
+            with patch.object(m.os,'getgroups',return_value=[321,1001]):
+                with self.assertRaises(m.Refused):m.validate_custody()
+
+    def test_entry_point_rejects_arbitrary_root_actions_and_keeps_info_token_free(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        m=self.module
+        for args in [['prepare','123','/tmp/key'],['stop','123'],['prepare','../other']]:
+            with patch.object(m.resource,'setrlimit'),patch.dict(m.os.environ,{},clear=True),patch.object(m.os,'geteuid',return_value=0),patch.object(m.sys,'argv',['fixture',*args]),patch.object(m,'Preparation') as factory:
+                with self.assertRaises(m.Refused):m.main()
+                factory.assert_not_called()
+        body={'token':'fixture-never-print','expires_at':'fixture-expiry','permissions':m.PERMISSIONS,
+              'repository_selection':'selected','repositories':[{'full_name':'krzysztofcal/arcadePlatform'}]}
+        output=io.StringIO()
+        with patch.object(m.resource,'setrlimit'),patch.dict(m.os.environ,{},clear=True),patch.object(m.os,'geteuid',return_value=1001),patch.object(m.sys,'argv',['fixture','--info']),patch.object(m,'mint',return_value=body),redirect_stdout(output):
+            m.main()
+        self.assertNotIn(body['token'],output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())['repositories'],['krzysztofcal/arcadePlatform'])
+
+    def test_prepare_refuses_unverifiable_sudo_before_enabling_signer(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        m=self.module
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);task=m.Preparation();task.files=config.SecureFiles(os.getuid(),os.getgid(),root)
+            task.directory=root/'private';task.backup=root/'backup';task.command=root/'issuer';task.policy=root/'policy'
+            task.run=lambda argv,**kwargs: '321' if argv[0]=='/usr/bin/id' else ''
+            account=SimpleNamespace(pw_uid=320,pw_gid=321,pw_dir='/nonexistent',pw_shell='/usr/sbin/nologin')
+            with patch.object(task,'preflight',return_value=b'fixture issuer'),patch.object(m.pwd,'getpwnam',return_value=account):
+                with self.assertRaisesRegex(m.Refused,'unexpected_signer_sudo_policy'):task.prepare('123')
+            self.assertTrue((task.backup/'manifest.json').exists())
+            self.assertFalse(task.directory.exists());self.assertFalse(task.command.exists());self.assertFalse(task.policy.exists())
+
+    def test_prepare_preflights_before_mutation_and_retains_failure_manifest(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        m=self.module
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);files=config.SecureFiles(os.getuid(),os.getgid(),root)
+            task=m.Preparation();task.files=files;task.directory=root/'private';task.backup=root/'backup';task.command=root/'issuer';task.policy=root/'sudoers';task.source=root/'source';task.source.write_bytes(b'fixture issuer');task.source.chmod(0o644)
+            calls=[]
+            task.run=lambda argv,**kwargs: calls.append(argv) or ('321' if argv[0]=='/usr/bin/id' else 'User arcade-github-token is not allowed to run sudo on fixture.' if '-U' in argv else '')
+            with patch.object(m.pwd,'getpwnam',side_effect=KeyError),patch.object(m.grp,'getgrnam',side_effect=KeyError),patch.object(m,'trusted_parents'):
+                task.preflight()
+                self.assertFalse(task.backup.exists());self.assertFalse(calls and any('useradd' in a[0] for a in calls))
+            account=SimpleNamespace(pw_uid=320,pw_gid=321,pw_dir='/nonexistent',pw_shell='/usr/sbin/nologin')
+            with patch.object(task,'preflight',return_value=b'fixture issuer'),patch.object(m.pwd,'getpwnam',return_value=account),patch.object(m.os,'chown',side_effect=OSError('fixture failure')):
+                with self.assertRaises(OSError):task.prepare('123')
+            self.assertTrue(task.mutated)
+            self.assertEqual(json.loads((task.backup/'manifest.json').read_text())['phase'],'preparing')
+            self.assertFalse(task.policy.exists());self.assertFalse(task.command.exists())
+            self.assertFalse(any('systemctl' in a[0] for a in calls))
 
 
 if __name__ == '__main__':
