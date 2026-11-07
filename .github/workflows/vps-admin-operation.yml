@@ -19,8 +19,6 @@ on:
           - systemd-daemon-reload
           - copilot-secret-snapshots-quarantine
           - ledger-production-dispatcher-install
-          - ws-preview-safe-stop
-          - ws-preview-isolation-preflight
           - ws-preview-isolation-provision
           - ws-preview-isolation-rollback
       reason:
