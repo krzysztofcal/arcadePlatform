@@ -84,6 +84,7 @@ Official contracts: [installation tokens and repository/permission limits](https
   `vps-admin-operation.yml`: two fixed catalog entries with the same requester/OWNER/audit/lock rules.
 - `stage-vps-admin.sh` and fresh-host `bootstrap.sh`: stage the reviewed root-owned module only;
   no signer account, key, client or token activation in the installer.
+- `agents.md`: name only the exact non-root signer exception; root/OWNER restrictions remain binding.
 - Existing Python configuration and infra workflow guards: fixture-only tests for scope, custody,
   refusal, partial preparation and wrapper compatibility; no live token/key/network operation.
 
@@ -112,10 +113,15 @@ Official contracts: [installation tokens and repository/permission limits](https
    Issuance remains fail-closed for unavailable API, changed scope or missing/misconfigured key.
 5. **Switch only the three public client files as copilot**, from the reviewed exact SHA; preserve the
    old public provider/wrappers as a source-only backup, never duplicate app.pem. Preserve existing
-   credential configuration and gh symlink. Ensure the actual agent PATH resolves the existing shim
+   credential configuration and gh symlink. Replace each client file atomically so concurrent calls never see partial source. Ensure the actual agent PATH resolves the existing shim
    before the real gh binary; the wrapper itself still execs the absolute real binary. Open a fresh
-   Codex shell and verify ghx/gh read-only repository access and Git credential plumbing without
-   printing token output. On failure restore only old public client files while the old key is retained;
+   actual Codex execution context and verify the fixed non-root sudo command succeeds there, not only
+   in a login shell. A sandbox with no_new_privs blocks setuid sudo: STOP without disabling sandbox
+   protections or widening permissions; keep the old path until OWNER decides a compatible execution
+   path. This audit context reports NoNewPrivs=0, but future launch settings must be checked separately.
+   Verify ghx/gh read-only repository access and Git credential plumbing without printing token output.
+   Confirm the Git helper chain resets inherited github.com helpers and uses only the approved helper;
+   issuer failure emits quit=1 so Git cannot fall through to OWNER helpers or terminal prompts. On failure restore only old public client files while the old key is retained;
    do not delete a key or lose the trusted OWNER channel during troubleshooting.
 6. **Separate bounded GitHub acceptance GO.** Read-only checks are insufficient to prove write scope:
    agree one disposable branch update, Draft PR/issue create-update-cleanup, and one existing

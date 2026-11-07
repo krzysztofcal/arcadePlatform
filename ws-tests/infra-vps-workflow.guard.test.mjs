@@ -1188,8 +1188,6 @@ test("GitHub App signer preparation is fixed and quarantine refuses an unavailab
   assert.match(runOperation("github-app-key-quarantine", "123", fx.host).line, /ADMIN_BLOCKED .* replacement_signer_not_verified$/);
   assert.equal(calls.filter(a => a[0] === "/usr/sbin/runuser").length, 1);
   assert.equal(calls.filter(a => a[0] === "/usr/bin/id").length, 0, "no old-key quarantine begins without replacement proof");
-  const python = spawnSync("python3", ["-B", "tests/ws-preview-config.test.py", "GitHubAppToken"], { encoding: "utf8" });
-  assert.equal(python.status, 0, python.stderr);
 });
 
 test("GitHub gh and Git wrappers preserve interfaces without OWNER or old-key fallback", () => {
@@ -1224,7 +1222,9 @@ test("GitHub gh and Git wrappers preserve interfaces without OWNER or old-key fa
     assert.equal(fs.readFileSync(marker, "utf8"), before);
     fs.writeFileSync(provider, "#!/bin/sh\nexit 1\n");
     assert.equal(spawnSync(wrapper, ["issue", "list"]).status, 1, "no OWNER fallback on issuer failure");
-    assert.equal(spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n" }).status, 1);
+    const refused = spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, "quit=1\n", "stop Git credential fallback and prompting after issuer failure");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
