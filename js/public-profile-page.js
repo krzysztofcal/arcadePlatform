@@ -48,6 +48,7 @@
     card.hidden = false;
     card.setAttribute('aria-busy', 'false');
     setStatus('', '');
+    if (window.ArcadeUgc) window.ArcadeUgc.profileRendered(profile);
   }
 
   function reset(){
@@ -63,6 +64,7 @@
     if (window.ProfileClient) window.ProfileClient.applyAvatar(avatar, null);
     avatar.setAttribute('aria-label', t('publicProfileAvatar', 'Avatar'));
     if (signIn) signIn.hidden = true;
+    if (window.ArcadeUgc) window.ArcadeUgc.profileRendered(null);
   }
 
   function showSignIn(){

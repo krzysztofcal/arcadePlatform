@@ -107,6 +107,7 @@
   <script src="/js/auth/supabaseClient.js" defer></script>
   <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/profile-client.js" defer></script>
+  <script src="/js/ugc-client.js" defer></script>
   <script src="js/chips/client.js" defer></script>
   <script src="js/core/number-format.js" defer></script>
   <script src="js/topbar.js" defer></script>
@@ -125,6 +126,7 @@
   <script src="js/vendor/klaro/klaro.js" defer></script>
   <script src="js/consent-services.js" defer></script>
   <link rel="stylesheet" href="/css/profile-account.css">
+  <link rel="stylesheet" href="/css/ugc.css">
 </head>
 <body class="page-account">
   <div class="page-boot" id="pageBoot" role="status" aria-label="Loading account">
@@ -306,6 +308,7 @@
               <span id="publicProfileSaveStatus" role="status"></span>
             </form>
           </section>
+          <section class="ugc-blocked" data-ugc-section hidden aria-labelledby="ugcBlockedTitle"><h3 id="ugcBlockedTitle" data-i18n="ugcBlockedListTitle">Blocked players</h3><div id="ugcBlockedList"></div></section>
           <div class="account-panel__actions">
             <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton" data-i18n="signOut">Sign out</button>
           </div>

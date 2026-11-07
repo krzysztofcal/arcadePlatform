@@ -3352,6 +3352,11 @@
     if (els.reactionLayer) els.reactionLayer.innerHTML = '';
   }
 
+  // #1140: a block is this client's own filter (avatar, reactions, gifts); seats, turns and chips are untouched.
+  function ugcBlocked(userId){
+    return !!(userId && window.ArcadeUgc && typeof window.ArcadeUgc.isBlocked === 'function' && window.ArcadeUgc.isBlocked(userId));
+  }
+
   function currentSeatOwnerUserId(seatNo){
     for (var i = 0; i < state.seats.length; i++){
       var seat = state.seats[i];
@@ -3575,6 +3580,7 @@
     var entry = findReactionEntry(reactionKey);
     var ownerUserId = currentSeatOwnerUserId(seatNo);
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
+    if (ugcBlocked(ownerUserId)) return;
     var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
     var targetSeatNo = null;
     var targetOwnerUserId = null;
@@ -3708,6 +3714,7 @@
   function seatAvatarSource(seat){
     if (!seat) return '';
     if (seat.isBot && seat.botPresentation) return seat.botPresentation.avatarPath || '';
+    if (ugcBlocked(seat.userId)) return 'blocked';
     var avatar = seat.profile && seat.profile.avatar;
     return avatar ? (avatar.type === 'uploaded' ? avatar.url : 'default:' + avatar.variant) : '';
   }
@@ -3725,7 +3732,7 @@
     avatar.appendChild(fallback);
 
     var imageUrl = seat.isBot && seat.botPresentation ? seat.botPresentation.avatarPath : '';
-    var profileAvatar = !seat.isBot && seat.profile && seat.profile.avatar;
+    var profileAvatar = !seat.isBot && !ugcBlocked(seat.userId) && seat.profile && seat.profile.avatar;
     if (!imageUrl && !profileAvatar) return;
     if (!imageUrl && profileAvatar.type === 'default'){
       avatar.dataset.avatarVariant = profileAvatar.variant;
@@ -4839,6 +4846,7 @@
         || !Number.isInteger(event.senderSeatNo) || !Number.isInteger(event.recipientSeatNo) || giftEventIds.has(event.eventId)) return;
     giftEventIds.add(event.eventId);
     if (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
+    if (ugcBlocked(currentSeatOwnerUserId(event.senderSeatNo))) return;
     syncGiftOwners();
     if (!giftOwners[event.recipientSeatNo]) return;
     var recent = giftsBySeat[event.recipientSeatNo] || [];
@@ -5283,6 +5291,9 @@
     });
     renderGiftBadges();
     syncGiftShop();
+    if (window.ArcadeUgc) window.ArcadeUgc.tablePlayers(state.tableId, state.seats.filter(function(seat){
+      return seat && seat.userId && !seat.isBot && seat.userId !== state.currentUserId;
+    }).map(function(seat){ return { userId: seat.userId, displayName: getPublicDisplayName(seat), isBot: false }; }));
     if (quickFocus && giftOwners[quickFocus.seatNo] === quickFocus.userId){
       var hud = renderedSeatHud[quickFocus.seatNo];
       var picker = hud && hud.quickPicker;
@@ -7028,6 +7039,7 @@
     els.menuSignIn = document.getElementById('pokerMenuSignIn');
     els.menuGuestInfo = document.getElementById('pokerMenuGuestInfo');
     bindGiftShop();
+    if (window.ArcadeUgc) window.ArcadeUgc.onChange(function(){ renderSeats(); });
     els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
     els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
     els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
