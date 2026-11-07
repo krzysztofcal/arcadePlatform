@@ -24,7 +24,11 @@ login-required profiles, operator profile block) is the input; this spec adds ph
 - **R-RETAIN (C).** A report never disappears without review: it leaves "pending" only through an audited admin
   decision in one transaction (a failed action rolls the decision back), nothing expires or deletes pending
   reports, and the queue is oldest first so new reports do not push old ones out of view. The only removal is the
-  account-deletion cascade of the reported user (R-SAFE). A manual review procedure (who checks the panel and how
+  account-deletion cascade of the reported user (R-SAFE): the user's content goes with the account, and each pending
+  report removed this way is added to an anonymous total (no ids, content, per-report time or identity hash) shown
+  in the Reports tab. A profile action on an account in deletion answers 409 `account_deleting` and changes
+  nothing. Owner decision 2026-11-07: no identity retention after deletion; a re-registered account starts
+  without moderation history (accepted). A manual review procedure (who checks the panel and how
   often) must be set by the owner before public activation.
 - **R-CONSENT (D).** Google sign-in offers a separate, unticked, optional consent to import and publicly show the
   Google photo. With consent the photo is imported once through the existing avatar processing and Storage path;

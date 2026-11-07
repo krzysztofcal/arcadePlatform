@@ -24,7 +24,16 @@ async function database(phaseA) {
   grant select, update on public.user_profiles to service_role;
   create table public.account_deletion_requests(old_user_id uuid);
   create table private.account_avatar_objects(user_id uuid not null, output_path text not null check (output_path ~ '^[0-9a-f-]{36}\\.webp$'),
-    deleted_at timestamptz, primary key (user_id, output_path));`);
+    deleted_at timestamptz, primary key (user_id, output_path));
+  -- Same rule as public.account_guard_owned_write_v2: no profile write for an account in deletion.
+  create function public.fake_account_guard() returns trigger language plpgsql security definer as $$
+  begin
+    if exists(select 1 from public.account_deletion_requests where old_user_id = new.user_id) then
+      raise exception using errcode='42501', message='Account is not active';
+    end if;
+    return new;
+  end $$;
+  create trigger account_owned_write_v2 before insert or update on public.user_profiles for each row execute function public.fake_account_guard();`);
   if (phaseA) {
     await db.exec(`alter table public.user_profiles add column public_profile_blocked boolean not null default false;
     create function private.guard_public_profile_block() returns trigger language plpgsql set search_path=pg_catalog as $$
@@ -174,4 +183,83 @@ test("the admin endpoint is admin-only, dark by default and never echoes interna
   assert.deepEqual([conflict.statusCode, JSON.parse(conflict.body)], [409, { error: "report_already_decided" }]);
   const broken = await make({ listReports: async () => { throw new Error("relation does not exist"); } })(ev("GET"));
   assert.deepEqual([broken.statusCode, JSON.parse(broken.body)], [500, { error: "server_error" }]);
+});
+
+test("pending reports removed by a real account deletion are counted anonymously, and a rolled-back deletion counts nothing", async () => {
+  const env = await database(false);
+  const count = async () => (await listReports(ADMIN, {}, env.deps)).removedWithDeletedAccount;
+  const reporterA = await env.user(); const reporterB = await env.user();
+  const target = await env.user(); const decided = await env.user(); const kept = await env.user();
+  await report(env, reporterA, target);
+  await report(env, reporterB, target, "harassment");
+  await report(env, reporterA, decided);
+  await report(env, reporterB, kept, "spam");
+  const queue = (await listReports(ADMIN, {}, env.deps)).reports;
+  await decideReport(ADMIN, { reportId: queue.find((r) => r.target.userId === decided).id, decision: "dismissed" }, env.deps);
+  assert.equal(await count(), 0);
+
+  await assert.rejects(env.db.transaction(async (tx) => {
+    await tx.query("delete from auth.users where id=$1", [target]);
+    throw new Error("abort deletion");
+  }), /abort deletion/);
+  assert.equal(await count(), 0, "a rolled-back deletion leaves the counter unchanged");
+  assert.equal((await listReports(ADMIN, {}, env.deps)).pendingCount, 3, "and keeps the reports");
+
+  await env.executeSql("delete from auth.users where id=$1", [target]);
+  assert.equal(await count(), 2, "both pending reports about the deleted account are counted");
+  await env.executeSql("delete from auth.users where id=$1", [decided]);
+  assert.equal(await count(), 2, "a decided report removed with its account is not counted");
+  await env.executeSql("delete from auth.users where id=$1", [reporterB]);
+  assert.equal(await count(), 2, "deleting a reporter removes no report");
+  const keptReport = (await listReports(ADMIN, {}, env.deps)).reports.find((r) => r.target.userId === kept);
+  assert.ok(keptReport, "the report of a deleted reporter stays pending");
+  await env.executeSql("delete from private.ugc_reports where id=$1", [keptReport.id]);
+  assert.equal(await count(), 2, "a deletion that is not an account deletion is not counted");
+
+  const columns = (await env.executeSql("select column_name from information_schema.columns where table_schema='private' and table_name='ugc_moderation_counters' order by ordinal_position", [])).map((r) => r.column_name);
+  assert.deepEqual(columns, ["key", "value"], "no identifiers, content or hashes");
+  assert.deepEqual(await env.executeSql("select key, value::int from private.ugc_moderation_counters", []), [{ key: "pending_removed_with_deleted_account", value: 2 }]);
+  for (const role of ["anon", "authenticated"]) {
+    await assert.rejects(env.db.transaction(async (tx) => { await tx.query(`set local role ${role}`); await tx.query("select 1 from private.ugc_moderation_counters"); }), /permission denied/i, role);
+  }
+  await assert.rejects(env.db.transaction(async (tx) => { await tx.query("set local role service_role"); await tx.query("update private.ugc_moderation_counters set value = 0"); }), /permission denied/i, "service_role reads only");
+});
+
+test("a profile action on an account in deletion answers 409 account_deleting and changes nothing", async () => {
+  const env = await database(true);
+  const key = `${randomUUID()}.webp`;
+  const reporter = await env.user(); const target = await env.user(key);
+  await report(env, reporter, target);
+  await report(env, await env.user(), target, "inappropriate_name");
+  await env.executeSql("insert into public.account_deletion_requests(old_user_id) values($1)", [target]);
+  const [first, second] = (await listReports(ADMIN, {}, env.deps)).reports;
+  for (const action of ["hide_avatar", "restrict_profile"]) {
+    await assert.rejects(decideReport(ADMIN, { reportId: first.id, decision: "resolved", action }, env.deps), (e) => e.code === "account_deleting" && e.status === 409, action);
+  }
+  await assert.rejects(unrestrictProfile(ADMIN, target, env.deps), (e) => e.code === "account_deleting" && e.status === 409);
+  const [profile] = await env.executeSql("select avatar_key, public_profile_blocked from public.user_profiles where user_id=$1", [target]);
+  assert.deepEqual(profile, { avatar_key: key, public_profile_blocked: false });
+  for (const table of ["ugc_moderation_actions", "ugc_avatar_holds", "account_avatar_objects"]) {
+    assert.equal((await env.executeSql(`select count(*)::int n from private.${table}`, []))[0].n, 0, `${table} untouched`);
+  }
+  assert.equal((await listReports(ADMIN, {}, env.deps)).pendingCount, 2, "both reports stay pending");
+  assert.equal((await decideReport(ADMIN, { reportId: second.id, decision: "resolved" }, env.deps)).status, "resolved", "a decision without a profile action still works");
+  await env.executeSql("delete from auth.users where id=$1", [target]);
+  assert.equal((await listReports(ADMIN, {}, env.deps)).removedWithDeletedAccount, 1, "the still pending report is counted when the deletion completes");
+
+  // The account lifecycle lock (the one requestDeletion takes) is held before the deletion check and before any write,
+  // so a deletion cannot start between the check and the profile change.
+  const other = await env.user(`${randomUUID()}.webp`);
+  await report(env, reporter, other);
+  const [open] = (await listReports(ADMIN, {}, env.deps)).reports;
+  for (const [action, run] of [["hide_avatar", (deps) => decideReport(ADMIN, { reportId: open.id, decision: "resolved", action: "hide_avatar" }, deps)],
+    ["unrestrict_profile", (deps) => unrestrictProfile(ADMIN, other, deps)]]) {
+    const seen = [];
+    const recording = { ...env.deps, beginSql: (work) => env.deps.beginSql((tx) => work({ unsafe: (query, params = []) => { seen.push({ query, params }); return tx.unsafe(query, params); } })) };
+    await run(recording);
+    const lock = seen.findIndex((q) => /pg_advisory_xact_lock/.test(q.query) && q.params[0] === `account-lifecycle:${other}`);
+    const check = seen.findIndex((q) => /account_deletion_requests/.test(q.query));
+    const firstWrite = seen.findIndex((q) => /^\s*(insert|update)\b|ugc_set_profile_blocked/i.test(q.query));
+    assert.ok(lock >= 0 && lock < check && check < firstWrite, `${action}: lock, then deletion check, then writes`);
+  }
 });

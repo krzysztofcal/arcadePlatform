@@ -4,7 +4,7 @@ import { ugcSafetyEnabled } from "./_shared/ugc-safety.mjs";
 import { decideReport, listReports, unrestrictProfile } from "./_shared/ugc-moderation.mjs";
 
 // #1140 UGC phase C, allowlisted admins only (ADMIN_USER_IDS):
-// GET ?status=pending|resolved|dismissed&after=<id>&limit=<n> -> { pendingCount, reports, next }
+// GET ?status=pending|resolved|dismissed&after=<id>&limit=<n> -> { pendingCount, removedWithDeletedAccount, reports, next }
 // POST { reportId, decision: "resolved" | "dismissed", action?: "none" | "hide_avatar" | "restrict_profile" }
 // POST { userId, action: "unrestrict_profile" } (correction without a report)
 function json(statusCode, headers, body) {

@@ -23,6 +23,8 @@
   internal errors not echoed.
 - [x] C2-T1 "Reports" tab in `admin.html` with the pending counter read on open/refresh (no polling), status filter,
   confirmed actions, profile restore; fundamental UI tests.
+- [x] C1-T3 Anonymous total of pending reports removed by account deletion (trigger, admin tab line) and 409
+  `account_deleting`; PGlite tests with real deletion, rollback, decided/other deletions not counted; mutation-checked.
 - [ ] C-T3 Owner: Stage apply of the migration (DB Stage Apply PR dispatch) and a Preview check with an admin account.
 - Not built (owner decision 2026-11-07): e-mail, mail provider, digest, scheduled job, automatic alerts.
 

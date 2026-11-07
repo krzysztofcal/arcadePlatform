@@ -24,6 +24,7 @@
     report_not_found: "This report no longer exists (the reported account was deleted). The list was refreshed.",
     profile_restriction_unavailable: "Profile restriction is not available yet (needs the public profile block migration). Nothing was changed.",
     profile_not_found: "The reported profile no longer exists. Nothing was changed.",
+    account_deleting: "This player's account is being deleted, so the profile can no longer be changed. Nothing was changed; resolve without action or wait until the deletion completes.",
     not_found: "Report moderation is not enabled on this environment."
   };
   var deps = null;
@@ -58,6 +59,20 @@
     }
     counter.textContent = value > 99 ? "99+" : String(value);
     counter.hidden = false;
+  }
+
+  // Pending reports deleted by the account-deletion cascade of the reported user (anonymous total from the server).
+  function setRemoved(count){
+    var line = node("adminUgcReportsRemoved");
+    if (!line) return;
+    var value = count == null ? NaN : Number(count);
+    if (!Number.isFinite(value) || value < 0){
+      line.textContent = "";
+      line.hidden = true;
+      return;
+    }
+    line.textContent = "Pending reports removed because the reported account was deleted: " + String(value);
+    line.hidden = false;
   }
 
   function formatTime(value){
@@ -155,6 +170,7 @@
       var data = await deps.apiFetch(ENDPOINT + query, { method: "GET" });
       if (generation !== state.generation) return;
       setCounter(data.pendingCount);
+      setRemoved(data.removedWithDeletedAccount);
       var reports = Array.isArray(data.reports) ? data.reports : [];
       state.reports = opts.append ? state.reports.concat(reports) : reports;
       state.next = data.next || null;
@@ -163,6 +179,7 @@
     } catch (err){
       if (generation !== state.generation) return;
       if (err && err.code === "not_found") setCounter(0);
+      setRemoved(null);
       state.reports = [];
       state.next = null;
       render();
@@ -176,8 +193,10 @@
     try {
       var data = await deps.apiFetch(ENDPOINT + "?status=pending&limit=1", { method: "GET" });
       setCounter(data.pendingCount);
+      setRemoved(data.removedWithDeletedAccount);
     } catch (_err){
       setCounter(0);
+      setRemoved(null);
     }
   }
 
@@ -198,6 +217,7 @@
     state.next = null;
     render();
     setCounter(0);
+    setRemoved(null);
     setMessage("");
   }
 
