@@ -41,13 +41,20 @@
     return error;
   }
 
-  async function request(url, options){
+  function tokenSubject(accessToken){
+    try { return String(JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub || '').toLowerCase(); } catch (_err){ return ''; }
+  }
+
+  // expect = { userId, session }: the request goes out only with a token of that account, in that session.
+  async function request(url, options, expect){
     var bridge = window.SupabaseAuthBridge;
     var accessToken = bridge && typeof bridge.getAccessToken === 'function' ? await bridge.getAccessToken() : null;
     if (!accessToken) throw failure('not_authenticated', 401);
+    if (!expect || !expect.userId || expect.session !== state.session || tokenSubject(accessToken) !== expect.userId) throw failure('stale_identity', 0);
     var opts = options || {};
     var headers = { Authorization: 'Bearer ' + accessToken, Accept: 'application/json' };
     if (opts.body) headers['Content-Type'] = 'application/json';
+    if (expect.session !== state.session) throw failure('stale_identity', 0);
     var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, { method: opts.method || 'GET', body: opts.body, headers: headers, cache: 'no-store', credentials: 'omit' });
     var body = {};
     try { body = await response.json(); } catch (_err){}
@@ -84,7 +91,7 @@
     if (!userId){ state.available = false; setBlocks(null, []); return []; }
     if (!force && state.loaded && state.userId === userId) return state.blocks;
     if (state.inFlight && state.inFlight.userId === userId && state.inFlight.session === session) return state.inFlight.promise;
-    var promise = request(BLOCKS_URL).then(async function(body){
+    var promise = request(BLOCKS_URL, null, { userId: userId, session: session }).then(async function(body){
       // A sign-out or account switch during the request must not apply the previous user's list.
       if (session !== state.session || await currentUserId() !== userId) return [];
       state.available = true;
@@ -116,30 +123,35 @@
     return target.userId ? { targetUserId: target.userId } : { targetHandle: target.handle };
   }
 
-  async function report(target, reason){
+  function currentExpect(expect){
+    return expect || { userId: state.userId, session: state.session };
+  }
+
+  async function report(target, reason, expect){
     var body = targetFields(target);
     body.reason = reason;
     body.context = target.context === 'table' ? 'table' : 'profile';
     if (body.context === 'table') body.tableId = target.tableId;
-    var result = await request(REPORT_URL, { method: 'POST', body: JSON.stringify(body) });
+    var result = await request(REPORT_URL, { method: 'POST', body: JSON.stringify(body) }, currentExpect(expect));
     klog('ugc:report_sent', { status: result && result.status, context: body.context });
     return result;
   }
 
-  async function block(target){
-    var result = await request(BLOCKS_URL, { method: 'POST', body: JSON.stringify(targetFields(target)) });
+  async function block(target, expect){
+    var result = await request(BLOCKS_URL, { method: 'POST', body: JSON.stringify(targetFields(target)) }, currentExpect(expect));
     await loadBlocks(true);
     return result;
   }
 
-  async function unblock(userId){
-    var result = await request(BLOCKS_URL + '?userId=' + encodeURIComponent(String(userId || '')), { method: 'DELETE' });
+  async function unblock(userId, expect){
+    var result = await request(BLOCKS_URL + '?userId=' + encodeURIComponent(String(userId || '')), { method: 'DELETE' }, currentExpect(expect));
     await loadBlocks(true);
     return result;
   }
 
   function messageFor(error){
     var code = error && error.code;
+    if (code === 'stale_identity') return '';
     if (code === 'rate_limit_exceeded') return t('ugcRateLimited', 'Too many requests. Please try again later.');
     if (code === 'not_authenticated' || code === 'unauthorized') return t('ugcSignInRequired', 'Sign in to report or block players.');
     return t('ugcError', 'Something went wrong. Please try again.');
@@ -226,7 +238,7 @@
       if (!reason || !await sameOwner(owner, session)) return;
       busy(true);
       try {
-        var result = await report(target, reason);
+        var result = await report(target, reason, { userId: owner, session: session });
         status.textContent = result && result.status === 'already_reported' ? t('ugcReportAlready', 'You have already reported this player. A moderator will review it.') : t('ugcReportSent', 'Thank you. Your report has been sent.');
       } catch (error){ status.textContent = messageFor(error); }
       busy(false);
@@ -236,12 +248,12 @@
       try {
         if (!await sameOwner(owner, session)){ busy(false); return; }
         if (blocked){
-          await unblock(blocked.userId);
+          await unblock(blocked.userId, { userId: owner, session: session });
           status.textContent = t('ugcUnblocked', 'Player unblocked.');
         } else {
           var ok = await openDialog({ title: t('ugcBlock', 'Block'), text: t('ugcBlockConfirm', 'Block {name}? You will no longer see their avatar, reactions or gifts. The game itself is not affected.', target.displayName), confirm: t('ugcBlock', 'Block') });
           if (ok && await sameOwner(owner, session)){
-            await block(target);
+            await block(target, { userId: owner, session: session });
             status.textContent = t('ugcBlocked', 'Player blocked. You will no longer see their avatar, reactions or gifts.');
           }
         }
@@ -317,7 +329,7 @@
       button.addEventListener('click', async function(){
         if (!await sameOwner(owner, session)) return;
         button.disabled = true;
-        try { await unblock(entry.userId); } catch (error){ button.disabled = false; button.title = messageFor(error); }
+        try { await unblock(entry.userId, { userId: owner, session: session }); } catch (error){ button.disabled = false; button.title = messageFor(error); }
       });
       row.appendChild(button);
       container.appendChild(row);

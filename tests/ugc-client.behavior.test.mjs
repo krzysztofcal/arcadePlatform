@@ -30,6 +30,8 @@ class Node {
   close() { this.open = false; }
 }
 
+const fakeJwt = (sub) => "h." + Buffer.from(JSON.stringify({ sub })).toString("base64url") + ".s";
+
 function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], elements = ["pokerSafetyPlayers", "publicProfileSafety"] } = {}) {
   const byId = {};
   const body = new Node("body");
@@ -42,7 +44,7 @@ function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], 
   const window = {
     document,
     SupabaseAuth: { getCurrentUser: async () => (auth.user ? { id: auth.user } : null), onAuthChange(listener) { auth.listener = listener; } },
-    SupabaseAuthBridge: { getAccessToken: async () => (auth.user ? "token-" + auth.user : null) },
+    SupabaseAuthBridge: { getAccessToken: async () => { if (auth.beforeToken) await auth.beforeToken(); return auth.user ? fakeJwt(auth.user) : null; } },
     ArcadeApi: { url: (url) => "https://api.example" + url },
     I18N: { t: () => "" },
     ProfileClient: { getMe: async () => ({ handle: "own-handle-1" }) },
@@ -53,7 +55,7 @@ function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], 
     if (typeof next.before === "function") await next.before();
     return { ok: next.status >= 200 && next.status < 300, status: next.status, json: async () => next.body };
   };
-  const context = vm.createContext({ window, document, fetch: window.fetch, setTimeout, Promise, JSON, String, Array, Object, Number, encodeURIComponent });
+  const context = vm.createContext({ window, document, fetch: window.fetch, setTimeout, Promise, JSON, String, Array, Object, Number, encodeURIComponent, atob });
   vm.runInContext(source, context);
   return { ugc: window.ArcadeUgc, calls, byId, body, section, auth };
 }
@@ -66,7 +68,7 @@ test("loads the caller's blocks once with the bearer token and filters ids case-
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://api.example/.netlify/functions/user-blocks");
   assert.equal(calls[0].method, "GET");
-  assert.equal(calls[0].auth, "Bearer token-00000000-0000-4000-8000-0000000000aa");
+  assert.equal(calls[0].auth, "Bearer " + fakeJwt("00000000-0000-4000-8000-0000000000aa"));
   assert.equal(ugc.isBlocked(blocked), true);
   assert.equal(ugc.isBlocked("00000000-0000-4000-8000-000000000999"), false);
   await ugc.loadBlocks(false);
@@ -191,5 +193,26 @@ test("profile controls hide when the feature turns out to be off", async () => {
   assert.equal(env.byId.publicProfileSafety.hidden, false);
   await env.ugc.loadBlocks(true);
   assert.equal(env.byId.publicProfileSafety.hidden, true, "a later 404 hides them");
+});
+
+test("an account switch while the token is being fetched sends nothing (report, block, unblock)", async () => {
+  for (const action of ["report", "block", "unblock"]) {
+    const env = setup({ responses: [{ status: 200, body: { blocks: action === "unblock" ? [{ userId: OTHER }] : [] } }] });
+    await flush();
+    env.ugc.tablePlayers("00000000-0000-4000-8000-0000000000f1", [{ userId: OTHER, displayName: "P" }]);
+    env.calls.length = 0;
+    const container = env.byId.pokerSafetyPlayers;
+    const button = container.querySelector(action === "report" ? ".ugc-actions__report" : ".ugc-actions__block");
+    // The switch happens while the action's token is fetched (after the confirmation, if there is one).
+    const switchDuringToken = () => { env.auth.beforeToken = async () => { env.auth.user = B; env.auth.beforeToken = null; env.auth.listener(); }; };
+    if (action === "unblock") switchDuringToken();
+    const clicked = button.fire("click");
+    await flush();
+    const dialog = env.body.children.find((node) => node.tagName === "dialog");
+    if (dialog) { switchDuringToken(); await dialog.children[0].fire("submit"); }
+    await clicked;
+    await flush();
+    assert.deepEqual(env.calls.filter((call) => call.method !== "GET"), [], `${action}: nothing is sent with B's token`);
+  }
 });
 
