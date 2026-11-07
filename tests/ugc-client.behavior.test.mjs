@@ -41,10 +41,11 @@ function setup({ user = "00000000-0000-4000-8000-0000000000aa", responses = [], 
   const document = { readyState: "complete", body, getElementById: (id) => byId[id] || null, createElement: (tag) => new Node(tag), createTextNode: (text) => new Node("#text", text), addEventListener() {} };
   const window = {
     document,
-    SupabaseAuth: { getCurrentUser: async () => (auth.user ? { id: auth.user } : null), onAuthChange() {} },
+    SupabaseAuth: { getCurrentUser: async () => (auth.user ? { id: auth.user } : null), onAuthChange(listener) { auth.listener = listener; } },
     SupabaseAuthBridge: { getAccessToken: async () => (auth.user ? "token-" + auth.user : null) },
     ArcadeApi: { url: (url) => "https://api.example" + url },
     I18N: { t: () => "" },
+    ProfileClient: { getMe: async () => ({ handle: "own-handle-1" }) },
   };
   window.fetch = async (url, options) => {
     calls.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : null, auth: options.headers.Authorization });
@@ -145,3 +146,50 @@ test("poker table filters only presentation of blocked players", async () => {
   assert.match(poker, /var profileAvatar = !seat\.isBot && !ugcBlocked\(seat\.userId\) && seat\.profile && seat\.profile\.avatar;/);
   assert.equal((poker.match(/ugcBlocked\(/g) || []).length, 5, "no other code path consults blocks (no seat, turn or chips logic)");
 });
+
+const A = "00000000-0000-4000-8000-0000000000aa";
+const B = "00000000-0000-4000-8000-0000000000bb";
+const OTHER = "00000000-0000-4000-8000-000000000002";
+
+test("an account switch forgets the previous list at once, even if the new load fails", async () => {
+  const env = setup({ responses: [{ status: 200, body: { blocks: [{ userId: OTHER }] } }, { status: 500, body: { error: "server_error" } }] });
+  await flush();
+  assert.equal(env.ugc.isBlocked(OTHER), true);
+  env.auth.user = B;
+  env.auth.listener();
+  assert.equal(env.ugc.isBlocked(OTHER), false, "cleared synchronously, before any new response");
+  await flush(); await flush();
+  assert.equal(env.ugc.isBlocked(OTHER), false, "a failed load for B never restores A's list");
+  assert.equal(env.section.hidden, true);
+});
+
+test("a dialog opened by one account is closed and sends nothing after a switch", async () => {
+  const env = setup();
+  await flush();
+  env.ugc.tablePlayers("00000000-0000-4000-8000-0000000000f1", [{ userId: OTHER, displayName: "P" }]);
+  env.calls.length = 0;
+  const clicked = env.byId.pokerSafetyPlayers.querySelector(".ugc-actions__report").fire("click");
+  await flush();
+  const dialog = env.body.children.find((node) => node.tagName === "dialog");
+  assert.ok(dialog && dialog.open);
+  env.auth.user = B;
+  env.auth.listener();
+  await clicked;
+  assert.equal(env.body.children.includes(dialog), false, "the switch closes A's dialog");
+  await flush();
+  assert.deepEqual(env.calls.filter((call) => call.method !== "GET"), [], "no report is sent as B");
+});
+
+test("profile controls hide when the feature turns out to be off", async () => {
+  const env = setup({ responses: [{ status: 200, body: { blocks: [] } }, { status: 404, body: { error: "not_found" } }] });
+  await flush();
+  await env.ugc.profileRendered({ handle: "rough-wolf-1", displayName: "Rough Wolf" });
+  assert.equal(env.byId.publicProfileSafety.hidden, false, "shown for another player's profile");
+  await env.ugc.profileRendered({ handle: "own-handle-1", displayName: "Me" });
+  assert.equal(env.byId.publicProfileSafety.hidden, true, "never on the own profile, while the feature is on");
+  await env.ugc.profileRendered({ handle: "rough-wolf-1", displayName: "Rough Wolf" });
+  assert.equal(env.byId.publicProfileSafety.hidden, false);
+  await env.ugc.loadBlocks(true);
+  assert.equal(env.byId.publicProfileSafety.hidden, true, "a later 404 hides them");
+});
+

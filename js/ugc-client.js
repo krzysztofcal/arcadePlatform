@@ -14,7 +14,8 @@
     ['spam', 'ugcReasonSpam', 'Spam'],
     ['other', 'ugcReasonOther', 'Other']
   ];
-  var state = { userId: null, blocks: [], ids: {}, loaded: false, available: false, inFlight: null, listeners: [], tableKey: '' };
+  // session counts sign-ins/outs and account switches; nothing started under an older session is applied or sent.
+  var state = { userId: null, blocks: [], ids: {}, loaded: false, available: false, inFlight: null, listeners: [], tableKey: '', session: 0, dialogs: [] };
 
   function klog(kind, data){
     try { if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {}); } catch (_err){}
@@ -77,24 +78,27 @@
 
   // Loads the caller's block list once per signed-in user; the answer also tells whether the feature is on.
   async function loadBlocks(force){
+    var session = state.session;
     var userId = await currentUserId();
+    if (session !== state.session) return [];
     if (!userId){ state.available = false; setBlocks(null, []); return []; }
     if (!force && state.loaded && state.userId === userId) return state.blocks;
-    if (state.inFlight && state.inFlight.userId === userId) return state.inFlight.promise;
+    if (state.inFlight && state.inFlight.userId === userId && state.inFlight.session === session) return state.inFlight.promise;
     var promise = request(BLOCKS_URL).then(async function(body){
       // A sign-out or account switch during the request must not apply the previous user's list.
-      if (await currentUserId() !== userId) return [];
+      if (session !== state.session || await currentUserId() !== userId) return [];
       state.available = true;
       setBlocks(userId, body && body.blocks);
       return state.blocks;
     }).catch(function(error){
       klog('ugc:blocks_load_failed', { code: error && error.code ? error.code : 'request_failed' });
+      if (session !== state.session) return [];
       // Off (404) or unreachable: hide every control explicitly, not only through the markup's initial state.
       state.available = false;
       notify();
       return [];
     }).finally(function(){ if (state.inFlight && state.inFlight.promise === promise) state.inFlight = null; });
-    state.inFlight = { userId: userId, promise: promise };
+    state.inFlight = { userId: userId, session: session, promise: promise };
     return promise;
   }
 
@@ -180,6 +184,7 @@
       function finish(value){
         if (done) return;
         done = true;
+        state.dialogs = state.dialogs.filter(function(close){ return close !== finish; });
         try { if (dialog.open) dialog.close(); } catch (_err){}
         dialog.remove();
         resolve(value);
@@ -191,6 +196,7 @@
         var picked = form.querySelector('input[name="ugcReason"]:checked');
         finish(options.reasons ? (picked ? picked.value : null) : true);
       });
+      state.dialogs.push(finish);
       document.body.appendChild(dialog);
       if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
       confirm.focus();
@@ -198,7 +204,14 @@
   }
 
   // Report and Block/Unblock buttons for one target ({displayName, handle | userId, context, tableId}).
+  // The buttons belong to the account and session that rendered them; after a switch they do nothing.
+  async function sameOwner(owner, session){
+    return session === state.session && !!owner && await currentUserId() === owner;
+  }
+
   function renderActions(container, target){
+    var owner = state.userId;
+    var session = state.session;
     container.textContent = '';
     var status = element('p', 'ugc-actions__status');
     status.setAttribute('aria-live', 'polite');
@@ -210,7 +223,7 @@
     function busy(value){ reportButton.disabled = value; blockButton.disabled = value; }
     reportButton.addEventListener('click', async function(){
       var reason = await openDialog({ title: t('ugcReportTitle', 'Report player'), text: t('ugcReportIntro', 'Why are you reporting {name}? A moderator reviews every report. The player is not told who reported them.', target.displayName), confirm: t('ugcReportSend', 'Send report'), reasons: true });
-      if (!reason) return;
+      if (!reason || !await sameOwner(owner, session)) return;
       busy(true);
       try {
         var result = await report(target, reason);
@@ -221,12 +234,13 @@
     blockButton.addEventListener('click', async function(){
       busy(true);
       try {
+        if (!await sameOwner(owner, session)){ busy(false); return; }
         if (blocked){
           await unblock(blocked.userId);
           status.textContent = t('ugcUnblocked', 'Player unblocked.');
         } else {
           var ok = await openDialog({ title: t('ugcBlock', 'Block'), text: t('ugcBlockConfirm', 'Block {name}? You will no longer see their avatar, reactions or gifts. The game itself is not affected.', target.displayName), confirm: t('ugcBlock', 'Block') });
-          if (ok){
+          if (ok && await sameOwner(owner, session)){
             await block(target);
             status.textContent = t('ugcBlocked', 'Player blocked. You will no longer see their avatar, reactions or gifts.');
           }
@@ -244,9 +258,11 @@
 
   // Public profile page (profile.html): actions for another player's profile.
   var profileGeneration = 0;
+  var lastProfile = null;
   async function profileRendered(profile){
     var container = document.getElementById('publicProfileSafety');
     if (!container) return;
+    lastProfile = profile || null;
     var generation = ++profileGeneration;
     container.hidden = true;
     if (!profile || !profile.handle) return;
@@ -296,7 +312,10 @@
       row.appendChild(element('span', 'ugc-blocked__name', name));
       var button = element('button', 'ugc-actions__block', t('ugcUnblock', 'Unblock'));
       button.type = 'button';
+      var owner = state.userId;
+      var session = state.session;
       button.addEventListener('click', async function(){
+        if (!await sameOwner(owner, session)) return;
         button.disabled = true;
         try { await unblock(entry.userId); } catch (error){ button.disabled = false; button.title = messageFor(error); }
       });
@@ -307,11 +326,29 @@
 
   function onChange(listener){ if (typeof listener === 'function') state.listeners.push(listener); }
 
+  // On every sign-in, sign-out or account switch: forget the previous user's list, close its dialogs, reload.
+  function resetSession(){
+    state.session += 1;
+    state.inFlight = null;
+    state.available = false;
+    state.tableKey = '';
+    state.dialogs.slice().forEach(function(close){ close(null); });
+    setBlocks(null, []);
+    loadBlocks(true);
+  }
+
+  // Profile controls follow availability: hidden while off, rendered again for the current profile when on.
+  function syncProfileControls(){
+    var container = document.getElementById('publicProfileSafety');
+    if (!container) return;
+    if (!state.available || !state.loaded){ container.hidden = true; return; }
+    if (lastProfile && container.hidden) profileRendered(lastProfile);
+  }
+
   function boot(){
     onChange(renderBlockedList);
-    if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function'){
-      window.SupabaseAuth.onAuthChange(function(){ state.loaded = false; state.tableKey = ''; loadBlocks(true); });
-    }
+    onChange(syncProfileControls);
+    if (window.SupabaseAuth && typeof window.SupabaseAuth.onAuthChange === 'function') window.SupabaseAuth.onAuthChange(resetSession);
     loadBlocks(false);
   }
 
