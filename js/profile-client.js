@@ -17,8 +17,28 @@
     return parts.length ? parts[0].slice(0, 2).toUpperCase() : 'AH';
   }
 
+  // Phase D: only our own avatar bucket is rendered as a photo; anything else falls back to the Arcade catalog.
+  var PHOTO_URL_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/profile-avatars\/[0-9a-f-]{36}\.webp$/;
+
+  function applyPhoto(node, profile){
+    var avatar = profile && profile.avatar;
+    if (!avatar || avatar.type !== 'uploaded' || typeof avatar.url !== 'string' || !PHOTO_URL_RE.test(avatar.url)) return false;
+    var url = avatar.url;
+    node.dataset.avatarUrl = url;
+    node.classList.add('profile-avatar--uploaded');
+    node.style.backgroundSize = 'cover';
+    node.style.backgroundPosition = 'center';
+    node.textContent = '';
+    var image = new Image();
+    image.onload = function(){ if (node.dataset.avatarUrl === url) node.style.backgroundImage = 'url("' + url + '")'; };
+    image.onerror = function(){ if (node.dataset.avatarUrl === url && window.ArcadeAvatars) window.ArcadeAvatars.apply(node, { avatar: { type: 'default', variant: avatar.variant } }); };
+    image.src = url;
+    return true;
+  }
+
   function applyAvatar(node, profile){
     if (!node) return;
+    if (applyPhoto(node, profile)) return;
     if(window.ArcadeAvatars){window.ArcadeAvatars.apply(node,profile);return;}
     node.textContent = initials(profile && profile.displayName);
   }
