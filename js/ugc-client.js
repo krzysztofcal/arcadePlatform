@@ -60,7 +60,8 @@
     try { body = await response.json(); } catch (_err){}
     if (response.ok) return body;
     var code = body && body.error ? body.error : 'request_failed';
-    if (response.status === 404 && code === 'not_found') setAvailable(false);
+    // Only an answer for the current session may switch the feature off (a late 404 for a previous account must not).
+    if (response.status === 404 && code === 'not_found' && expect.session === state.session) setAvailable(false);
     throw failure(code, response.status);
   }
 

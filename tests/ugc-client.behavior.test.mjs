@@ -237,3 +237,21 @@ test("a session switch while the user is being read never restores the previous 
   await flush(); await flush();
   assert.equal(env.ugc.isBlocked(OTHER), false);
 });
+
+test("a late 'feature off' answer to the previous account's request never hides the new account's controls", async () => {
+  let releaseA;
+  const aGate = new Promise((resolve) => { releaseA = resolve; });
+  const env = setup({ responses: [{ status: 200, body: { blocks: [] } }, { status: 404, body: { error: "not_found" }, before: () => aGate }, { status: 200, body: { blocks: [] } }] });
+  await flush();
+  assert.equal(env.section.hidden, false, "A: feature on");
+  const pending = env.ugc.loadBlocks(true).catch(() => {});
+  await flush();
+  env.auth.user = B;
+  env.auth.listener();
+  await flush(); await flush();
+  assert.equal(env.section.hidden, false, "B: loaded, feature on");
+  releaseA();
+  await pending; await flush(); await flush();
+  assert.equal(env.section.hidden, false, "A's late 404 does not switch the feature off for B");
+  assert.equal(env.calls.length, 3);
+});
