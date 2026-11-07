@@ -16,8 +16,15 @@
   shapes; physical WWW and Android check after Stage apply (owner).
 
 ## Phase C
-- [ ] C1 Moderation actions migration and admin endpoint behind existing admin authorization, audited.
-- [ ] C2 Admin queue UI in `admin.html`; digest e-mail after the scheduler/mail decision.
+- [x] C1-T1 Migration: audit and avatar hold tables, audited profile-restriction function; RLS, grants, cascade;
+  manifest entry; migration check PASS. Accept: PGlite with and without #1155; browser roles get permission denied.
+- [x] C1-T2 `_shared/ugc-moderation.mjs` and `admin-ugc-reports`: admin only, dark by default, oldest-first queue
+  with pending counter, one decision per report (409 on the second), failed action rolls back, audit rows,
+  internal errors not echoed.
+- [x] C2-T1 "Reports" tab in `admin.html` with the pending counter read on open/refresh (no polling), status filter,
+  confirmed actions, profile restore; fundamental UI tests.
+- [ ] C-T3 Owner: Stage apply of the migration (DB Stage Apply PR dispatch) and a Preview check with an admin account.
+- Not built (owner decision 2026-11-07): e-mail, mail provider, digest, scheduled job, automatic alerts.
 
 ## Phase D
 - [ ] D1 Consent record, one-time import through the existing avatar path, withdrawal fallback, moderator hide wins.
@@ -25,4 +32,5 @@
 
 ## Gates (owner)
 - [ ] Privacy/Terms and Data Safety text for reports, blocks, moderation and photo consent.
+- [ ] Manual review procedure for the Reports tab (who, how often, response time) before public activation.
 - [ ] Owner config: `UGC_SAFETY_ENABLED=1` for the deploy-preview context to test (after the Stage apply); outside previews only after phase C.
