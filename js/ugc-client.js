@@ -1,6 +1,7 @@
 (function(){
   // #1140 UGC phase B client (WWW and Android): Report / Block / Unblock against ugc-report and user-blocks.
-  // A block is a filter on this device's screens only (avatar, reactions, gifts); poker state is never changed.
+  // A block is a filter on this device's screens only (avatar, new reactions and gifts, live gift badges); gift badges
+  // restored from the server snapshot carry no sender and may stay. Poker state is never changed.
   // Every name is written with textContent. The UI stays hidden for guests and while the endpoints are off (404).
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
@@ -255,10 +256,10 @@
           await unblock(blocked.userId, { userId: owner, session: session });
           status.textContent = t('ugcUnblocked', 'Player unblocked.');
         } else {
-          var ok = await openDialog({ title: t('ugcBlock', 'Block'), text: t('ugcBlockConfirm', 'Block {name}? You will no longer see their avatar, reactions or gifts. The game itself is not affected.', target.displayName), confirm: t('ugcBlock', 'Block') });
+          var ok = await openDialog({ title: t('ugcBlock', 'Block'), text: t('ugcBlockConfirm', 'Block {name}? You will no longer see their avatar or their new reactions and gifts. Gifts shown earlier may still be visible. The game itself is not affected.', target.displayName), confirm: t('ugcBlock', 'Block') });
           if (ok && await sameOwner(owner, session)){
             await block(target, { userId: owner, session: session });
-            status.textContent = t('ugcBlocked', 'Player blocked. You will no longer see their avatar, reactions or gifts.');
+            status.textContent = t('ugcBlocked', 'Player blocked. You will no longer see their avatar or their new reactions and gifts.');
           }
         }
       } catch (error){ status.textContent = messageFor(error); }

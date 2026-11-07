@@ -146,7 +146,22 @@ test("poker table filters only presentation of blocked players", async () => {
   assert.match(poker, /if \(ugcBlocked\(currentSeatOwnerUserId\(event\.senderSeatNo\)\)\) return;/, "live gifts of a blocked sender are not shown");
   assert.match(poker, /if \(ugcBlocked\(seat\.userId\)\) return 'blocked';/, "the avatar source changes so a shown avatar is replaced");
   assert.match(poker, /var profileAvatar = !seat\.isBot && !ugcBlocked\(seat\.userId\) && seat\.profile && seat\.profile\.avatar;/);
-  assert.equal((poker.match(/ugcBlocked\(/g) || []).length, 5, "no other code path consults blocks (no seat, turn or chips logic)");
+  assert.equal((poker.match(/ugcBlocked\(/g) || []).length, 6, "no other code path consults blocks (no seat, turn or chips logic)");
+});
+
+test("gift badges received live from a player disappear once that player is blocked", async () => {
+  const poker = await readFile(new URL("../poker/poker-v2.js", import.meta.url), "utf8");
+  assert.match(poker, /\{ eventId: event\.eventId, giftKey: event\.giftKey, senderUserId: currentSeatOwnerUserId\(event\.senderSeatNo\) \|\| null \}/, "live gifts remember their sender");
+  assert.match(poker, /: visibleGifts\(giftsBySeat\[seat\.seatNo\] \|\| \[\]\);/, "badges are filtered at render time");
+  const helper = poker.match(/function visibleGifts\(gifts\)\{[\s\S]*?\n  \}/)[0];
+  const blocked = new Set();
+  const visibleGifts = vm.runInNewContext(`(function(){ function ugcBlocked(id){ return blocked.has(id); } ${helper} return visibleGifts; })()`, { blocked });
+  const stored = [{ eventId: "e1", giftKey: "beer", senderUserId: OTHER }, { eventId: "e2", giftKey: "pizza", senderUserId: B }, { eventId: "e3", giftKey: "whisky" }];
+  assert.deepEqual(visibleGifts(stored).map((g) => g.eventId), ["e1", "e2", "e3"]);
+  blocked.add(OTHER);
+  assert.deepEqual(visibleGifts(stored).map((g) => g.eventId), ["e2", "e3"], "the blocked sender's earlier gift is hidden; a snapshot gift without sender stays");
+  blocked.delete(OTHER);
+  assert.deepEqual(visibleGifts(stored).map((g) => g.eventId), ["e1", "e2", "e3"], "unblocking shows it again");
 });
 
 const A = "00000000-0000-4000-8000-0000000000aa";

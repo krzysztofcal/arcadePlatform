@@ -4768,6 +4768,12 @@
     })[0] || null;
   }
   function clearHeroGiftDemo(){ heroGiftDemo = null; renderGiftBadges(); }
+  // #1140: gift badges of a blocked sender are hidden. Live gifts remember their sender; gifts restored from the
+  // server snapshot carry no sender and stay as they are.
+  function visibleGifts(gifts){
+    return gifts.filter(function(gift){ return !(gift && gift.senderUserId && ugcBlocked(gift.senderUserId)); });
+  }
+
   function renderGiftBadges(){
     var hero = giftDemoHeroSeat();
     if (heroGiftDemo && (!hero || heroGiftDemo.tableId !== state.tableId
@@ -4780,7 +4786,7 @@
       var hud = renderedSeatHud[seat.seatNo];
       if (!hud || !seat.userId) return;
       var demo = !!heroGiftDemo && seat.seatNo === heroGiftDemo.seatNo && seat.userId === heroGiftDemo.userId;
-      var gifts = demo ? [{giftKey:'beer'},{giftKey:'pizza'},{giftKey:'whisky'}] : giftsBySeat[seat.seatNo] || [];
+      var gifts = demo ? [{giftKey:'beer'},{giftKey:'pizza'},{giftKey:'whisky'}] : visibleGifts(giftsBySeat[seat.seatNo] || []);
       if (hud.nameNode){
         if (demo) hud.nameNode.dataset.giftDemo = 'true';
         else delete hud.nameNode.dataset.giftDemo;
@@ -4850,7 +4856,7 @@
     syncGiftOwners();
     if (!giftOwners[event.recipientSeatNo]) return;
     var recent = giftsBySeat[event.recipientSeatNo] || [];
-    giftsBySeat[event.recipientSeatNo] = [{ eventId: event.eventId, giftKey: event.giftKey }].concat(recent).slice(0, 3);
+    giftsBySeat[event.recipientSeatNo] = [{ eventId: event.eventId, giftKey: event.giftKey, senderUserId: currentSeatOwnerUserId(event.senderSeatNo) || null }].concat(recent).slice(0, 3);
     renderGiftBadges();
     if (els.giftNotice) {
       els.giftNotice.textContent = gift.emoji + ' ' + t('pokerGiftSent', 'Gift sent') + ' · S' + event.recipientSeatNo;
