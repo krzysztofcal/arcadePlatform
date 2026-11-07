@@ -363,6 +363,18 @@ export const OPERATIONS = Object.freeze({
     : { ok: false, failed: "daemon-reload" }),
   "copilot-secret-snapshots-quarantine": quarantineSnapshots,
   "ledger-production-dispatcher-install": installProductionDispatcher,
+  "github-app-token-prepare": (host, runId) => {
+    const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", String(runId)], 180000);
+    return result.status === 0 && result.stdout === "GITHUB_TOKEN_OK prepared_no_key_no_client_switch"
+      ? { ok: true, details: "prepared_no_key_no_client_switch" }
+      : { ok: false, failed: "github_token_inspect_protected_manifest_no_retry" };
+  },
+  "github-app-key-quarantine": (host, runId) => {
+    // The fixed signer proves replacement custody/scope without disclosing its freshly issued token.
+    const proof = host.run(["/usr/sbin/runuser", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", "--info"], 30000);
+    if (proof.status !== 0) return { ok: false, blocked: "replacement_signer_not_verified" };
+    return quarantineSnapshots({ ...host, quarantine: { ...host.quarantine, files: [".arcade-code-agent/app.pem"] } }, runId);
+  },
   ...Object.fromEntries(["provision", "rollback"].map((action) => [
     `ws-preview-isolation-${action}`, (host, runId) => {
       const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, String(runId)], 480000);

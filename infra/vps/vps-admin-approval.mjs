@@ -62,6 +62,22 @@ export const APPROVAL = Object.freeze({
     sideEffects: "The result and the journal record the commit and the new and previous SHA-256 of the script.",
     rollback: "Merge the previous script to main through a reviewed PR and request this operation again, then ledger-dispatchers-resume.",
   },
+  "github-app-token-prepare": {
+    title: "Prepare an isolated non-root GitHub App signer without moving a key",
+    readOnly: false,
+    changes: "Creates only arcade-github-token with no login, its protected empty key directory, a root-owned fixed token issuer and a copilot run-as rule limited to this non-root signer. Records a protected manifest. Does not read or copy any private key, issue a token or switch clients.",
+    risk: "Partial installation requires manifest inspection and no automatic retry. The old GitHub path remains unchanged. After a separate OWNER key import, copilot can obtain repository-limited one-hour tokens, including Actions write, but cannot choose token scope or run a shell as the signer.",
+    sideEffects: "Dedicated account, fixed executable, sudoers policy and manifest only. No service, Poker, Production, Environment or key changes.",
+    rollback: "Separate OWNER maintenance decision can disable only the new fixed sudoers rule. Keep trusted OWNER recovery access and current client path until acceptance.",
+  },
+  "github-app-key-quarantine": {
+    title: "Quarantine only the old copilot GitHub App private key after replacement acceptance",
+    readOnly: false,
+    changes: "First calls the isolated signer info mode, which mints and discards one scoped token without printing it, then reuses the protected descriptor-based quarantine for only .arcade-code-agent/app.pem. No other snapshot is moved. OWNER must first accept new gh and Git behavior.",
+    risk: "The old local signer loses key access. Existing open references block before moving; uncertain custody after a move requires protected-manifest inspection. Quarantine does not invalidate copies or existing tokens; OWNER must revoke the old App key after acceptance.",
+    sideEffects: "One token issuance and one key inode move to root-only quarantine with audit. No key content in logs, no automatic deletion, rotation, client switch or service operation.",
+    rollback: "No automatic restore into copilot custody. OWNER recovers through the protected signer or trusted Termux channel. Use existing quarantine manifest procedure for any incomplete move.",
+  },
   "ws-preview-isolation-provision": {
     title: "Provision the reviewed Preview deploy and runtime isolation",
     readOnly: false,
