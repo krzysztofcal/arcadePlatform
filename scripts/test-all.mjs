@@ -153,6 +153,7 @@ run("node", ["tests/user-ui-state.behavior.test.mjs"], "user-ui-state-behavior")
 run("node", ["tests/chips-client-cache.behavior.test.mjs"], "chips-client-cache-behavior");
 run("node", ["tests/home-bonuses.contract.test.mjs"], "home-bonuses-contract");
 run("node", ["tests/account-auth.contract.test.mjs"], "account-auth-contract");
+run("node", ["tests/profile-google-photo.behavior.test.mjs"], "profile-google-photo-behavior");
 run("node", ["tests/xp-ledger.behavior.test.mjs"], "xp-ledger-behavior");
 run("node", ["tests/xp-leaderboard-foundation.behavior.test.mjs"], "xp-leaderboard-foundation-behavior");
 run("node", ["tests/xp-leaderboard-maintenance.behavior.test.mjs"], "xp-leaderboard-maintenance-behavior");

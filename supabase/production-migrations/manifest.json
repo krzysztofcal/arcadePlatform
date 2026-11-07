@@ -1291,6 +1291,13 @@
       "sha256": "73b4bfefce21b8e59c1d20c21344ee7d182b8c90140d2b6d41a0c57379c30f6d",
       "category": "needs-production-equivalent",
       "purpose": "#1114 additive public profile block; separate Production schema-first GO required; no profile blocks activated."
+    },
+    {
+      "file": "20261107140000_google_photo_consent.sql",
+      "version": "20261107140000",
+      "sha256": "e0953fcaf848c449a370ae18d41aa8bc4a091b9a8376077787d5eaba8e3376ce",
+      "category": "needs-production-equivalent",
+      "purpose": "#1140 UGC phase D dark private Google photo consent record and pending-copy deletion list (no flag activation, empty tables, no job or notification); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
     }
   ]
 }

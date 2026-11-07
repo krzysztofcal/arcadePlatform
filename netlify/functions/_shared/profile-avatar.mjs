@@ -170,6 +170,19 @@ async function deleteStorageObject(bucket, path, deps = {}) {
   }, deps);
 }
 
+// Shared by the retired upload path and the phase D Google photo import: JPEG/PNG/WebP only, a single frame,
+// at most 1024x1024, re-encoded to a 256x256 WebP without the source metadata.
+async function normalizeAvatarImage(source, deps = {}) {
+  const image = (deps.sharp || sharp)(source, { failOn: "error", limitInputPixels: MAX_DIMENSION * MAX_DIMENSION });
+  const metadata = await image.metadata();
+  const actualMime = FORMAT_MIME[metadata.format];
+  if (!actualMime || !ALLOWED_MIME.has(actualMime) || Number(metadata.pages || 1) > 1) throw avatarError("invalid_avatar_file");
+  if (!metadata.width || !metadata.height || metadata.width > MAX_DIMENSION || metadata.height > MAX_DIMENSION) {
+    throw avatarError("avatar_dimensions_too_large");
+  }
+  return image.rotate().resize(256, 256, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
+}
+
 async function finalizeAvatar(userId, uploadId, deps = {}) {
   const pending = await consumePendingUpload(userId, uploadId, deps);
   const runSql = deps.executeSql || executeSql;
@@ -183,14 +196,7 @@ async function finalizeAvatar(userId, uploadId, deps = {}) {
     if (!source.length || source.length > MAX_SOURCE_BYTES || source.length > Number(pending.declared_size)) {
       throw avatarError("invalid_avatar_file");
     }
-    const image = (deps.sharp || sharp)(source, { failOn: "error", limitInputPixels: MAX_DIMENSION * MAX_DIMENSION });
-    const metadata = await image.metadata();
-    const actualMime = FORMAT_MIME[metadata.format];
-    if (!actualMime || !ALLOWED_MIME.has(actualMime)) throw avatarError("invalid_avatar_file");
-    if (!metadata.width || !metadata.height || metadata.width > MAX_DIMENSION || metadata.height > MAX_DIMENSION) {
-      throw avatarError("avatar_dimensions_too_large");
-    }
-    const processed = await image.rotate().resize(256, 256, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
+    const processed = await normalizeAvatarImage(source, deps);
     newAvatarKey = enabled(deps) ? pending.output_path : `${crypto.randomUUID()}.webp`;
     outputAttempted = true;
     await storageRequest(storagePath(PUBLIC_BUCKET, newAvatarKey, null), {
@@ -222,6 +228,49 @@ and output_write_finished_at is null returning id;`, [uploadId,userId]);
   }
 }
 
+// Phase D: a server-produced avatar (no browser upload) written under the same V3 manifest protocol as finalize:
+// the intent and output path are recorded while the account is active, before the Storage write, and the write is
+// confirmed afterwards, so an account deletion waits for or reconciles an in-flight write instead of purging early.
+// With tracking off (account deletion off) the output is listed in private.account_avatar_objects.
+async function writeTrackedOutput(userId, body, deps = {}, outputPath = `${crypto.randomUUID()}.webp`) {
+  if (!/^[0-9a-f-]{36}\.webp$/.test(outputPath)) throw avatarError("invalid_avatar_key");
+  const runSql = deps.executeSql || executeSql;
+  let id = null;
+  if (enabled(deps)) {
+    id = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + PENDING_TTL_MS).toISOString();
+    await activeTransaction(userId, deps, (tx) => tx.unsafe(`insert into public.profile_avatar_uploads
+      (id,user_id,source_path,declared_mime_type,declared_size,expires_at,tracking_version)
+      values ($1,$2,$3,'image/webp',$4,$5::timestamptz,3);`, [id, userId, `pending/${id}`, body.length, expiresAt]));
+    await finishSigning(userId, id, deps);
+    const rows = await activeTransaction(userId, deps, (tx) => tx.unsafe(`update public.profile_avatar_uploads
+      set consumed_at=timezone('utc', now()), output_path=$3, output_write_started_at=clock_timestamp(), source_deleted_at=clock_timestamp()
+      where id=$1 and user_id=$2 and consumed_at is null and tracking_version=3 returning id;`, [id, userId, outputPath]));
+    if (rows?.length !== 1) throw avatarError("avatar_tracking_unavailable", 503);
+  } else {
+    await runSql("insert into private.account_avatar_objects(user_id, output_path) values ($1,$2) on conflict (user_id,output_path) do nothing;", [userId, outputPath]);
+  }
+  let attempted = false;
+  let confirmed = false;
+  try {
+    attempted = true;
+    await storageRequest(storagePath(PUBLIC_BUCKET, outputPath, null), {
+      method: "POST",
+      headers: { "content-type": "image/webp", "cache-control": "3600", "x-upsert": "false" },
+      body,
+    }, deps);
+    confirmed = true;
+  } finally {
+    // A lost POST response stays uncertain (finished_at null) for the deletion reconciliation, as in finalize.
+    if (id && (confirmed || !attempted)) {
+      const rows = await runSql(`update public.profile_avatar_uploads set output_write_finished_at=clock_timestamp()
+where id=$1 and user_id=$2 and output_write_started_at is not null and output_write_finished_at is null returning id;`, [id, userId]);
+      if (rows?.length !== 1) throw avatarError("avatar_tracking_unavailable", 503);
+    }
+  }
+  return outputPath;
+}
+
 async function removeAvatar(userId, deps = {}) {
   const { profile, previousAvatarKey } = await (deps.updateUserAvatarKey || updateUserAvatarKey)(userId, null, deps);
   if (previousAvatarKey) await deleteStorageObject(PUBLIC_BUCKET, previousAvatarKey, deps).catch(() => {});
@@ -230,9 +279,15 @@ async function removeAvatar(userId, deps = {}) {
 
 export {
   MAX_SOURCE_BYTES,
+  PUBLIC_BUCKET,
+  deleteStorageObject,
+  normalizeAvatarImage,
+  storagePath,
+  storageRequest,
   cleanupExpiredUploads,
   createPendingUpload,
   finalizeAvatar,
   removeAvatar,
   validateUploadRequest,
+  writeTrackedOutput,
 };

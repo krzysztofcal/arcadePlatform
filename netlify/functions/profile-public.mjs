@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { xpStoreUnavailableResponse, atomicRateLimitIncr, getUserXpTotalStrict } from "./_shared/store-upstash.mjs";
 import { baseHeaders, corsHeaders, extractBearerToken, verifySupabaseJwt, klog } from "./_shared/supabase-admin.mjs";
 import { findPublicProfile, publicProfile } from "./_shared/user-profile.mjs";
+import { attachPublishedPhotos } from "./_shared/profile-photo-publication.mjs";
 import { computeXpLevel } from "./_shared/xp-level.mjs";
 
 const RATE_LIMIT_PER_MIN = Math.max(0, Number(process.env.PROFILE_PUBLIC_RATE_LIMIT_IP_PER_MIN || 60));
@@ -47,6 +48,7 @@ function createProfilePublicHandler(deps = {}) {
   const findProfile = deps.findPublicProfile || findPublicProfile;
   const allowRead = deps.allowPublicRead || allowPublicRead;
   const getPublicXp = deps.getUserXpTotal || getUserXpTotalStrict;
+  const attachPhotos = deps.attachPublishedPhotos || attachPublishedPhotos;
   return async function handler(event) {
     const origin = event.headers?.origin || event.headers?.Origin;
     const cors = profileCors(origin);
@@ -62,7 +64,7 @@ function createProfilePublicHandler(deps = {}) {
       const unavailable = xpStoreUnavailableResponse(cors);
       if (unavailable) return unavailable;
       if (!await allowRead(event)) return json(429, cors, { error: "rate_limit_exceeded" });
-      const profile = await findProfile(event.queryStringParameters?.handle);
+      const [profile] = await attachPhotos([await findProfile(event.queryStringParameters?.handle)]);
       if (!profile || profile.publicProfileBlocked === true) return json(404, { ...cors, "cache-control": "no-store" }, { error: "not_found" });
       const xpResult = await getPublicXp(profile.userId);
       const xpValue = typeof xpResult === "object" ? xpResult?.totalXp : xpResult;
