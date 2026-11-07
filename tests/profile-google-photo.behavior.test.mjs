@@ -58,7 +58,7 @@ async function database({ holds = true } = {}) {
 function network(env, { sub = "google-sub-1", picture = PICTURE, image = PNG, userinfoStatus = 200, imageHeaders = {}, onUserinfo, onImage, onStorage, deleteStatus = 200, tracking = true } = {}) {
   const calls = [];
   const fetch = async (url, options = {}) => {
-    const call = { url: String(url), method: options.method || "GET", headers: { ...(options.headers || {}) }, redirect: options.redirect };
+    const call = { url: String(url), method: options.method || "GET", headers: { ...(options.headers || {}) }, redirect: options.redirect, body: typeof options.body === "string" ? options.body : null };
     calls.push(call);
     if (call.url === "https://openidconnect.googleapis.com/v1/userinfo") {
       if (onUserinfo) await onUserinfo();
@@ -263,8 +263,18 @@ test("a write with a lost response stays listed as uncertain: deletions are repe
   assert.ok(early.calls.some((c) => c.method === "DELETE"), "a withdrawal deletes the late object");
   assert.deepEqual([first.copyDeleted, first.copyStored], [false, true], "but cannot confirm before the horizon");
 
+  const [{ avatar_key: lostKey }] = await env.executeSql("select avatar_key from private.profile_photo_pending_deletions where user_id=$1", [id]);
   await env.executeSql("update private.profile_photo_pending_deletions set uncertain_until = now() - interval '1 second' where user_id=$1", [id]);
-  const later = await photo.withdrawGooglePhoto(id, network(env).deps);
+  // After the horizon: a failed final DELETE keeps the copy listed and is reported.
+  const failedFinal = await photo.withdrawGooglePhoto(id, network(env, { deleteStatus: 500 }).deps);
+  assert.deepEqual([failedFinal.copyDeleted, failedFinal.copyStored], [false, true]);
+  assert.equal((await env.executeSql("select count(*)::int n from private.profile_photo_pending_deletions where user_id=$1 and avatar_key=$2", [id, lostKey]))[0].n, 1);
+  // A confirmed final DELETE of exactly that key unlists it.
+  const final = network(env);
+  const later = await photo.withdrawGooglePhoto(id, final.deps);
+  const deletes = final.calls.filter((c) => c.method === "DELETE");
+  assert.equal(deletes.length, 1);
+  assert.deepEqual(JSON.parse(deletes[0].body), { prefixes: [lostKey] }, "the final DELETE targets the listed key");
   assert.deepEqual([later.copyDeleted, later.copyStored], [true, false]);
   assert.equal((await env.executeSql("select count(*)::int n from private.profile_photo_pending_deletions", []))[0].n, 0);
 
@@ -312,6 +322,34 @@ test("a withdrawal while the copy is being written cannot orphan it", async () =
   await assert.rejects(photo.importGooglePhoto(fid, input(), fnet.deps));
   assert.equal((await failing.executeSql("select count(*)::int n from private.profile_photo_pending_deletions where user_id=$1", [fid]))[0].n, 1, "listed again when its deletion fails");
   assert.equal((await photo.googlePhotoStatus(fid, fnet.deps)).copyStored, true);
+});
+
+test("a withdrawal deletes only the copies listed when it committed, never those of a later import", async () => {
+  const env = await database();
+  const id = await env.user();
+  let releasePost;
+  const postGate = new Promise((resolve) => { releasePost = resolve; });
+  let reachedPost;
+  const atPost = new Promise((resolve) => { reachedPost = resolve; });
+  const later = network(env, { onStorage: async (call) => { if (call.method === "POST") { reachedPost(); await postGate; } } });
+  let importRun;
+  const out = network(env);
+  // After the withdrawal's transaction commits, a new import starts and lists its key; the withdrawal's cleanup
+  // runs while that import is still writing.
+  out.deps.beginSql = async (work) => {
+    const result = await env.beginSql(work);
+    importRun = photo.importGooglePhoto(id, input(), later.deps);
+    await atPost;
+    return result;
+  };
+  await photo.withdrawGooglePhoto(id, out.deps);
+  releasePost();
+  const status = await importRun;
+  assert.equal(out.calls.filter((c) => c.method === "DELETE").length, 0, "the withdrawal does not delete the later import's copy");
+  assert.equal(status.photoInUse, true);
+  const key = (await profileRow(env, id)).avatar_key;
+  assert.ok(key);
+  assert.equal(later.calls.some((c) => c.method === "DELETE"), false, "the attached copy is intact");
 });
 
 test("a withdrawal during a first import wins", async () => {

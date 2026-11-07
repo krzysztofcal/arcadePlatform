@@ -55,14 +55,15 @@ async function importChecks(tx, userId, ownKey = null) {
   return sub;
 }
 
-// Deletes the listed copies (only `onlyKey` when given). A copy is unlisted after a confirmed deletion unless its
-// write is still uncertain: then it stays listed (and counts as not deleted) until uncertain_until has passed.
-async function deletePendingCopies(userId, deps, onlyKey = null) {
+// Deletes exactly the given listed copies. A copy is unlisted after a confirmed deletion unless its write is still
+// uncertain: then it stays listed (and counts as not deleted) until uncertain_until has passed.
+async function deletePendingCopies(userId, deps, keys) {
+  if (!keys.length) return true;
   const runSql = deps.executeSql || executeSql;
   const rows = await runSql(
     `select avatar_key, coalesce(uncertain_until > now(), false) as uncertain from private.profile_photo_pending_deletions
-     where user_id = $1 and ($2::text is null or avatar_key = $2) order by avatar_key;`,
-    [userId, onlyKey],
+     where user_id = $1 and avatar_key = any($2::text[]) order by avatar_key;`,
+    [userId, keys],
   );
   let all = true;
   for (const { avatar_key: key, uncertain } of rows || []) {
@@ -242,7 +243,7 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
          on conflict (user_id, avatar_key) do update set uncertain_until = excluded.uncertain_until;`,
         [user, key, writeUncertain, CAPABILITY_MS],
       ).catch(() => {});
-      await deletePendingCopies(user, deps, key).catch(() => {});
+      await deletePendingCopies(user, deps, [key]).catch(() => {});
     }
   }
   // An earlier avatar object (e.g. a legacy upload) is not deleted here; it stays tracked for the existing purge.
@@ -255,7 +256,7 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
 // running loses its attach check. Allowed while Terms are pending; refused (409) once account deletion has started.
 export async function withdrawGooglePhoto(userId, deps = {}) {
   const user = requireUser(userId);
-  const imported = await (deps.beginSql || beginSql)(async (tx) => {
+  const { imported, pendingKeys } = await (deps.beginSql || beginSql)(async (tx) => {
     await lockAccountLifecycle(tx, [user]);
     const [state] = await tx.unsafe(
       `select exists(select 1 from auth.users where id = $1) as present,
@@ -268,6 +269,9 @@ export async function withdrawGooglePhoto(userId, deps = {}) {
     const [profile] = await tx.unsafe("select avatar_key from public.user_profiles where user_id = $1 for update;", [user]);
     if (!profile) throw photoError("profile_not_found", 404);
     const key = consent?.imported_avatar_key || null;
+    // Exactly the copies to delete, fixed here: an import that starts after this commit lists its own key later
+    // and is not cleaned up by this withdrawal (earlier imports fail on the revision bump below).
+    const listed = await tx.unsafe("select avatar_key from private.profile_photo_pending_deletions where user_id = $1 order by avatar_key for update;", [user]);
     if (consent && consent.decision !== "withdrawn") {
       await tx.unsafe(
         "update private.profile_photo_consents set decision = 'withdrawn', withdrawn_at = now(), consent_revision = consent_revision + 1 where user_id = $1;",
@@ -279,10 +283,10 @@ export async function withdrawGooglePhoto(userId, deps = {}) {
          avatar_key = case when $2 then null else avatar_key end, avatar_revision = avatar_revision + 1 where user_id = $1;`,
       [user, !!key && profile.avatar_key === key],
     );
-    return key;
+    return { imported: key, pendingKeys: (listed || []).map((row) => row.avatar_key) };
   });
   // Also copies of imports that failed or were outrun by this withdrawal (it bumped avatar_revision above).
-  let copyDeleted = await deletePendingCopies(user, deps).catch(() => false);
+  let copyDeleted = await deletePendingCopies(user, deps, pendingKeys).catch(() => false);
   if (imported) {
     try {
       await deleteStorageObject(PUBLIC_BUCKET, imported, deps);

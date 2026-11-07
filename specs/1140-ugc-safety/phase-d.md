@@ -35,7 +35,8 @@ or activation, no e-mail, job, scheduler or notification. Follows the Google pho
 - **R-D-WITHDRAW.** Withdrawal (also with pending Terms) shows the Arcade avatar at once, sets
   `google_photo_suppressed`, bumps `avatar_revision` (a running import loses its attach), records the time and
   deletes our copy and any listed copy. The key stays on the record until the deletion is confirmed; a failure is
-  reported (`copyDeleted: false`) and the next withdrawal retries. Later sign-ins never re-import. Choosing an Arcade
+  reported (`copyDeleted: false`) and the next withdrawal retries. A withdrawal deletes exactly the copies listed when
+  its transaction committed, never those of an import that started afterwards. Later sign-ins never re-import. Choosing an Arcade
   avatar (phase A) also detaches the photo; the copy stays until withdrawal. Refused (409 `account_deleting`) once
   deletion has started (the deletion purge removes it).
 - **R-D-SHOW.** WWW only (Account, topbar, public profile, leaderboard): a photo is shown only while consent is
@@ -65,5 +66,6 @@ or activation, no e-mail, job, scheduler or notification. Follows the Google pho
   race fixed, 2 rejected with reasons). Owner-authorized 4th Codex round: 1 finding (D7, lost write response),
   fixed and mutation-checked; that fix was not re-reviewed by Codex. agy advisory check of it: 3 valid findings
   (missing UPDATE grant for the upsert, uncertainty marked too late, 5xx treated as certain), all fixed with
-  mutation-checked tests.
+  mutation-checked tests. OWNER-authorized extra round on the full diff: D8 (withdrawal cleanup not a snapshot) and a
+  test gap (final DELETE after the horizon, its failure); both fixed and mutation-checked.
 - [ ] D-T5 Owner: Stage apply, `GOOGLE_PHOTO_IMPORT_ENABLED=1` on a Preview, physical WWW and Android check.
