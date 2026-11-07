@@ -8,7 +8,6 @@
   var handle = document.getElementById('publicProfileHandle');
   var xp = document.getElementById('publicProfileXp');
   var level = document.getElementById('publicProfileLevel');
-  var bio = document.getElementById('publicProfileBio');
   var currentProfile = null;
 
   function t(key, fallback){
@@ -42,8 +41,6 @@
     if (level) level.textContent = String(Math.max(1, Number(profile.level) || 1));
     if (xp) { xp.classList.remove('public-profile__stat-loading'); xp.removeAttribute('aria-label'); }
     if (level) { level.classList.remove('public-profile__stat-loading'); level.removeAttribute('aria-label'); }
-    bio.textContent = profile.bio || '';
-    bio.hidden = !profile.bio;
     if (identity) identity.hidden = false;
     card.hidden = false;
     card.setAttribute('aria-busy', 'false');

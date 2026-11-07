@@ -84,3 +84,8 @@ Wszystkie cztery istniejące inline scripts są identyczne, razem z whitespace: 
 Fundamentalne testy: RED przed zmianą guard (jedna landing policy odrzucana przez portalowy zestaw route); GREEN po rozszerzeniu istniejącej kontroli. PASS: tests/csp-inline-hashes.behavior.test.mjs, tests/static-html.behavior.test.mjs, check-csp-inline-hashes56served+4standalone i syntax229files, diff/self-review. Guard czyta rzeczywisty landing/_headers i nie przechodzi przy jego braku. Fixtures: prawidłowa pojedyncza policy, missing policy/hash, błędny hash, script unsafe-inline i inline onload odmówione; security headers/ad-domains/liczba hashów sprawdzone. Bez szerokich nowych testów.
 
 Po push wymagane CI i tylko jeden kolejny manualny landing Draft Deploy z artefaktu exact nowego SHA; stop_builds ma pozostaćtrue, published Production ID bez zmian. Kontrola czterech rzeczywistych CSP, fontów, roku, minigry, managera, starej zgody Ads i GA wyłącznie po zgodzie. Aktualny SHA/deployID/wyniki Hosted i ostateczna rekomendacja w bieżącym opisie PR — bez kolejnego docs-only push powodującego zbędne CI/APK. Nie przyznawać PASS Hosted na podstawie samych lokalnych testów.
+
+
+## Zamknięta decyzja OWNER — Production PASS, 2026-10-28
+
+#1156 scalony jako0f77574d74945aa3b64b4e5e81494e621d7b2794. Production play6ae19488f50eb5ff7e60f7e6 i landing6ae194d817674a2d5690830b odebrane przez OWNER; własny AdSense usunięty, GA nadal opt-in, standalone CSP PASS. Landing stop_builds=true zachowane. Historyczne blokery powyżej zamknięte. #1155 lokalnie zawiera ten main; w tym przebiegu nie wykonywano kolejnego deploymentu/smoke Production. LEGAL pozostaje OPEN niezależnie od decyzji reklamowej.

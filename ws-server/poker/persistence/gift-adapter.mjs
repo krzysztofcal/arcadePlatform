@@ -2,7 +2,7 @@ import { beginSqlWs } from '../bootstrap/persisted-bootstrap-db.mjs';
 import { executePokerGiftPurchase, loadActiveGiftSummary } from '../../../shared/poker-domain/gift-purchase.mjs';
 
 const REASONS = new Set(['gift_invalid', 'gift_target_unavailable', 'gift_rate_limited', 'gift_shop_unavailable',
-  'gift_idempotency_conflict', 'gift_purchase_failed', 'not_seated', 'invalid_sender']);
+  'terms_required','terms_unavailable','gift_idempotency_conflict', 'gift_purchase_failed', 'not_seated', 'invalid_sender']);
 export function createGiftAdapter({ env = process.env, beginSql = beginSqlWs, postTransactionFn = null, klog = () => {} } = {}) {
   const available = () => Boolean(String(env.SUPABASE_DB_URL || '').trim());
   return {

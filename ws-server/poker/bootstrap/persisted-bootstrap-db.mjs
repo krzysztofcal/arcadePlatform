@@ -36,6 +36,11 @@ async function beginSqlFileStore(fn, { env = process.env } = {}) {
   const tx = {
     unsafe: async (query, params = []) => {
       const sql = String(query).toLowerCase();
+      if (sql.includes("from private.profile_terms_policy")) return doc.profileTermsPolicy ? [{ ...doc.profileTermsPolicy }] : [];
+      if (sql.includes("from private.profile_terms_receipts")) return (doc.profileTermsReceipts || []).filter(receipt => (
+        receipt.subject_kind === params[0] && receipt.subject_id === params[1] && receipt.terms_version === params[2]
+        && (receipt.expires_at == null || Date.parse(receipt.expires_at) > Date.now())
+      )).map(receipt => ({ ...receipt }));
       if (sql.includes("ws_restart_preflight_money")) {
         return Object.entries(tables)
           .filter(([, candidate]) => String(candidate?.tableRow?.status || "OPEN").toUpperCase() === "OPEN")

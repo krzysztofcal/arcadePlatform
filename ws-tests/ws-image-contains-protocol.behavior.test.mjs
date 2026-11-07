@@ -67,7 +67,7 @@ ${check.stderr || check.stdout}`);
       imageTag,
       "sh",
       "-lc",
-      "test -f /app/ws-server/poker/protocol/constants.mjs && test -f /app/ws-server/poker/protocol/envelope.mjs && test -f /app/ws-server/poker/handlers/hello.mjs && test -f /app/ws-server/poker/runtime/conn-state.mjs && test -f /app/ws-server/poker/table/table-snapshot.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-turn-timeout.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-state-utils.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-legal-actions.mjs && test -f /app/ws-server/poker/persistence/authoritative-join-adapter.mjs && test -f /app/netlify/functions/_shared/poker-turn-timeout.mjs && test -f /app/netlify/functions/_shared/supabase-admin.mjs && test -f /app/netlify/functions/_shared/api-cors.mjs && test -f /app/netlify/functions/_generated/deploy-context.mjs && test -f /app/shared/poker-domain/leave.mjs && test -f /app/shared/poker-domain/join.mjs && test -f /app/shared/poker-domain/bots.mjs && test ! -f /app/netlify/functions/_shared/xp-cors.mjs"
+      "test -f /app/ws-server/poker/protocol/constants.mjs && test -f /app/ws-server/poker/protocol/envelope.mjs && test -f /app/ws-server/poker/handlers/hello.mjs && test -f /app/ws-server/poker/runtime/conn-state.mjs && test -f /app/ws-server/poker/table/table-snapshot.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-turn-timeout.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-state-utils.mjs && test -f /app/ws-server/poker/snapshot-runtime/poker-legal-actions.mjs && test -f /app/ws-server/poker/persistence/authoritative-join-adapter.mjs && test -f /app/netlify/functions/_shared/poker-turn-timeout.mjs && test -f /app/netlify/functions/_shared/supabase-admin.mjs && test -f /app/netlify/functions/_shared/api-cors.mjs && test -f /app/netlify/functions/_generated/deploy-context.mjs && test -f /app/shared/poker-domain/leave.mjs && test -f /app/shared/poker-domain/join.mjs && test -f /app/shared/profile-terms.mjs && test -f /app/shared/poker-domain/bots.mjs && test ! -f /app/netlify/functions/_shared/xp-cors.mjs"
     ]);
     assert.equal(runtimeCheck.status, 0, `required ws modules are missing in image:
 ${runtimeCheck.stderr || runtimeCheck.stdout}`);
@@ -97,7 +97,7 @@ ${build.stderr || build.stdout}`);
       imageTag,
       "sh",
       "-lc",
-      `cd /app/ws-server && node --input-type=module -e 'const mod = await import("./poker/persistence/authoritative-join-adapter.mjs"); const execute = mod.createAuthoritativeJoinExecutor({ env: { SUPABASE_DB_URL: "", WS_TEST_AUTHORITATIVE_JOIN_RESULT_JSON: "" }, beginSql: async (fn) => fn({}), klog: () => {} }); const result = await execute({ tableId: "t1", userId: "u1", requestId: "r1" }); if (result?.code === "temporarily_unavailable") { throw new Error("temporarily_unavailable"); }'`
+      `cd /app/ws-server && node --input-type=module -e 'await import("../shared/profile-terms.mjs"); const mod = await import("./poker/persistence/authoritative-join-adapter.mjs"); const execute = mod.createAuthoritativeJoinExecutor({ env: { SUPABASE_DB_URL: "", WS_TEST_AUTHORITATIVE_JOIN_RESULT_JSON: "" }, beginSql: async (fn) => fn({}), klog: () => {} }); const result = await execute({ tableId: "t1", userId: "u1", requestId: "r1" }); if (result?.code === "temporarily_unavailable") { throw new Error("temporarily_unavailable"); }'`
     ]);
     assert.equal(runtime.status, 0, `authoritative join dependency chain failed in docker runtime:
 ${runtime.stderr || runtime.stdout}`);

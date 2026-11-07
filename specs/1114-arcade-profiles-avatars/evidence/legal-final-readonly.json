@@ -1,0 +1,42 @@
+{
+  "checkedAtUtc": "2026-10-26T22:04:19Z",
+  "netlify": {
+    "project": "playkcswh",
+    "productionFlag": "1",
+    "activeDeployId": "6adf43aa3debf6e93a3fa53a",
+    "activeDeploySha": "a63e44b0d9a1d3625956ed98b75c1242989efdd3",
+    "state": "ready",
+    "readOnlyAccountDeleteGet": {
+      "status": 401,
+      "error": "unauthorized",
+      "OFFWouldReturn": 503
+    }
+  },
+  "ws": {
+    "service": "ws-server.service",
+    "active": true,
+    "pid": 386175,
+    "startedAtUtc": "2026-10-26T12:10:53Z",
+    "health": "ok",
+    "protectedReadOnlyPreflight": "PASS LIVE Redis V3 prod",
+    "processDeletionFlag": "UNKNOWN \u2014 protected environment; not accessed"
+  },
+  "notTested": [
+    "DB deletion release",
+    "provider Auth-last readiness",
+    "actual account deletion"
+  ],
+  "mutations": 0,
+  "stageApplyWorkflow": {
+    "mainBlob": "f4184f5406d6111907ca3930f7c853c090d345b7",
+    "draftFalseRequired": true,
+    "pullRequestTarget": false
+  },
+  "localTests": {
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0,
+    "scope": "profile/Terms, including missing schema despite OFF"
+  },
+  "legalVersionAndLinkCheck": "PASS EN/PL"
+}

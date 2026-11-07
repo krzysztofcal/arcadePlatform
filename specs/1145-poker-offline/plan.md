@@ -93,3 +93,11 @@ Owner confirmed T024 physical Galaxy S24+ PASS on source 8c05fc11b00586e8944480d
 
 
 T025 execution2026-10-26: separate owner GO exercised once. Exact8c05fc11 WS Preview deployment40307557291 and bounded authenticated Online/Single Player/reconnect/settlement/Leave PASS. Leave ACK NOT OBSERVED under existing immediate-navigation contract; durable result/cashout verified. Final wallet442CH, test tables CLOSED/escrow0/no seats. Owner physical Offline PASS remains valid. WS gate closed; technically MERGE-READY, Draft retained pending explicit owner decision and safe Production deployment policy. No runtime changes. Current execution details supersede earlier pending-gate status; historical failures retained in review.md/ws-verification.md.
+
+## Local avatar correction
+
+- scripts/build-poker-offline-poc.mjs::replacements.init uses PokerOffline.avatarVariant instead of a constant.
+- poker/offline/browser-entry.mjs::avatarVariant reads only kcswh:offline-avatar:v1, validates ArcadeAvatars.variants and defaults safely. No write/network/Auth access.
+- js/user-ui-state.js extends existing per-user cache with a variant-only offline-avatar entry and the identity-free current projection; confirmed publish/external profile updates, hydrate, clearUser and setAnonymous maintain it. Existing js/auth/supabaseClient.js profile:updated relay unchanged. Pending Account tile choices do not publish.
+- Regenerate game/renderer/catalog/play HTML CSP/SRI via the existing generator. package-web already copies these files and current UserUiState; do not duplicate logic or change game persistence.
+- Fundamental actual-event/cache→projection tests extend tests/poker-offline.test.mjs; run existing UserUiState/mobile/syntax/CSP checks and hosted CI/APK. Check actual packaged hashes/signature and origin1155. Manual phone retest remains owner-run; no WS deploy for browser-only diff.

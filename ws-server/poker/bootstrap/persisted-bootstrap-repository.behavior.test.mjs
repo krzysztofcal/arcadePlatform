@@ -51,6 +51,7 @@ test("public profile repository performs one independent bounded allowlisted que
         queryParams = params;
         return [{
           user_id: userId,
+          public_profile_blocked: false,
           handle: "cosmic-panda-123456",
           display_name: "Cosmic Panda 123456",
           bio: "must not be selected",

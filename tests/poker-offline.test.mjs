@@ -244,3 +244,36 @@ test('Offline theme readiness resolves success or bounded stable Classic fallbac
   const pending=context.applyTableTheme(mode==='classic'?'classic-casino':'midnight-sapphire');assert.equal(typeof pending?.then,'function');await new Promise(setImmediate);if(mode==='timeout')for(const fn of [...timers.values()])fn();await pending;assert.equal(attrs.get('data-table-theme'),mode==='success'?'midnight-sapphire':undefined);for(const image of images)image.onload?.();await new Promise(setImmediate);assert.equal(attrs.get('data-table-theme'),mode==='success'?'midnight-sapphire':undefined);
  }
 });
+
+async function offlineAvatarHarness(storage=store()){
+ const {readFileSync}=await import('node:fs'),{parse}=await import('acorn'),vm=await import('node:vm');
+ storage.removeItem=storage.removeItem||function(key){this.setItem(key,null);};
+ const window={localStorage:storage,addEventListener(){},KLog:{log(){}}};window.window=window;
+ const online=vm.createContext({window,document:{querySelectorAll(){return[];},dispatchEvent(){}},CustomEvent:class{},Date,JSON});
+ vm.runInContext(readFileSync('js/profile-avatar-catalog.js','utf8'),online);vm.runInContext(readFileSync('js/user-ui-state.js','utf8'),online);
+ const bridge=readFileSync('poker/offline/browser-entry.mjs','utf8');const reader=parse(bridge,{ecmaVersion:'latest',sourceType:'module'}).body.find(n=>n.type==='FunctionDeclaration'&&n.id.name==='avatarVariant');assert.ok(reader,'Offline must use its isolated local avatar reader');
+ const isolated=vm.createContext({window:{localStorage:{getItem(key){assert.equal(key,'kcswh:offline-avatar:v1');return storage.getItem(key);},setItem(){throw Error('visual_write_forbidden');},removeItem(){throw Error('visual_write_forbidden');}},ArcadeAvatars:window.ArcadeAvatars},fetch(){throw Error('network_forbidden');},WebSocket(){throw Error('network_forbidden');},SupabaseAuth:new Proxy({},{get(){throw Error('auth_forbidden');}})});
+ vm.runInContext(bridge.slice(reader.start,reader.end),isolated);
+ const renderer=readFileSync('poker/offline/renderer.generated.js','utf8');let decoration;
+ function visit(node){if(!node||typeof node!=='object')return;if(node.type==='IfStatement'&&renderer.slice(node.start,node.end).includes('if(payload.seats)payload.seats.forEach')&&renderer.slice(node.start,node.end).includes('offline.human'))decoration=renderer.slice(node.start,node.end);for(const v of Object.values(node)){if(Array.isArray(v))v.forEach(visit);else if(v&&typeof v==='object')visit(v);}}
+ visit(parse(renderer,{ecmaVersion:'latest'}));assert.ok(decoration);isolated.offline={human:'offline-human',avatarVariant:()=>isolated.avatarVariant()};
+ const auth=readFileSync('js/auth/supabaseClient.js','utf8');let callback;
+ function find(node){if(!node||typeof node!=='object')return;if(node.type==='CallExpression'&&node.arguments?.[0]?.value==='profile:updated')callback=auth.slice(node.arguments[1].start,node.arguments[1].end);for(const v of Object.values(node)){if(Array.isArray(v))v.forEach(find);else if(v&&typeof v==='object')find(v);}}
+ find(parse(auth,{ecmaVersion:'latest'}));assert.ok(callback);online.state={user:{id:'alice'}};online.userUiState=()=>window.UserUiState;online.renderUser=()=>{};const confirmed=vm.runInContext('('+callback+')',online);
+ return {ui:window.UserUiState,confirm(profile){confirmed({detail:profile});},account(id){online.state.user=id?{id}:null;},variant:()=>isolated.avatarVariant(),decorate(payload){isolated.payload=payload;vm.runInContext(decoration,isolated);return payload;},reload(){return offlineAvatarHarness(storage);}};
+}
+test('confirmed Account avatar projects into Offline New Game and Resume without game writes or transport',async()=>{
+ const storage=store(),h=await offlineAvatarHarness(storage);h.ui.hydrate('alice');h.confirm({displayName:'Alice',avatar:{type:'default',variant:'fox-blue'}});
+ const g=game(storage);await g.newGame(100);let raw=storage.getItem(STORAGE_KEY);assert.equal(h.decorate(g.snapshot()).seats.find(s=>s.userId==='offline-human').profile.avatar.variant,'fox-blue');assert.equal(storage.getItem(STORAGE_KEY),raw);
+ h.confirm({displayName:'Alice',avatar:{type:'default',variant:'panda-pink'}});assert.equal(storage.getItem(STORAGE_KEY),raw);const cold=await h.reload();assert.equal(cold.decorate(game(storage).snapshot()).seats.find(s=>s.userId==='offline-human').profile.avatar.variant,'panda-pink');assert.equal(storage.getItem(STORAGE_KEY),raw);
+ // Local selection has no confirmed event: the last saved visual remains unchanged.
+ assert.equal(cold.variant(),'panda-pink');g.leave();await g.newGame(100);raw=storage.getItem(STORAGE_KEY);assert.equal(cold.decorate(g.snapshot()).seats.find(s=>s.userId==='offline-human').profile.avatar.variant,'panda-pink');assert.equal(storage.getItem(STORAGE_KEY),raw);
+});
+test('Offline avatar is account-bound, durable without Auth, and fails safely on logout/invalid storage',async()=>{
+ const storage=store(),h=await offlineAvatarHarness(storage);assert.equal(h.variant(),'comet-blue');h.ui.hydrate('alice');h.confirm({displayName:'Alice',avatar:{type:'default',variant:'fox-blue'}});assert.equal(h.variant(),'fox-blue');
+ h.ui.hydrate('bob');h.account('bob');assert.equal(h.variant(),'comet-blue');h.confirm({displayName:'Bob',avatar:{type:'default',variant:'orbit-green'}});assert.equal(h.variant(),'orbit-green');assert.equal(h.ui.publish('alice','profile',{displayName:'Alice',avatar:{variant:'fox-blue'}}),null);assert.equal(h.variant(),'orbit-green');
+ storage.removeItem('kcswh:user-ui:profile:v1:alice');const cold=await h.reload();cold.ui.hydrate('alice');assert.equal(cold.variant(),'fox-blue');cold.ui.clearUser('alice');cold.ui.setAnonymous();assert.equal(cold.variant(),'comet-blue');
+ for(const bad of ['https://google.test/photo','not-an-avatar','{"variant":"fox-blue"}']){storage.setItem('kcswh:offline-avatar:v1',bad);assert.equal(cold.variant(),'comet-blue');}
+ storage.setItem('kcswh:offline-avatar:v1','fox-blue');assert.equal((await h.reload()).variant(),'fox-blue','cold Offline reads only the visual record, no Auth bootstrap');h.confirm({displayName:'Bob',avatar:{type:'uploaded',variant:'fox-blue',url:'https://google.test/photo'}});assert.equal(h.variant(),'comet-blue');
+ storage.getItem=()=>{throw Error('storage_unavailable');};assert.equal(cold.variant(),'comet-blue');
+});
