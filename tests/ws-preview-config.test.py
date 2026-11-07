@@ -480,7 +480,10 @@ class PreviewIsolation(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
-        self.receipt_ready = True
+        self.stop_error = False
+        self.stop_completes = True
+        self.stop_leaves_children = False
+        self.policy_input = None
         outer = self
 
         class Fixture(isolation.Isolation):
@@ -490,15 +493,20 @@ class PreviewIsolation(unittest.TestCase):
             def old_runtime(self):
                 return None
 
-            def run(self, argv, expected=(0,)):
+            def run(self, argv, expected=(0,), data=None):
                 outer.calls.append(argv)
-                if argv[0:2] == ['/usr/bin/node', '/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs']:
-                    if not outer.receipt_ready:
-                        return 'SAFE_STOP_BLOCKED inspect_read_only_no_retry'
-                    if argv[2] == 'consume-receipt':
-                        outer.receipt_ready = False
-                        return 'SAFE_STOP_OK consumed'
-                    return 'SAFE_STOP_OK verified'
+                if argv == ['/usr/bin/systemctl', 'stop', isolation.UNIT]:
+                    if outer.stop_error:
+                        raise isolation.secure.Refused('command_failed')
+                    if outer.stop_completes:
+                        outer.active = 'inactive'
+                    (self.cgroup / 'cgroup.events').write_text('populated ' + ('1' if outer.stop_leaves_children else '0'))
+                    return ''
+                if 'KillMode' in argv:
+                    return 'LoadState=loaded\nKillMode=control-group\nControlGroup=/system.slice/ws-server-preview.service'
+                if argv == ['/usr/sbin/visudo', '-c', '-f', '-']:
+                    outer.policy_input = data
+                    return ''
                 if 'ActiveState' in argv:
                     return 'ActiveState=' + outer.active + '\nMainPID=' + ('0' if outer.active == 'inactive' else '123') + '\nLoadState=loaded'
                 if 'SupplementaryGroups' in argv:
@@ -534,6 +542,9 @@ class PreviewIsolation(unittest.TestCase):
         self.task = Fixture()
         self.task.base = root / 'preview'
         self.task.base.mkdir(mode=0o755)
+        self.task.cgroup = root / 'preview-cgroup'
+        self.task.cgroup.mkdir()
+        (self.task.cgroup / 'cgroup.events').write_text('populated 0')
         self.task.backup = root / 'backup'
         self.task.files = isolation.secure.SecureFiles(os.getuid(), os.getgid(), root)
         self.task.key = root / 'owner.pub'
@@ -575,23 +586,81 @@ class PreviewIsolation(unittest.TestCase):
         self.assertIn(b'command="cd /var/lib/arcade-preview-deploy/staging', key)
         self.assertIn(b'\\"$SSH_ORIGINAL_COMMAND\\"', key)
 
-    def test_inactive_without_safe_stop_receipt_cannot_provision(self):
-        self.receipt_ready = False
-        for action in (self.task.preflight, lambda: self.task.provision('123')):
-            with self.assertRaisesRegex(isolation.secure.Refused, 'fresh_safe_stop_receipt_required'):
-                action()
-            self.assertFalse(self.task.backup.exists())
-        self.assertFalse(any('useradd' in command[0] for command in self.calls))
+    def test_active_stage_preflight_finishes_before_the_only_preview_stop(self):
+        self.active = 'active'
+        self.task.preflight()
+        self.assertEqual(self.active, 'active')
+        self.assertFalse(self.task.backup.exists())
+        self.assertFalse(any(c[0].endswith('systemctl') and 'stop' in c for c in self.calls))
+        self.assertEqual(self.policy_input, isolation.SUDO)
+        self.calls.clear()
+        self.assertEqual(self.task.provision('123'), 'provisioned_runtime_not_started')
+        stop = ['/usr/bin/systemctl', 'stop', isolation.UNIT]
+        self.assertEqual(self.calls.count(stop), 1)
+        self.assertLess(self.calls.index(['/usr/sbin/visudo', '-c', '-f', '-']), self.calls.index(stop))
+        self.assertLess(self.calls.index(stop), next(i for i,c in enumerate(self.calls) if c[0].endswith('useradd')))
+        self.assertFalse(any('ws-server.service' in c or c[0].endswith('psql') for c in self.calls))
+        self.assertFalse(any('safe-stop' in str(c) for c in self.calls))
+        self.assertEqual(self.production.read_bytes(), b'unchanged')
 
-    def test_public_key_and_active_service_block_before_mutation(self):
+    def test_invalid_preflight_never_stops_active_preview(self):
+        self.active = 'active'
         self.task.key.write_bytes(b'')
         with self.assertRaisesRegex(isolation.secure.Refused, 'owner_public_key_missing'):
-            self.task.preflight()
-        self.assertFalse(self.task.backup.exists())
-        self.active = 'active'
-        with self.assertRaisesRegex(isolation.secure.Refused, 'preview_must_be_stopped'):
             self.task.provision('123')
+        self.assertFalse(any('stop' in c for c in self.calls))
         self.assertFalse(self.task.backup.exists())
+
+    def test_failed_or_incomplete_stop_never_changes_accounts_or_live_trees(self):
+        for kind in ['stop_error', 'stop_completes', 'stop_leaves_children']:
+            with self.subTest(kind=kind):
+                self.active = 'active'
+                self.stop_error = kind == 'stop_error'
+                self.stop_completes = kind != 'stop_completes'
+                self.stop_leaves_children = kind == 'stop_leaves_children'
+                self.calls.clear()
+                before = (self.task.base / 'ws-server').stat().st_ino
+                with self.assertRaises(isolation.secure.Refused):
+                    self.task.provision('123')
+                self.assertTrue(self.task.mutation_started)
+                self.assertFalse(self.task.backup.exists())
+                self.assertFalse(any(c[0].endswith('useradd') for c in self.calls))
+                self.assertEqual((self.task.base / 'ws-server').stat().st_ino, before)
+                self.assertEqual(self.production.read_bytes(), b'unchanged')
+
+    def test_untrusted_stop_policy_is_refused_before_stop(self):
+        run = self.task.run
+        self.task.run = lambda argv, **kwargs: 'LoadState=loaded\nKillMode=process\nControlGroup=/system.slice/ws-server.service' if 'KillMode' in argv else run(argv, **kwargs)
+        with self.assertRaisesRegex(isolation.secure.Refused, 'unexpected_stop_policy'):
+            self.task.provision('123')
+        self.assertFalse(self.task.mutation_started)
+        self.assertFalse(self.task.backup.exists())
+        self.assertFalse(any('stop' in cmd for cmd in self.calls))
+
+    def test_cli_distinguishes_preflight_refusal_from_attempted_stop(self):
+        from types import SimpleNamespace
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        for started in [False, True]:
+            task = SimpleNamespace(mutation_started=started)
+            def fail(_):
+                raise isolation.secure.Refused('fixture_refusal')
+            task.provision = fail
+            output = io.StringIO()
+            with patch.object(isolation.os, 'geteuid', return_value=0), patch.object(isolation.sys, 'argv', ['fixture','provision','123']), patch.object(isolation, 'Isolation', return_value=task), redirect_stdout(output):
+                with self.assertRaises(SystemExit) as error:
+                    isolation.main()
+                self.assertEqual(error.exception.code, 1)
+            self.assertEqual(output.getvalue(), ('PREVIEW_FAILED' if started else 'PREVIEW_BLOCKED') + ' fixture_refusal\n')
+
+    def test_cli_has_no_external_preflight_service_or_path_argument(self):
+        from unittest.mock import patch
+        for args in [['preflight','123'],['stop','123'],['provision','123','ws-server.service'],['provision','123','/tmp/other'],['rollback','../../other']]:
+            with patch.object(isolation.os, 'geteuid', return_value=0), patch.object(isolation.sys, 'argv', ['fixture', *args]), patch.object(isolation, 'Isolation') as factory:
+                with self.assertRaisesRegex(isolation.secure.Refused, 'unexpected_arguments'):
+                    isolation.main()
+                factory.assert_not_called()
 
     def test_provision_and_rollback_preserve_original_inodes_and_production(self):
         before = {name: (self.task.base / name).stat().st_ino for name in isolation.ROOTS}
@@ -606,7 +675,7 @@ class PreviewIsolation(unittest.TestCase):
         for name in isolation.ROOTS:
             self.assertEqual((self.task.base / name).stat().st_ino, before[name])
         self.assertEqual(self.production.read_bytes(), b'unchanged')
-        self.assertFalse(any(cmd[0].endswith('systemctl') and any(x in cmd for x in ['start','stop','restart']) for cmd in self.calls))
+        self.assertEqual([cmd for cmd in self.calls if cmd[0].endswith('systemctl') and any(x in cmd for x in ['start','stop','restart'])], [['/usr/bin/systemctl','stop',isolation.UNIT]])
         self.assertFalse(any('ws-server.service' in cmd for cmd in self.calls))
 
     def test_external_symlink_blocks_without_touching_target_or_live_trees(self):

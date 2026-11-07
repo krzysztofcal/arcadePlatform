@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Fixed Preview-only catalog implementation. Never stops/starts a service or handles a private key."""
+"""Fixed Preview-only catalog implementation. Stops only Preview after preflight; never starts a service or handles a private key."""
 import base64
 import hashlib
 import importlib.util
@@ -14,7 +14,6 @@ import shlex
 import stat
 import subprocess
 import sys
-import tempfile
 
 _spec = importlib.util.spec_from_file_location('preview_secure', Path(__file__).with_name('prepare-ws-preview-v3.py'))
 secure = importlib.util.module_from_spec(_spec)
@@ -150,9 +149,11 @@ class Isolation:
         }
         self.home = Path('/var/lib/arcade-preview-deploy')
         self.auth = self.home / '.ssh/authorized_keys'
+        self.cgroup = Path('/sys/fs/cgroup/system.slice/ws-server-preview.service')
+        self.mutation_started = False
 
-    def run(self, argv, expected=(0,)):
-        result = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+    def run(self, argv, expected=(0,), data=None):
+        result = subprocess.run(argv, **({'input': data} if data is not None else {'stdin': subprocess.DEVNULL}), stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'}, timeout=180)
         require(result.returncode in expected, 'command_failed')
         return result.stdout.decode().strip()
@@ -160,6 +161,10 @@ class Isolation:
     def stopped(self):
         value = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'ActiveState', '-p', 'MainPID', '-p', 'LoadState'])
         require(set(value.splitlines()) == {'ActiveState=inactive', 'MainPID=0', 'LoadState=loaded'}, 'preview_must_be_stopped')
+        require(not self.cgroup.is_symlink(), 'unexpected_preview_cgroup')
+        if self.cgroup.exists():
+            events = dict(line.split() for line in (self.cgroup / 'cgroup.events').read_text().splitlines())
+            require(events.get('populated') == '0', 'preview_processes_still_running')
 
     def clean_accounts(self):
         for name in (DEPLOY, RUNTIME):
@@ -176,16 +181,11 @@ class Isolation:
             else:
                 raise secure.Refused('group_already_exists')
 
-    def safe_stop_receipt(self, run_id=None):
-        mode = 'verify-receipt' if run_id is None else 'consume-receipt'
-        result = self.run(['/usr/bin/node', '/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs',
-                           mode, '1' if run_id is None else str(run_id)], expected=(0, 1))
-        require(result == ('SAFE_STOP_OK verified' if run_id is None else 'SAFE_STOP_OK consumed'),
-                'fresh_safe_stop_receipt_required')
-
     def preflight(self):
-        self.stopped()
-        self.safe_stop_receipt()
+        policy = self.run(['/usr/bin/systemctl', 'show', UNIT, '-p', 'LoadState', '-p', 'KillMode', '-p', 'ControlGroup'])
+        policy = dict(line.split('=', 1) for line in policy.splitlines())
+        require(policy.get('LoadState') == 'loaded' and policy.get('KillMode') == 'control-group'
+                and policy.get('ControlGroup') in ('', '/system.slice/ws-server-preview.service'), 'unexpected_stop_policy')
         key = public_key(self.files.read(self.key, 0o644))
         self.files.parents(self.base / '.env.preview')
         env = secure.parse_env(self.files.read(self.base / '.env.preview', 0o600))
@@ -250,10 +250,7 @@ class Isolation:
         self.run(['/usr/sbin/sshd', '-t'])
         self.run(['/usr/sbin/visudo', '-c'])
         self.ssh_policy()
-        with tempfile.TemporaryDirectory(prefix='.preview-policy-', dir=self.backup.parent) as directory:
-            candidate = Path(directory) / 'sudoers'
-            self.files.atomic(candidate, SUDO, 0o440)
-            self.run(['/usr/sbin/visudo', '-c', '-f', str(candidate)])
+        self.run(['/usr/sbin/visudo', '-c', '-f', '-'], data=SUDO)
         return key
 
     def old_runtime(self):
@@ -302,7 +299,9 @@ class Isolation:
 
     def provision(self, run_id):
         key = self.preflight()  # no mutation before all prerequisites, including a dedicated OWNER public key
-        self.safe_stop_receipt(run_id)  # one-use proof, rechecked immediately before the first mutation
+        self.mutation_started = True
+        self.run(['/usr/bin/systemctl', 'stop', UNIT])
+        self.stopped()
         self.backup.mkdir(mode=0o700)
         self.files.sync_dir(self.backup.parent)
         state = {'version': 1, 'phase': 'preparing', 'run': run_id, 'original': {}, 'installed': {},
@@ -419,6 +418,7 @@ class Isolation:
             if target.exists() or target.is_symlink():
                 mode = 0o440 if target.parent.name == 'sudoers.d' else 0o644
                 require(secure.digest(self.files.read(target, mode)) == state['desired'][str(target)], 'target_changed')
+        self.mutation_started = True
         if self.auth.exists():
             self.auth.unlink()
             self.files.sync_dir(self.auth.parent)
@@ -456,14 +456,14 @@ class Isolation:
 def main():
     # No path/key/identity input, environment override or new privileged entry point.
     require(os.geteuid() == 0 and len(sys.argv) == 3 and
-            sys.argv[1] in ('preflight', 'provision', 'rollback') and
+            sys.argv[1] in ('provision', 'rollback') and
             re.fullmatch(r'[1-9][0-9]{0,19}', sys.argv[2]), 'unexpected_arguments')
     task = Isolation()
-    if sys.argv[1] == 'preflight':
-        task.preflight()
-        result = 'ready_stopped_only'
-    else:
+    try:
         result = task.provision(sys.argv[2]) if sys.argv[1] == 'provision' else task.rollback()
+    except secure.Refused as error:
+        print(('PREVIEW_FAILED ' if task.mutation_started else 'PREVIEW_BLOCKED ') + str(error))
+        sys.exit(1)
     print('PREVIEW_OK ' + result)
 
 

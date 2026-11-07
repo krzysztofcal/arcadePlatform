@@ -1023,7 +1023,7 @@ test("Preview approval descriptions retain the stopped-service and recovery limi
   const { approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
   const request = { reason: "Inspect reviewed Preview isolation request", sha: "b".repeat(40),
     actor: "release-agent[bot]", triggeringActor: "release-agent[bot]", runId: "42223180929", attempt: "1" };
-  for (const operation of ["ws-preview-safe-stop", "ws-preview-isolation-preflight", "ws-preview-isolation-provision", "ws-preview-isolation-rollback"]) {
+  for (const operation of ["ws-preview-isolation-provision", "ws-preview-isolation-rollback"]) {
     const text = approvalSummary({ ...request, operation });
     assert.ok(text.includes(`## Approve only if expected: ${operation}`));
     assert.match(text, /CHANGES THE VPS/);
@@ -1031,14 +1031,10 @@ test("Preview approval descriptions retain the stopped-service and recovery limi
     assert.match(text, /stopped|stopping/);
     assert.match(text, /separate/i);
   }
-  const stop = approvalSummary({ ...request, operation: "ws-preview-safe-stop" });
-  assert.match(stop, /uncertain outcome is FAILED/);
-  assert.match(stop, /not an automatic retry/);
-  const preflight = approvalSummary({ ...request, operation: "ws-preview-isolation-preflight" });
-  assert.match(preflight, /temporary policy-validation files/);
   const provision = approvalSummary({ ...request, operation: "ws-preview-isolation-provision" });
   assert.match(provision, /daemon-reload re-reads all changed VPS unit files/);
-  assert.match(provision, /one-use safe-stop receipt/);
+  assert.match(provision, /hard kick does not guarantee chip settlement/);
+  assert.match(provision, /read-only preflight, stops only ws-server-preview.service/);
 });
 
 test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
@@ -1140,7 +1136,7 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
 
 test("Preview isolation catalog uses fixed actions and unprivileged fundamental fixtures", async () => {
   const { runOperation } = await import("../infra/vps/vps-admin.mjs");
-  for (const action of ["preflight", "provision", "rollback"]) {
+  for (const action of ["provision", "rollback"]) {
     const fx = fakeAdminHost();
     const originalRun = fx.host.run;
     fx.host.run = (argv, ...args) => {
@@ -1157,34 +1153,15 @@ test("Preview isolation catalog uses fixed actions and unprivileged fundamental 
 });
 
 
-test("Preview safe-stop fundamentals and audit-gated receipt run without privileged commands", async () => {
+test("removed Preview operations fail closed and partial provisioning is FAILED", async () => {
   const { runOperation } = await import("../infra/vps/vps-admin.mjs");
-  for (const auditEnd of [0, 1]) {
-    const fx = fakeAdminHost({}, { loggerStatus: [0, auditEnd] });
-    const original = fx.host.run;
-    const modes = [];
-    fx.host.run = (argv, ...args) => {
-      if (argv[0] === "/usr/bin/node") {
-        assert.deepEqual(argv.slice(0, 2), ["/usr/bin/node", "/usr/local/libexec/arcade-vps-admin/ws-preview-safe-stop.mjs"]);
-        assert.equal(argv[3], "123"); modes.push(argv[2]);
-        return { status: 0, stdout: argv[2] === "stop" ? "SAFE_STOP_OK stopped_pending_audit" : "SAFE_STOP_OK ready" };
-      }
-      return original(argv, ...args);
-    };
-    const result = runOperation("ws-preview-safe-stop", "123", fx.host);
-    assert.equal(result.ok, auditEnd === 0);
-    assert.deepEqual(modes, auditEnd === 0 ? ["stop", "finalize"] : ["stop"]);
+  for (const operation of ["ws-preview-safe-stop", "ws-preview-isolation-preflight"]) {
+    const fx = fakeAdminHost();
+    assert.match(runOperation(operation, "123", fx.host).line, /ADMIN_BLOCKED .* unexpected_arguments$/);
   }
-  for (const [stdout, status, outcome] of [
-    ["SAFE_STOP_BLOCKED inspect_read_only_no_retry", 1, "ADMIN_BLOCKED"],
-    ["SAFE_STOP_FAILED stop_attempted_uncertain_no_retry", 1, "ADMIN_FAILED"],
-    ["", null, "ADMIN_FAILED"]
-  ]) {
-    const fx = fakeAdminHost(); const original = fx.host.run;
-    fx.host.run = (argv, ...args) => argv[0] === "/usr/bin/node" ? { status, stdout } : original(argv, ...args);
-    assert.ok(runOperation("ws-preview-safe-stop", "123", fx.host).line.startsWith(outcome + " "));
-    assert.ok(fx.audits.at(-1).includes("result=" + (outcome === "ADMIN_BLOCKED" ? "blocked" : "failed")));
-  }
-  const result = spawnSync(process.execPath, ["--test", "ws-tests/ws-preview-safe-stop.behavior.test.mjs"], { encoding: "utf8" });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  fx.host.run = (argv, ...args) => argv[0] === "/usr/bin/python3"
+    ? { status: 1, stdout: "PREVIEW_FAILED preview_processes_still_running" } : original(argv, ...args);
+  assert.match(runOperation("ws-preview-isolation-provision", "123", fx.host).line, /^ADMIN_FAILED /);
 });

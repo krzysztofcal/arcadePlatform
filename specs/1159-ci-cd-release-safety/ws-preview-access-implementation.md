@@ -1,28 +1,23 @@
 # WS Preview isolation implementation / activation handoff (#1159)
 
-Implements [the approved design](ws-preview-access.md). This PR is code preparation only: no live
-installation, key generation, SSH change, dispatch, restart or deploy. `ws-preview-deploy.yml` and
-all secrets remain unchanged. OWNER supplied the dedicated public key; it is pinned in this PR.
-The running Preview service and missing approved quiesce/installation path still block activation;
-this is deliberate, not runtime acceptance.
+Implements [the approved design](ws-preview-access.md), including OWNER's Stage hard-kick decision.
+This follow-up prepares code only. Installation, service operations, Environment/secret changes,
+DRAIN removal and deployment require separate GO. The dedicated public key remains unchanged.
 
-## Implementation / checks
+## Minimal plan and Constitution Check
 
-- [x] Extend the existing `VPS Admin Operation` catalog with exactly `ws-preview-isolation-preflight`,
-  `ws-preview-isolation-provision` and `ws-preview-isolation-rollback`. Keep its OWNER/main,
-  environment approval, fixed arguments, journal and shared lock. No new privileged SSH endpoint.
-- [x] Reuse `prepare-ws-preview-v3.py`'s protected-file, Stage identity, environment parsing and
-  atomic-write primitives. Install code/public-data dependencies with the existing admin installer
-  (and fresh-host bootstrap), never the private key. No new package or service.
-- [x] Add only fundamental fixture tests to the existing Preview configuration tests and infra guard.
-- [ ] Independent Claude Code review and hosted CI on the final diff.
-- [x] OWNER dedicated public key supplied and pinned (public material only).
-- [ ] Approved administrative activation and runtime acceptance (not executed here).
+- Keep the existing catalog, requester/OWNER separation, journal, shared lock and exact-SHA deployment.
+- Remove standalone safe-stop, receipt and external isolation-preflight; no new package or workflow.
+- Complete read-only configuration, identity, source inventory, SSH and sudo syntax preflight first.
+- Provision stops only `ws-server-preview.service`, checks inactive/MainPID=0 and empty cgroup,
+  then creates backup/accounts and switches Preview files. Occupied tables do not block Stage stop.
+- Rollback requires already stopped Preview and empty cgroup; neither operation starts a service.
+- Remove only Preview presence counters; Production HOLD/DRAIN, escrow and recovery stay unchanged.
+- Fundamental fixture/contract tests, required CI and independent Claude review precede Draft handoff.
+- Live runtime verification remains pending separate OWNER authorization; green CI is not deployment.
 
-The Python module is not a separate sudo grant. The catalog executes one installed root-owned module
-with `python3 -I -B`, one fixed action and numeric run ID. It accepts no path, username, unit, key or shell
-command from a dispatch. Both mutations require `ActiveState=inactive` and `MainPID=0`; they never
-stop/start/restart the service. A missing/unverifiable prerequisite is STOP. No automatic retry.
+The Python module runs only through the existing fixed catalog with `python3 -I -B`, a fixed action
+and numeric run ID. No configurable unit, path, account, key or shell command is accepted.
 
 ## Filesystem and identity contract
 
@@ -50,7 +45,7 @@ quoted argument to Bash, without profiles/rc. This also supports the relative au
 by the pinned [drone-scp 1.6.14 implementation](https://github.com/appleboy/drone-scp/blob/v1.6.14/plugin.go),
 while the existing workflow's final target remains absolute. No private-key input or output exists.
 
-With Preview already stopped, provision stages a new copy of the four existing application roots
+After preflight and confirmed Preview stop, provision stages a new copy of the four existing application roots
 under `/var/lib/arcade-admin/ws-preview-isolation` (root:root 0700), then renames the original roots
 there as `before-*`. It never recursively chowns an existing tree or follows source symlinks. Sources
 are read through pinned descriptors; devices/sockets/hardlinks and links outside copied Preview roots
@@ -73,47 +68,45 @@ for attested deletion-window ON/OFF; this operation does not change that setting
 The configuration preflight is reused; no database table or application data is changed by this module.
 
 Root-only `manifest.json` records the run, phase, original/installed directory identities and expected
-configuration hashes with fsync at rename checkpoints. Candidate sudoers syntax is validated in a
-root-private transient file before provisioning; a failed post-install check removes that new rule so
+configuration hashes with fsync at rename checkpoints. Candidate sudoers syntax is validated through `visudo -c -f -` stdin before any mutation; a failed post-install check removes that new rule so
 admin rollback remains reachable. Original application trees and copied post-rollback
 trees are retained, not deleted. This is operational recovery, not proof that a previously compromised
 account retained no open descriptor/copy of its old files. No secret values are written to the manifest.
 
-## OWNER activation — each administrative action requires separate approval
+## OWNER activation — separate GO; no activation in this PR
 
-1. Review/merge this PR only after CI and independent review. Supply/review the dedicated public key
-   before attempting provisioning. OWNER generates/retains the private key locally; never send it to
-   an agent or put it in the repository. Keep current OWNER/Termux access and old GitHub secrets intact.
-2. Use the approved owner-controlled reinstall of `infra/vps/stage-vps-admin.sh` from the reviewed
-   merged SHA. This only registers dependencies/catalog, not Preview users or keys. The workflow
-   cannot install its own new catalog operation. Do not substitute manual SSH/root/sudo by the agent,
-   full bootstrap on the existing VPS, or release-agent activation. Existing approval-role constraints
-   remain: if there is no eligible requester distinct from the required approver, STOP.
-3. Freeze old-key Preview dispatches/reruns. Establish an approved Preview-only quiet window with no
-   active users, reconnectable seats, hands, pending financial operations or unsafe recovery state.
-   This freeze includes direct restarts by the existing broad `copilot` account, as well as Actions
-   dispatches/reruns; those existing permissions are not revoked by this PR.
-   The new catalog deliberately does not provide an unchecked stop/restart. If Preview is active or
-   there is no existing reviewed way to quiesce/stop it under that window, **STOP**: obtain a separately
-   reviewed, approved quiesce operation before activation. Never work around this precondition.
-4. With Preview already inactive, request `ws-preview-isolation-preflight`; inspect the result, then
-   separately request `ws-preview-isolation-provision` through `VPS Admin Operation`. Each uses `main`,
-   the existing confirmation phrase and OWNER environment approval. Any failure leaves a protected
-   manifest/backup for inspection; no retry. Successful provisioning says
-   `provisioned_runtime_not_started`, explicitly not a successful deployment or runtime acceptance.
-5. Verify public-key fingerprint, actual SSH identity/restrictions, exact sudo rights, installed-file
-   modes/umask, runtime inability to write code, and lack of Production/state/credential authority.
-   Treat this deployment key as Stage-sensitive: it controls code that will receive Stage credentials.
-   Keep all secrets/private keys out of reports and artifacts. The root preflight imports only Node built-ins (`node:fs`, `node:crypto`), not deployed code. Check the
-   forced-session staging with the pinned SCP action: its auxiliary archive is relative, but the
-   existing extraction/deploy target stays absolute under `/tmp`.
-   Source SHA/unit/permissions and rollback
-   evidence must be recorded before proceeding; preserve the former account access for recovery.
-6. Only after provisioning acceptance, the separate Environment binding PR and OWNER setup can follow
-   the approved design. The first approved exact-SHA workflow run starts Preview with the isolated user.
-   Verify actual process UID, Stage database/Redis preflight, signing/hold readability, installed SHA,
-   local/public health and relevant read-only smoke. Until then: runtime acceptance PENDING. A green
-   CI/Netlify check does not validate SSH provisioning or effective runtime confinement.
+1. Approve merge separately after CI/review. Freeze Preview dispatches and historical reruns throughout
+   migration. Keep OWNER's trusted access, old Preview secret copies and protected backups until acceptance.
+   The strict new workflow has no broad-account fallback: plan a paused-deployment window after merge.
+2. OWNER reinstalls the exact reviewed merged catalog/assets using the existing `stage-vps-admin.sh`
+   through the previously verified trusted OWNER-controlled channel. Never execute agent-writable files
+   as root. Do not use full bootstrap, agent sudo, or ask the old catalog to install its own replacement.
+   The now-unused installed Preview adapter and its private copy of `ws-restart-gate.mjs` are inert;
+   they receive no catalog/sudo grant. Retain old protected receipts/backups for audit, not authorization.
+   Never remove `/usr/local/sbin/arcade-ws-restart-gate` or its Production implementation.
+3. An eligible App requester requests one `ws-preview-isolation-provision`; OWNER reads the summary
+   and approves `vps-admin` (main-only, prevent self-review, no bypass). Preflight occurs before stop.
+   Stop hard-kicks Stage players even at occupied tables; this does not guarantee hand/escrow settlement.
+   Success is `provisioned_runtime_not_started`. After any failure STOP and inspect the protected manifest,
+   unit and account state: an attempted stop is FAILED, not a claim that nothing changed. No retry.
+4. OWNER verifies actual dedicated SSH identity, public fingerprint, fixed sudo allowlist, runtime and
+   filesystem confinement, and existing SCP staging compatibility without deploying. Keep the old trusted
+   recovery access until acceptance; do not enable a broad-account fallback in the workflow.
+5. OWNER configures `ws-preview`: selected branch exactly `main`, no tags, secrets `WS_PREVIEW_HOST`,
+   `WS_PREVIEW_USER=arcade-preview-deploy`, `WS_PREVIEW_SSH_KEY`. The private key goes directly from Termux
+   to GitHub, never to an agent. No second reviewer gate for ordinary Stage deploy; OWNER-only main dispatch
+   remains mandatory. Do not change `vps-admin`/`ws-production` protections. The GitHub App private key
+   remains only in OWNER Termux, never on VPS. Existing repository-level Preview secrets do not become
+   Environment-scoped retroactively; freeze legacy runs until their separately approved retirement.
+6. Separate GO for the existing `WS Preview Deploy` using the reviewed exact application SHA. Confirm
+   dedicated user, Stage Redis/database preflight, actual runtime UID/SHA, local/public health and relevant
+   read-only smoke. This first workflow restart starts the isolated runtime. No counter-only deployment.
+   Then OWNER may retire obsolete repository-level Preview secrets after acceptance.
+7. Health does not prove playability: current Stage DRAIN is intentionally unchanged. There is no catalog
+   DRAIN-off operation. The smallest existing path is separate OWNER GO to clear only the protected Stage
+   hold file `/etc/arcadeplatform/ws-hold-preview/new-hands` through OWNER's trusted maintenance access,
+   using the existing hold-file mechanism. The deployer gains no write access there. Verify DRAIN/HOLD
+   status and recovery/ledger state before playable acceptance; never clear Production HOLD/DRAIN.
 
 ## STOP / rollback
 
@@ -132,9 +125,18 @@ The owner must approve subsequent Preview startup; never silently switch GitHub 
 Risks: Preview downtime until the separately approved acceptance run; temporary loss of deploy access;
 read-permission/umask or signing/hold dependency mismatches (root-owned home/key directories are
 explicitly chmodded, independently of installer umask); interrupted provisioning requiring recovery;
-loss of local file persistence is prevented by refusal. Production changes, secret migration and cleanup
-of old repository secrets are excluded. This does not remediate the existing broad `copilot` authority.
+loss of local file persistence is prevented by refusal. Production changes are excluded; Environment/secret migration and retirement are separate OWNER actions. This does not remediate the existing broad `copilot` authority.
 
 The symlink inventory is a lexical boundary check. Root never follows copied links; it is not a proof
 that every later unprivileged path traversal remains inside Preview when links are chained with `..`.
 Filesystem DAC, distinct UIDs and the verified service sandbox remain the authority boundary.
+
+## Accepted Stage risk and breaking changes
+
+A standard Preview restart may interrupt an active hand. Committed persisted snapshots and idempotent
+ledger operations support existing recovery, but uncommitted in-memory actions can be lost; pending
+hands, requests, version or escrow mismatches may require manual Stage intervention. No automatic
+refund, balance repair or reset is added. Preserve existing recovery refusals and inspect before play.
+Production restart gate and financial contracts are unchanged. New workflow dispatch requires an exact
+40-character SHA and the dedicated user/Environment; old branch-name inputs and broad-user secrets
+fail closed. Removed catalog operations and two Preview status fields are intentional breaking changes.

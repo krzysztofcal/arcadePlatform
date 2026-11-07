@@ -10,8 +10,7 @@ Production deployment authority. Keep the existing workflow, artifact, five scop
 Redis preflight, restart and health checks. No new service, deployment framework or dependency.
 
 The owner approved preparation of a dedicated Preview account and key. This document specifies that
-change for review; it does not implement the accounts, provision keys, bind a workflow, or change live
-settings. Merge of this document has no activation effect.
+change for review; it does not activate accounts, keys, the workflow Environment or live settings. Merge of this document has no activation effect.
 
 ## Why an SSH account alone is insufficient
 
@@ -70,40 +69,12 @@ the shared runtime identity. A new deployment service or generic root command in
 
 ## Bounded implementation and activation order
 
-1. Prepare the account/runtime isolation implementation for review. Reuse the existing
-   [VPS Admin Operation](../../docs/vps-admin-operations.md) approval and fixed catalog. The current
-   catalog has no Preview account provisioning operation: adding a narrowly bounded operation and
-   installing that reviewed helper requires a separately approved administrative activation path
-   (the owner-controlled reinstall from merged `main` documented in the admin runbook).
-   Do not claim the existing workflow can install its own new operation. Do not use manual SSH,
-   root/sudo, the full fresh-host bootstrap or release-agent activation as an alternative.
-2. Review the complete implementation with Claude Code (at most three rounds, zero P0/P1/P2 for
-   handoff), and run fundamental tests for scope, unexpected identity/path refusal and preservation
-   of current deployment gates. No provisioning or service change during preparation.
-3. Before OWNER-approved activation, record the current Preview SHA, unit, metadata and recovery
-   procedure without copying secrets into agent-readable files. Check for active Preview runs and
-   establish a safe Preview restart window, including active users and financial/recovery state.
-   Runtime-user activation requires a Preview restart and may interrupt connections; do not restart
-   Production. On failure report STOP and recover only by the reviewed, separately approved path;
-   never silently fall back to the broad `copilot` credential.
-   Freeze old-credential dispatches/reruns throughout provisioning and acceptance. Separate the runtime
-   identity before enabling the new deployer's write/login authority; verify preflight compatibility.
-4. After authorized provisioning, independently verify both identities' effective SSH, filesystem,
-   process and sudo boundaries. Confirm Stage configuration without printing values. Keep the old
-   workflow credential intact until replacement acceptance; do not remove or change OWNER's key.
-5. Only after isolation PASS, OWNER creates `ws-preview`, selected branches/tags: exactly `main`,
-   no tags, with `WS_PREVIEW_HOST`, `WS_PREVIEW_USER=arcade-preview-deploy` and the new
-   `WS_PREVIEW_SSH_KEY`. Upload the private key locally from Termux without exposing it to the agent.
-6. Prepare the small binding PR: `environment: ws-preview` on both `validate` and `deploy` in
-   `.github/workflows/ws-preview-deploy.yml`, extend the existing
-   `ws-tests/ws-preview-deploy.workflow.guard.test.mjs`, and minimally update deployment instructions.
-   Preserve OWNER/main and triggering-actor guards, serialization, Redis checks and all current
-   artifact/restart/health logic. Obtain independent Claude review and required CI before handoff.
-7. After separate merge/deploy GO, use the existing main-definition workflow with the approved exact
-   application SHA. Verify actual SSH identity, Stage preflight, installed SHA and local/public health.
-   Then inventory old branches/reruns and remove obsolete repository-level Preview credentials only
-   with separate OWNER approval. Historical workflow definitions do not gain Environment binding
-   retroactively; do not rely on Environment rules to restrict secrets still stored at repository level.
+The single follow-up contains catalog simplification, fixed Preview-only stop during provisioning,
+removal of presence counters and binding both secret-using deploy jobs to `ws-preview`.
+Follow the [implementation/activation handoff](ws-preview-access-implementation.md) for the exact
+migration order and recovery. No separate binding PR, safe-stop, receipt, empty-table requirement or
+runtime-counter rollout is required. OWNER accepts Stage hard kicks and possible manual ledger recovery;
+Production settlement protection is unchanged. Runtime acceptance still needs separate deployment GO.
 
 ## Completion evidence
 

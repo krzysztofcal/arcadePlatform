@@ -4297,16 +4297,7 @@ async function buildNewHandsHoldStatus() {
     dbFinancialIssues: null,
     restartSafe: false
   };
-  const withPreviewPresence = () => {
-    if (getPokerMaintenanceEnvironment() === "preview") {
-      // All loaded tables, including guest tables; membership includes reconnectable disconnected humans.
-      const ids = tableManager.listTableIds();
-      status.humanMemberTables = ids.filter((id) => tableManager.hasActiveHumanMember(id)).length;
-      status.connectedHumanTables = ids.filter((id) => tableManager.hasConnectedHumanPresence(id)).length;
-    }
-    return status;
-  };
-  if (!hold.active || !persistedStateWriteEnabled) return withPreviewPresence();
+  if (!hold.active || !persistedStateWriteEnabled) return status;
   try {
     const beginSqlWs = await loadBeginSqlWs();
     const { rows, moneyRows, requestRows } = await beginSqlWs(async (tx) => ({
@@ -4322,13 +4313,13 @@ async function buildNewHandsHoldStatus() {
       .length;
   } catch (error) {
     klogSafe("ws_restart_preflight_db_failed", { message: error?.message || "unknown" });
-    return withPreviewPresence();
+    return status;
   }
   status.restartSafe = hold.drain && loadedHandsInProgress === 0 && status.tableCommandsInFlight === 0
     && stateWritesInFlight === 0 && !status.supervisorSweepInProgress
     && status.dbHandsInProgress === 0 && status.dbVersionMismatches === 0
     && Object.values(status.dbFinancialIssues).every((count) => count === 0);
-  return withPreviewPresence();
+  return status;
 }
 
 async function buildInternalPokerMaintenanceStatus(environment) {

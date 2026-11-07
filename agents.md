@@ -90,6 +90,15 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - DB is NOT source of truth
 
 ### WS Preview Deploy Gate (CRITICAL)
+
+Stage/WS Preview accepts hard-kick deployment restarts, including occupied tables; no manual Leave,
+empty-table requirement, Preview presence counters or safe-stop receipt is required. This is not a
+chip-settlement guarantee: interrupted hands may need existing Stage recovery and OWNER intervention.
+Provisioning completes read-only preflight, stops only Preview and proves its process group empty
+before changing files/accounts; rollback requires stopped Preview and never starts it. Production
+restart gate, HOLD/DRAIN, escrow/recovery and OWNER approvals remain unchanged. A deployment or DRAIN
+change always needs its own GO; health alone does not prove playable status.
+
 - Agents MUST use the approved release/admin paths below; never bypass owner approvals or substitute manual SSH/root/sudo, service restarts, direct release switching or direct publication. Missing approval or a blocked workflow is a STOP; request the owner’s decision. Read-only diagnostics permitted below and by the release procedure do not authorize mutations.
 - Netlify deploy previews update the browser app only. The `WS Server Deploy` pull-request check validates the WS package but does **not** deploy it; its deploy job is intentionally skipped on PR events.
 - If a PR changes `ws-server/**`, WS runtime dependencies under `shared/**`, or browser/WS protocol behavior, the agent MUST remind the user that `WS Preview Deploy` is required before end-to-end preview verification.
