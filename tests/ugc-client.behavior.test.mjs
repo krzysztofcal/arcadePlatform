@@ -301,3 +301,28 @@ test("the public profile shows a blocked player with the Arcade avatar, restores
   for (let i = 0; i < 10; i += 1) await flush();
   assert.equal(shown(switching.avatarCalls.at(-1)), true, "for B, who has not blocked this player, the avatar is shown");
 });
+
+test("a block right after an unblock reads the list again after the running reload (no stale list)", async () => {
+  const FIRST = "00000000-0000-4000-8000-000000000011";
+  const SECOND = "00000000-0000-4000-8000-000000000022";
+  let releaseReload;
+  const held = new Promise((resolve) => { releaseReload = resolve; });
+  const env = setup({ responses: [
+    { status: 200, body: { blocks: [{ userId: FIRST, handle: "first-player" }] } },
+    { status: 200, body: {} },
+    { status: 200, body: { blocks: [] }, before: () => held },
+    { status: 200, body: { blocked: true } },
+    { status: 200, body: { blocks: [{ userId: SECOND, handle: "second-player" }] } },
+  ] });
+  await flush();
+  assert.equal(env.ugc.isBlocked(FIRST), true);
+  const unblock = env.ugc.unblock(FIRST);
+  for (let i = 0; i < 4; i += 1) await flush();
+  const block = env.ugc.block({ userId: SECOND });
+  for (let i = 0; i < 4; i += 1) await flush();
+  releaseReload();
+  await unblock; await block; await flush();
+  assert.equal(env.ugc.isBlocked(FIRST), false);
+  assert.equal(env.ugc.isBlocked(SECOND), true, "the block is in the list: a fresh GET ran after the running one");
+  assert.deepEqual(env.calls.map((c) => c.method || "GET"), ["GET", "DELETE", "GET", "POST", "GET"]);
+});

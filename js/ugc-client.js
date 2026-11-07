@@ -92,7 +92,13 @@
     if (session !== state.session) return [];
     if (!userId){ state.available = false; setBlocks(null, []); return []; }
     if (!force && state.loaded && state.userId === userId) return state.blocks;
-    if (state.inFlight && state.inFlight.userId === userId && state.inFlight.session === session) return state.inFlight.promise;
+    if (state.inFlight && state.inFlight.userId === userId && state.inFlight.session === session){
+      if (!force) return state.inFlight.promise;
+      // A forced reload (after a block or unblock) must not reuse a read that started before that change: wait
+      // for it, then read again, still only for the same session (loadBlocks re-checks the account itself).
+      var running = state.inFlight.promise;
+      return running.then(function(){ return session === state.session ? loadBlocks(true) : []; });
+    }
     var promise = request(BLOCKS_URL, null, { userId: userId, session: session }).then(async function(body){
       // A sign-out or account switch during the request must not apply the previous user's list.
       var nowUser = await currentUserId();
