@@ -1165,3 +1165,85 @@ test("removed Preview operations fail closed and partial provisioning is FAILED"
     ? { status: 1, stdout: "PREVIEW_FAILED preview_processes_still_running" } : original(argv, ...args);
   assert.match(runOperation("ws-preview-isolation-provision", "123", fx.host).line, /^ADMIN_FAILED /);
 });
+
+test("GitHub App signer preparation is fixed and quarantine refuses an unavailable replacement", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  const calls = [];
+  fx.host.run = (argv, ...args) => {
+    calls.push(argv);
+    if (argv[0] === "/usr/bin/python3") {
+      assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", "123"]);
+      return { status: 0, stdout: "GITHUB_TOKEN_OK prepared_no_key_no_client_switch" };
+    }
+    if (argv[0] === "/usr/sbin/runuser") {
+      assert.deepEqual(argv, ["/usr/sbin/runuser", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", "--info"]);
+      return { status: 1, stdout: "" };
+    }
+    return original(argv, ...args);
+  };
+  assert.equal(runOperation("github-app-token-prepare", "123", fx.host).ok, true);
+  calls.length = 0;
+  assert.match(runOperation("github-app-key-quarantine", "123", fx.host).line, /ADMIN_BLOCKED .* replacement_signer_not_verified$/);
+  assert.equal(calls.filter(a => a[0] === "/usr/sbin/runuser").length, 1);
+  assert.equal(calls.filter(a => a[0] === "/usr/bin/id").length, 0, "no old-key quarantine begins without replacement proof");
+});
+
+test("GitHub gh and Git wrappers preserve interfaces without OWNER or old-key fallback", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "github-client-"));
+  try {
+    const provider = path.join(dir, "provider");
+    const gh = path.join(dir, "gh-real");
+    const marker = path.join(dir, "called");
+    fs.writeFileSync(provider, `#!/bin/sh\nprintf called >> '${marker}'\nprintf fixture-short-lived\n`, { mode: 0o700 });
+    fs.writeFileSync(gh, '#!/bin/sh\n[ "$GH_TOKEN" = fixture-short-lived ] || exit 9\n[ -z "${GITHUB_TOKEN:-}${GH_HOST:-}${GH_ENTERPRISE_TOKEN:-}" ] || exit 10\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
+    const wrapper = path.join(dir, "ghx");
+    fs.writeFileSync(wrapper, fileText("infra/vps/github-app-client/ghx")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider)
+      .replaceAll("/home/copilot/.local/bin/gh", gh), { mode: 0o700 });
+    const run = spawnSync(wrapper, ["workflow", "run", "vps-admin-operation.yml", "--ref", "main"], {
+      encoding: "utf8", env: { PATH: process.env.PATH, GITHUB_TOKEN: "unrelated-fixture", GH_HOST: "foreign.invalid", GH_ENTERPRISE_TOKEN: "unrelated-fixture" }
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout, "workflow\nrun\nvps-admin-operation.yml\n--ref\nmain\n");
+    assert.equal(fs.readFileSync(marker, "utf8"), "called");
+    assert.equal(spawnSync(wrapper, ["auth", "token"]).status, 2);
+    assert.equal(fs.readFileSync(marker, "utf8"), "called", "gh auth must not mint or print a token");
+    const helper = path.join(dir, "credential");
+    fs.writeFileSync(helper, fileText("infra/vps/github-app-client/git-credential-arcade-agent")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider), { mode: 0o700 });
+    assert.equal(spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" }).stdout,
+      "username=x-access-token\npassword=fixture-short-lived\n");
+    const before = fs.readFileSync(marker, "utf8");
+    for (const [action, input] of [["store", ""], ["erase", ""], ["get", "protocol=https\nhost=foreign.invalid\n\n"], ["get", "protocol=http\nhost=github.com\n\n"]]) {
+      assert.equal(spawnSync(helper, [action], { input, encoding: "utf8" }).stdout, "");
+    }
+    assert.equal(fs.readFileSync(marker, "utf8"), before);
+    fs.writeFileSync(provider, "#!/bin/sh\nexit 1\n");
+    assert.equal(spawnSync(wrapper, ["issue", "list"]).status, 1, "no OWNER fallback on issuer failure");
+    const refused = spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, "quit=1\n", "stop Git credential fallback and prompting after issuer failure");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("compatibility provider invokes only the fixed non-root isolated issuer", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const source = fileText("infra/vps/github-app-client/arcade-agent-token.mjs").replace(/^#!.*\n/, "")
+    .replace('import { spawnSync } from "node:child_process";', "");
+  for (const args of [[], ["--info"], ["--permissions=administration:write"], ["--info", "extra"]]) {
+    const calls = []; let code;
+    const process = { argv: ["node", "provider", ...args], stderr: { write() {} }, exit(value) { code = value; throw new Error("exit"); } };
+    assert.throws(() => runInNewContext(source, { process, spawnSync(...argv) { calls.push(argv); return { status: 0 }; } }), /exit/);
+    const allowed = args.length <= 1 && (args.length === 0 || args[0] === "--info");
+    assert.equal(code, allowed ? 0 : 1);
+    assert.equal(calls.length, allowed ? 1 : 0);
+    if (allowed) {
+      assert.equal(calls[0][0], "/usr/bin/sudo");
+      assert.deepEqual(Array.from(calls[0][1]), ["-n", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", ...args]);
+      assert.equal(calls[0][2].env.PATH, "/usr/bin:/bin");
+      assert.deepEqual(Array.from(calls[0][2].stdio), ["ignore", "inherit", "inherit"]);
+    }
+  }
+});

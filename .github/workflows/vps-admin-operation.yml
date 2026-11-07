@@ -19,6 +19,8 @@ on:
           - systemd-daemon-reload
           - copilot-secret-snapshots-quarantine
           - ledger-production-dispatcher-install
+          - github-app-token-prepare
+          - github-app-key-quarantine
           - ws-preview-isolation-provision
           - ws-preview-isolation-rollback
       reason:
