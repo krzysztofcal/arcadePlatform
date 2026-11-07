@@ -27,6 +27,8 @@
   <script src="/js/chips/client.js" defer></script>
   <script src="/poker/poker-ws-client.js" defer></script>
   <link rel="stylesheet" href="/poker/poker-v2.css">
+  <link rel="stylesheet" href="/css/ugc.css">
+  <script src="/js/ugc-client.js" defer></script>
   <script src="/poker/poker-v2.js" defer></script>
 </head>
 <body>
@@ -71,6 +73,7 @@
         </label>
         <p class="poker-social-settings__hint" id="pokerAutoRebuyPreferenceHint">Automatically uses the current table buy-in from your account each time you run out of chips.</p>
       </div>
+      <section class="ugc-table" id="pokerSafetyPlayers" hidden></section>
       <section class="poker-diagnostics" id="pokerDiagnostics" aria-labelledby="pokerDiagnosticsTitle">
         <h3 id="pokerDiagnosticsTitle">Diagnostics</h3>
         <div class="poker-live-meta">
