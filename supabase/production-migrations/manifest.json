@@ -1253,6 +1253,13 @@
       "sha256": "c6cd0e5f31ee7dbc841d275c2fb1fde95e3b0a9e86372637b493dbb5457a83b2",
       "category": "needs-production-equivalent",
       "purpose": "#1140 UGC phase B dark private report and block tables (no flag activation, empty tables); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
+    },
+    {
+      "file": "20261107130000_ugc_moderation.sql",
+      "version": "20261107130000",
+      "sha256": "300d2153d1bb7a7457740a1431b80c891580d9b0a811aeafc1d2dd6d2747d610",
+      "category": "needs-production-equivalent",
+      "purpose": "#1140 UGC phase C dark private moderation audit and avatar hold tables plus the audited profile restriction function (no flag activation, no notification or scheduler); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
     }
   ]
 }
