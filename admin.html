@@ -30,6 +30,7 @@
   <script src="js/xp.js" defer></script>
   <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
+  <script src="js/admin-ugc-reports.js" defer></script>
   <script src="js/admin-page.js" defer></script>
   <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
   <script src="js/klaro-config.js" defer></script>
@@ -143,6 +144,7 @@
               <button class="admin-tab" id="adminTabButtonLedger" type="button" role="tab" data-admin-tab="ledger" aria-selected="false" aria-controls="adminTabLedger" tabindex="-1">Ledger</button>
               <button class="admin-tab" id="adminTabButtonBonusCampaigns" type="button" role="tab" data-admin-tab="bonusCampaigns" aria-selected="false" aria-controls="adminTabBonusCampaigns" tabindex="-1">Bonus Campaigns</button>
               <button class="admin-tab" id="adminTabButtonPokerAudit" type="button" role="tab" data-admin-tab="pokerAudit" aria-selected="false" aria-controls="adminTabPokerAudit" tabindex="-1">Poker Audit</button>
+              <button class="admin-tab" id="adminTabButtonUgcReports" type="button" role="tab" data-admin-tab="ugcReports" aria-selected="false" aria-controls="adminTabUgcReports" tabindex="-1">Reports <span class="admin-pill admin-pill--danger" id="adminUgcPendingCount" aria-label="Pending reports" hidden></span></button>
               <button class="admin-tab" id="adminTabButtonOps" type="button" role="tab" data-admin-tab="ops" aria-selected="false" aria-controls="adminTabOps" tabindex="-1">Ops</button>
             </div>
           </section>
@@ -643,6 +645,36 @@
                   <p class="admin-empty">Select a hand to inspect actions, board, payouts, pots, and evaluated hands.</p>
                 </div>
               </aside>
+            </div>
+          </section>
+
+          <section class="admin-tab-panel" id="adminTabUgcReports" data-admin-panel="ugcReports" role="tabpanel" aria-labelledby="adminTabButtonUgcReports" hidden>
+            <div class="admin-workspace">
+              <section class="xp-card admin-card admin-card--main" aria-labelledby="adminUgcReportsTitle">
+                <div class="admin-card__head">
+                  <div>
+                    <h2 class="xp-card__title" id="adminUgcReportsTitle">Reports</h2>
+                    <p class="admin-card__subtitle">Player reports of avatars, names and behaviour. Oldest first; a report leaves the queue only through a decision.</p>
+                    <p class="admin-list__meta" id="adminUgcReportsRemoved" hidden></p>
+                  </div>
+                  <div class="admin-card__actions">
+                    <label class="admin-field">
+                      <span class="admin-field__label">Status</span>
+                      <select class="admin-input" id="adminUgcReportsStatus">
+                        <option value="pending" selected>Pending</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="dismissed">Dismissed</option>
+                      </select>
+                    </label>
+                    <button class="admin-btn admin-btn--ghost" type="button" id="adminUgcReportsRefresh">Refresh</button>
+                  </div>
+                </div>
+                <p class="admin-empty" id="adminUgcReportsMessage" role="status"></p>
+                <div class="admin-list" id="adminUgcReportsList"></div>
+                <div class="admin-card__actions">
+                  <button class="admin-btn admin-btn--ghost" type="button" id="adminUgcReportsMore" hidden>Load more</button>
+                </div>
+              </section>
             </div>
           </section>
 

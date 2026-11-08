@@ -31,13 +31,24 @@ build on the profile UI of #1160 because #1155/#1160 rewrote `js/account-page.js
 
 ## Phase C — Moderation (PR C1 server + PR C2 admin UI)
 
-- Migration: `private.ugc_moderation_actions` (report id, admin user id, action `resolve|dismiss|hide_avatar|
-  restrict_profile|restore`, time); hide uses the existing `google_photo_suppressed`/avatar fallback and restrict
-  uses `public_profile_blocked` through a security-definer function guarded for the admin role only.
-- `netlify/functions/admin-ugc-reports.mjs` (list/act) behind the existing `admin-me` authorization.
-- `admin.html` / `js/admin-page.js`: queue tab, filters by status, action buttons, audit list.
-- Weekly digest: reuse an existing scheduler/mail path if one exists (to verify: Netlify scheduled functions,
-  existing mail provider); otherwise propose the smallest option for owner decision before building anything.
+- Migration `20261107130000_ugc_moderation.sql`: `private.ugc_moderation_actions` (report id or null for a
+  correction, target, admin user id, action `resolve|dismiss|hide_avatar|restrict_profile|unrestrict_profile`,
+  time), `private.ugc_avatar_holds` (moderator avatar hide that phase D import must respect) and
+  `private.ugc_set_profile_blocked`, a security-definer function executable by `service_role` only; it is the one
+  audited path to `public_profile_blocked` and fails closed (409, decision rolled back) until #1155 is applied.
+- Anonymous total `private.ugc_moderation_counters` (`key`, `value` only): an after-delete trigger on
+  `private.ugc_reports` counts a pending report only when its reported account no longer exists (the account-deletion
+  cascade); decided reports and any other deletion are not counted. Returned as `removedWithDeletedAccount`.
+- Profile actions (`hide_avatar`, `restrict_profile`, `unrestrict_profile`) take the account lifecycle lock and
+  answer 409 `account_deleting` for an account in deletion, before any write.
+- Hide avatar: `avatar_key` null (Arcade fallback), old object handed to the existing avatar cleanup
+  (`private.account_avatar_objects`), hold recorded. `google_photo_suppressed` (#1155) is not required: the hold
+  covers phase D.
+- `netlify/functions/admin-ugc-reports.mjs`: GET queue `{ pendingCount, reports, next }`, POST decision or
+  `unrestrict_profile` correction; `requireAdminUser` (ADMIN_USER_IDS), dark unless `UGC_SAFETY_ENABLED=1`.
+- `admin.html` + `js/admin-ugc-reports.js` (+3 hook lines in `js/admin-page.js`): "Reports" tab with the pending
+  counter, status filter, text-only rendering, confirmed actions, Refresh and "Load more". No polling.
+- No digest, e-mail, scheduler or alert (owner decision 2026-11-07).
 
 ## Phase D — Google avatar consent (PR D1 server + PR D2 UI)
 
@@ -51,5 +62,7 @@ build on the profile UI of #1160 because #1155/#1160 rewrote `js/account-page.js
 - Stage apply of each migration: separate owner DB Stage Apply PR dispatch. Production: separate GO.
 - Activation (`UGC_SAFETY_ENABLED=1` outside previews) after Privacy/Terms describe reports, blocks, moderation
   and consent (legal), and after phase C exists: reports without a moderation queue are not "ongoing moderation".
+- Before public activation the owner sets the manual review procedure (who opens the Reports tab and how often,
+  response time) and adds the moderators to `ADMIN_USER_IDS`.
 - WS unchanged. If owners want blocks enforced on the server (e.g. reactions never delivered), that is a separate
   WS decision.
