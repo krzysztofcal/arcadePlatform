@@ -2,6 +2,7 @@ import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt }
 import { getUserBalance } from "./_shared/chips-ledger.mjs";
 import { loadWsAccountPokerProjection, normalizeAccountPokerProjection } from "./_shared/poker-ws-runtime-notify.mjs";
 import { ensureUserProfile, ownerProfile, updateUserProfile } from "./_shared/user-profile.mjs";
+import { attachPublishedPhotos } from "./_shared/profile-photo-publication.mjs";
 
 function json(statusCode, headers, body) {
   return { statusCode, headers, body: JSON.stringify(body) };
@@ -63,6 +64,7 @@ function createProfileMeHandler(deps = {}) {
   const verifyJwt = deps.verifySupabaseJwt || verifySupabaseJwt;
   const ensureProfile = deps.ensureUserProfile || ensureUserProfile;
   const updateProfile = deps.updateUserProfile || updateUserProfile;
+  const attachPhotos = deps.attachPublishedPhotos || attachPublishedPhotos;
   const readBalance = deps.getUserBalance || getUserBalance;
   const log = deps.klog || klog;
   const loadPoker = deps.loadPokerProjection || ((userId) => loadWsAccountPokerProjection({
@@ -82,9 +84,9 @@ function createProfileMeHandler(deps = {}) {
     if (!auth.valid || !auth.userId) return json(401, cors, { error: "unauthorized" });
 
     try {
-      const profile = event.httpMethod === "GET"
+      const [profile] = await attachPhotos([event.httpMethod === "GET"
         ? await ensureProfile(auth.userId)
-        : await updateProfile(auth.userId, validatePatch(parseBody(event.body)));
+        : await updateProfile(auth.userId, validatePatch(parseBody(event.body)))]);
       if (event.httpMethod !== "GET" || !wantsPokerProjection(event)) {
         return json(200, cors, ownerProfile(profile));
       }

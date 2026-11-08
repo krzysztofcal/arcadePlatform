@@ -78,6 +78,9 @@
     .public-profile-editor__avatar-btn{ padding:8px 11px; border:1px solid rgba(255,255,255,.14); border-radius:9px; background:rgba(255,255,255,.07); color:#e2e8f0; font:600 13px/1.2 Poppins,sans-serif; cursor:pointer; }
     .public-profile-editor__avatar-btn:disabled{ cursor:wait; opacity:.58; }
     .public-profile-editor__avatar-status{ min-height:18px; margin:0; color:#a5f3fc; font-size:13px; }
+    .google-photo{ display:grid; gap:8px; margin:12px 0; padding:12px; border:1px solid rgba(255,255,255,.12); border-radius:12px; }
+    .google-photo legend{ padding:0 6px; font-weight:700; }
+    .google-photo__consent{ display:flex; gap:8px; align-items:flex-start; }
     .public-profile-editor__avatar-status[data-tone="success"]{ color:#86efac; }
     .public-profile-editor__avatar-status[data-tone="error"]{ color:#fda4af; }
     .public-profile-editor__avatar[data-upload-state="validating"],.public-profile-editor__avatar[data-upload-state="uploading"],.public-profile-editor__avatar[data-upload-state="processing"],.public-profile-editor__avatar[data-upload-state="removing"]{ box-shadow:0 0 0 3px rgba(50,246,255,.22); }
@@ -120,6 +123,7 @@
   <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/account-page.js" defer></script>
+  <script src="js/profile-google-photo.js" defer></script>
   <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
   <script src="js/klaro-config.js" defer></script>
   <script src="js/vendor/klaro/klaro.js" defer></script>
@@ -300,6 +304,16 @@
             <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" data-i18n-aria="arcadeAvatarGallery" aria-label="Arcade avatars"></div>
             <button id="publicAvatarSave" type="button" class="account-panel__btn account-panel__btn--primary arcade-avatar-save" aria-describedby="publicAvatarStatus" aria-busy="false" disabled><span id="publicAvatarSaveLabel" data-i18n="arcadeAvatarSet">Set avatar</span></button>
             <p id="publicAvatarStatus" class="account-note" role="status" aria-live="polite" aria-atomic="true"></p>
+            <fieldset class="google-photo" id="googlePhotoPanel" hidden>
+              <legend data-i18n="googlePhotoTitle">Google profile photo</legend>
+              <p class="account-note" id="googlePhotoState" role="status" aria-live="polite"></p>
+              <div id="googlePhotoOffer">
+                <label class="google-photo__consent"><input id="googlePhotoConsent" type="checkbox"> <span data-i18n="googlePhotoConsent">I agree that Arcade Hub copies my current Google profile photo once and shows it as my avatar to signed-in players. This is voluntary and I can withdraw this consent at any time.</span></label>
+                <button type="button" class="account-panel__btn" id="googlePhotoImport" disabled data-i18n="googlePhotoImport">Use my Google photo</button>
+                <button type="button" class="account-panel__btn" id="googlePhotoReconnect" hidden data-i18n="googlePhotoReconnect">Confirm with Google</button>
+              </div>
+              <button type="button" class="account-panel__btn" id="googlePhotoWithdraw" hidden data-i18n="googlePhotoWithdraw">Stop using my Google photo</button>
+            </fieldset>
             <form class="account-form" id="publicProfileForm">
               <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note" data-i18n="profileRemainsPublic">This does not hide your player profile from signed-in users.</p></fieldset>
               <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel" data-i18n="profileSaveVisibility">Save visibility</span></button>

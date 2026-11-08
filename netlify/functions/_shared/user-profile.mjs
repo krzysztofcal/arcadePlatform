@@ -29,7 +29,17 @@ function normalizeProfileRow(row) {
   };
 }
 
+const STORAGE_ORIGIN_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i;
+const PHOTO_KEY_RE = /^[0-9a-f-]{36}\.webp$/;
+
+// Phase D: a consented Google photo (publishedPhotoKey, set by attachPublishedPhotos) is shown on WWW; everything
+// else keeps the Arcade catalog avatar. The shared projection, used by the WS server, is unchanged.
 function profileAvatar(profile) {
+  const base = String(process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "").replace(/\/$/, "");
+  const key = profile.avatarKey;
+  if (profile.publishedPhotoKey && profile.publishedPhotoKey === key && PHOTO_KEY_RE.test(key) && STORAGE_ORIGIN_RE.test(base)) {
+    return { type: "uploaded", url: `${base}/storage/v1/object/public/profile-avatars/${encodeURIComponent(key)}` };
+  }
   return projectPublicAvatar({
     avatarKey: profile.avatarKey,
     avatarVariant: profile.avatarVariant,
