@@ -1,7 +1,8 @@
 # VPS admin operations (root on demand, #1159)
 
 Root work on the VPS is requested, approved and executed through one GitHub Actions workflow. Nobody gets a
-standing root shell: the agent account `copilot` keeps only its existing narrow sudo rules, and the executor
+standing root shell: the agent account `copilot` keeps its existing narrow root rules and, after separately
+approved preparation, only the fixed non-root GitHub signer rule described below; the executor
 account `arcade-admin` may run only the fixed catalog of one root helper.
 
 | Role | Who | Mechanism |
@@ -22,9 +23,19 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | `ledger-dispatchers-resume` | Refuses while any of the two services or two timers needs `daemon-reload`; otherwise starts both timers and checks they are active |
 | `systemd-daemon-reload` | `systemctl daemon-reload` |
 | `copilot-secret-snapshots-quarantine` | Moves the fixed list of `copilot` files that hold credentials or their recovery copies (`HOST.quarantine.files` in `infra/vps/vps-admin.mjs`; nothing else in the home) into `/var/lib/arcade-admin/quarantine/<runId>/` (`root:root 0700`) with `rename(2)`, so `copilot` can no longer read them. The home and every parent directory are opened with `O_NOFOLLOW`, each relative to the previous descriptor, and the move goes through these descriptors, so a symlink or rename in `copilot`'s tree cannot redirect it. Before the first move every file must exist as a single-link regular file of `copilot` in `copilot` directories, no process may refer to it (cwd, root, executable, descriptor or memory mapping, by device and inode), existing quarantine directories must already be `root:root 0700` (never changed) and the run directory must be new. `MANIFEST` records each file's identity, then `moving <i>` before and `moved <i>` after its rename (both directories and the file itself fsynced in between) and ends with `complete <n>` only for full custody. The result is `custody=complete`, otherwise `ADMIN_FAILED <step> custody=none|partial|uncertain|moved_but_open moved=<k>/<n> manifest=<path>`. A missing file blocks (`file_<i>_missing`), also after an earlier run. Output carries only counts and paths, never file contents |
+| `ledger-production-dispatcher-install` | Installs `infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh` from `main` as `/usr/local/bin/arcade-chips-ledger-production-dispatch.sh` (`root:root 0755`). Before any change the helper reads this run from the GitHub API and blocks unless it is the in-progress `VPS Admin Operation` `workflow_dispatch` on `main` (`run_not_main_vps_admin_dispatch`) and `main` still points at the run's commit (`main_advanced`). A failed `systemctl stop` of either timer is reported for each timer; the other one is still stopped. It then pauses both timers as `ledger-dispatchers-pause` does, downloads the script at that exact commit, checks it is a bash script of at most 64 KiB whose git object id equals the one the contents API reports for that path and commit (`content_mismatch` keeps the old script), and replaces the old one with `rename(2)`. The result and the journal record `commit=<sha> sha256=<new> previous=<old>`, also for a failure during the install, which reads the destination back and reports `replaced=yes|no|unknown`. The timers stay stopped, also after a failure (`…timers_left_stopped`); `ledger-dispatchers-resume` is the separate next request. A script-only change needs no `systemd-daemon-reload`; the result shows `reload:<yes/no>` |
+| `github-app-token-prepare` | Prepare only the fixed non-root signer account, protected empty key directory, executable and narrow run-as policy. No key read/copy, token mint, client switch or service operation. Partial failure requires protected-manifest inspection. |
+| `github-app-key-quarantine` | After OWNER accepts new gh/Git behavior: verify the replacement signer through metadata-only info output (one scoped token is minted and discarded), then reuse the existing descriptor-based quarantine for only `.arcade-code-agent/app.pem`. Does not rotate/revoke the key or invalidate existing tokens. |
+| `ws-preview-isolation-provision` | Full read-only preflight, then hard-kick/stop only Preview, verify empty cgroup, backup and isolate deploy/runtime identities; leaves Preview stopped. Occupied tables do not block Stage. No receipt or settlement guarantee. |
+| `ws-preview-isolation-rollback` | Requires stopped Preview and protected manifest; revokes new key and restores original files, leaving Preview stopped. No automatic retry/start. |
+
+See [Preview activation/recovery](../specs/1159-ci-cd-release-safety/ws-preview-access-implementation.md). After an attempted stop or partial mutation, FAILED requires inspecting protected manifest/unit state; never infer unchanged state from a failed request.
 
 Every operation uses fixed absolute commands with fixed arguments and no shell. There is no free command, file
-path, package name or unit name input.
+path, package name or unit name input. The dispatcher install uses `curl` to `api.github.com` and
+`raw.githubusercontent.com` for this repository, with URLs built from the validated run id and commit.
+The one-key quarantine also invokes the non-root signer proof, which requests one scoped token from
+the fixed `api.github.com` installation endpoint and discards it without printing it.
 
 ### Quarantine limits and recovery
 
@@ -49,10 +60,15 @@ request blocks with `file_<i>_missing` until the list is changed by a reviewed P
 1. Dispatch `VPS Admin Operation` from `main` with `operation`, `reason` and `confirmation` exactly
    `RUN <operation>`. The reason is one plain line of 10–200 letters, digits, spaces or `.,:;()/+=_-`, so it
    cannot add lines, markdown or HTML to the summary.
-2. The unprivileged job `request` (no environment, no secret) checks the inputs and writes operation, reason,
-   `main` revision, requester and triggering actor to its summary. It finishes before the approval request.
-3. The owner reads that summary in the pending run and approves the `vps-admin` environment for the job
-   `operate`. Before that approval no job has a VPS secret. A re-run needs a new approval.
+2. The unprivileged job `request` ("1. Review request: <operation>"; no environment, no secret) checks the
+   inputs and writes the approval summary: the operation's reviewed description from
+   `infra/vps/vps-admin-approval.mjs` (changes, risk and downtime, side effects, way back, read-only or not),
+   target, `main` revision, requester, triggering actor and, labelled as free text, the reason. A catalog
+   operation without exactly one description fails this job, so nothing can be approved without one. It finishes
+   before the approval request.
+3. The owner reads that summary in the pending run (see [Before you approve](#before-you-approve)) and approves
+   the `vps-admin` environment for the job `operate` ("2. Run on the VPS after approval: <operation>"). Before
+   that approval no job has a VPS secret. A re-run needs a new approval.
 4. `operate` connects as `arcade-admin` (the step fails for any other account) and runs the helper once.
 
 `ADMIN_OK <operation> <details>` is success. `ADMIN_BLOCKED <operation> <reason>` (for example `busy`,
@@ -60,6 +76,21 @@ request blocks with `file_<i>_missing` until the list is changed by a reviewed P
 `ADMIN_FAILED <operation> <step>` fail the job. A systemd read that fails or returns an undocumented value blocks
 the operation; a status is never reported from unverified data. Nothing is retried automatically; the owner
 decides the next step.
+
+### Before you approve
+
+GitHub's `Review deployments` dialog shows only the environment and a comment field; it cannot show a custom
+description. The run page shows it instead, so read it there before opening the dialog:
+
+1. Open the run from the link or from Actions → `VPS Admin Operation`. The run title is
+   `VPS Admin: <operation> (requested by <actor>)`.
+2. Stay on the `Summary` tab. The annotation at the top says `Read-only` or `Changes the VPS` with the title of the
+   operation; scroll below the job graph to `Approve only if expected: <operation>`.
+3. Check operation, revision, requester, changes, risk, side effects and the way back. The reason is the
+   requester's free text; the reviewed description is what the helper does.
+4. Only then use `Review deployments` → `vps-admin` → `Approve and deploy`; otherwise `Reject`.
+
+The same applies to `WS Server Deploy` (job `Review WS Production release request`, environment `ws-production`).
 
 ## Audit
 
@@ -77,7 +108,9 @@ decides the next step.
 ## Adding an operation
 
 A reviewed PR adds the operation to `OPERATIONS` in `infra/vps/vps-admin.mjs`, to the workflow choice list and to
-`infra/vps/arcade-admin.sudoers` (the guard test keeps the three identical), with a fundamental test. It becomes
+`infra/vps/arcade-admin.sudoers` (the guard test keeps the three identical), with a fundamental test, and its
+approval description to `APPROVAL` in `infra/vps/vps-admin-approval.mjs` in catalog order (facts of the helper code;
+no backticks, pipes, angle brackets or line breaks). It becomes
 available on the VPS only after the helper and sudoers file are reinstalled with `infra/vps/stage-vps-admin.sh`.
 
 ## Activation (owner, each step a separate GO)
@@ -98,3 +131,12 @@ available on the VPS only after the helper and sudoers file are reinstalled with
 With prevent self-review, a run dispatched by the owner cannot be approved by the same owner. Agent requests need
 the release agent App (`vars.WS_RELEASE_AGENT`, T004 activation step 5), which comes only after the owner token has
 left `copilot` (T004-3); until then the agent cannot request an operation that it could also approve.
+
+## GitHub App key isolation
+
+See [security audit and OWNER cutover/recovery](../specs/1159-ci-cd-release-safety/github-app-key-isolation.md).
+The new catalog entries do not take effect until a separately authorized trusted OWNER reinstall.
+The fixed non-root signer run-as rule is not a root shell or admin-catalog permission for copilot.
+Do not use the legacy mixed-snapshot quarantine to retire only the App key: it requires every old
+snapshot and can block after earlier moves. The dedicated operation reuses that implementation with
+one fixed target. Neither operation is authorized by merge or this documentation.

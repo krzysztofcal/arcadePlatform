@@ -636,7 +636,7 @@ fi
     return { ...result, calls: fs.readFileSync(log, "utf8") };
   };
   assert.equal(run("02:09", { CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "0" }).calls, "");
-  for (const [slot, policy] of [["02:09", "existing-30d"], ["03:09", "bot-only-7d"], ["03:24", "closed-human-30d"], ["03:39", "escrow"]]) {
+  for (const [slot, policy] of [["02:09", "existing-30d"], ["03:09", "bot-only-7d"], ["03:24", "closed-human-30d"], ["03:39", "retention-12m"], ["04:39", "escrow"], ["02:39", "escrow"]]) {
     const result = run(slot);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.calls, new RegExp(`policy=${policy}`));

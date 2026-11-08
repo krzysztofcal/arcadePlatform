@@ -72,6 +72,15 @@ source of truth for current code; a conflicting snapshot MUST NOT override it.
 
 ## Deployment and Safety Gates
 
+Stage/WS Preview accepts hard-kick deployment restarts, including occupied tables; no manual Leave,
+empty-table requirement, Preview presence counters or safe-stop receipt is required. This is not a
+chip-settlement guarantee: interrupted hands may need existing Stage recovery and OWNER intervention.
+Provisioning completes read-only preflight, stops only Preview and proves its process group empty
+before changing files/accounts; rollback requires stopped Preview and never starts it. Production
+restart gate, HOLD/DRAIN, escrow/recovery and OWNER approvals remain unchanged. A deployment or DRAIN
+change always needs its own GO; health alone does not prove playable status.
+
+
 Pull request creation, Draft/Ready and synchronize events never apply
 supabase/migrations/** to the shared Stage database. Shared Stage SQL is
 applied only by an explicitly authorized DB Stage Apply PR workflow_dispatch

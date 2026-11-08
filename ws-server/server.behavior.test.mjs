@@ -1412,6 +1412,24 @@ test("internal poker maintenance route is token-protected and does not expose a 
   }
 });
 
+test("Production maintenance status retains its existing contract without Preview human counters", async () => {
+  const token = "production-status-fixture-token";
+  const { port, child } = await createServer({ env: {
+    POKER_WS_INTERNAL_TOKEN: token, WS_DEPLOY_ENVIRONMENT: "production", SUPABASE_DB_URL: "", WS_POKER_LOG_LEVEL: "INFO"
+  } });
+  try {
+    await waitForListening(child, 5000);
+    const response = await fetch(`http://127.0.0.1:${port}/internal/admin/poker-maintenance`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const { newHandsHold } = await response.json();
+    assert.equal(Object.hasOwn(newHandsHold, "humanMemberTables"), false);
+    assert.equal(Object.hasOwn(newHandsHold, "connectedHumanTables"), false);
+  } finally {
+    child.kill("SIGTERM"); await waitForExit(child);
+  }
+});
+
 test("internal poker access mutation route requires the internal token and rejects unauthorized callers", async () => {
   const token = "internal-access-refresh-token";
   const { port, child } = await createServer({
