@@ -1017,6 +1017,9 @@ test("VPS admin approval summary describes every catalog operation from reviewed
   for (const operation of Object.keys(APPROVAL)) {
     const summary = approvalSummary({ ...request, operation });
     assert.ok(summary.includes("### Review implementation"));
+    assert.ok(summary.includes("These links show repository code at this run's SHA."));
+    assert.ok(summary.includes("They do not confirm the version of `/usr/local/sbin/arcade-vps-admin` or its supporting files installed on the VPS."));
+    assert.ok(summary.includes("Matching the installed helper to this source requires separate verification before approval."));
     for (const file of ["infra/vps/vps-admin.mjs", ".github/workflows/vps-admin-operation.yml"]) {
       assert.ok(summary.includes(`https://github.com/krzysztofcal/arcadePlatform/blob/${request.sha}/${file}`));
     }

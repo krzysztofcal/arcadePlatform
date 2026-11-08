@@ -74,7 +74,7 @@ export function releaseScope(fromSha, toSha, git) {
     .map((line) => ({ sha: line.slice(0, 40), subject: line.slice(41) }));
   // The deploy workflow itself builds and packages the artifact, so a change to it counts as a WS input change.
   const paths = [...new Set([WS_WORKFLOW, ...wsPackagedPaths(run(['show', `${fromSha}:${WS_WORKFLOW}`])), ...wsPackagedPaths(run(['show', `${toSha}:${WS_WORKFLOW}`]))])];
-  const wsFiles = run(['diff', '--name-only', fromSha, toSha, '--', ...paths]).split('\n').filter(Boolean);
+  const wsFiles = run(['diff', '--name-only', '-z', fromSha, toSha, '--', ...paths]).split('\0').filter(Boolean);
   return { relation, commits, commitCount, wsFiles };
 }
 

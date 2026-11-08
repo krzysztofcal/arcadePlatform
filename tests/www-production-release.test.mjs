@@ -422,6 +422,13 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
   const divergentText = renderSummary({ ...input, releaseSha: diverged, last: { sha: c, runId: 20 }, scope: divergentScope });
   assert.ok(divergentText.includes(`[View changes](https://github.com/krzysztofcal/arcadePlatform/compare/${c}..${diverged})`));
   assert.match(divergentText, /NOT an ancestor/);
+  const unusualPath = 'shared/żółw "quoted"\nname.mjs';
+  const unusual = commit(unusualPath, 'unusual path\n', 'unusual WS path');
+  const unusualScope = releaseScope(diverged, unusual, git);
+  assert.deepEqual(unusualScope.wsFiles, [unusualPath], 'diff paths are literal, not Git-quoted or split on embedded newlines');
+  const unusualText = renderSummary({ ...input, releaseSha: unusual, last: { sha: diverged, runId: 20 }, scope: unusualScope });
+  assert.ok(unusualText.includes(`#diff-${createHash('sha256').update(unusualPath).digest('hex')})`), 'the link hashes the original UTF-8 path');
+
 
   fs.rmSync(repo, { recursive: true, force: true });
 });

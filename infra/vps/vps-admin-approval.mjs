@@ -155,6 +155,8 @@ export function approvalSummary({ operation, reason, sha, actor, triggeringActor
     "",
     "### Review implementation",
     "",
+    "These links show repository code at this run's SHA. They do not confirm the version of `/usr/local/sbin/arcade-vps-admin` or its supporting files installed on the VPS. Matching the installed helper to this source requires separate verification before approval.",
+    "",
     ...["infra/vps/vps-admin.mjs", ".github/workflows/vps-admin-operation.yml", ...(IMPLEMENTATION_FILES[operation] || [])]
       .map((file) => `- [\`${file}\`](${REPOSITORY}/blob/${sha}/${file})`),
     "",
