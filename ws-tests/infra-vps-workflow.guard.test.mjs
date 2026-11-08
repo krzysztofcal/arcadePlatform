@@ -24,12 +24,12 @@ function remoteBash(text) {
   return text.slice(start, end);
 }
 
-test("infra routes validation conservatively while retaining the Caddy-only push apply surface", () => {
+test("infra retains PR/main validation while Caddy apply has no push-change gate", () => {
   const text = workflowText();
   assert.match(text, /needs\.impact\.outputs\.infra == 'true'/);
-  assert.match(text, /git diff --name-only "\$BEFORE_SHA" "\$GITHUB_SHA" -- infra\/vps\/Caddyfile/);
+  assert.match(text, /pull_request:\n  push:\n    branches: \[ main \]/);
   assert.match(text, /apply:\n    needs: validate/);
-  assert.match(text, /needs\.validate\.outputs\.caddy == 'true'/);
+  assert.doesNotMatch(text, /needs\.validate\.outputs\.caddy|Detect existing Caddy deploy surface/);
 });
 
 test("infra VPS owns the unified Caddy contract test", () => {
@@ -552,7 +552,7 @@ test("infra VPS recovery docs retain the mutation boundaries and runner contract
   }
 });
 
-test("VPS SSH apply runs only for an owner main dispatch or an owner Caddy push, never a foreign re-run (#1159 T004-3)", () => {
+test("VPS SSH apply requires owner main dispatch, never push, PR, foreign actor or foreign re-run (#1159)", () => {
   const condition = workflowText().match(/\n  apply:\n    needs: validate\n    if: (.+)\n/)[1];
   const evaluate = ({ event = "workflow_dispatch", ref = "refs/heads/main", actor = "krzysztofcal", triggeringActor = actor, caddy = "true" } = {}) => {
     const js = condition
@@ -570,9 +570,12 @@ test("VPS SSH apply runs only for an owner main dispatch or an owner Caddy push,
   };
   assert.equal(evaluate(), true, "owner main dispatch");
   assert.equal(evaluate({ ref: "refs/heads/feature" }), false, "dispatch from another branch");
+  assert.equal(evaluate({ ref: "refs/tags/main" }), false, "a main-named tag is not the main branch");
+  assert.equal(evaluate({ caddy: "false" }), true, "explicit owner dispatch is independent of a previous push diff");
   assert.equal(evaluate({ triggeringActor: "release-agent[bot]" }), false, "foreign re-run of an owner dispatch");
   assert.equal(evaluate({ actor: "release-agent[bot]" }), false, "foreign dispatch");
-  assert.equal(evaluate({ event: "push" }), true, "owner Caddy push to main");
+  assert.equal(evaluate({ actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner rerun cannot authorize a foreign dispatch");
+  assert.equal(evaluate({ event: "push" }), false, "owner Caddy push to main never applies");
   assert.equal(evaluate({ event: "push", caddy: "false" }), false, "push without Caddy change");
   assert.equal(evaluate({ event: "push", triggeringActor: "release-agent[bot]" }), false, "foreign re-run of a Caddy push");
   assert.equal(evaluate({ event: "push", actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner re-run of a foreign push");

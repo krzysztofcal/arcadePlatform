@@ -13,7 +13,7 @@ Spec/plan/tasks source: GitHub issue #1029 (T001–T009), verified 2026-10-04.
 | WS PR Checks | WS impact only; 54 commands. No infra or duplicate Production deploy guards. Explicit browser/WS contracts retained. |
 | WS Deploy | Removed. No backup. All 74 baseline contracts retained by WS Server Deploy/Infra ownership. |
 | **WS Server Deploy — Production path** | **Main/manual validate runs 67 unique commands + existing Docker build before `deploy` through `needs: [impact, validate]`. PR runs 14 deploy guards only; runtime harness belongs to WS PR. Deploy eligibility preserves the previous runtime/helper/workflow surface. Test-only/unknown diffs never authorize mutation. Main push and explicit manual dispatch retain existing deployment semantics. Merge requires a separate owner decision.** |
-| Infra VPS | Owns 8 infra/maintenance commands once. Impact-gated validation on PR/main; existing Caddyfile-only push mutation and manual apply retained, now behind validation. Guard-only/unknown changes do not reload Production. |
+| Infra VPS | Owns 8 infra/maintenance commands once. Impact-gated validation on PR/main. #1159 supersedes the original Caddyfile-only push apply: apply requires a separate OWNER main dispatch behind validation; pushes never reload Caddy. See `infra/vps/README.md`. |
 
 Classifier: six coarse domains. PR uses base→head, push uses before→SHA.
 Empty/missing/unknown/shared/package/CI changes select broad coverage. Explicit
