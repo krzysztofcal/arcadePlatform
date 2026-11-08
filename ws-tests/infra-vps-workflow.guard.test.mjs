@@ -1014,6 +1014,24 @@ test("VPS admin approval summary describes every catalog operation from reviewed
     APPROVAL["ledger-dispatchers-pause"].rollback, "environment vps-admin", "Nothing has run on the VPS yet"]) assert.ok(text.includes(part), part);
   assert.match(text, /Requester's reason \(free text, not part of the reviewed description\): `Pause dispatchers/);
   assert.doesNotMatch(text, /ADMIN_OK ledger|PASS/);
+  for (const operation of Object.keys(APPROVAL)) {
+    const summary = approvalSummary({ ...request, operation });
+    assert.ok(summary.includes("### Review implementation"));
+    assert.ok(summary.includes("These links show repository code at this run's SHA."));
+    assert.ok(summary.includes("They do not confirm the version of `/usr/local/sbin/arcade-vps-admin` or its supporting files installed on the VPS."));
+    assert.ok(summary.includes("Matching the installed helper to this source requires separate verification before approval."));
+    for (const file of ["infra/vps/vps-admin.mjs", ".github/workflows/vps-admin-operation.yml"]) {
+      assert.ok(summary.includes(`https://github.com/krzysztofcal/arcadePlatform/blob/${request.sha}/${file}`));
+    }
+    assert.doesNotMatch(summary, /\/blob\/main\//);
+  }
+  for (const [operation, file] of [
+    ["ledger-production-dispatcher-install", "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+    ["github-app-token-prepare", "infra/vps/github-app-token.py"],
+    ["github-app-key-quarantine", "infra/vps/github-app-token.py"],
+    ["ws-preview-isolation-provision", "infra/vps/ws-preview-isolation.py"],
+    ["ws-preview-isolation-rollback", "infra/vps/ws-preview-isolation.py"],
+  ]) assert.ok(approvalSummary({ ...request, operation }).includes(`/blob/${request.sha}/${file}`));
   for (const [field, value] of [["operation", "rm-rf"], ["reason", "ok\n## Approved"], ["reason", "see `x` now ok"], ["sha", "abc"], ["actor", "a b"], ["runId", "0"]]) {
     assert.throws(() => approvalSummary({ ...request, [field]: value }), Error, field);
   }

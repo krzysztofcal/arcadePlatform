@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { latestWsDeploy, wsPackagedPaths } from './www-production-release.mjs';
@@ -13,6 +14,7 @@ const RUN = /^[1-9][0-9]{0,19}$/;
 const LOGIN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$/;
 const WS_WORKFLOW = '.github/workflows/ws-server-deploy.yml';
 const MAX_LIST = 20;
+const REPOSITORY = 'https://github.com/krzysztofcal/arcadePlatform';
 
 export const TARGET = 'ws-production: Production WS server ws.kcswh.pl (/opt/ws-server, account arcade-release)';
 export const RISK = 'Restarts ws-server.service once. Before the restart the restart gate holds new hands, waits for running hands and drains; the restart disconnects connected players, who reconnect. New hands resume only after local and public healthz and the WS handshake smoke pass. A failure after the release switch keeps the hold (play stays paused) until the owner decides.';
@@ -72,12 +74,15 @@ export function releaseScope(fromSha, toSha, git) {
     .map((line) => ({ sha: line.slice(0, 40), subject: line.slice(41) }));
   // The deploy workflow itself builds and packages the artifact, so a change to it counts as a WS input change.
   const paths = [...new Set([WS_WORKFLOW, ...wsPackagedPaths(run(['show', `${fromSha}:${WS_WORKFLOW}`])), ...wsPackagedPaths(run(['show', `${toSha}:${WS_WORKFLOW}`]))])];
-  const wsFiles = run(['diff', '--name-only', fromSha, toSha, '--', ...paths]).split('\n').filter(Boolean);
+  const wsFiles = run(['diff', '--name-only', '-z', fromSha, toSha, '--', ...paths]).split('\0').filter(Boolean);
   return { relation, commits, commitCount, wsFiles };
 }
 
 export function renderSummary({ releaseSha, actor, triggeringActor, runId, attempt, checks, last, scope, scopeError }) {
   if (!SHA.test(String(releaseSha)) || !LOGIN.test(String(actor)) || !LOGIN.test(String(triggeringActor)) || !RUN.test(String(runId)) || !RUN.test(String(attempt))) fail('invalid_summary_input');
+  if (last && !SHA.test(String(last.sha))) fail('invalid_summary_input');
+  // Match releaseScope's direct tree diff, also when the deployed SHA is not an ancestor.
+  const compare = last ? `${REPOSITORY}/compare/${last.sha}..${releaseSha}` : null;
   let lastText = 'unknown: no successful WS Production deploy is the newest one on main, or another deploy run is unfinished';
   let scopeText = 'unknown: no last confirmed deploy to compare with';
   const lines = [];
@@ -93,7 +98,8 @@ export function renderSummary({ releaseSha, actor, triggeringActor, runId, attem
       if (scope.commitCount > scope.commits.length) lines.push(`- … ${scope.commitCount - scope.commits.length} more`);
       lines.push('', '### WS input files changed (packaged files and the deploy workflow)', '');
       if (!scope.wsFiles.length) lines.push('- none');
-      for (const f of scope.wsFiles.slice(0, MAX_LIST)) lines.push(`- \`${inert(f, 200)}\``);
+      // Compare anchors also work for deleted files and never place an untrusted path in a URL.
+      for (const f of scope.wsFiles.slice(0, MAX_LIST)) lines.push(`- [\`${inert(f, 200)}\`](${compare}#diff-${createHash('sha256').update(f).digest('hex')})`);
       if (scope.wsFiles.length > MAX_LIST) lines.push(`- … ${scope.wsFiles.length - MAX_LIST} more`);
     }
   }
@@ -111,6 +117,8 @@ export function renderSummary({ releaseSha, actor, triggeringActor, runId, attem
     `| Risk and downtime | ${RISK} |`,
     `| Side effects | ${SIDE_EFFECTS} |`,
     `| Way back | ${WAY_BACK} |`,
+    '',
+    compare ? `[View changes](${compare})` : `[View commit](${REPOSITORY}/commit/${releaseSha})`,
     ...lines,
     '',
     '### Checks',

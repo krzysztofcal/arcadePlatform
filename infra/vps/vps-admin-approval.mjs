@@ -96,6 +96,16 @@ export const APPROVAL = Object.freeze({
   },
 });
 
+const REPOSITORY = "https://github.com/krzysztofcal/arcadePlatform";
+const PREVIEW_IMPLEMENTATION = ["infra/vps/ws-preview-isolation.py", "infra/vps/prepare-ws-preview-v3.py", "infra/vps/ws-server-preview.service.d/99-preview-isolation.conf"];
+const IMPLEMENTATION_FILES = {
+  "ledger-production-dispatcher-install": ["infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+  "github-app-token-prepare": ["infra/vps/github-app-token.py"],
+  "github-app-key-quarantine": ["infra/vps/github-app-token.py"],
+  "ws-preview-isolation-provision": PREVIEW_IMPLEMENTATION,
+  "ws-preview-isolation-rollback": PREVIEW_IMPLEMENTATION,
+};
+
 const SHA = /^[0-9a-f]{40}$/;
 const OPERATION = /^[a-z0-9-]{1,64}$/;
 const REASON = /^[A-Za-z0-9 .,:;()/+=_-]{10,200}$/;
@@ -142,6 +152,13 @@ export function approvalSummary({ operation, reason, sha, actor, triggeringActor
     `| Way back | ${d.rollback} |`,
     "",
     `Requester's reason (free text, not part of the reviewed description): \`${reason}\``,
+    "",
+    "### Review implementation",
+    "",
+    "These links show repository code at this run's SHA. They do not confirm the version of `/usr/local/sbin/arcade-vps-admin` or its supporting files installed on the VPS. Matching the installed helper to this source requires separate verification before approval.",
+    "",
+    ...["infra/vps/vps-admin.mjs", ".github/workflows/vps-admin-operation.yml", ...(IMPLEMENTATION_FILES[operation] || [])]
+      .map((file) => `- [\`${file}\`](${REPOSITORY}/blob/${sha}/${file})`),
     "",
     "Checked before approval: the operation is in the reviewed catalog, the confirmation phrase matches and the run is a main dispatch of the owner or the release agent. Nothing has run on the VPS yet; the result (ADMIN_OK, ADMIN_BLOCKED or ADMIN_FAILED) appears only after approval in the operate job.",
     "",
