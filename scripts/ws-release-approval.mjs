@@ -81,7 +81,8 @@ export function releaseScope(fromSha, toSha, git) {
 export function renderSummary({ releaseSha, actor, triggeringActor, runId, attempt, checks, last, scope, scopeError }) {
   if (!SHA.test(String(releaseSha)) || !LOGIN.test(String(actor)) || !LOGIN.test(String(triggeringActor)) || !RUN.test(String(runId)) || !RUN.test(String(attempt))) fail('invalid_summary_input');
   if (last && !SHA.test(String(last.sha))) fail('invalid_summary_input');
-  const compare = last ? `${REPOSITORY}/compare/${last.sha}...${releaseSha}` : null;
+  // Match releaseScope's direct tree diff, also when the deployed SHA is not an ancestor.
+  const compare = last ? `${REPOSITORY}/compare/${last.sha}..${releaseSha}` : null;
   let lastText = 'unknown: no successful WS Production deploy is the newest one on main, or another deploy run is unfinished';
   let scopeText = 'unknown: no last confirmed deploy to compare with';
   const lines = [];
