@@ -996,6 +996,149 @@ test("VPS admin installs the Production dispatcher only from the approved run's 
   }
 });
 
+const NEW_RESTART_GATE = `#!/usr/bin/node
+// Valid restart gate mock
+import fs from "node:fs";
+const modes = ["check", "restart", "prepare", "switching", "resume", "abort"];
+const action = process.argv[2];
+if (action === "check") {
+  process.stdout.write("RESTART_SAFE all_clear\\n");
+  process.exit(0);
+}
+`;
+
+function restartGateInstallFixture({ run = {}, main, script = NEW_RESTART_GATE, published = NEW_RESTART_GATE, downloadExit = 0, checkStatus = 0, checkStdout = "RESTART_SAFE all_clear", state = {}, extra = {} } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-restart-gate-"));
+  const dest = path.join(dir, "arcade-ws-restart-gate");
+  fs.writeFileSync(dest, `#!/usr/bin/node\n// old gate\nconst modes = ["check", "restart"];\n`, { mode: 0o755 });
+  const commit = "a".repeat(40);
+  const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
+  const urls = [];
+  const admin = fakeAdminHost(state, extra);
+  const source = "infra/vps/ws-restart-gate.mjs";
+  const blob = crypto.createHash("sha1").update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest("hex");
+  const host = {
+    ...admin.host,
+    restartGate: { source, dest, uid: process.getuid(), gid: process.getgid() },
+    run(argv) {
+      if (argv[0] === "/usr/bin/curl") {
+        const url = argv.at(-1);
+        urls.push(url);
+        if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
+        if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+        if (url.endsWith(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: "file", path: source, sha: blob }) };
+        if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
+          if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
+          return { status: downloadExit, stdout: "" };
+        }
+        return { status: 22, stdout: "" };
+      }
+      if (argv[0] === "/usr/bin/node" && argv[1] === "--check") {
+        const res = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
+        return { status: res.status, stdout: res.stdout || res.stderr || "" };
+      }
+      if (argv[0] === dest && argv[1] === "check") {
+        return { status: checkStatus, stdout: checkStdout };
+      }
+      return admin.host.run(argv);
+    },
+  };
+  return { dir, dest, commit, host, urls, admin };
+}
+
+test("VPS admin installs the WS restart gate helper only from the approved run's current main commit and runs check", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "ws-restart-gate-install";
+  const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const oldScript = `#!/usr/bin/node\n// old gate\nconst modes = ["check", "restart"];\n`;
+
+  // Safe check exit 0
+  const okSafe = restartGateInstallFixture();
+  try {
+    const result = runOperation(op, "41700000020", okSafe.host);
+    const installed = fs.readFileSync(okSafe.dest, "utf8");
+    assert.equal(installed, NEW_RESTART_GATE);
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${okSafe.commit} sha256=${hash(installed)} previous=${hash(oldScript)} gate:safe`);
+    assert.equal(fs.statSync(okSafe.dest).mode & 0o777, 0o755);
+    assert.deepEqual(fs.readdirSync(okSafe.dir), [path.basename(okSafe.dest)], "no temporary file is left");
+    assert.match(okSafe.admin.audits[1], new RegExp(`result=ok detail=installed commit=${okSafe.commit} sha256=`));
+  } finally {
+    fs.rmSync(okSafe.dir, { recursive: true, force: true });
+  }
+
+  // Blocked check exit 1 with expected reason
+  const okBlocked = restartGateInstallFixture({ checkStatus: 1, checkStdout: "RESTART_BLOCKED humanSeatsOpen=1" });
+  try {
+    const result = runOperation(op, "41700000020", okBlocked.host);
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${okBlocked.commit} sha256=${hash(NEW_RESTART_GATE)} previous=${hash(oldScript)} gate:blocked`);
+    assert.equal(fs.readFileSync(okBlocked.dest, "utf8"), NEW_RESTART_GATE);
+  } finally {
+    fs.rmSync(okBlocked.dir, { recursive: true, force: true });
+  }
+
+  // Technical gate_error is NOT accepted: triggers recovery to previous
+  const gateError = restartGateInstallFixture({ checkStatus: 1, checkStdout: "RESTART_BLOCKED gate_error" });
+  try {
+    const result = runOperation(op, "41700000020", gateError.host);
+    assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:gate_error recovery:restored_previous`);
+    assert.equal(fs.readFileSync(gateError.dest, "utf8"), oldScript, "recovered to old script");
+  } finally {
+    fs.rmSync(gateError.dir, { recursive: true, force: true });
+  }
+
+  // Crash or unrecognized exit triggers recovery to previous
+  const gateCrash = restartGateInstallFixture({ checkStatus: 2, checkStdout: "usage: arcade-ws-restart-gate <mode>" });
+  try {
+    const result = runOperation(op, "41700000020", gateCrash.host);
+    assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:status_2 recovery:restored_previous`);
+    assert.equal(fs.readFileSync(gateCrash.dest, "utf8"), oldScript, "recovered to old script");
+  } finally {
+    fs.rmSync(gateCrash.dir, { recursive: true, force: true });
+  }
+
+  // Syntax error refused before replace
+  const badSyntax = `#!/usr/bin/node\nimport { bad syntax`;
+  const syntaxErr = restartGateInstallFixture({ script: badSyntax, published: badSyntax });
+  try {
+    const result = runOperation(op, "41700000020", syntaxErr.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} syntax_error`);
+    assert.equal(fs.readFileSync(syntaxErr.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(syntaxErr.dir, { recursive: true, force: true });
+  }
+
+  // Missing modes refused before replace
+  const missingCode = `#!/usr/bin/node\n// only check\nconst x = ["check"];\n`;
+  const missingModes = restartGateInstallFixture({ script: missingCode, published: missingCode });
+  try {
+    const result = runOperation(op, "41700000020", missingModes.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} missing_modes`);
+    assert.equal(fs.readFileSync(missingModes.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(missingModes.dir, { recursive: true, force: true });
+  }
+
+  // Content mismatch refused before replace
+  const mismatch = restartGateInstallFixture({ script: NEW_RESTART_GATE + "\n// extra" });
+  try {
+    const result = runOperation(op, "41700000020", mismatch.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} content_mismatch`);
+    assert.equal(fs.readFileSync(mismatch.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(mismatch.dir, { recursive: true, force: true });
+  }
+
+  // Late failure reporting read-back state
+  const late = restartGateInstallFixture();
+  try {
+    late.host.rename = (from, to) => { fs.renameSync(from, to); throw new Error("after rename"); };
+    const line = runOperation(op, "41700000020", late.host).line;
+    assert.equal(line, `ADMIN_FAILED ${op} install replaced=yes commit=${late.commit} sha256=${hash(NEW_RESTART_GATE)} previous=${hash(oldScript)}`);
+  } finally {
+    fs.rmSync(late.dir, { recursive: true, force: true });
+  }
+});
+
 test("VPS admin approval summary describes every catalog operation from reviewed code, never from the reason", async () => {
   const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
   const { APPROVAL, checkCatalog, approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
@@ -1030,6 +1173,7 @@ test("VPS admin approval summary describes every catalog operation from reviewed
   }
   for (const [operation, file] of [
     ["ledger-production-dispatcher-install", "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+    ["ws-restart-gate-install", "infra/vps/ws-restart-gate.mjs"],
     ["github-app-token-prepare", "infra/vps/github-app-token.py"],
     ["github-app-key-quarantine", "infra/vps/github-app-token.py"],
     ["ws-preview-isolation-provision", "infra/vps/ws-preview-isolation.py"],
