@@ -1082,6 +1082,11 @@ test("VPS admin installs the WS restart gate helper only from the approved run's
     const result = runOperation(op, "41700000020", gateError.host);
     assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:gate_error recovery:restored_previous`);
     assert.equal(fs.readFileSync(gateError.dest, "utf8"), oldScript, "recovered to old script");
+    const restored = fs.statSync(gateError.dest);
+    assert.equal(restored.mode & 0o7777, 0o755, "restored mode is 0755");
+    assert.equal(restored.uid, gateError.host.restartGate.uid, "restored uid matches");
+    assert.equal(restored.gid, gateError.host.restartGate.gid, "restored gid matches");
+    assert.equal(hash(fs.readFileSync(gateError.dest)), hash(oldScript), "restored sha256 matches");
   } finally {
     fs.rmSync(gateError.dir, { recursive: true, force: true });
   }
@@ -1092,6 +1097,11 @@ test("VPS admin installs the WS restart gate helper only from the approved run's
     const result = runOperation(op, "41700000020", gateCrash.host);
     assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:status_2 recovery:restored_previous`);
     assert.equal(fs.readFileSync(gateCrash.dest, "utf8"), oldScript, "recovered to old script");
+    const restored = fs.statSync(gateCrash.dest);
+    assert.equal(restored.mode & 0o7777, 0o755, "restored mode is 0755");
+    assert.equal(restored.uid, gateCrash.host.restartGate.uid, "restored uid matches");
+    assert.equal(restored.gid, gateCrash.host.restartGate.gid, "restored gid matches");
+    assert.equal(hash(fs.readFileSync(gateCrash.dest)), hash(oldScript), "restored sha256 matches");
   } finally {
     fs.rmSync(gateCrash.dir, { recursive: true, force: true });
   }

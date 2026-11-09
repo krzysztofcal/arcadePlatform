@@ -408,11 +408,20 @@ function installWsRestartGate(host, runId) {
       let recovery = "none";
       if (previousBytes) {
         try {
-          fs.writeFileSync(tmp, previousBytes, { mode: 0o755 });
+          fs.writeFileSync(tmp, previousBytes);
+          fs.chownSync(tmp, g.uid, g.gid);
+          fs.chmodSync(tmp, 0o755);
           fsyncFd(fs.openSync(tmp, "r"), true);
           host.rename(tmp, g.dest);
           fsyncFd(fs.openSync(path.dirname(g.dest), O_DIR), true);
-          recovery = (sha256(fs.readFileSync(g.dest)) === previousSha) ? "restored_previous" : "restore_failed";
+          const restored = lstatOrNull(g.dest);
+          const restoredOk = restored
+            && restored.isFile()
+            && restored.uid === g.uid
+            && restored.gid === g.gid
+            && (restored.mode & 0o7777) === 0o755
+            && sha256(fs.readFileSync(g.dest)) === previousSha;
+          recovery = restoredOk ? "restored_previous" : "restore_failed";
         } catch {
           recovery = "restore_failed";
         }
