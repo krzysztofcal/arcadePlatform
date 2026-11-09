@@ -1034,8 +1034,8 @@ function restartGateInstallFixture({ run = {}, main, script = NEW_RESTART_GATE, 
         return { status: 22, stdout: "" };
       }
       if (argv[0] === "/usr/bin/node" && argv[1] === "--check") {
-        const res = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });
-        return { status: res.status, stdout: res.stdout || res.stderr || "" };
+        const res = spawnSync(process.execPath, argv.slice(1), { encoding: "utf8" });
+        return { status: res.status ?? 1, stdout: res.stdout || res.stderr || "" };
       }
       if (argv[0] === dest && argv[1] === "check") {
         return { status: checkStatus, stdout: checkStdout };
