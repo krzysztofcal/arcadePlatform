@@ -8,6 +8,7 @@ Cmnd_Alias ARCADE_ADMIN_COMMANDS = \
     /usr/local/sbin/arcade-vps-admin systemd-daemon-reload *, \
     /usr/local/sbin/arcade-vps-admin copilot-secret-snapshots-quarantine *, \
     /usr/local/sbin/arcade-vps-admin ledger-production-dispatcher-install *, \
+    /usr/local/sbin/arcade-vps-admin ws-restart-gate-install *, \
     /usr/local/sbin/arcade-vps-admin github-app-token-prepare *, \
     /usr/local/sbin/arcade-vps-admin github-app-key-quarantine *, \
     /usr/local/sbin/arcade-vps-admin ws-preview-isolation-provision *, \

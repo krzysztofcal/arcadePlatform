@@ -62,6 +62,14 @@ export const APPROVAL = Object.freeze({
     sideEffects: "The result and the journal record the commit and the new and previous SHA-256 of the script.",
     rollback: "Merge the previous script to main through a reviewed PR and request this operation again, then ledger-dispatchers-resume.",
   },
+  "ws-restart-gate-install": {
+    title: "Install the reviewed WS restart gate helper from this run's main commit",
+    readOnly: false,
+    changes: "Replaces /usr/local/sbin/arcade-ws-restart-gate (root:root 0755) with infra/vps/ws-restart-gate.mjs at the run commit. Blocks if main advanced or the downloaded bytes do not match that commit. Verifies syntax, required modes and gate decision immediately after installation.",
+    risk: "No service is restarted; WS Production remains on its existing process and release. The gate takes effect at the next WS Production deployment.",
+    sideEffects: "The result and the journal record the commit and the new and previous SHA-256 of the helper.",
+    rollback: "Merge the previous helper to main through a reviewed PR and request this operation again.",
+  },
   "github-app-token-prepare": {
     title: "Prepare an isolated non-root GitHub App signer without moving a key",
     readOnly: false,
@@ -100,6 +108,7 @@ const REPOSITORY = "https://github.com/krzysztofcal/arcadePlatform";
 const PREVIEW_IMPLEMENTATION = ["infra/vps/ws-preview-isolation.py", "infra/vps/prepare-ws-preview-v3.py", "infra/vps/ws-server-preview.service.d/99-preview-isolation.conf"];
 const IMPLEMENTATION_FILES = {
   "ledger-production-dispatcher-install": ["infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+  "ws-restart-gate-install": ["infra/vps/ws-restart-gate.mjs"],
   "github-app-token-prepare": ["infra/vps/github-app-token.py"],
   "github-app-key-quarantine": ["infra/vps/github-app-token.py"],
   "ws-preview-isolation-provision": PREVIEW_IMPLEMENTATION,
