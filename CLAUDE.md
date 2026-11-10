@@ -1,16 +1,13 @@
-# Shared project instructions
+# CLAUDE.md — Entrypoint for Claude Code
 
-@agents.md
-@skills.md
+Before starting any work in this repository, read and follow:
+- `AGENTS.md` (agent guidelines, deployment authority, operational rules, architecture, logging, JSP compatibility)
+- `skills.md` (codebase map and subsystem paths)
+- `.specify/memory/constitution.md` (binding project constitution)
 
-Claude Code follows the shared instructions above. The `ANTIGRAVITY_DELEGATION`
-switch and the coordinator/worker rules in `agents.md` are the single source of
-truth for Antigravity delegation (Claude Code and Codex); do not keep a separate
-switch here.
-
-- Claude Code is the coordinator; Antigravity (`agy`) is the full
-  implementation agent (runs tests, commits and pushes `agy/*`). Delegate with the `agy-implement`
-  skill, verify every result yourself, then integrate and open the Draft PR.
-- Check Antigravity availability at session start (user SessionStart hook). If it
-  is unavailable, report the concrete problem; never skip delegation silently.
-- Follow later OWNER stop/disable instructions immediately.
+## Core Guardrails
+- **No Self-Merge**: Never merge a pull request unless the user explicitly commands it in the current prompt.
+- **No Unauthorized Deploys**: Agent GitHub access is NOT authorization for Production deployment. Every required OWNER GO is mandatory.
+- **Approved Procedures Only**: Deployments and administrative tasks must use only official approved paths (`WS Server Deploy`, `scripts/www-production-release.mjs`, `VPS Admin Operation`, `DB Stage Apply PR`, `Release Record`). Never bypass via manual SSH, sudo, root, or direct restart (does not preclude OWNER emergency recovery C7).
+- **Platform Rules**: JSP-compatible JS (no browser modules/imports), CSS 1-line-per-selector, logging strictly via `klog(...)` (never `console.log`), and only fundamental tests.
+- **Antigravity delegation**: Claude Code coordinates; Antigravity (`agy`) is the full implementation agent. Follow the `ANTIGRAVITY_DELEGATION` switch and rules in `AGENTS.md` (Claude Code: `agy-implement` skill); if agy is unavailable, report it instead of skipping delegation silently.

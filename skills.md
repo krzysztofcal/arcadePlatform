@@ -11,7 +11,7 @@ Agents MUST use this to locate logic quickly.
 
 Antigravity (`agy`) is the full implementation agent; the coordinator plans,
 delegates, verifies and integrates. The single `ANTIGRAVITY_DELEGATION` switch and
-all rules live in [agents.md](agents.md) (Claude Code: `agy-implement` skill). Log
+all rules live in [AGENTS.md](AGENTS.md) (Claude Code: `agy-implement` skill). Log
 every attempt, including failures, in
 [docs/antigravity-evaluation.md](docs/antigravity-evaluation.md). Do not create a
 second switch here.
@@ -213,7 +213,7 @@ second switch here.
 - For live debugging, add `-f`; for recent bounded output, add `--no-pager -n 200`.
 
 ### Rule
-- Follow the mandatory release, Root on Demand and Supabase egress rules in [agents.md](agents.md); use [VPS Admin Operation](docs/vps-admin-operations.md) for catalogued root operations with owner approval.
+- Follow the mandatory release, Root on Demand and Supabase egress rules in [AGENTS.md](AGENTS.md); use [VPS Admin Operation](docs/vps-admin-operations.md) for catalogued root operations with owner approval.
 - No Docker assumptions unless explicitly present
 - When investigating WS preview or production behavior, check the relevant journald service before inferring from code alone.
 

@@ -1,9 +1,41 @@
-# agents.md
+# AGENTS.md — AI Agent Guidelines & Operations
 
 ## 🎯 Purpose
-Defines how agents (Codex / AI) should operate in the Arcade Platform repo.
+Defines how agents (Codex / AI / Antigravity / Claude Code) should operate in the Arcade Platform repo.
+
+Before starting any task in this repository, you MUST read and comply with:
+1. This file (`AGENTS.md`) — primary source of detailed development, runtime, logging, and deployment rules.
+2. `skills.md` — codebase architecture and directory mapping.
+3. `.specify/memory/constitution.md` — binding project constitution and safety gates.
 
 This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
+
+---
+
+## 🔒 Deployment & Administrative Authority
+
+> **Binding Operational Principle**:
+> Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez agentów przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty (co nie wyklucza istniejącej awaryjnej procedury odzyskiwania przez OWNERA — C7 w `docs/ws-production-restart-gate.md`).
+
+- **Agent GitHub access is NOT authorization for Production deployment.**
+- Every required **OWNER GO** remains strictly mandatory.
+- Never bypass procedures via manual SSH, sudo, root, direct service restart, Netlify publish, or ad-hoc scripts (does not preclude OWNER emergency recovery C7).
+
+### Official Approved Pathways
+- **WS Production Deploy**: `.github/workflows/ws-server-deploy.yml` (exact SHA, GitHub App dispatch, OWNER approval in `ws-production`).
+- **WWW Production Release**: `node scripts/www-production-release.mjs` (Netlify production procedure, OWNER-run only).
+- **VPS Admin Operations**: `.github/workflows/vps-admin-operation.yml` (helper catalog, OWNER approval in `vps-admin`).
+- **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (wymaga jawnego `workflow_dispatch` z `main`, operacja `apply` uruchamiana przez OWNERA dla dokładnego zatwierdzonego `sourceSha` i zestawu migracji w środowisku `stage-automation`).
+- **Release Record**: `.github/workflows/release-record.yml` (rejestr wersji; `publish=true` wymaga dispatchu przez OWNERA; nie wykonuje deploymentu).
+- **Android / Google Play**: Separate publishing track with independent review and signing.
+
+---
+
+## 🔀 GitHub PR Merge Policy (Always Binding)
+
+- **NEVER merge a pull request yourself.**
+- You may create PRs, run checks, and prepare them for review/merge.
+- Only merge if the user explicitly commands you to merge in that specific task.
 
 ---
 
@@ -20,7 +52,7 @@ ANTIGRAVITY_DELEGATION: enabled
 - **Identity.** Antigravity's GitHub access uses the existing `arcade-code-agent` GitHub App (git credential helper; `gh` via the `ghx` wrapper), never the OWNER token.
 - **Workspace isolation.** Antigravity works only in its own git worktree on an `agy/*` branch, never in the coordinator's checkout; one writer per worktree at a time. The coordinator does not edit that worktree during a run. Antigravity does not merge, open PRs or delegate further. Delete `agy/*` branches once integrated or abandoned.
 - **Invocation.** Claude Code uses the `agy-implement` skill (`~/.claude/skills/agy-implement/`): `agy --print` in the worktree with the coordinator's environment, `ghx` first on PATH, all commands allowed for the session (headless agy aborts the turn on a permission prompt it cannot show) and a small PreToolUse **GO gate** hook that denies direct commands crossing the boundaries above (push to non-`agy/*` or force push, `gh pr merge`, workflow dispatch, releases, remote migrations/SQL, Netlify production, sudo/ssh). The GO gate is a tripwire, **not a security barrier**: code that an agent writes and runs is not inspected, and Antigravity, Claude Code and Codex share the same OS user, files and network. Technical barriers are server-side only (`main` ruleset: PR + checks, no force push; `ws-production` and `vps-admin` required OWNER reviewers). Merge (0 required reviews) and the `production-ledger` / `production-poker-refill` environments (branch policy only) rely on these instructions for every agent. Do not use `--dangerously-skip-permissions`. Check the structured report, not only the exit code.
-- **Context.** Give the worker the task, exact files/areas, acceptance criteria, required tests and allowed actions; require it to follow `agents.md`, `skills.md` and `.specify/memory/constitution.md`. Do not forward the whole conversation, secrets, private-deal/R2 material or player data.
+- **Context.** Give the worker the task, exact files/areas, acceptance criteria, required tests and allowed actions; require it to follow `AGENTS.md`, `skills.md` and `.specify/memory/constitution.md`. Do not forward the whole conversation, secrets, private-deal/R2 material or player data.
 - **Verification.** Verify every returned claim: read the pushed diff, rerun the tests, check GO gate denials and blockers. Do not read credential files or print secrets; agy transcripts and logs persist command input/output in plain text. A worker's self-report or self-review is not verification and not an independent review.
 - **Unavailability.** If Antigravity is unavailable, unauthenticated, times out or returns an unusable result, report the concrete problem to OWNER — never skip delegation silently. Retry at most once, then continue directly and say so. If results are repeatedly unreliable, recommend disabling the switch. Never present another model/tool as Antigravity.
 - **Monitoring.** Log each delegation, including failures, in [the Antigravity evaluation log](docs/antigravity-evaluation.md): task, coordinator, measured CLI wall time, verified result (accepted/partial/rejected) and rework, and CLI-reported worker token usage (coordinator usage `unknown` unless measured — never zero). Mark estimates as estimates; do not claim net savings without a comparable baseline. Keep entries concise and free of secrets and full prompts/responses. Summarize after each five new attempts or on OWNER request (a reporting window, not a usage cap).

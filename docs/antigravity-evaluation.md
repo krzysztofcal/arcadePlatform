@@ -1,7 +1,7 @@
 # Antigravity delegation evaluation
 
 Shared log for Codex and Claude Code. Delegation is controlled by
-`ANTIGRAVITY_DELEGATION` in [agents.md](../agents.md).
+`ANTIGRAVITY_DELEGATION` in [AGENTS.md](../AGENTS.md).
 
 Track useful work, quality and total overhead, including failures. Unknown
 measurements stay unknown. Never infer token savings merely from delegation.
@@ -95,7 +95,7 @@ than retrying indefinitely.
 ## OWNER decision — Antigravity as default implementation worker (2026-11-10)
 
 Scope changed from "simple bounded tasks" to "default implementation worker" (features, fixes, tests,
-refactors; coordinator plans, verifies and integrates). See `agents.md`. Root cause of the earlier
+refactors; coordinator plans, verifies and integrates). See `AGENTS.md`. Root cause of the earlier
 silent stop: this policy, `CLAUDE.md` and this log existed only as uncommitted files in one local
 checkout, so sessions started in fresh git worktrees never loaded them; the only global agy tool was
 the review-only `agy-review` skill. Setup diagnostics (permission probes in a throwaway directory) are
