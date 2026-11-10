@@ -7,6 +7,17 @@ Agents MUST use this to locate logic quickly.
 
 ---
 
+## Antigravity delegation (Codex and Claude Code)
+
+Antigravity (`agy`) is the default implementation worker; the coordinator plans,
+delegates, verifies and integrates. The single `ANTIGRAVITY_DELEGATION` switch and
+all rules live in [agents.md](agents.md) (Claude Code: `agy-implement` skill). Log
+every attempt, including failures, in
+[docs/antigravity-evaluation.md](docs/antigravity-evaluation.md). Do not create a
+second switch here.
+
+---
+
 ## 🕹️ Portal / Arcade Core
 
 ### Files
