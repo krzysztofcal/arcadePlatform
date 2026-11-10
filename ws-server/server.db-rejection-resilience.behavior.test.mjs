@@ -90,7 +90,8 @@ export async function beginSqlWs() {
   const child = spawn(process.execPath, ["ws-server/server.mjs"], {
     cwd: path.resolve(new URL(".", import.meta.url).pathname, ".."),
     env: {
-      ...process.env,
+      PATH: process.env.PATH || "/usr/bin:/bin",
+      NODE_ENV: "test",
       PORT: String(port),
       WS_POKER_LOG_LEVEL: "INFO",
       SUPABASE_DB_URL: "postgresql://postgres.test:test-secret@127.0.0.1:54329/postgres",
