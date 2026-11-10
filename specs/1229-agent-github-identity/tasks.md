@@ -5,8 +5,10 @@
 - [ ] T002-O OWNER credential removal from the VPS agent runtime — **OWNER GO** (draft, pending independent review):
   A. Personal connectors stay connected; only the VPS agent clients stop using them:
      1. Claude Code (VPS): already `permissions.deny: ["mcp__claude_ai_github"]` (claude.ai web/mobile unaffected).
-     2. Codex (VPS): add `[features]` `apps = false` to `~/.codex/config.toml` and remove the two
-        `apps.connector_76869538009648d5b282a4bb21c3d157` auto-approve blocks (ChatGPT itself unaffected).
+     2. Codex (VPS): in `~/.codex/config.toml` replace the two auto-approve blocks of the GitHub app with
+        `[apps.connector_76869538009648d5b282a4bb21c3d157]` `enabled = false` (only that app; ChatGPT unaffected).
+        Not `features.apps = false`: it would also remove Figma, Adobe Acrobat and the Gmail/Google Drive plugins that
+        Codex sessions use. MCP servers (supabase-stage, browserstack, OVH) do not depend on apps.
      3. Limitation (not closable without changing personal integrations): both switches are enforced by the agent
         programs, but every agent runs as the same Unix user that holds the OWNER's Claude and ChatGPT logins
         (`~/.claude/.credentials.json`, `~/.codex/auth.json`). A deliberately misbehaving agent could still reach the
@@ -24,7 +26,10 @@
         Termux included. If chosen, do it after step 2 and re-login Termux at once with `gh auth login --web`
         (the browser is the independent channel). The 2026-11-10 audit found the token in no agent logs or transcripts,
         but agent processes could read it.
-     5. Do not log `gh` in again on the VPS; OWNER actions go through the browser/Termux.
+     5. Do not log `gh` in again on the VPS; OWNER actions go through the browser/Termux. Nothing automatic on the VPS
+        uses this token (no crontab, no user systemd units, no user scripts). `scripts/www-production-release.mjs`
+        reads WS deploy runs/jobs with `gh api`. On the VPS, run it with `ghx` first on PATH (the App can read them);
+        otherwise run it from Termux.
      Rollback: `gh auth login` on the VPS (OWNER only).
      The #1159 quarantine catalog is not needed: the file holds a revocable token, so logout is the simpler, existing
      path. A root-custody copy would need a catalog entry like `github-app-key-quarantine` (reviewed PR + `vps-admin`
