@@ -72,6 +72,20 @@ source of truth for current code; a conflicting snapshot MUST NOT override it.
 
 ## Deployment and Safety Gates
 
+### Authorized Deployment and Administrative Procedures
+
+Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty.
+
+All Arcade Hub deployments and administrative operations must strictly use the approved procedures for the respective component. Agent access to GitHub does not constitute authorization for Production deployment. Every required OWNER GO remains strictly mandatory. Bypassing procedures via manual SSH, sudo, root, direct restart, publication, or alternative scripts is prohibited.
+
+Official approved operational paths:
+- **WS Server Deploy**: Exact-SHA deployment workflow (`.github/workflows/ws-server-deploy.yml`) dispatched via GitHub App (`arcade-code-agent[bot]`), with human seat/financial preflight gates, restart gate, rollback receipts, and requiring explicit OWNER approval in the `ws-production` GitHub Environment.
+- **WWW Production Release**: Netlify production release procedure executed strictly via `scripts/www-production-release.mjs`.
+- **VPS Admin Operation**: Root-on-demand administrative helper catalog (`.github/workflows/vps-admin-op.yml`), requiring explicit OWNER approval in the `vps-admin` GitHub Environment.
+- **DB Stage Apply PR**: Automated shared Stage database schema migrations triggered only by eligible non-draft PRs (`.github/workflows/db-stage-apply-pr.yml`).
+- **Release Record**: Audited immutable version provenance registry (`.github/workflows/release-record.yml`), documenting component SHAs and manifests. Release Record is an audited version registry and does NOT perform deployment or mutate environments.
+- **Android / Google Play**: Separate publishing track with independent review, signing, and explicit release gates.
+
 Stage/WS Preview accepts hard-kick deployment restarts, including occupied tables; no manual Leave,
 empty-table requirement, Preview presence counters or safe-stop receipt is required. This is not a
 chip-settlement guarantee: interrupted hands may need existing Stage recovery and OWNER intervention.
@@ -192,4 +206,4 @@ resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.1.2 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-05
+**Version**: 1.2.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-10
