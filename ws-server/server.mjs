@@ -6447,7 +6447,7 @@ async function runRetentionCleanups() {
         return;
       }
     } catch (error) {
-      klogSafe("ws_action_history_cleanup_sweep_error", {
+      klogSafe("ws_action_history_cleanup_failed", {
         message: error?.message || "unknown"
       });
       return;
@@ -6461,7 +6461,7 @@ async function runRetentionCleanups() {
         releaseTableIds: (claimedIds) => tableManager.endTableRetirement(claimedIds)
       });
     } catch (error) {
-      klogSafe("ws_closed_table_cleanup_sweep_error", {
+      klogSafe("ws_closed_table_cleanup_failed", {
         message: error?.message || "unknown"
       });
     }
