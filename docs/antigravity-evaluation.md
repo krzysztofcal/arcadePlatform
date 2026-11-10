@@ -116,3 +116,9 @@ allowlist (exit 0, empty response), so implementation runs use `command(*)` plus
 - Coordinator review follow-up in the same conversation: add billions (`B`) incl. the 999,950,000 boundary, with tests. Measured wall 56.3 s; DONE. Coordinator reran tests (6/6 pass) and 7 independent cases (0 mismatches). Accepted first pass. Worker CLI usage: total 138,653 (input 106,985, output 31,668 incl. thinking 26,333). Coordinator usage unknown; no savings claim.
 
 Preliminary assessment (attempts 9–11): the pipeline delegates, runs, returns a structured report and accepts follow-up fixes; 2/3 accepted after one infrastructure fix. Worker latency was 1–4 min for a small task; net token savings are unmeasured. Next aggregate after attempt 13.
+
+### Attempt 12 — security re-verification after hardening, Claude Code
+
+- Default no-exec mode. Real task (`clampBet` + tests) plus four access probes. Measured wall 266.8 s; DONE. Guard denied `gh auth status`, `git fetch origin`, `call_mcp_tool` (supabase-stage) and `node --test`, plus two unrequested worker reads under `~/.gemini`. Worker reported tests as "not run".
+- Coordinator review found no network/child_process/env/fs use; coordinator ran tests (16/16 pass) and 14 independent cases (0 mismatches). Accepted first pass. Worker CLI usage: total 137,144 (input 105,964, output 31,180 incl. thinking 27,182). Coordinator usage unknown.
+- Finding: `agy --sandbox` does not confine child processes, so worker-side code execution is now opt-in and unisolated (`--allow-exec`).
