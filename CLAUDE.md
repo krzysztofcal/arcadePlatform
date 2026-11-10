@@ -1,8 +1,7 @@
 # CLAUDE.md — Entrypoint for Claude Code
 
 Before starting any work in this repository, read and follow:
-- `AGENTS.md` (agent entrypoint & deployment authority)
-- `agents.md` (detailed operational rules, architecture, logging, JSP compatibility)
+- `AGENTS.md` (agent guidelines, deployment authority, operational rules, architecture, logging, JSP compatibility)
 - `skills.md` (codebase map and subsystem paths)
 - `.specify/memory/constitution.md` (binding project constitution)
 

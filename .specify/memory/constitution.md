@@ -99,7 +99,7 @@ Pull request creation, Draft/Ready and synchronize events never apply
 supabase/migrations/** to the shared Stage database. Shared Stage SQL is
 applied only by an explicitly authorized DB Stage Apply PR workflow_dispatch
 from main, in the stage-automation environment, for the exact approved source
-SHA, file and hash set; apply is owner-dispatched (see agents.md "Explicit
+SHA, file and hash set; apply is owner-dispatched (see AGENTS.md "Explicit
 Stage migrations" and docs/operations.md "Stage DB migrations"). This is a
 shared-environment mutation, NOT a read-only CI check, and needs its own
 explicit scope. The specification, plan, and tasks MUST record which
@@ -186,7 +186,7 @@ feature artifacts means no generic setup changes.
 
 ## Governance
 
-This constitution formalizes the project rules in agents.md and skills.md and
+This constitution formalizes the project rules in AGENTS.md and skills.md and
 governs all Arcade Platform changes, including documentation, configuration,
 automation, frontend, backend, database, and WebSocket work. Where guidance
 conflicts, the stricter safety rule applies. Each feature specification, plan,
@@ -200,7 +200,7 @@ backward-incompatible governance or principle removal or redefinition, MINOR
 denotes a new principle, section, or materially expanded guidance, and PATCH
 denotes clarification, wording, or other non-semantic refinement.
 
-The constitution is reviewed whenever agents.md, skills.md, deployment policy,
+The constitution is reviewed whenever AGENTS.md, skills.md, deployment policy,
 runtime ownership, or safety boundaries change. Compliance findings MUST be
 resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
