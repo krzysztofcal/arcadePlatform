@@ -3623,7 +3623,7 @@ async function loadPersistedTableHealthSnapshot(tableId) {
   if (!persistedBootstrapEnabled) return null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    return beginSqlWs(async (tx) => {
+    return await beginSqlWs(async (tx) => {
       const tableRows = await tx.unsafe(
         "select id, status, created_at, updated_at, last_activity_at, lifecycle_kind, managed_profile_key, rotation_due_at from public.poker_tables where id = $1 limit 1;",
         [tableId]
@@ -3861,7 +3861,7 @@ async function listZombieOpenTableIds({ limit = 25 } = {}) {
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 25;
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    return beginSqlWs(async (tx) => {
+    return await beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
         `select t.id
          from public.poker_tables t
@@ -3910,7 +3910,7 @@ async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
   const cursorTableId = hasCursor ? openTableJanitorCursor.tableId.trim() : null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    return beginSqlWs(async (tx) => {
+    return await beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
          `select
            t.id,
@@ -6439,15 +6439,38 @@ const closedTableCleanup = hasSupabaseDbUrl
     })
   : null;
 
-if (actionHistoryCleanup || closedTableCleanup) {
-  const actionHistoryCleanupTimer = setInterval(() => {
-    void actionHistoryCleanup.sweep().finally(() => {
-      if (!closedTableCleanup) return;
-      void closedTableCleanup.sweep({
+async function runRetentionCleanups() {
+  if (actionHistoryCleanup) {
+    try {
+      const historyResult = await actionHistoryCleanup.sweep();
+      if (!historyResult || historyResult.ok !== true || (historyResult.skipped === true && historyResult.reason === "sweep_in_progress")) {
+        return;
+      }
+    } catch (error) {
+      klogSafe("ws_action_history_cleanup_sweep_error", {
+        message: error?.message || "unknown"
+      });
+      return;
+    }
+  }
+
+  if (closedTableCleanup) {
+    try {
+      await closedTableCleanup.sweep({
         claimTableIds: (candidateIds) => tableManager.beginTableRetirement(candidateIds),
         releaseTableIds: (claimedIds) => tableManager.endTableRetirement(claimedIds)
       });
-    });
+    } catch (error) {
+      klogSafe("ws_closed_table_cleanup_sweep_error", {
+        message: error?.message || "unknown"
+      });
+    }
+  }
+}
+
+if (actionHistoryCleanup || closedTableCleanup) {
+  const actionHistoryCleanupTimer = setInterval(() => {
+    void runRetentionCleanups();
   }, actionHistoryCleanupSweepMs);
   actionHistoryCleanupTimer.unref();
 }
