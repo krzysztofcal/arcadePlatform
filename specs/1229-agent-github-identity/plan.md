@@ -12,8 +12,10 @@ Agent launch configuration (outside the repository, per agent):
 `GH_CONFIG_DIR` points plain `gh` at the empty App config, so a bypass of the wrapper finds no OWNER login (fail
 closed); `ghx` refuses `gh auth`; git already uses only the App helper (`quit=1` on failure).
 
-This routing is not isolation: the OWNER OAuth token in `~/.config/gh/hosts.yml` stays readable by the shared Unix
-user until the OWNER removes it. Minimal removal, using only GitHub and `gh` (OWNER GO, see tasks.md T002-O).
+This routing is not isolation. The OWNER OAuth token in `~/.config/gh/hosts.yml` stays readable by the shared Unix
+user until the OWNER logs it out on the VPS (no revoke needed, so Termux keeps working). The OWNER's Claude/ChatGPT
+logins on the VPS keep their GitHub connectors technically reachable by agents. The VPS clients disable them, but the
+personal integrations are not changed (tasks.md T002-O).
 
 ## T003 — ruleset (OWNER activation GO)
 New ruleset [main-owner-review.ruleset.json](main-owner-review.ruleset.json): `main`, 1 approval, code owner review,
