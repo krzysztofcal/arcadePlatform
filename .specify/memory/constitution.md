@@ -74,15 +74,15 @@ source of truth for current code; a conflicting snapshot MUST NOT override it.
 
 ### Authorized Deployment and Administrative Procedures
 
-Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty.
+Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez agentów przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty (co nie wyklucza istniejącej awaryjnej procedury odzyskiwania przez OWNERA — C7 w `docs/ws-production-restart-gate.md`).
 
-All Arcade Hub deployments and administrative operations must strictly use the approved procedures for the respective component. Agent access to GitHub does not constitute authorization for Production deployment. Every required OWNER GO remains strictly mandatory. Bypassing procedures via manual SSH, sudo, root, direct restart, publication, or alternative scripts is prohibited.
+All Arcade Hub deployments and administrative operations must strictly use the approved procedures for the respective component. Agent access to GitHub does not constitute authorization for Production deployment. Every required OWNER GO remains strictly mandatory. Bypassing procedures by agents via manual SSH, sudo, root, direct restart, publication, or alternative scripts is prohibited (this does not preclude the existing OWNER emergency recovery procedure — C7 in `docs/ws-production-restart-gate.md`).
 
 Official approved operational paths:
 - **WS Server Deploy**: Exact-SHA deployment workflow (`.github/workflows/ws-server-deploy.yml`) dispatched via GitHub App (`arcade-code-agent[bot]`), with human seat/financial preflight gates, restart gate, rollback receipts, and requiring explicit OWNER approval in the `ws-production` GitHub Environment.
 - **WWW Production Release**: Netlify production release procedure executed strictly via `scripts/www-production-release.mjs`.
-- **VPS Admin Operation**: Root-on-demand administrative helper catalog (`.github/workflows/vps-admin-op.yml`), requiring explicit OWNER approval in the `vps-admin` GitHub Environment.
-- **DB Stage Apply PR**: Automated shared Stage database schema migrations triggered only by eligible non-draft PRs (`.github/workflows/db-stage-apply-pr.yml`).
+- **VPS Admin Operation**: Root-on-demand administrative helper catalog (`.github/workflows/vps-admin-operation.yml`), requiring explicit OWNER approval in the `vps-admin` GitHub Environment.
+- **DB Stage Apply PR**: Shared Stage database schema migrations executed only via explicit `workflow_dispatch` from `main` (`.github/workflows/db-stage-apply-pr.yml`), where `apply` must be authorized by OWNER for the exact SHA and approved migration set in `stage-automation`.
 - **Release Record**: Audited immutable version provenance registry (`.github/workflows/release-record.yml`), documenting component SHAs and manifests. Release Record is an audited version registry and does NOT perform deployment or mutate environments.
 - **Android / Google Play**: Separate publishing track with independent review, signing, and explicit release gates.
 

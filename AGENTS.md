@@ -10,17 +10,17 @@ Before starting any task in this repository, you MUST read and comply with:
 ## 🔒 Deployment & Administrative Authority
 
 > **Binding Operational Principle**:
-> Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty.
+> Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez agentów przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty (co nie wyklucza istniejącej awaryjnej procedury odzyskiwania przez OWNERA — C7 w `docs/ws-production-restart-gate.md`).
 
 - **Agent GitHub access is NOT authorization for Production deployment.**
 - Every required **OWNER GO** remains strictly mandatory.
-- Never bypass procedures via manual SSH, sudo, root, direct service restart, Netlify publish, or ad-hoc scripts.
+- Never bypass procedures via manual SSH, sudo, root, direct service restart, Netlify publish, or ad-hoc scripts (does not preclude OWNER emergency recovery C7).
 
 ### Official Approved Pathways
 - **WS Production Deploy**: `.github/workflows/ws-server-deploy.yml` (exact SHA, GitHub App dispatch, OWNER approval in `ws-production`).
 - **WWW Production Release**: `node scripts/www-production-release.mjs` (Netlify production procedure).
-- **VPS Admin Operations**: `.github/workflows/vps-admin-op.yml` (helper catalog, OWNER approval in `vps-admin`).
-- **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (Stage migrations on non-draft PRs).
+- **VPS Admin Operations**: `.github/workflows/vps-admin-operation.yml` (helper catalog, OWNER approval in `vps-admin`).
+- **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (wymaga jawnego `workflow_dispatch` z `main`, operacja `apply` autoryzowana przez OWNERA dla dokładnego SHA i zatwierdzonego zestawu migracji w środowisku `stage-automation`).
 - **Release Record**: `.github/workflows/release-record.yml` (version provenance registry; does NOT deploy).
 - **Android / Google Play**: Separate publishing track with independent review and signing.
 
