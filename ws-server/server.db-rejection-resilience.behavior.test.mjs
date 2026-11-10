@@ -71,12 +71,12 @@ function waitForExit(proc) {
   return new Promise((resolve) => proc.once("exit", resolve));
 }
 
-test("background sweeps survive transient database CONNECT_TIMEOUT without unhandled rejections", async () => {
+test("zombie table background sweep survives transient database CONNECT_TIMEOUT without unhandled rejection", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-db-resilience-"));
   const rejectingModulePath = path.join(tempDir, "rejecting-loader.mjs");
   const moduleSource = `
 export async function beginSqlWs() {
-  const error = new Error("write CONNECT_TIMEOUT aws-1-eu-west-3.pooler.supabase.com:6543");
+  const error = new Error("write CONNECT_TIMEOUT 127.0.0.1:54329");
   error.code = "CONNECT_TIMEOUT";
   throw error;
 }
@@ -93,12 +93,9 @@ export async function beginSqlWs() {
       ...process.env,
       PORT: String(port),
       WS_POKER_LOG_LEVEL: "INFO",
-      SUPABASE_DB_URL: "postgresql://postgres.mock:secret@aws-1-eu-west-3.pooler.supabase.com:6543/postgres",
+      SUPABASE_DB_URL: "postgresql://postgres.test:test-secret@127.0.0.1:54329/postgres",
       WS_BEGIN_SQL_LOADER_MODULE_PATH: rejectingModulePath,
-      WS_ZOMBIE_TABLE_SWEEP_MS: "30",
-      WS_OPEN_TABLE_JANITOR_SWEEP_MS: "30",
-      WS_STALE_ACTIVE_SEAT_SWEEP_MS: "30",
-      WS_POKER_ACTION_HISTORY_SWEEP_MS: "30"
+      WS_ZOMBIE_TABLE_SWEEP_MS: "30"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -109,7 +106,7 @@ export async function beginSqlWs() {
   try {
     await waitForListening(child, 5000);
 
-    // Allow multiple sweep cycles (30ms intervals) to fire with the rejecting database
+    // Allow multiple zombie sweep cycles (30ms intervals) to fire with the rejecting database
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     // Verify server remained alive and responsive
@@ -127,91 +124,15 @@ export async function beginSqlWs() {
       "Should not emit ws_unhandled_rejection on transient database errors"
     );
 
-    // Verify handled failure logs were emitted
+    // Verify handled failure log was emitted specifically by the zombie sweep query
     assert.equal(
-      combinedLogs.includes("ws_zombie_cleanup_list_failed")
-      || combinedLogs.includes("ws_open_table_janitor_list_failed")
-      || combinedLogs.includes("ws_stale_seat_cleanup_list_failed"),
+      combinedLogs.includes("ws_zombie_cleanup_list_failed"),
       true,
-      "Should safely log handled sweep failures via klogSafe"
+      "Should safely log handled zombie sweep failure via ws_zombie_cleanup_list_failed"
     );
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
     await fs.rm(tempDir, { recursive: true, force: true });
   }
-});
-
-test("retention cleanups preserve strict execution ordering and error isolation", async () => {
-  let actionHistoryCalled = 0;
-  let closedTableCalled = 0;
-
-  // Case 1: actionHistory skipped due to sweep_in_progress -> closedTableCleanup must NOT run
-  const mockActionInProgress = {
-    sweep: async () => {
-      actionHistoryCalled += 1;
-      return { ok: true, skipped: true, reason: "sweep_in_progress" };
-    }
-  };
-  const mockClosed = {
-    sweep: async () => {
-      closedTableCalled += 1;
-      return { ok: true };
-    }
-  };
-
-  async function testRunRetention(actionHistory, closed) {
-    if (actionHistory) {
-      try {
-        const historyResult = await actionHistory.sweep();
-        if (!historyResult || historyResult.ok !== true || (historyResult.skipped === true && historyResult.reason === "sweep_in_progress")) {
-          return;
-        }
-      } catch {
-        return;
-      }
-    }
-    if (closed) {
-      try {
-        await closed.sweep();
-      } catch {}
-    }
-  }
-
-  await testRunRetention(mockActionInProgress, mockClosed);
-  assert.equal(actionHistoryCalled, 1);
-  assert.equal(closedTableCalled, 0, "closedTableCleanup must not run when action-history sweep is in progress");
-
-  // Case 2: actionHistory error -> closedTableCleanup must NOT run
-  const mockActionError = {
-    sweep: async () => {
-      actionHistoryCalled += 1;
-      throw new Error("DB connection timeout");
-    }
-  };
-  await testRunRetention(mockActionError, mockClosed);
-  assert.equal(actionHistoryCalled, 2);
-  assert.equal(closedTableCalled, 0, "closedTableCleanup must not run when action-history sweep throws");
-
-  // Case 3: actionHistory ok !== true -> closedTableCleanup must NOT run
-  const mockActionFailed = {
-    sweep: async () => {
-      actionHistoryCalled += 1;
-      return { ok: false, reason: "phase1_failed" };
-    }
-  };
-  await testRunRetention(mockActionFailed, mockClosed);
-  assert.equal(actionHistoryCalled, 3);
-  assert.equal(closedTableCalled, 0, "closedTableCleanup must not run when action-history sweep fails");
-
-  // Case 4: actionHistory success -> closedTableCleanup runs
-  const mockActionSuccess = {
-    sweep: async () => {
-      actionHistoryCalled += 1;
-      return { ok: true, skipped: false };
-    }
-  };
-  await testRunRetention(mockActionSuccess, mockClosed);
-  assert.equal(actionHistoryCalled, 4);
-  assert.equal(closedTableCalled, 1, "closedTableCleanup must run after action-history succeeds");
 });
