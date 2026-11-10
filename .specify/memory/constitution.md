@@ -80,10 +80,10 @@ All Arcade Hub deployments and administrative operations must strictly use the a
 
 Official approved operational paths:
 - **WS Server Deploy**: Exact-SHA deployment workflow (`.github/workflows/ws-server-deploy.yml`) dispatched via GitHub App (`arcade-code-agent[bot]`), with human seat/financial preflight gates, restart gate, rollback receipts, and requiring explicit OWNER approval in the `ws-production` GitHub Environment.
-- **WWW Production Release**: Netlify production release procedure executed strictly via `scripts/www-production-release.mjs`.
+- **WWW Production Release**: Netlify production release procedure executed strictly via `scripts/www-production-release.mjs` (OWNER-run only).
 - **VPS Admin Operation**: Root-on-demand administrative helper catalog (`.github/workflows/vps-admin-operation.yml`), requiring explicit OWNER approval in the `vps-admin` GitHub Environment.
-- **DB Stage Apply PR**: Shared Stage database schema migrations executed only via explicit `workflow_dispatch` from `main` (`.github/workflows/db-stage-apply-pr.yml`), where `apply` must be authorized by OWNER for the exact SHA and approved migration set in `stage-automation`.
-- **Release Record**: Audited immutable version provenance registry (`.github/workflows/release-record.yml`), documenting component SHAs and manifests. Release Record is an audited version registry and does NOT perform deployment or mutate environments.
+- **DB Stage Apply PR**: Shared Stage database schema migrations executed only via explicit `workflow_dispatch` from `main` (`.github/workflows/db-stage-apply-pr.yml`), where `apply` is owner-dispatched for the exact approved `sourceSha` and migration set in `stage-automation`.
+- **Release Record**: Audited immutable version provenance registry (`.github/workflows/release-record.yml`), documenting component SHAs and manifests (`publish=true` is owner-dispatched). Release Record is an audited version registry and does NOT perform deployment or mutate environments.
 - **Android / Google Play**: Separate publishing track with independent review, signing, and explicit release gates.
 
 Stage/WS Preview accepts hard-kick deployment restarts, including occupied tables; no manual Leave,

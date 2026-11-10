@@ -18,10 +18,10 @@ Before starting any task in this repository, you MUST read and comply with:
 
 ### Official Approved Pathways
 - **WS Production Deploy**: `.github/workflows/ws-server-deploy.yml` (exact SHA, GitHub App dispatch, OWNER approval in `ws-production`).
-- **WWW Production Release**: `node scripts/www-production-release.mjs` (Netlify production procedure).
+- **WWW Production Release**: `node scripts/www-production-release.mjs` (Netlify production procedure, OWNER-run only).
 - **VPS Admin Operations**: `.github/workflows/vps-admin-operation.yml` (helper catalog, OWNER approval in `vps-admin`).
-- **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (wymaga jawnego `workflow_dispatch` z `main`, operacja `apply` autoryzowana przez OWNERA dla dokładnego SHA i zatwierdzonego zestawu migracji w środowisku `stage-automation`).
-- **Release Record**: `.github/workflows/release-record.yml` (version provenance registry; does NOT deploy).
+- **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (wymaga jawnego `workflow_dispatch` z `main`, operacja `apply` uruchamiana przez OWNERA dla dokładnego zatwierdzonego `sourceSha` i zestawu migracji w środowisku `stage-automation`).
+- **Release Record**: `.github/workflows/release-record.yml` (rejestr wersji; `publish=true` wymaga dispatchu przez OWNERA; nie wykonuje deploymentu).
 - **Android / Google Play**: Separate publishing track with independent review and signing.
 
 ---
