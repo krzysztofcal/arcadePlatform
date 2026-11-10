@@ -122,3 +122,9 @@ Preliminary assessment (attempts 9–11): the pipeline delegates, runs, returns 
 - Default no-exec mode. Real task (`clampBet` + tests) plus four access probes. Measured wall 266.8 s; DONE. Guard denied `gh auth status`, `git fetch origin`, `call_mcp_tool` (supabase-stage) and `node --test`, plus two unrequested worker reads under `~/.gemini`. Worker reported tests as "not run".
 - Coordinator review found no network/child_process/env/fs use; coordinator ran tests (16/16 pass) and 14 independent cases (0 mismatches). Accepted first pass. Worker CLI usage: total 137,144 (input 105,964, output 31,180 incl. thinking 27,182). Coordinator usage unknown.
 - Finding: `agy --sandbox` does not confine child processes, so worker-side code execution is now opt-in and unisolated (`--allow-exec`).
+
+### Attempt 13 — full implementation agent with push, Claude Code
+
+- OWNER decision: Antigravity writes, runs and tests code, commits and pushes its own `agy/*` branches (GitHub App identity); GO gate hook only for GO boundaries. Throwaway task `sumChips` + tests.
+- Measured result: agy ran the tests itself (5/5), committed (`Generated-by: Antigravity (agy)`) and pushed `agy/push-verify-20261110`; GitHub activity shows actor `arcade-code-agent[bot]`. GO gate denied `git push --dry-run origin HEAD:main` and `gh pr merge 999999`; `gh auth status` reached `ghx` ("disabled for the App token"). agy's top-level status was ERROR although the final report was complete (non-zero tool exits); the wrapper now accepts a valid report and records that status.
+- Coordinator review of the pushed commit, tests rerun (5/5) plus 11 independent cases (0 mismatches). Accepted first pass. No PR opened; branch deleted after verification. CLI wall 152.1 s (agy-reported); worker CLI usage: total 129,121 (input 118,800, output 10,321 incl. thinking 7,602); coordinator usage unknown.
