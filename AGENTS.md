@@ -1,9 +1,47 @@
-# agents.md
+# AGENTS.md — AI Agent Guidelines & Operations
 
 ## 🎯 Purpose
-Defines how agents (Codex / AI) should operate in the Arcade Platform repo.
+Defines how agents (Codex / AI / Antigravity / Claude Code) should operate in the Arcade Platform repo.
+
+Before starting any task in this repository, you MUST read and comply with:
+1. This file (`AGENTS.md`) — primary source of detailed development, runtime, logging, and deployment rules.
+2. `skills.md` — codebase architecture and directory mapping.
+3. `.specify/memory/constitution.md` — binding project constitution and safety gates.
 
 This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
+
+---
+
+## 🔒 Deployment & Administrative Authority
+
+> **Binding Operational Principle**:
+> Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez agentów przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty (co nie wyklucza istniejącej awaryjnej procedury odzyskiwania przez OWNERA — C7 w `docs/ws-production-restart-gate.md`).
+
+- **Agent GitHub access is NOT authorization for Production deployment.**
+- Every required **OWNER GO** remains strictly mandatory.
+- Never bypass procedures via manual SSH, sudo, root, direct service restart, Netlify publish, or ad-hoc scripts (does not preclude OWNER emergency recovery C7).
+
+### Official Approved Pathways
+- **WS Production Deploy**: `.github/workflows/ws-server-deploy.yml` (exact SHA, GitHub App dispatch, OWNER approval in `ws-production`).
+- **WWW Production Release**: `node scripts/www-production-release.mjs` (Netlify production procedure, OWNER-run only).
+- **VPS Admin Operations**: `.github/workflows/vps-admin-operation.yml` (helper catalog, OWNER approval in `vps-admin`).
+- **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (wymaga jawnego `workflow_dispatch` z `main`, operacja `apply` uruchamiana przez OWNERA dla dokładnego zatwierdzonego `sourceSha` i zestawu migracji w środowisku `stage-automation`).
+- **Release Record**: `.github/workflows/release-record.yml` (rejestr wersji; `publish=true` wymaga dispatchu przez OWNERA; nie wykonuje deploymentu).
+- **Android / Google Play**: Separate publishing track with independent review and signing.
+
+---
+
+## 🔀 GitHub PR Merge Policy (Always Binding)
+
+- **NEVER merge a pull request yourself.**
+- You may create PRs, run checks, and prepare them for review/merge.
+- Only merge if the user explicitly commands you to merge in that specific task.
+
+### Agent GitHub identity (#1229)
+
+- Claude Code, Codex and Antigravity act on GitHub only as the GitHub App `arcade-code-agent[bot]` (#1159): `git push` through the global credential helper, `gh` through `~/.arcade-code-agent/bin/gh` (`ghx`) with `GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh`. Never use the OWNER's `gh` login, OWNER GitHub connectors (claude.ai / ChatGPT) or any other OWNER credential; if the App token is unavailable, stop and report — there is no fallback. This routing is not credential isolation: agents share the OWNER's Unix user, so OWNER logins on the VPS stay technically reachable (see `specs/1229-agent-github-identity/`); never use or work around them.
+- Agents may implement, test, commit, push feature branches and open or update PRs as the App. Push to `main` and force push are forbidden.
+- Merging into `main` requires the code owner `@krzysztofcal`: an OWNER approval of an agent PR (a new push dismisses it), or the `pull_request`-only bypass of the user `krzysztofcal` for OWNER PRs. Agents never approve, bypass or merge on the OWNER's behalf. Activation of this rule and OWNER credential changes follow `specs/1229-agent-github-identity/`.
 
 ---
 
@@ -90,6 +128,15 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - DB is NOT source of truth
 
 ### WS Preview Deploy Gate (CRITICAL)
+
+Stage/WS Preview accepts hard-kick deployment restarts, including occupied tables; no manual Leave,
+empty-table requirement, Preview presence counters or safe-stop receipt is required. This is not a
+chip-settlement guarantee: interrupted hands may need existing Stage recovery and OWNER intervention.
+Provisioning completes read-only preflight, stops only Preview and proves its process group empty
+before changing files/accounts; rollback requires stopped Preview and never starts it. Production
+restart gate, HOLD/DRAIN, escrow/recovery and OWNER approvals remain unchanged. A deployment or DRAIN
+change always needs its own GO; health alone does not prove playable status.
+
 - Agents MUST use the approved release/admin paths below; never bypass owner approvals or substitute manual SSH/root/sudo, service restarts, direct release switching or direct publication. Missing approval or a blocked workflow is a STOP; request the owner’s decision. Read-only diagnostics permitted below and by the release procedure do not authorize mutations.
 - Netlify deploy previews update the browser app only. The `WS Server Deploy` pull-request check validates the WS package but does **not** deploy it; its deploy job is intentionally skipped on PR events.
 - If a PR changes `ws-server/**`, WS runtime dependencies under `shared/**`, or browser/WS protocol behavior, the agent MUST remind the user that `WS Preview Deploy` is required before end-to-end preview verification.
@@ -97,15 +144,12 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - WS Production is never deployed by a merge or `main` push. `WS Server Deploy` deploys only on a `workflow_dispatch` from `main` by the owner or the release-agent GitHub App (`vars.WS_RELEASE_AGENT`), with `releaseSha` equal to the current `main` HEAD and confirmation `DEPLOY WS PRODUCTION <releaseSha>`, and only after the owner approves the `ws-production` environment (#1159 T004). The agent may prepare and dispatch the run; the approval is the owner's GO and never comes from the agent. The approved job holds, drains and checks humans/escrow itself (`arcade-ws-restart-gate prepare/switching/resume/abort`); no manual root step is part of a normal release, and any STOP after the switch keeps the hold for the owner (C7 in `docs/ws-production-restart-gate.md`). A push touching the WS deploy surface only reports `WS Production NOT deployed`.
 - A GitHub Release is only a record of the running WWW, WS and Android versions (`Release Record` workflow, `docs/release-records.md`): it never deploys, restarts, migrates or publishes. Record a component only after its own owner-approved release path finished and was verified; the agent may run only the dry run; publishing (`publish=true`) and Android attestation are the owner's own dispatch, and never attach secrets, Stage/debug APKs, the AAB or other binaries. Never create, edit or delete a GitHub Release or tag directly: only an owner `Release Record` publication is a trusted record.
 - VPS administration that needs root never uses a root shell, `sudo` for `copilot` or a new sudoers rule for the agent. The agent requests one operation from the fixed catalog through the `VPS Admin Operation` workflow (`main`, confirmation `RUN <operation>`, a 10-200 character reason); the owner's approval of the `vps-admin` environment is the GO, and only then does the run reach the VPS account `arcade-admin`, which may run only `/usr/local/sbin/arcade-vps-admin <operation> <runId>`. An operation that is not in the catalog is added by a reviewed PR first (`docs/vps-admin-operations.md`); a failed operation is never retried automatically.
+- The fixed GitHub App signer is a non-root exception for credential issuance only: `copilot` may invoke `/usr/local/sbin/arcade-github-app-token` with no arguments or `--info` only as `arcade-github-token`. This grants no root, shell, admin-catalog access or caller-selected scope; all root administration still follows the rule above.
 - WWW Production (`playkcswh`) is never built or published by a merge: `netlify.toml` `ignore` skips `main` Git builds, auto publishing is locked, and only OWNER publishes an on-demand build-hook candidate with `scripts/www-production-release.mjs` (exact current-main SHA, active WS release proven by the VPS `current` release and GitHub deploy history; no rollback mode before T004; an unpublished candidate must be discarded with permalink 404 proof). Never unlock auto publishing, use Stop builds, remove the `ignore` or run `netlify deploy --prod` for this site without explicit OWNER GO. See `specs/1159-ci-cd-release-safety/pr5-www-production-publish.md`.
 - Use the manual `WS Preview Deploy` workflow with `--ref main` for the workflow definition and `-f ref=<the-latest-runtime-affecting-sha>` for the application revision. After dispatch, verify that the workflow succeeded for that exact SHA before handing off the manual smoke.
 - Codex does not have to run a full authenticated browser smoke for every PR. The user may perform it manually; agent smoke is optional unless explicitly requested or needed to diagnose the issue. If user verification is pending, report `implementation ready, awaiting manual runtime verification` and do not call the PR merge-ready.
 - A successful exact-SHA deploy plus confirmed smoke remains valid across later docs/spec/test/comment-only commits after a diff proves no runtime/deployable artifact or environment configuration changed. Any runtime/deployable/configuration change requires a new exact-SHA deploy and relevant smoke.
 - The preview WS host is shared. Do not make every PR auto-deploy to `ws-preview.kcswh.pl`; concurrent PRs would overwrite each other's runtime. Keep deployment explicit unless preview infrastructure becomes isolated per PR.
-
-### WS deployment activity gate
-
-Bot-only hands/tables do not block deployment or restart. Block deployment for active human games, human seats eligible for reconnect/resume, or their unresolved financial operations. Verify these conditions immediately before restart; do not infer human absence from socket count alone. Bot-only restart still requires persisted-state/escrow/CH safety, recovery verification and a verified executable rollback. All existing environment, authorization and financial guards remain binding.
 
 ### WS Runtime Logs
 - For preview incidents, agents may inspect:
