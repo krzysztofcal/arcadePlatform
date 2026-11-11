@@ -581,6 +581,41 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
 }
 
+// #1157: Stage functions NULL execute guard: p_execute NULL is a dry run,
+// even with the control enabled and an eligible batch and request. Rolled back.
+async function assertStageSettledRetentionNullExecute(sql) {
+  const nullRollback = new Error("stage null execute fixture rollback");
+  const stripTx = (s) => s.replace(/^\s*begin;\s*$/m, "").replace(/^\s*commit;\s*$/m, "");
+  const stage1 = stripTx(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "20261105160000_chips_settled_retention_12m.sql"), "utf8"));
+  const stage2 = stripTx(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "20261111213000_chips_settled_retention_12m_null_execute_guard.sql"), "utf8"));
+
+  await assert.rejects(() => sql.begin(async (tx) => {
+    await tx.unsafe(stage1);
+    await tx.unsafe(stage2);
+    await tx.unsafe("set local session_replication_role = 'replica';");
+    await tx.unsafe("update public.chips_ledger_archive_batches set first_created_at = now() - interval '14 months', last_created_at = now() - interval '13 months' where batch_id = 9000;");
+    const [table] = await tx.unsafe("select id from public.poker_tables limit 1;");
+    assert.ok(table, "fixture needs a poker table");
+    await tx.unsafe(`insert into public.poker_requests (table_id, user_id, request_id, kind, result_json, created_at)
+      values ($1::uuid, gen_random_uuid(), 'r-null-execute-old', 'JOIN', '{"ok":true}'::jsonb, now() - interval '13 months');`, [table.id]);
+    await tx.unsafe("set local session_replication_role = 'origin';");
+    await tx.unsafe("update public.chips_settled_retention_control set enabled = true, activated_at = now() where control_id;");
+    const snapshot = async () => (await tx.unsafe(`select
+        (select objects_expired_at is null from public.chips_ledger_archive_batches where batch_id = 9000) as batch_live,
+        (select count(*)::int from public.chips_transaction_idempotency where archive_batch_id = 9000) as registry,
+        (select count(*)::int from public.poker_requests where request_id = 'r-null-execute-old') as old_request;`))[0];
+    const before = await snapshot();
+    assert.deepEqual(before, { batch_live: true, registry: 3, old_request: 1 });
+    const [result] = await tx.unsafe(`select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, null, null, null) as expire,
+      public.chips_settled_retention_12m_run(5000, null, null) as run;`);
+    assert.equal(result.expire.state, "eligible", "NULL execute on an eligible batch only reports it");
+    assert.equal(result.run.state, "diagnosed", "NULL execute only counts table rows");
+    assert.ok(Number(result.run.poker_requests) >= 1);
+    assert.deepEqual(await snapshot(), before, "NULL execute mutates nothing");
+    throw nullRollback;
+  }), (error) => error === nullRollback);
+}
+
 // #1157 Production equivalent: exact confirmation, dark install, no deletion, no replay.
 async function assertProductionSettledRetentionInstall(sql) {
   const [identity] = await sql.unsafe("select system_identifier::text from pg_catalog.pg_control_system();");
@@ -729,6 +764,7 @@ async function assertSettledRetentionOwnerTransferAsNonSuperuser(sql) {
   };
   const blocks = [
     block("20261105160000_chips_settled_retention_12m.sql", "supabase/migrations"),
+    block("20261111213000_chips_settled_retention_12m_null_execute_guard.sql", "supabase/migrations"),
     block("20261105160500_chips_settled_retention_12m_production_contract.sql", "supabase/production-migrations"),
   ];
   const password = crypto.randomBytes(24).toString("hex");
@@ -5164,6 +5200,7 @@ async function main() {
   process.env.ACCOUNT_DELETION_ENABLED = "0";
   const { assertProductionDeletionCompatibility, assertAvatarLifecycleContention } = await import("./account-deletion-production.fixture.mjs");
   await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
+  await assertStageSettledRetentionNullExecute(sql);
   await assertProductionSettledRetentionInstall(sql);
 
   // The integration workflow reuses this disposable database for the
