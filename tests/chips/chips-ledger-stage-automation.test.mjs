@@ -4644,6 +4644,16 @@ await assert.rejects(botProvedPartialRecovery.run(), /durable recovery state is 
 assert.equal(botProvedPartialRecovery.calls.persist, 0);
 assert.equal(botProvedPartialRecovery.calls.execute, 0);
 assert.equal(botProvedPartialRecovery.calls.proof, 0);
+const botProvedPartialCleanup = makeBotMissingProofHarness({
+  row: {
+    archive_proof_verified_at: "2026-11-03T13:09:46Z",
+    archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+    archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256,
+    registry_cleaned_at: "2026-11-03T13:10:00Z",
+  },
+});
+await assert.rejects(botProvedPartialCleanup.run(), /cleanup receipts or destructive GO/);
+assert.deepEqual(botProvedPartialCleanup.calls, { proof: 0, dry: 0, persist: 0, execute: 0 }, "partial cleanup fails before recovery writes");
 const manualSixPrepare = makeProductionPrepareResumeHarness({ row: { transaction_count: 6, entry_count: 12 } });
 await assert.rejects(prepareProductionResume(manualSixPrepare), /PREPARE batch identity, archive or cap differs/);
 assert.deepEqual(manualSixPrepare.prepareCalls, { proof: 0, dry: 0, persist: 0 }, "manual PREPARE keeps the cap of 2");
