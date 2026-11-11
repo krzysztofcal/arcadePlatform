@@ -173,6 +173,7 @@ These will be built on top of this ledger.
   - `automatic` needs the owner workflow on `main` and the enabled control, and processes at most 10 batches per run.
   - Both modes use the target's existing retention advisory lock.
   - Only canonical Stage accepts a `--cutoff` override (T002).
+- **Schedule.** The Production dispatcher selects `retention-12m` daily at `03:39 UTC`; escrow skips that one slot and keeps its other hourly `:39` runs.
 
 ---
 

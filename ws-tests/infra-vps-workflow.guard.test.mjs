@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,12 +24,12 @@ function remoteBash(text) {
   return text.slice(start, end);
 }
 
-test("infra routes validation conservatively while retaining the Caddy-only push apply surface", () => {
+test("infra retains PR/main validation while Caddy apply has no push-change gate", () => {
   const text = workflowText();
   assert.match(text, /needs\.impact\.outputs\.infra == 'true'/);
-  assert.match(text, /git diff --name-only "\$BEFORE_SHA" "\$GITHUB_SHA" -- infra\/vps\/Caddyfile/);
+  assert.match(text, /pull_request:\n  push:\n    branches: \[ main \]/);
   assert.match(text, /apply:\n    needs: validate/);
-  assert.match(text, /needs\.validate\.outputs\.caddy == 'true'/);
+  assert.doesNotMatch(text, /needs\.validate\.outputs\.caddy|Detect existing Caddy deploy surface/);
 });
 
 test("infra VPS owns the unified Caddy contract test", () => {
@@ -551,7 +552,7 @@ test("infra VPS recovery docs retain the mutation boundaries and runner contract
   }
 });
 
-test("VPS SSH apply runs only for an owner main dispatch or an owner Caddy push, never a foreign re-run (#1159 T004-3)", () => {
+test("VPS SSH apply requires owner main dispatch, never push, PR, foreign actor or foreign re-run (#1159)", () => {
   const condition = workflowText().match(/\n  apply:\n    needs: validate\n    if: (.+)\n/)[1];
   const evaluate = ({ event = "workflow_dispatch", ref = "refs/heads/main", actor = "krzysztofcal", triggeringActor = actor, caddy = "true" } = {}) => {
     const js = condition
@@ -569,9 +570,12 @@ test("VPS SSH apply runs only for an owner main dispatch or an owner Caddy push,
   };
   assert.equal(evaluate(), true, "owner main dispatch");
   assert.equal(evaluate({ ref: "refs/heads/feature" }), false, "dispatch from another branch");
+  assert.equal(evaluate({ ref: "refs/tags/main" }), false, "a main-named tag is not the main branch");
+  assert.equal(evaluate({ caddy: "false" }), true, "explicit owner dispatch is independent of a previous push diff");
   assert.equal(evaluate({ triggeringActor: "release-agent[bot]" }), false, "foreign re-run of an owner dispatch");
   assert.equal(evaluate({ actor: "release-agent[bot]" }), false, "foreign dispatch");
-  assert.equal(evaluate({ event: "push" }), true, "owner Caddy push to main");
+  assert.equal(evaluate({ actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner rerun cannot authorize a foreign dispatch");
+  assert.equal(evaluate({ event: "push" }), false, "owner Caddy push to main never applies");
   assert.equal(evaluate({ event: "push", caddy: "false" }), false, "push without Caddy change");
   assert.equal(evaluate({ event: "push", triggeringActor: "release-agent[bot]" }), false, "foreign re-run of a Caddy push");
   assert.equal(evaluate({ event: "push", actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner re-run of a foreign push");
@@ -865,6 +869,349 @@ test("VPS admin quarantine keeps listed credential files in root-only custody an
   }
 });
 
+// GitHub answers come from a fake curl; the script is written to a temporary destination owned by the current user.
+const NEW_SCRIPT = "#!/usr/bin/env bash\nset -euo pipefail\necho new\n";
+function dispatcherInstallFixture({ run = {}, main, script = NEW_SCRIPT, published = NEW_SCRIPT, downloadExit = 0, state = {}, extra = {} } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-dispatcher-"));
+  const dest = path.join(dir, "arcade-chips-ledger-production-dispatch.sh");
+  fs.writeFileSync(dest, "#!/usr/bin/env bash\necho old\n", { mode: 0o755 });
+  const commit = "a".repeat(40);
+  const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
+  const urls = [];
+  const admin = fakeAdminHost(state, extra);
+  const source = "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh";
+  const blob = crypto.createHash("sha1").update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest("hex");
+  const host = {
+    ...admin.host,
+    dispatcher: { source, dest, uid: process.getuid(), gid: process.getgid() },
+    run(argv) {
+      if (argv[0] !== "/usr/bin/curl") return admin.host.run(argv);
+      const url = argv.at(-1);
+      urls.push(url);
+      if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
+      if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+      if (url.endsWith(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: "file", path: source, sha: blob }) };
+      if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
+        if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
+        return { status: downloadExit, stdout: "" };
+      }
+      return { status: 22, stdout: "" };
+    },
+  };
+  return { dir, dest, commit, host, urls, admin };
+}
+
+test("VPS admin installs the Production dispatcher only from the approved run's current main commit and leaves the timers stopped", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "ledger-production-dispatcher-install";
+  const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const stopped = (fx) => fx.admin.calls.filter((c) => c.startsWith("stop") || c.startsWith("start"));
+  const ok = dispatcherInstallFixture();
+  try {
+    const result = runOperation(op, "41700000020", ok.host);
+    const installed = fs.readFileSync(ok.dest, "utf8");
+    assert.equal(installed, "#!/usr/bin/env bash\nset -euo pipefail\necho new\n");
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${ok.commit} sha256=${hash(installed)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_stopped reload:no`);
+    assert.equal(fs.statSync(ok.dest).mode & 0o777, 0o755);
+    assert.deepEqual(stopped(ok), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"], "paused, never resumed");
+    assert.deepEqual(fs.readdirSync(ok.dir), [path.basename(ok.dest)], "no temporary file is left");
+    assert.match(ok.admin.audits[1], new RegExp(`result=ok detail=installed commit=${ok.commit} sha256=`));
+  } finally {
+    fs.rmSync(ok.dir, { recursive: true, force: true });
+  }
+
+  // Refused before anything changes: no timer stopped, no download, old script kept.
+  for (const [label, options, line] of [
+    ["main advanced", { main: "b".repeat(40) }, "main_advanced"],
+    ["feature branch", { run: { head_branch: "feature" } }, "run_not_main_vps_admin_dispatch"],
+    ["other workflow", { run: { path: ".github/workflows/infra-vps.yml" } }, "run_not_main_vps_admin_dispatch"],
+    ["finished run", { run: { status: "completed" } }, "run_not_main_vps_admin_dispatch"],
+    ["other run id", { run: { id: 1 } }, "run_not_main_vps_admin_dispatch"],
+    ["unreadable main", { main: "not-a-sha" }, "unverifiable_github_main"],
+  ]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, `ADMIN_BLOCKED ${op} ${line}`, label);
+      assert.deepEqual(stopped(fx), [], label);
+      assert.equal(fx.urls.some((u) => u.startsWith("https://raw.githubusercontent.com/")), false, label);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", label);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  const unknownRun = dispatcherInstallFixture();
+  try {
+    assert.equal(runOperation(op, "41700000021", unknownRun.host).line, `ADMIN_BLOCKED ${op} unverifiable_github_run`);
+  } finally {
+    fs.rmSync(unknownRun.dir, { recursive: true, force: true });
+  }
+
+  // After the pause: a failed or unexpected download keeps the old script and the timers stopped.
+  for (const [options, line] of [[{ downloadExit: 22 }, `ADMIN_FAILED ${op} download timers_left_stopped`],
+    [{ script: "<html>rate limited</html>" }, `ADMIN_BLOCKED ${op} unexpected_script timers_left_stopped`],
+    [{ script: "#!/usr/bin/env bash\necho tampered\n" }, `ADMIN_BLOCKED ${op} content_mismatch timers_left_stopped`]]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, line);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+      assert.equal(stopped(fx).length, 2);
+      assert.deepEqual(fs.readdirSync(fx.dir), [path.basename(fx.dest)]);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  // An error after the rename is reported with the ids and the read-back state, never as a bare failure.
+  const late = dispatcherInstallFixture();
+  try {
+    late.host.rename = (from, to) => { fs.renameSync(from, to); throw new Error("after rename"); };
+    const line = runOperation(op, "41700000020", late.host).line;
+    assert.equal(line, `ADMIN_FAILED ${op} install replaced=yes commit=${late.commit} sha256=${hash(NEW_SCRIPT)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_left_stopped`);
+    assert.match(late.admin.audits[1], /result=failed detail=install replaced=yes commit=/);
+  } finally {
+    fs.rmSync(late.dir, { recursive: true, force: true });
+  }
+  const early = dispatcherInstallFixture();
+  try {
+    early.host.rename = () => { throw new Error("rename failed"); };
+    assert.match(runOperation(op, "41700000020", early.host).line, new RegExp(`^ADMIN_FAILED ${op} install replaced=no commit=${early.commit} sha256=`));
+    assert.equal(fs.readFileSync(early.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(early.dir, { recursive: true, force: true });
+  }
+  // A failed stop of the first timer still stops the second, and nothing is installed.
+  const stopFails = dispatcherInstallFixture({ state: { "exit:stop arcade-chips-ledger-dispatch.timer": 1 } });
+  try {
+    assert.equal(runOperation(op, "41700000020", stopFails.host).line, `ADMIN_FAILED ${op} stop_arcade-chips-ledger-dispatch.timer`);
+    assert.deepEqual(stopped(stopFails), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"]);
+    assert.equal(fs.readFileSync(stopFails.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(stopFails.dir, { recursive: true, force: true });
+  }
+  const busy = dispatcherInstallFixture({ state: { "arcade-chips-ledger-production-dispatch.service:ActiveState": "activating" } });
+  try {
+    assert.match(runOperation(op, "41700000020", busy.host).line, new RegExp(`^ADMIN_BLOCKED ${op} timeout_timers_left_stopped `));
+    assert.equal(fs.readFileSync(busy.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", "a running dispatcher is never replaced");
+  } finally {
+    fs.rmSync(busy.dir, { recursive: true, force: true });
+  }
+});
+
+const NEW_RESTART_GATE = `#!/usr/bin/node
+// Valid restart gate mock
+import fs from "node:fs";
+const modes = ["check", "restart", "prepare", "switching", "resume", "abort"];
+const action = process.argv[2];
+if (action === "check") {
+  process.stdout.write("RESTART_SAFE all_clear\\n");
+  process.exit(0);
+}
+`;
+
+function restartGateInstallFixture({ run = {}, main, script = NEW_RESTART_GATE, published = NEW_RESTART_GATE, downloadExit = 0, checkStatus = 0, checkStdout = "RESTART_SAFE all_clear", state = {}, extra = {} } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-restart-gate-"));
+  const dest = path.join(dir, "arcade-ws-restart-gate");
+  fs.writeFileSync(dest, `#!/usr/bin/node\n// old gate\nconst modes = ["check", "restart"];\n`, { mode: 0o755 });
+  const commit = "a".repeat(40);
+  const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
+  const urls = [];
+  const admin = fakeAdminHost(state, extra);
+  const source = "infra/vps/ws-restart-gate.mjs";
+  const blob = crypto.createHash("sha1").update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest("hex");
+  const host = {
+    ...admin.host,
+    restartGate: { source, dest, uid: process.getuid(), gid: process.getgid() },
+    run(argv) {
+      if (argv[0] === "/usr/bin/curl") {
+        const url = argv.at(-1);
+        urls.push(url);
+        if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
+        if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+        if (url.endsWith(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: "file", path: source, sha: blob }) };
+        if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
+          if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
+          return { status: downloadExit, stdout: "" };
+        }
+        return { status: 22, stdout: "" };
+      }
+      if (argv[0] === "/usr/bin/node" && argv[1] === "--check") {
+        const res = spawnSync(process.execPath, argv.slice(1), { encoding: "utf8" });
+        return { status: res.status ?? 1, stdout: res.stdout || res.stderr || "" };
+      }
+      if (argv[0] === dest && argv[1] === "check") {
+        return { status: checkStatus, stdout: checkStdout };
+      }
+      return admin.host.run(argv);
+    },
+  };
+  return { dir, dest, commit, host, urls, admin };
+}
+
+test("VPS admin installs the WS restart gate helper only from the approved run's current main commit and runs check", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "ws-restart-gate-install";
+  const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const oldScript = `#!/usr/bin/node\n// old gate\nconst modes = ["check", "restart"];\n`;
+
+  // Safe check exit 0
+  const okSafe = restartGateInstallFixture();
+  try {
+    const result = runOperation(op, "41700000020", okSafe.host);
+    const installed = fs.readFileSync(okSafe.dest, "utf8");
+    assert.equal(installed, NEW_RESTART_GATE);
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${okSafe.commit} sha256=${hash(installed)} previous=${hash(oldScript)} gate:safe`);
+    assert.equal(fs.statSync(okSafe.dest).mode & 0o777, 0o755);
+    assert.deepEqual(fs.readdirSync(okSafe.dir), [path.basename(okSafe.dest)], "no temporary file is left");
+    assert.match(okSafe.admin.audits[1], new RegExp(`result=ok detail=installed commit=${okSafe.commit} sha256=`));
+  } finally {
+    fs.rmSync(okSafe.dir, { recursive: true, force: true });
+  }
+
+  // Blocked check exit 1 with expected reason
+  const okBlocked = restartGateInstallFixture({ checkStatus: 1, checkStdout: "RESTART_BLOCKED humanSeatsOpen=1" });
+  try {
+    const result = runOperation(op, "41700000020", okBlocked.host);
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${okBlocked.commit} sha256=${hash(NEW_RESTART_GATE)} previous=${hash(oldScript)} gate:blocked`);
+    assert.equal(fs.readFileSync(okBlocked.dest, "utf8"), NEW_RESTART_GATE);
+  } finally {
+    fs.rmSync(okBlocked.dir, { recursive: true, force: true });
+  }
+
+  // Technical gate_error is NOT accepted: triggers recovery to previous
+  const gateError = restartGateInstallFixture({ checkStatus: 1, checkStdout: "RESTART_BLOCKED gate_error" });
+  try {
+    const result = runOperation(op, "41700000020", gateError.host);
+    assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:gate_error recovery:restored_previous`);
+    assert.equal(fs.readFileSync(gateError.dest, "utf8"), oldScript, "recovered to old script");
+    const restored = fs.statSync(gateError.dest);
+    assert.equal(restored.mode & 0o7777, 0o755, "restored mode is 0755");
+    assert.equal(restored.uid, gateError.host.restartGate.uid, "restored uid matches");
+    assert.equal(restored.gid, gateError.host.restartGate.gid, "restored gid matches");
+    assert.equal(hash(fs.readFileSync(gateError.dest)), hash(oldScript), "restored sha256 matches");
+  } finally {
+    fs.rmSync(gateError.dir, { recursive: true, force: true });
+  }
+
+  // Crash or unrecognized exit triggers recovery to previous
+  const gateCrash = restartGateInstallFixture({ checkStatus: 2, checkStdout: "usage: arcade-ws-restart-gate <mode>" });
+  try {
+    const result = runOperation(op, "41700000020", gateCrash.host);
+    assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:status_2 recovery:restored_previous`);
+    assert.equal(fs.readFileSync(gateCrash.dest, "utf8"), oldScript, "recovered to old script");
+    const restored = fs.statSync(gateCrash.dest);
+    assert.equal(restored.mode & 0o7777, 0o755, "restored mode is 0755");
+    assert.equal(restored.uid, gateCrash.host.restartGate.uid, "restored uid matches");
+    assert.equal(restored.gid, gateCrash.host.restartGate.gid, "restored gid matches");
+    assert.equal(hash(fs.readFileSync(gateCrash.dest)), hash(oldScript), "restored sha256 matches");
+  } finally {
+    fs.rmSync(gateCrash.dir, { recursive: true, force: true });
+  }
+
+  // Syntax error refused before replace
+  const badSyntax = `#!/usr/bin/node\nimport { bad syntax`;
+  const syntaxErr = restartGateInstallFixture({ script: badSyntax, published: badSyntax });
+  try {
+    const result = runOperation(op, "41700000020", syntaxErr.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} syntax_error`);
+    assert.equal(fs.readFileSync(syntaxErr.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(syntaxErr.dir, { recursive: true, force: true });
+  }
+
+  // Missing modes refused before replace
+  const missingCode = `#!/usr/bin/node\n// only check\nconst x = ["check"];\n`;
+  const missingModes = restartGateInstallFixture({ script: missingCode, published: missingCode });
+  try {
+    const result = runOperation(op, "41700000020", missingModes.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} missing_modes`);
+    assert.equal(fs.readFileSync(missingModes.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(missingModes.dir, { recursive: true, force: true });
+  }
+
+  // Content mismatch refused before replace
+  const mismatch = restartGateInstallFixture({ script: NEW_RESTART_GATE + "\n// extra" });
+  try {
+    const result = runOperation(op, "41700000020", mismatch.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} content_mismatch`);
+    assert.equal(fs.readFileSync(mismatch.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(mismatch.dir, { recursive: true, force: true });
+  }
+
+  // Late failure reporting read-back state
+  const late = restartGateInstallFixture();
+  try {
+    late.host.rename = (from, to) => { fs.renameSync(from, to); throw new Error("after rename"); };
+    const line = runOperation(op, "41700000020", late.host).line;
+    assert.equal(line, `ADMIN_FAILED ${op} install replaced=yes commit=${late.commit} sha256=${hash(NEW_RESTART_GATE)} previous=${hash(oldScript)}`);
+  } finally {
+    fs.rmSync(late.dir, { recursive: true, force: true });
+  }
+});
+
+test("VPS admin approval summary describes every catalog operation from reviewed code, never from the reason", async () => {
+  const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
+  const { APPROVAL, checkCatalog, approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
+  checkCatalog();
+  assert.deepEqual(Object.keys(APPROVAL), Object.keys(OPERATIONS), "one description per helper operation, same order");
+  assert.throws(() => checkCatalog({ ...OPERATIONS, "new-operation": () => ({}) }), /approval_catalog_mismatch/);
+  const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
+  assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
+  assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status"], "only the status read is read-only");
+  assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
+  assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
+
+  const request = { operation: "ledger-dispatchers-pause", reason: "Pause dispatchers for the T004-3 cutover (step 4)", sha: "a".repeat(40),
+    actor: "arcade-code-agent[bot]", triggeringActor: "arcade-code-agent[bot]", runId: "42223180928", attempt: "1" };
+  const text = approvalSummary(request);
+  for (const part of ["## Approve only if expected: ledger-dispatchers-pause", "CHANGES THE VPS", `| Revision | \`${"a".repeat(40)}\` (main) |`,
+    "| Requested by | `arcade-code-agent[bot]`, triggered by `arcade-code-agent[bot]` |", APPROVAL["ledger-dispatchers-pause"].risk,
+    APPROVAL["ledger-dispatchers-pause"].rollback, "environment vps-admin", "Nothing has run on the VPS yet"]) assert.ok(text.includes(part), part);
+  assert.match(text, /Requester's reason \(free text, not part of the reviewed description\): `Pause dispatchers/);
+  assert.doesNotMatch(text, /ADMIN_OK ledger|PASS/);
+  for (const operation of Object.keys(APPROVAL)) {
+    const summary = approvalSummary({ ...request, operation });
+    assert.ok(summary.includes("### Review implementation"));
+    assert.ok(summary.includes("These links show repository code at this run's SHA."));
+    assert.ok(summary.includes("They do not confirm the version of `/usr/local/sbin/arcade-vps-admin` or its supporting files installed on the VPS."));
+    assert.ok(summary.includes("Matching the installed helper to this source requires separate verification before approval."));
+    for (const file of ["infra/vps/vps-admin.mjs", ".github/workflows/vps-admin-operation.yml"]) {
+      assert.ok(summary.includes(`https://github.com/krzysztofcal/arcadePlatform/blob/${request.sha}/${file}`));
+    }
+    assert.doesNotMatch(summary, /\/blob\/main\//);
+  }
+  for (const [operation, file] of [
+    ["ledger-production-dispatcher-install", "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+    ["ws-restart-gate-install", "infra/vps/ws-restart-gate.mjs"],
+    ["github-app-token-prepare", "infra/vps/github-app-token.py"],
+    ["github-app-key-quarantine", "infra/vps/github-app-token.py"],
+    ["ws-preview-isolation-provision", "infra/vps/ws-preview-isolation.py"],
+    ["ws-preview-isolation-rollback", "infra/vps/ws-preview-isolation.py"],
+  ]) assert.ok(approvalSummary({ ...request, operation }).includes(`/blob/${request.sha}/${file}`));
+  for (const [field, value] of [["operation", "rm-rf"], ["reason", "ok\n## Approved"], ["reason", "see `x` now ok"], ["sha", "abc"], ["actor", "a b"], ["runId", "0"]]) {
+    assert.throws(() => approvalSummary({ ...request, [field]: value }), Error, field);
+  }
+});
+
+test("Preview approval descriptions retain the stopped-service and recovery limits", async () => {
+  const { approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
+  const request = { reason: "Inspect reviewed Preview isolation request", sha: "b".repeat(40),
+    actor: "release-agent[bot]", triggeringActor: "release-agent[bot]", runId: "42223180929", attempt: "1" };
+  for (const operation of ["ws-preview-isolation-provision", "ws-preview-isolation-rollback"]) {
+    const text = approvalSummary({ ...request, operation });
+    assert.ok(text.includes(`## Approve only if expected: ${operation}`));
+    assert.match(text, /CHANGES THE VPS/);
+    assert.match(text, /Nothing has run on the VPS yet/);
+    assert.match(text, /stopped|stopping/);
+    assert.match(text, /separate/i);
+  }
+  const provision = approvalSummary({ ...request, operation: "ws-preview-isolation-provision" });
+  assert.match(provision, /daemon-reload re-reads all changed VPS unit files/);
+  assert.match(provision, /hard kick does not guarantee chip settlement/);
+  assert.match(provision, /read-only preflight, stops only ws-server-preview.service/);
+});
+
 test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
   const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
   const catalog = Object.keys(OPERATIONS);
@@ -886,8 +1233,12 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
   const request = workflow.slice(workflow.indexOf("\n  request:\n"), workflow.indexOf("\n  operate:\n"));
   const operate = workflow.slice(workflow.indexOf("\n  operate:\n"));
   assert.doesNotMatch(request, /environment:|secrets\./, "the summary job has no environment and no secret");
-  assert.match(request, /GITHUB_STEP_SUMMARY/);
-  for (const field of ["operation: \\`$OPERATION\\`", "reason: \\`$REASON\\`", "revision: \\`$GITHUB_SHA\\`", "requested by: \\`$GITHUB_ACTOR\\`"]) assert.ok(request.includes(field), field);
+  // The reviewed description is rendered only after the inputs passed the bash checks, from main's own code.
+  assert.ok(request.indexOf("[[ \"$REASON\" =~ $REASON_RE ]]") < request.indexOf("node infra/vps/vps-admin-approval.mjs"));
+  assert.match(request, /uses: actions\/checkout@v4\n        with:\n          persist-credentials: false\n/);
+  assert.match(workflow, /^run-name: "VPS Admin: \$\{\{ inputs\.operation \}\} \(requested by \$\{\{ github\.triggering_actor \}\}\)"$/m);
+  assert.match(request, /\n    name: "1\. Review request: \$\{\{ inputs\.operation \}\}"\n/);
+  assert.match(operate, /\n    name: "2\. Run on the VPS after approval: \$\{\{ inputs\.operation \}\}"\n/);
   assert.match(operate, /\n    needs: request\n/);
   assert.match(operate, /\n    environment: vps-admin\n/);
   assert.doesNotMatch(operate, /GITHUB_STEP_SUMMARY/);
@@ -955,4 +1306,119 @@ test("VPS admin workflow shows the request before approval and reaches arcade-ad
     ["unindented garbage", header + helperLine(["ledger-dispatchers-status"]) + "unexpected\n", 0],
   ]) assert.equal(verifies(out, exit), false, label);
   fs.rmSync(bin, { recursive: true, force: true });
+});
+
+
+test("Preview isolation catalog uses fixed actions and unprivileged fundamental fixtures", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const action of ["provision", "rollback"]) {
+    const fx = fakeAdminHost();
+    const originalRun = fx.host.run;
+    fx.host.run = (argv, ...args) => {
+      if (argv[0] === "/usr/bin/python3") {
+        assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, "123"]);
+        return { status: 1, stdout: "PREVIEW_BLOCKED owner_public_key_missing_or_invalid" };
+      }
+      return originalRun(argv, ...args);
+    };
+    assert.match(runOperation(`ws-preview-isolation-${action}`, "123", fx.host).line, /ADMIN_BLOCKED .* owner_public_key_missing_or_invalid$/);
+  }
+  const result = spawnSync("python3", ["tests/ws-preview-config.test.py", "PreviewIsolation"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+
+test("removed Preview operations fail closed and partial provisioning is FAILED", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const operation of ["ws-preview-safe-stop", "ws-preview-isolation-preflight"]) {
+    const fx = fakeAdminHost();
+    assert.match(runOperation(operation, "123", fx.host).line, /ADMIN_BLOCKED .* unexpected_arguments$/);
+  }
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  fx.host.run = (argv, ...args) => argv[0] === "/usr/bin/python3"
+    ? { status: 1, stdout: "PREVIEW_FAILED preview_processes_still_running" } : original(argv, ...args);
+  assert.match(runOperation("ws-preview-isolation-provision", "123", fx.host).line, /^ADMIN_FAILED /);
+});
+
+test("GitHub App signer preparation is fixed and quarantine refuses an unavailable replacement", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  const calls = [];
+  fx.host.run = (argv, ...args) => {
+    calls.push(argv);
+    if (argv[0] === "/usr/bin/python3") {
+      assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", "123"]);
+      return { status: 0, stdout: "GITHUB_TOKEN_OK prepared_no_key_no_client_switch" };
+    }
+    if (argv[0] === "/usr/sbin/runuser") {
+      assert.deepEqual(argv, ["/usr/sbin/runuser", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", "--info"]);
+      return { status: 1, stdout: "" };
+    }
+    return original(argv, ...args);
+  };
+  assert.equal(runOperation("github-app-token-prepare", "123", fx.host).ok, true);
+  calls.length = 0;
+  assert.match(runOperation("github-app-key-quarantine", "123", fx.host).line, /ADMIN_BLOCKED .* replacement_signer_not_verified$/);
+  assert.equal(calls.filter(a => a[0] === "/usr/sbin/runuser").length, 1);
+  assert.equal(calls.filter(a => a[0] === "/usr/bin/id").length, 0, "no old-key quarantine begins without replacement proof");
+});
+
+test("GitHub gh and Git wrappers preserve interfaces without OWNER or old-key fallback", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "github-client-"));
+  try {
+    const provider = path.join(dir, "provider");
+    const gh = path.join(dir, "gh-real");
+    const marker = path.join(dir, "called");
+    fs.writeFileSync(provider, `#!/bin/sh\nprintf called >> '${marker}'\nprintf fixture-short-lived\n`, { mode: 0o700 });
+    fs.writeFileSync(gh, '#!/bin/sh\n[ "$GH_TOKEN" = fixture-short-lived ] || exit 9\n[ -z "${GITHUB_TOKEN:-}${GH_HOST:-}${GH_ENTERPRISE_TOKEN:-}" ] || exit 10\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
+    const wrapper = path.join(dir, "ghx");
+    fs.writeFileSync(wrapper, fileText("infra/vps/github-app-client/ghx")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider)
+      .replaceAll("/home/copilot/.local/bin/gh", gh), { mode: 0o700 });
+    const run = spawnSync(wrapper, ["workflow", "run", "vps-admin-operation.yml", "--ref", "main"], {
+      encoding: "utf8", env: { PATH: process.env.PATH, GITHUB_TOKEN: "unrelated-fixture", GH_HOST: "foreign.invalid", GH_ENTERPRISE_TOKEN: "unrelated-fixture" }
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout, "workflow\nrun\nvps-admin-operation.yml\n--ref\nmain\n");
+    assert.equal(fs.readFileSync(marker, "utf8"), "called");
+    assert.equal(spawnSync(wrapper, ["auth", "token"]).status, 2);
+    assert.equal(fs.readFileSync(marker, "utf8"), "called", "gh auth must not mint or print a token");
+    const helper = path.join(dir, "credential");
+    fs.writeFileSync(helper, fileText("infra/vps/github-app-client/git-credential-arcade-agent")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider), { mode: 0o700 });
+    assert.equal(spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" }).stdout,
+      "username=x-access-token\npassword=fixture-short-lived\n");
+    const before = fs.readFileSync(marker, "utf8");
+    for (const [action, input] of [["store", ""], ["erase", ""], ["get", "protocol=https\nhost=foreign.invalid\n\n"], ["get", "protocol=http\nhost=github.com\n\n"]]) {
+      assert.equal(spawnSync(helper, [action], { input, encoding: "utf8" }).stdout, "");
+    }
+    assert.equal(fs.readFileSync(marker, "utf8"), before);
+    fs.writeFileSync(provider, "#!/bin/sh\nexit 1\n");
+    assert.equal(spawnSync(wrapper, ["issue", "list"]).status, 1, "no OWNER fallback on issuer failure");
+    const refused = spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, "quit=1\n", "stop Git credential fallback and prompting after issuer failure");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("compatibility provider invokes only the fixed non-root isolated issuer", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const source = fileText("infra/vps/github-app-client/arcade-agent-token.mjs").replace(/^#!.*\n/, "")
+    .replace('import { spawnSync } from "node:child_process";', "");
+  for (const args of [[], ["--info"], ["--permissions=administration:write"], ["--info", "extra"]]) {
+    const calls = []; let code;
+    const process = { argv: ["node", "provider", ...args], stderr: { write() {} }, exit(value) { code = value; throw new Error("exit"); } };
+    assert.throws(() => runInNewContext(source, { process, spawnSync(...argv) { calls.push(argv); return { status: 0 }; } }), /exit/);
+    const allowed = args.length <= 1 && (args.length === 0 || args[0] === "--info");
+    assert.equal(code, allowed ? 0 : 1);
+    assert.equal(calls.length, allowed ? 1 : 0);
+    if (allowed) {
+      assert.equal(calls[0][0], "/usr/bin/sudo");
+      assert.deepEqual(Array.from(calls[0][1]), ["-n", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", ...args]);
+      assert.equal(calls[0][2].env.PATH, "/usr/bin:/bin");
+      assert.deepEqual(Array.from(calls[0][2].stdio), ["ignore", "inherit", "inherit"]);
+    }
+  }
 });
