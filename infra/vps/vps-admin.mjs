@@ -43,6 +43,12 @@ const HOST = {
     dest: "/usr/local/bin/arcade-chips-ledger-production-dispatch.sh",
     uid: 0, gid: 0,
   },
+  // The reviewed Production WS restart gate; installed only from the exact main commit of the approved run.
+  restartGate: {
+    source: "infra/vps/ws-restart-gate.mjs",
+    dest: "/usr/local/sbin/arcade-ws-restart-gate",
+    uid: 0, gid: 0,
+  },
   // Verified files of the agent account that hold credentials or their recovery copies. They move into a root-only
   // quarantine kept for recovery; copilot cannot read them afterwards. Nothing else in copilot's home is touched.
   quarantine: {
@@ -326,6 +332,122 @@ function installProductionDispatcher(host, runId) {
   }
 }
 
+// Installs the Production WS restart gate from GitHub at the commit of this run. Verifies the run is an
+// in-progress VPS Admin workflow_dispatch on main, checks commit and blob SHA, validates syntax with node --check
+// on a .mjs temporary file, verifies required modes statically, replaces atomically, and runs check.
+// Accepts safe (exit 0) or blocked (exit 1), but refuses gate_error or unexpected exits. In case of verification
+// failure, attempts atomic recovery from previous bytes. Never restarts ws-server.service.
+function installWsRestartGate(host, runId) {
+  const g = host.restartGate;
+  const api = (route, accept) => curl(host, `https://api.github.com/repos/${REPO}/${route}`, ["-H", `Accept: ${accept}`]);
+  const response = api(`actions/runs/${runId}`, "application/vnd.github+json");
+  let run;
+  try {
+    run = response.status === 0 ? JSON.parse(response.stdout) : null;
+  } catch {
+    run = null;
+  }
+  if (!run) throw new Unverifiable("github_run");
+  if (String(run.id) !== String(runId) || run.path !== ".github/workflows/vps-admin-operation.yml" || run.event !== "workflow_dispatch"
+    || run.head_branch !== "main" || run.status !== "in_progress" || !COMMIT.test(String(run.head_sha))) return { ok: false, blocked: "run_not_main_vps_admin_dispatch" };
+  const main = api("commits/main", "application/vnd.github.sha");
+  if (main.status !== 0 || !COMMIT.test(main.stdout)) throw new Unverifiable("github_main");
+  if (main.stdout !== run.head_sha) return { ok: false, blocked: "main_advanced" };
+  const entry = api(`contents/${g.source}?ref=${run.head_sha}`, "application/vnd.github.object+json");
+  let blob;
+  try {
+    blob = entry.status === 0 ? JSON.parse(entry.stdout) : null;
+  } catch {
+    blob = null;
+  }
+  if (!blob || blob.type !== "file" || blob.path !== g.source || !/^[0-9a-f]{40}$/.test(String(blob.sha))) throw new Unverifiable("github_contents");
+  const current = lstatOrNull(g.dest);
+  if (current && !current.isFile()) return { ok: false, blocked: "dest_not_regular_file" };
+
+  const previousBytes = current ? fs.readFileSync(g.dest) : null;
+  const previousSha = previousBytes ? sha256(previousBytes) : "none";
+  // The temporary file must carry .mjs so node --check parses it as an ES module without ERR_UNKNOWN_FILE_EXTENSION.
+  const tmp = path.join(path.dirname(g.dest), `.${path.basename(g.dest)}.${runId}.mjs`);
+  let ids = null;
+  try {
+    fs.rmSync(tmp, { force: true });
+    if (curl(host, `https://raw.githubusercontent.com/${REPO}/${run.head_sha}/${g.source}`, ["-o", tmp]).status !== 0) {
+      return { ok: false, failed: "download" };
+    }
+    const bytes = fs.readFileSync(tmp);
+    if (bytes.length > 65536 || !bytes.toString("utf8", 0, 16).startsWith("#!/usr/bin/node\n")) {
+      return { ok: false, blocked: "unexpected_script" };
+    }
+    if (gitBlob(bytes) !== blob.sha) return { ok: false, blocked: "content_mismatch" };
+
+    const syntax = host.run(["/usr/bin/node", "--check", tmp], 10000);
+    if (syntax.status !== 0) return { ok: false, blocked: "syntax_error" };
+    const src = bytes.toString("utf8");
+    const requiredModes = ["check", "restart", "prepare", "switching", "resume", "abort"];
+    if (requiredModes.some((m) => !src.includes(`"${m}"`))) {
+      return { ok: false, blocked: "missing_modes" };
+    }
+
+    ids = { sha: sha256(bytes), text: `commit=${run.head_sha} sha256=${sha256(bytes)} previous=${previousSha}` };
+    fs.chownSync(tmp, g.uid, g.gid);
+    fs.chmodSync(tmp, 0o755);
+    fsyncFd(fs.openSync(tmp, "r"), true);
+    host.rename(tmp, g.dest);
+    fsyncFd(fs.openSync(path.dirname(g.dest), O_DIR), true);
+
+    const check = host.run([g.dest, "check"], 15000);
+    const stdout = (check.stdout || "").trim();
+    let gateDecision = null;
+    if (check.status === 0 && stdout.startsWith("RESTART_SAFE")) {
+      gateDecision = "safe";
+    } else if (check.status === 1 && stdout.startsWith("RESTART_BLOCKED") && stdout !== "RESTART_BLOCKED gate_error") {
+      gateDecision = "blocked";
+    }
+
+    if (!gateDecision) {
+      let recovery = "none";
+      if (previousBytes) {
+        try {
+          fs.writeFileSync(tmp, previousBytes);
+          fs.chownSync(tmp, g.uid, g.gid);
+          fs.chmodSync(tmp, 0o755);
+          fsyncFd(fs.openSync(tmp, "r"), true);
+          host.rename(tmp, g.dest);
+          fsyncFd(fs.openSync(path.dirname(g.dest), O_DIR), true);
+          const restored = lstatOrNull(g.dest);
+          const restoredOk = restored
+            && restored.isFile()
+            && restored.uid === g.uid
+            && restored.gid === g.gid
+            && (restored.mode & 0o7777) === 0o755
+            && sha256(fs.readFileSync(g.dest)) === previousSha;
+          recovery = restoredOk ? "restored_previous" : "restore_failed";
+        } catch {
+          recovery = "restore_failed";
+        }
+      }
+      const failReason = (stdout === "RESTART_BLOCKED gate_error") ? "gate_error" : `status_${check.status}`;
+      return { ok: false, failed: `verification_failed reason:${failReason} recovery:${recovery}` };
+    }
+
+    return { ok: true, details: `installed ${ids.text} gate:${gateDecision}` };
+  } catch {
+    let replaced = "unknown";
+    try {
+      const destBytes = fs.readFileSync(g.dest);
+      const destSha = sha256(destBytes);
+      if (ids && destSha === ids.sha) replaced = "yes";
+      else if (previousBytes && destSha === previousSha) replaced = "no";
+      else replaced = "different";
+    } catch {
+      // stays unknown
+    }
+    return { ok: false, failed: `install replaced=${replaced}${ids ? ` ${ids.text}` : ""}` };
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
 export const OPERATIONS = Object.freeze({
   "ledger-dispatchers-status": (host) => ({
     ok: true,
@@ -363,6 +485,7 @@ export const OPERATIONS = Object.freeze({
     : { ok: false, failed: "daemon-reload" }),
   "copilot-secret-snapshots-quarantine": quarantineSnapshots,
   "ledger-production-dispatcher-install": installProductionDispatcher,
+  "ws-restart-gate-install": installWsRestartGate,
   "github-app-token-prepare": (host, runId) => {
     const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", String(runId)], 180000);
     return result.status === 0 && result.stdout === "GITHUB_TOKEN_OK prepared_no_key_no_client_switch"

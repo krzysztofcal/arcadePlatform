@@ -202,7 +202,7 @@ Agents MUST use this to locate logic quickly.
 - For live debugging, add `-f`; for recent bounded output, add `--no-pager -n 200`.
 
 ### Rule
-- Follow the mandatory release, Root on Demand and Supabase egress rules in [agents.md](agents.md); use [VPS Admin Operation](docs/vps-admin-operations.md) for catalogued root operations with owner approval.
+- Follow the mandatory release, Root on Demand and Supabase egress rules in [AGENTS.md](AGENTS.md); use [VPS Admin Operation](docs/vps-admin-operations.md) for catalogued root operations with owner approval.
 - No Docker assumptions unless explicitly present
 - When investigating WS preview or production behavior, check the relevant journald service before inferring from code alone.
 

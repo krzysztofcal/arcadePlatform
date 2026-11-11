@@ -1,9 +1,47 @@
-# agents.md
+# AGENTS.md — AI Agent Guidelines & Operations
 
 ## 🎯 Purpose
-Defines how agents (Codex / AI) should operate in the Arcade Platform repo.
+Defines how agents (Codex / AI / Antigravity / Claude Code) should operate in the Arcade Platform repo.
+
+Before starting any task in this repository, you MUST read and comply with:
+1. This file (`AGENTS.md`) — primary source of detailed development, runtime, logging, and deployment rules.
+2. `skills.md` — codebase architecture and directory mapping.
+3. `.specify/memory/constitution.md` — binding project constitution and safety gates.
 
 This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
+
+---
+
+## 🔒 Deployment & Administrative Authority
+
+> **Binding Operational Principle**:
+> Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez agentów przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty (co nie wyklucza istniejącej awaryjnej procedury odzyskiwania przez OWNERA — C7 w `docs/ws-production-restart-gate.md`).
+
+- **Agent GitHub access is NOT authorization for Production deployment.**
+- Every required **OWNER GO** remains strictly mandatory.
+- Never bypass procedures via manual SSH, sudo, root, direct service restart, Netlify publish, or ad-hoc scripts (does not preclude OWNER emergency recovery C7).
+
+### Official Approved Pathways
+- **WS Production Deploy**: `.github/workflows/ws-server-deploy.yml` (exact SHA, GitHub App dispatch, OWNER approval in `ws-production`).
+- **WWW Production Release**: `node scripts/www-production-release.mjs` (Netlify production procedure, OWNER-run only).
+- **VPS Admin Operations**: `.github/workflows/vps-admin-operation.yml` (helper catalog, OWNER approval in `vps-admin`).
+- **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (wymaga jawnego `workflow_dispatch` z `main`, operacja `apply` uruchamiana przez OWNERA dla dokładnego zatwierdzonego `sourceSha` i zestawu migracji w środowisku `stage-automation`).
+- **Release Record**: `.github/workflows/release-record.yml` (rejestr wersji; `publish=true` wymaga dispatchu przez OWNERA; nie wykonuje deploymentu).
+- **Android / Google Play**: Separate publishing track with independent review and signing.
+
+---
+
+## 🔀 GitHub PR Merge Policy (Always Binding)
+
+- **NEVER merge a pull request yourself.**
+- You may create PRs, run checks, and prepare them for review/merge.
+- Only merge if the user explicitly commands you to merge in that specific task.
+
+### Agent GitHub identity (#1229)
+
+- Claude Code, Codex and Antigravity act on GitHub only as the GitHub App `arcade-code-agent[bot]` (#1159): `git push` through the global credential helper, `gh` through `~/.arcade-code-agent/bin/gh` (`ghx`) with `GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh`. Never use the OWNER's `gh` login, OWNER GitHub connectors (claude.ai / ChatGPT) or any other OWNER credential; if the App token is unavailable, stop and report — there is no fallback. This routing is not credential isolation: agents share the OWNER's Unix user, so OWNER logins on the VPS stay technically reachable (see `specs/1229-agent-github-identity/`); never use or work around them.
+- Agents may implement, test, commit, push feature branches and open or update PRs as the App. Push to `main` and force push are forbidden.
+- Merging into `main` requires the code owner `@krzysztofcal`: an OWNER approval of an agent PR (a new push dismisses it), or the `pull_request`-only bypass of the user `krzysztofcal` for OWNER PRs. Agents never approve, bypass or merge on the OWNER's behalf. Activation of this rule and OWNER credential changes follow `specs/1229-agent-github-identity/`.
 
 ---
 
@@ -112,10 +150,6 @@ change always needs its own GO; health alone does not prove playable status.
 - Codex does not have to run a full authenticated browser smoke for every PR. The user may perform it manually; agent smoke is optional unless explicitly requested or needed to diagnose the issue. If user verification is pending, report `implementation ready, awaiting manual runtime verification` and do not call the PR merge-ready.
 - A successful exact-SHA deploy plus confirmed smoke remains valid across later docs/spec/test/comment-only commits after a diff proves no runtime/deployable artifact or environment configuration changed. Any runtime/deployable/configuration change requires a new exact-SHA deploy and relevant smoke.
 - The preview WS host is shared. Do not make every PR auto-deploy to `ws-preview.kcswh.pl`; concurrent PRs would overwrite each other's runtime. Keep deployment explicit unless preview infrastructure becomes isolated per PR.
-
-### WS deployment activity gate
-
-Bot-only hands/tables do not block deployment or restart. Block deployment for active human games, human seats eligible for reconnect/resume, or their unresolved financial operations. Verify these conditions immediately before restart; do not infer human absence from socket count alone. Bot-only restart still requires persisted-state/escrow/CH safety, recovery verification and a verified executable rollback. All existing environment, authorization and financial guards remain binding.
 
 ### WS Runtime Logs
 - For preview incidents, agents may inspect:

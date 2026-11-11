@@ -5,6 +5,17 @@ Arcade Platform VPS. It is a recovery source, not an application deployment
 system. `WS Server Deploy` and `WS Preview Deploy` remain the only application
 deployment workflows.
 
+## Caddy configuration updates (#1159)
+
+PRs and pushes to `main` validate relevant infra changes but never apply Caddy.
+To deploy the reviewed configuration, OWNER separately selects **Actions → Infra VPS →
+Run workflow → main**. Both `github.actor` and `github.triggering_actor` must be OWNER;
+a foreign requester/rerun or any other ref is refused. Validation, backup, rollback,
+health checks, WS smoke and workflow concurrency remain unchanged.
+
+Breaking change: merging `infra/vps/Caddyfile` no longer updates Caddy on the VPS;
+the separate OWNER dispatch is required. No manual SSH/root step is introduced.
+
 ## Supported baseline
 
 - Ubuntu 24.04 LTS.
