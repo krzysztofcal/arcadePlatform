@@ -12,6 +12,10 @@ function botReaction(before){
     : classifyAmbientReaction({botSeats});
   if(candidate){lastBotReaction=Date.now();reactionListener({payload:{...candidate,seatNo:candidate.botSeatNo}});}
 }
+function avatarVariant(){
+  try { const variant=window.localStorage.getItem('kcswh:offline-avatar:v1'); if(window.ArcadeAvatars?.variants.includes(variant))return variant; } catch {}
+  return 'comet-blue';
+}
 function publish(){
   if(listener && game.read().session){
     const token=game.timerToken(),snapshot=game.snapshot();
@@ -121,7 +125,7 @@ async function startView(fn,reactions,onPause,ready){
   await activate();
 }
 window.PokerOffline={
-  human:HUMAN,read:game.read,backToLobby,cancelDialog,isActive:()=>active,
+  human:HUMAN,read:game.read,avatarVariant,backToLobby,cancelDialog,isActive:()=>active,
   start(fn,reactions,onPause,ready){return startView(fn,reactions,onPause,ready).catch(error=>{fail(error);window.location.replace('/poker/index.html');});},
   act(action){const expected=renderedToken,generation=epoch;return run(()=>active&&expected&&generation===epoch?game.act(action,expected):false);},
   leave(){

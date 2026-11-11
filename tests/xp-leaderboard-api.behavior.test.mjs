@@ -313,3 +313,13 @@ test("leaderboard rollout defaults to previews and requires an explicit producti
   assert.equal(configuredRateLimit("invalid"), 60);
   assert.equal(configuredRateLimit("-1"), 60);
 });
+
+ test("leaderboard reader requires current schema and excludes blocked public profiles in SQL",async()=>{
+ const {readLeaderboardProfiles}=await import("../netlify/functions/_shared/xp-leaderboard-read.mjs");
+ const id="00000000-0000-4000-8000-000000000003";
+ let blocked=true;
+ const run=async(query)=>{assert.match(query,/public_profile_blocked = false/);assert.match(query,/leaderboard_visible = true/);return blocked?[]:[{user_id:id,handle:"fox-123",display_name:"Fox",avatar_variant:"fox-blue"}];};
+ assert.equal((await readLeaderboardProfiles([id],run)).size,0);
+ blocked=false;assert.equal((await readLeaderboardProfiles([id],run)).size,1);
+ await assert.rejects(readLeaderboardProfiles([id],async()=>{throw Object.assign(new Error("missing column"),{code:"42703"});}),{code:"42703"});
+ });

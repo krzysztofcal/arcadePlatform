@@ -59,11 +59,11 @@ function createProfilePublicHandler(deps = {}) {
 
     try {
       const profile = await findProfile(event.queryStringParameters?.handle);
-      if (!profile) return json(404, cors, { error: "not_found" });
+      if (!profile || profile.publicProfileBlocked === true) return json(404, { ...cors, "cache-control": "no-store" }, { error: "not_found" });
       const xpResult = await getPublicXp(profile.userId);
       const xpValue = typeof xpResult === "object" ? xpResult?.totalXp : xpResult;
       const xp = Math.max(0, Math.floor(Number(xpValue) || 0));
-      return json(200, { ...cors, "cache-control": "public, max-age=30", Vary: "Origin" }, publicProfile(profile, {
+      return json(200, { ...cors, "cache-control": "no-store", Vary: "Origin" }, publicProfile(profile, {
         xp,
         level: computeXpLevel(xp),
       }));

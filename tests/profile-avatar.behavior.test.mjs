@@ -35,28 +35,9 @@ test("finalization trusts detected safe image content over browser-declared rast
   assert.match(result.avatarKey, /^[0-9a-f-]{36}\.webp$/);
 });
 
-test("upload-url endpoint requires auth and returns only backend-generated upload data", async () => {
-  const unauthorized = createAvatarUploadUrlHandler({ verifySupabaseJwt: async () => ({ valid: false }) });
-  const denied = await unauthorized({ httpMethod: "POST", headers: {}, body: "{}" });
-  assert.equal(denied.statusCode, 401);
-
-  const handler = createAvatarUploadUrlHandler({
-    verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }),
-    createPendingUpload: async (userId, payload) => {
-      assert.equal(userId, USER_ID);
-      assert.deepEqual(payload, { mimeType: "image/webp", size: 1234, path: "client/path" });
-      return { uploadId: "10000000-0000-4000-8000-000000000001", uploadUrl: "https://stage.supabase.co/signed", token: "signed", expiresAt: "2026-07-11T10:00:00Z" };
-    },
-  });
-  const response = await handler({
-    httpMethod: "POST",
-    headers: {},
-    body: JSON.stringify({ mimeType: "image/webp", size: 1234, path: "client/path" }),
-  });
-  const body = JSON.parse(response.body);
-  assert.equal(response.statusCode, 200);
-  assert.equal(body.uploadId, "10000000-0000-4000-8000-000000000001");
-  assert.equal("sourcePath" in body, false);
+test("retired public upload URL endpoint cannot sign a new Storage capability", async () => {
+ const handler=createAvatarUploadUrlHandler({createPendingUpload:async()=>{throw Error("must not sign");}});
+ assert.equal((await handler({httpMethod:"POST",headers:{origin:"https://arcade.test"},body:"{}"})).statusCode,410);
 });
 
 test("pending upload signs only a server-generated private Storage path", async () => {

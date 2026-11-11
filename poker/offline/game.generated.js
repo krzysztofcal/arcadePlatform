@@ -2363,7 +2363,17 @@
     "fox-blue",
     "nova-purple",
     "orbit-green",
-    "panda-pink"
+    "panda-pink",
+    "raven-violet",
+    "tiger-gold",
+    "wave-cyan",
+    "wizard-indigo",
+    "bolt-yellow",
+    "rocket-red",
+    "ace-silver",
+    "ember-coral",
+    "pixel-teal",
+    "zen-lime"
   ]);
   var PUBLIC_AVATAR_VARIANT_SET = new Set(PUBLIC_AVATAR_VARIANTS);
 
@@ -3131,6 +3141,14 @@
       reactionListener({ payload: { ...candidate, seatNo: candidate.botSeatNo } });
     }
   }
+  function avatarVariant() {
+    try {
+      const variant = window.localStorage.getItem("kcswh:offline-avatar:v1");
+      if (window.ArcadeAvatars?.variants.includes(variant)) return variant;
+    } catch {
+    }
+    return "comet-blue";
+  }
   function publish() {
     if (listener && game.read().session) {
       const token = game.timerToken(), snapshot = game.snapshot();
@@ -3300,6 +3318,7 @@
   window.PokerOffline = {
     human: HUMAN,
     read: game.read,
+    avatarVariant,
     backToLobby,
     cancelDialog,
     isActive: () => active,

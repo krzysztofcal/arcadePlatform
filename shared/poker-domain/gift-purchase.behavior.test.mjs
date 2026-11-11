@@ -23,6 +23,9 @@ async function fixture({ funds = 10000, failReceipt = false, ledgerFailure = fal
       ('${tableId}', '${humanId}', 2, 'ACTIVE', false, '2026-01-01T00:00:00.123456Z'),
       ('${tableId}', '${botId}', 3, 'ACTIVE', true, '2026-01-01T00:00:00.123456Z');`);
   await db.exec(await fs.readFile(new URL('../../supabase/migrations/20261004220956_poker_gift_purchases.sql', import.meta.url), 'utf8'));
+  await db.exec('create schema auth;create schema private;create table auth.users(id uuid primary key);create table user_profiles(user_id uuid primary key);create table account_deletion_requests(old_user_id uuid);');
+  await db.exec(await fs.readFile(new URL('../../supabase/migrations/20261026120000_profile_phase_a.sql',import.meta.url),'utf8'));
+  await db.query('insert into auth.users values($1)',[buyerUserId]);
   const beginSql = (fn) => db.transaction((sql) => fn({ unsafe: async (q, args = []) => {
     if (failReceipt && q.startsWith('insert into public.poker_gift_purchases')) throw new Error('receipt failed');
     // Model postgres-js inferred timestamp binding, including its actual Date serializer.
@@ -157,9 +160,7 @@ test('postgres timestamp binding preserves exact receipt participation for recov
 test('deleting sender or human recipient prevents a new gift before payment, while bot recipients need no Auth',async()=>{
  const f=await fixture();
  try {
-  await f.db.exec(`create schema auth; create table auth.users(id uuid primary key);
-   create table account_deletion_requests(old_user_id uuid);
-   insert into auth.users values('${buyerUserId}'),('${humanId}');`);
+  await f.db.query('insert into auth.users values($1)',[humanId]);
   await f.db.query('insert into account_deletion_requests values($1)',[humanId]);
   await assert.rejects(f.buy({env:{ACCOUNT_DELETION_ENABLED:'1'}}),{code:'account_not_active'});
   assert.equal((await f.db.query('select count(*)::int n from test_burns')).rows[0].n,0);
@@ -168,4 +169,23 @@ test('deleting sender or human recipient prevents a new gift before payment, whi
   await f.db.exec("update poker_gift_purchases set created_at=clock_timestamp()-interval '4 seconds'");
   await assert.rejects(f.buy({env:{ACCOUNT_DELETION_ENABLED:'1'},recipientSeatNo:3,requestId:'late'}),{code:'account_not_active'});
  } finally {await f.db.close();}
+});
+
+test('pending Terms prevents a new BURN atomically; paid gift replay remains available after a version change',async()=>{
+ const f=await fixture();try{
+  await f.db.exec("update private.profile_terms_policy set active=true");
+  await assert.rejects(f.buy(),{code:'terms_required'});
+  assert.equal((await f.db.query('select count(*)::int n from test_burns')).rows[0].n,0);
+  assert.equal((await f.db.query('select count(*)::int n from poker_gift_purchases')).rows[0].n,0);
+  assert.equal(Number((await f.db.query('select balance from test_balances')).rows[0].balance),10000);
+  const {acceptTerms}=await import('../profile-terms.mjs');
+  await f.beginSql(tx=>acceptTerms(tx,{kind:'account',id:buyerUserId},{version:'2026-10-26-a1',requestId:'terms-gift-accept'}));
+  const first=await f.buy();
+  await f.db.exec("update private.profile_terms_policy set version='next-version'");
+  const replay=await f.buy();assert.equal(replay.replayed,true);assert.deepEqual(replay.event,first.event);
+  await f.db.exec("update poker_gift_purchases set created_at=clock_timestamp()-interval '4 seconds'");
+  await assert.rejects(f.buy({requestId:'gift-new-version'}),{code:'terms_required'});
+  assert.equal((await f.db.query('select count(*)::int n from test_burns')).rows[0].n,1);
+  assert.equal(Number((await f.db.query('select balance from test_balances')).rows[0].balance),9975);
+ }finally{await f.db.close();}
 });

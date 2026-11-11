@@ -424,6 +424,7 @@ export function createTableManager({
 
   function publicProfilesForSnapshot(table) {
     const candidates = invalidatePublicProfilesForSeatChange(table);
+    if (!Number.isFinite(table.publicProfilesLoadedAtMs) || Date.now() - table.publicProfilesLoadedAtMs >= normalizedPublicProfileFreshMs) return {};
     const allowed = new Set(candidates.userIds);
     return Object.fromEntries(Object.entries(table?.publicProfilesByUserId || {})
       .filter(([userId]) => allowed.has(userId))
@@ -505,6 +506,7 @@ export function createTableManager({
         if (currentTable) {
           const currentCandidates = invalidatePublicProfilesForSeatChange(currentTable);
           if (currentCandidates.fingerprint === candidates.fingerprint && currentTable.publicProfilesRefreshGeneration === generation) {
+            currentTable.publicProfilesByUserId = {};
             currentTable.publicProfilesLoadedAtMs = null;
           }
         }
