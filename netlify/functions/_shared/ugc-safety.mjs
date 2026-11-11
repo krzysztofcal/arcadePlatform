@@ -75,12 +75,13 @@ export async function createReport(reporterId, input = {}, deps = {}) {
     if (row.user_id === reporter) throw ugcError("cannot_report_self");
     // Evidence is the server's own snapshot of the public identity, so a later change cannot erase it.
     const evidence = { handle: row.handle, displayName: row.display_name, avatarVariant: row.avatar_variant, avatarKey: row.avatar_key || null };
+    const evidenceParam = typeof tx?.json === "function" ? tx.json(evidence) : JSON.stringify(evidence);
     const inserted = await tx.unsafe(
       `insert into private.ugc_reports (reporter_user_id, target_user_id, reason, context, table_id, evidence)
        values ($1, $2, $3, $4, $5, $6::jsonb)
        on conflict (reporter_user_id, target_user_id) where status = 'pending' do nothing
        returning id;`,
-      [reporter, row.user_id, input.reason, input.context, tableId ? tableId.toLowerCase() : null, JSON.stringify(evidence)],
+      [reporter, row.user_id, input.reason, input.context, tableId ? tableId.toLowerCase() : null, evidenceParam],
     );
     return { status: inserted.length ? "reported" : "already_reported" };
   });
