@@ -62,3 +62,4 @@
   - **Activation:** the owner enabled the control by SQL under the Production retention advisory lock at 2026-11-06 01:10:56 UTC (`enabled=true`, `activated_at` set; verified read-only).
   - **Automatic** (run `42185756097`): PASS, `complete`, `expired: []`, tables `executed` 0/0/0.
   - **Open:** the `03:39` dispatcher slot (T031) is not installed on the VPS yet; until the T032 install, `retention-12m` runs only on an owner dispatch.
+  - **Status (2026-11-11):** the `03:39` slot is installed (VPS dispatcher identical to `main`; run `42954155632` executed `retention-12m`, 0 rows). #1233 adds the Stage NULL-execute guard `20261111213000`; Stage apply is pending through `DB Stage Apply PR` with a temporary documentation-only source PR (no migration or workflow change there).
