@@ -581,28 +581,13 @@ async function assertProductionE3Activation(sql, fixtureSql) {
   assert.equal((await sql.unsafe("select enabled from public.chips_production_retention_control"))[0].enabled,false,"E3 replay must not reactivate");
 }
 
-// #1157 Production equivalent: exact confirmation, dark install, no deletion, no replay.
-async function assertProductionSettledRetentionInstall(sql) {
-  const [identity] = await sql.unsafe("select system_identifier::text from pg_catalog.pg_control_system();");
-  const install = fs.readFileSync(path.join(process.cwd(), "supabase", "production-migrations", "20261105160500_chips_settled_retention_12m_production_contract.sql"), "utf8")
-    .replaceAll("7575202818581710058", identity.system_identifier);
-  await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
-  await sql.unsafe("set chips.production_settled_retention_confirmation = '';");
-  await assert.rejects(() => sql.unsafe(install), /exact owner confirmation/);
-  await sql.unsafe("rollback;");
-  await sql.unsafe("set chips.production_settled_retention_confirmation = 'INSTALL SETTLED RETENTION 12M otbqfijerkieoxwpxjnm';");
-  await sql.unsafe(install);
-  const [state] = await sql.unsafe(`select (select enabled from public.chips_settled_retention_control) as enabled,
-      (select count(*)::int from public.chips_ledger_archive_batches where objects_expired_at is not null) as expired,
-      (select count(*)::int from public.chips_transaction_idempotency where archive_batch_id = 9000) as registry,
-      (select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, null, false, null)->>'state') as batch_9000;`);
-  assert.deepEqual([state.enabled, state.expired, state.registry, state.batch_9000], [false, 0, 3, "not_eligible"],
-    "install is dark and a batch younger than 12 months is never eligible");
-  await assert.rejects(() => sql.unsafe("select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, now() - interval '1 day', false, null);"), /only on canonical Stage/);
-  // #1157 T051 review: p_execute NULL is a dry run, even with the control
-  // enabled and an eligible batch and request. Rolled back.
-  const nullRollback = new Error("production null execute fixture rollback");
+// #1157: Shared dry-run helper for p_execute NULL regression tests.
+// Rolled back; old batch 9000 + old poker_request, control enabled;
+// expects expire.state "eligible", run.state "diagnosed", snapshot unchanged.
+async function assertNullExecuteIsDryRun(sql, label, prepare = null) {
+  const nullRollback = new Error(`${label} null execute fixture rollback`);
   await assert.rejects(() => sql.begin(async (tx) => {
+    if (prepare) await prepare(tx);
     await tx.unsafe("set local session_replication_role = 'replica';");
     await tx.unsafe("update public.chips_ledger_archive_batches set first_created_at = now() - interval '14 months', last_created_at = now() - interval '13 months' where batch_id = 9000;");
     const [table] = await tx.unsafe("select id from public.poker_tables limit 1;");
@@ -625,6 +610,41 @@ async function assertProductionSettledRetentionInstall(sql) {
     assert.deepEqual(await snapshot(), before, "NULL execute mutates nothing");
     throw nullRollback;
   }), (error) => error === nullRollback);
+}
+
+// #1157: Stage functions NULL execute guard: p_execute NULL is a dry run,
+// even with the control enabled and an eligible batch and request. Rolled back.
+async function assertStageSettledRetentionNullExecute(sql) {
+  const stripTx = (s) => s.replace(/^\s*begin;\s*$/m, "").replace(/^\s*commit;\s*$/m, "");
+  const stage1 = stripTx(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "20261105160000_chips_settled_retention_12m.sql"), "utf8"));
+  const stage2 = stripTx(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "20261111213000_chips_settled_retention_12m_null_execute_guard.sql"), "utf8"));
+  await assertNullExecuteIsDryRun(sql, "stage", async (tx) => {
+    await tx.unsafe(stage1);
+    await tx.unsafe(stage2);
+  });
+}
+
+// #1157 Production equivalent: exact confirmation, dark install, no deletion, no replay.
+async function assertProductionSettledRetentionInstall(sql) {
+  const [identity] = await sql.unsafe("select system_identifier::text from pg_catalog.pg_control_system();");
+  const install = fs.readFileSync(path.join(process.cwd(), "supabase", "production-migrations", "20261105160500_chips_settled_retention_12m_production_contract.sql"), "utf8")
+    .replaceAll("7575202818581710058", identity.system_identifier);
+  await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
+  await sql.unsafe("set chips.production_settled_retention_confirmation = '';");
+  await assert.rejects(() => sql.unsafe(install), /exact owner confirmation/);
+  await sql.unsafe("rollback;");
+  await sql.unsafe("set chips.production_settled_retention_confirmation = 'INSTALL SETTLED RETENTION 12M otbqfijerkieoxwpxjnm';");
+  await sql.unsafe(install);
+  const [state] = await sql.unsafe(`select (select enabled from public.chips_settled_retention_control) as enabled,
+      (select count(*)::int from public.chips_ledger_archive_batches where objects_expired_at is not null) as expired,
+      (select count(*)::int from public.chips_transaction_idempotency where archive_batch_id = 9000) as registry,
+      (select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, null, false, null)->>'state') as batch_9000;`);
+  assert.deepEqual([state.enabled, state.expired, state.registry, state.batch_9000], [false, 0, 3, "not_eligible"],
+    "install is dark and a batch younger than 12 months is never eligible");
+  await assert.rejects(() => sql.unsafe("select public.chips_expire_archive_batch('otbqfijerkieoxwpxjnm', 9000, now() - interval '1 day', false, null);"), /only on canonical Stage/);
+  // #1157 T051 review: p_execute NULL is a dry run, even with the control
+  // enabled and an eligible batch and request. Rolled back.
+  await assertNullExecuteIsDryRun(sql, "production");
   await assert.rejects(() => sql.unsafe(install), /own migration absent/);
   await sql.unsafe("rollback;");
   await sql.unsafe("set chips.production_settled_retention_confirmation = '';");
@@ -729,6 +749,7 @@ async function assertSettledRetentionOwnerTransferAsNonSuperuser(sql) {
   };
   const blocks = [
     block("20261105160000_chips_settled_retention_12m.sql", "supabase/migrations"),
+    block("20261111213000_chips_settled_retention_12m_null_execute_guard.sql", "supabase/migrations"),
     block("20261105160500_chips_settled_retention_12m_production_contract.sql", "supabase/production-migrations"),
   ];
   const password = crypto.randomBytes(24).toString("hex");
@@ -5164,6 +5185,7 @@ async function main() {
   process.env.ACCOUNT_DELETION_ENABLED = "0";
   const { assertProductionDeletionCompatibility, assertAvatarLifecycleContention } = await import("./account-deletion-production.fixture.mjs");
   await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
+  await assertStageSettledRetentionNullExecute(sql);
   await assertProductionSettledRetentionInstall(sql);
 
   // The integration workflow reuses this disposable database for the

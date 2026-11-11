@@ -1181,7 +1181,8 @@
         "20261022091126_account_avatar_known_capability_policy.sql"
       ],
       "source_versions": [
-        "20261105160000"
+        "20261105160000",
+        "20261111213000"
       ]
     },
     {
@@ -1305,6 +1306,13 @@
       "sha256": "a6c707ff48d55848fd94518e3760a24e757c60c38a8e6152414c0a6a1a58198c",
       "category": "needs-production-equivalent",
       "purpose": "#1140 UGC phase C dark private moderation audit, avatar hold and anonymous removed-report counter tables plus the audited profile restriction function (no flag activation, no notification or scheduler); Stage apply needs a separate owner DB Stage Apply PR dispatch; Production not authorized"
+    },
+    {
+      "file": "20261111213000_chips_settled_retention_12m_null_execute_guard.sql",
+      "version": "20261111213000",
+      "sha256": "61d775531704a61a24d7beb6ee8460c34ccdc27435023f85d398a04e7e9f30f5",
+      "category": "needs-production-equivalent",
+      "purpose": "#1157 Stage NULL-execute dry-run guard for the two settled retention functions; Production equivalent already in 20261105160500 (p_execute IS NOT TRUE), no new Production migration; no data change"
     }
   ]
 }
