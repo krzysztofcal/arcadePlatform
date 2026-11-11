@@ -152,6 +152,7 @@ run("node", ["tests/admin-ugc-reports.behavior.test.mjs"], "admin-ugc-reports-be
 run("node", ["tests/profile-avatar.behavior.test.mjs"], "profile-avatar-behavior");
 run("node", ["tests/public-profile-xp.e2e.test.mjs"], "public-profile-xp-e2e");
 run("node", ["tests/public-profile-ui.contract.test.mjs"], "public-profile-ui-contract");
+run("node", ["tests/mobile-legal-packaging.test.mjs"], "mobile-legal-packaging");
 run("node", ["tests/user-ui-state.behavior.test.mjs"], "user-ui-state-behavior");
 run("node", ["tests/chips-client-cache.behavior.test.mjs"], "chips-client-cache-behavior");
 run("node", ["tests/home-bonuses.contract.test.mjs"], "home-bonuses-contract");

@@ -50,6 +50,8 @@ Cookies and local storage support sessions, preferences and caches. Website cons
 
 ## Your rights and account deletion
 
+If an objection to profile visibility is upheld, the operator can block the profile from being shared with other signed-in users without deleting the account. This is not a switch in user settings. A profile block does not remove the identity needed by participants in an ongoing game; we consider any request about leaderboard visibility separately.
+
 You may request access, correction, erasure and restriction, and portability where applicable. You may object to processing based on legitimate interests, including the public profile, through contact@kcswh.pl. Leaderboard opt-out is a separate setting and does not replace this right. Your request may also cover records remaining after account deletion. Reviewing it requires identifying which data is still needed, for what specific purpose and on what legal ground. Any refusal to erase data must be explained. Not every request entails deleting the entire settlement history or all files. We also consider requests concerning children's data.
 
 Request account deletion in Account when the feature is available, or by email. The process removes the profile and sign-in identity after safely handling game participation and the virtual balance. We do not promise immediate deletion of all logs, backups and integrity records. You do not need to accept new Terms to make a request or obtain support.
