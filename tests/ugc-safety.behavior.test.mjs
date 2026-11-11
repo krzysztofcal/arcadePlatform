@@ -75,6 +75,49 @@ test("a report names the target by handle or seat user id, keeps a server snapsh
   await assert.rejects(createReport("not-a-user", { targetHandle: target.handle, reason: "spam", context: "profile" }, deps), (error) => error.status === 401);
 });
 
+test("createReport stores evidence as jsonb object when tx exposes json() helper (postgres.js parameter handling)", async () => {
+  const JSON_TAG = Symbol("postgres.json");
+  const pgBeginSql = (work) =>
+    db.transaction((tx) =>
+      work({
+        json: (value) => ({ [JSON_TAG]: true, value }),
+        unsafe: async (query, params = []) => {
+          const emulatedParams = params.map((param, index) => {
+            if (param && typeof param === "object" && param[JSON_TAG]) {
+              return JSON.stringify(param.value);
+            }
+            if (typeof param === "string" && query.includes(`$${index + 1}::jsonb`)) {
+              return JSON.stringify(param);
+            }
+            return param;
+          });
+          return (await tx.query(query, emulatedParams)).rows;
+        },
+      }),
+    );
+
+  const reporter = await user();
+  const target = await user("postgres-target-1");
+  const result = await createReport(
+    reporter.id,
+    { targetHandle: target.handle, reason: "harassment", context: "profile" },
+    { ...deps, beginSql: pgBeginSql },
+  );
+
+  assert.deepEqual(result, { status: "reported" });
+  const [row] = await executeSql(
+    "select jsonb_typeof(evidence) as evidence_typeof, evidence from private.ugc_reports where reporter_user_id = $1 and target_user_id = $2",
+    [reporter.id, target.id],
+  );
+  assert.equal(row.evidence_typeof, "object");
+  assert.deepEqual(row.evidence, {
+    handle: "postgres-target-1",
+    displayName: "Name postgres-target-1",
+    avatarVariant: "fox-blue",
+    avatarKey: null,
+  });
+});
+
 test("blocks are the caller's own list, capped, idempotent and removable", async () => {
   const me = await user(); const them = await user("calm-owl-2");
   assert.deepEqual(await blockUser(me.id, { targetHandle: "calm-owl-2" }, deps), { status: "blocked", user: { userId: them.id, handle: "calm-owl-2", displayName: "Name calm-owl-2" } });
