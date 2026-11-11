@@ -4561,23 +4561,31 @@ await assert.rejects(runProductionAutomation({policy:"escrow",mode:"automatic",e
 const botResumeEvidence = { ...productionResumeEvidence,
   transactionIds: Array.from({ length: 6 }, (_, index) => `00000000-0000-4000-8000-00000000020${index}`),
   entryIds: Array.from({ length: 12 }, (_, index) => 2001 + index), transactionCount: 6, entryCount: 12 };
-function makeBotMissingProofHarness({ row: overrides = {}, badBytes = false, loseLockOnDownload = false, recoveryExisted = false } = {}) {
+function makeBotMissingProofHarness({ row: overrides = {}, badBytes = false, loseLockOnDownload = false, recoveryExisted = false, recoveryState = "both_missing" } = {}) {
   const row = { ...makeProductionResumeRow(), source_policy_id: "production-ledger-bot-only-retention-7d-v1", batch_id: "440",
     transaction_count: 6, entry_count: 12,
     archive_proof_verified_at: null, archived_transaction_ids_sha256: null, archived_entry_ids_sha256: null, ...overrides };
   const harness = makeProductionResumeHarness(row);
   const calls = { proof: 0, dry: 0, persist: 0, execute: 0 };
   let lockLost = false;
+  let currentRecoveryState = recoveryState;
   const unsafe = harness.deps.sql.unsafe;
   harness.deps.sql.unsafe = async (query, values) => (lockLost && query.includes("pg_backend_pid") && !query.includes("pg_try_advisory_lock")
     ? [{ backend_pid: "reconnected-production-session" }] : unsafe(query, values));
-  harness.deps.inspectDurableRecoveryState = async () => ({ state: "both_missing" });
+  harness.deps.inspectDurableRecoveryState = async () => ({ state: currentRecoveryState });
+  const inspectRecovery = harness.deps.inspectDurableRecovery;
+  harness.deps.inspectDurableRecovery = async (...args) => {
+    if (currentRecoveryState === "both_missing") return null;
+    if (currentRecoveryState !== "complete") throw new Error(`durable recovery state is ${currentRecoveryState}`);
+    return inspectRecovery(...args);
+  };
   harness.deps.downloadPrivateArchiveObject = async () => {
     if (loseLockOnDownload) lockLost = true;
     return { bytes: badBytes ? Buffer.from("wrong archive") : productionResumeArchiveBytes };
   };
   harness.deps.persistDurableRecovery = async () => {
     calls.persist += 1;
+    currentRecoveryState = "complete";
     return { state: "complete", archive: { sha256: row.compressed_sha256 }, recoveryArchive: { sha256: row.compressed_sha256, uploaded: !recoveryExisted },
       recoveryManifest: { sha256: "4".repeat(64), uploaded: !recoveryExisted } };
   };
@@ -4608,6 +4616,44 @@ assert.equal((await makeBotMissingProofHarness({ recoveryExisted: true }).run())
 assert.deepEqual(botMissingProof.calls, { proof: 1, dry: 2, persist: 1, execute: 1 });
 assert.equal(botMissingProof.harness.calls.export, 0);
 assert.equal(botMissingProof.harness.calls.store, 0);
+const botProvedMissingRecovery = makeBotMissingProofHarness({
+  row: {
+    archive_proof_verified_at: "2026-11-03T13:09:46Z",
+    archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+    archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256,
+  },
+});
+const botProvedMissingRecoveryResult = await botProvedMissingRecovery.run();
+assert.equal(botProvedMissingRecoveryResult.state, "cleaned");
+assert.equal(botProvedMissingRecoveryResult.batchId, "440");
+assert.equal(botProvedMissingRecoveryResult.transactions, 6);
+assert.equal(botProvedMissingRecoveryResult.entries, 12);
+assert.equal(botProvedMissingRecoveryResult.storageWrites, 2);
+assert.deepEqual(botProvedMissingRecovery.calls, { proof: 0, dry: 2, persist: 1, execute: 1 });
+assert.equal(botProvedMissingRecovery.harness.calls.export, 0);
+assert.equal(botProvedMissingRecovery.harness.calls.store, 0);
+const botProvedPartialRecovery = makeBotMissingProofHarness({
+  row: {
+    archive_proof_verified_at: "2026-11-03T13:09:46Z",
+    archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+    archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256,
+  },
+  recoveryState: "partial",
+});
+await assert.rejects(botProvedPartialRecovery.run(), /durable recovery state is partial/);
+assert.equal(botProvedPartialRecovery.calls.persist, 0);
+assert.equal(botProvedPartialRecovery.calls.execute, 0);
+assert.equal(botProvedPartialRecovery.calls.proof, 0);
+const botProvedPartialCleanup = makeBotMissingProofHarness({
+  row: {
+    archive_proof_verified_at: "2026-11-03T13:09:46Z",
+    archived_transaction_ids_sha256: productionResumeEvidence.transactionIdsSha256,
+    archived_entry_ids_sha256: productionResumeEvidence.entryIdsSha256,
+    registry_cleaned_at: "2026-11-03T13:10:00Z",
+  },
+});
+await assert.rejects(botProvedPartialCleanup.run(), /cleanup receipts or destructive GO/);
+assert.deepEqual(botProvedPartialCleanup.calls, { proof: 0, dry: 0, persist: 0, execute: 0 }, "partial cleanup fails before recovery writes");
 const manualSixPrepare = makeProductionPrepareResumeHarness({ row: { transaction_count: 6, entry_count: 12 } });
 await assert.rejects(prepareProductionResume(manualSixPrepare), /PREPARE batch identity, archive or cap differs/);
 assert.deepEqual(manualSixPrepare.prepareCalls, { proof: 0, dry: 0, persist: 0 }, "manual PREPARE keeps the cap of 2");

@@ -641,16 +641,42 @@ async function resumeProductionCanaryBatch({
   }
   let row = await pruneStore.getManifest(activeRow.object_path);
   let resumedPrepare = null;
+  let bucketVerified = false;
+  const ensureBucket = async () => {
+    if (!bucketVerified) {
+      await verifyBucket(storageTarget);
+      bucketVerified = true;
+    }
+  };
   // An automatic bot-only run that lost its session after commit leaves the
-  // batch without any proof. Only that exact state resumes through PREPARE.
-  if (mode === "automatic" && policy === "bot-only-7d" && row
-    && [row.archive_proof_verified_at, row.archived_transaction_ids_sha256, row.archived_entry_ids_sha256].every(value => value == null)) {
-    resumedPrepare = await resumeProductionPrepareBatch({ activeRow, profile, env, policy, batchId, sql, lockSession,
-      pruneStore, storageTarget, verifyBucket, storageDeps, tempRoot, deps, automaticContext });
-    row = await pruneStore.getManifest(activeRow.object_path);
+  // batch without any proof, or a proved batch may have both recovery copies
+  // missing. Only those exact states resume through PREPARE before cleanup.
+  if (mode === "automatic" && policy === "bot-only-7d" && row) {
+    const proofMissing = [
+      row.archive_proof_verified_at,
+      row.archived_transaction_ids_sha256,
+      row.archived_entry_ids_sha256,
+    ].every(value => value == null);
+    let enterPrepare = proofMissing;
+    if (!enterPrepare
+      && row.archive_proof_verified_at
+      && SHA256_RE.test(text(row.archived_transaction_ids_sha256))
+      && SHA256_RE.test(text(row.archived_entry_ids_sha256))) {
+      await ensureBucket();
+      const inspectState = deps.inspectDurableRecoveryState || inspectDurableRecoveryState;
+      const recovery = await inspectState(storageTarget, row, profile, null, storageDeps);
+      if (recovery?.state === "both_missing") {
+        enterPrepare = true;
+      }
+    }
+    if (enterPrepare) {
+      resumedPrepare = await resumeProductionPrepareBatch({ activeRow, profile, env, policy, batchId, sql, lockSession,
+        pruneStore, storageTarget, verifyBucket, storageDeps, tempRoot, deps, automaticContext });
+      row = await pruneStore.getManifest(activeRow.object_path);
+    }
   }
   assertProductionActiveCanaryBatch({ row, batchId, profile, sourcePolicyId });
-  await verifyBucket(storageTarget);
+  await ensureBucket();
 
   const runPrune = deps.pruneArchive || pruneArchive;
   const pruneDeps = {
