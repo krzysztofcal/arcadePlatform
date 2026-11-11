@@ -1,0 +1,59 @@
+name: Netlify Preview Retention
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Read-only by default; canary requires separate OWNER GO and versioned gates
+        type: choice
+        options: [dry-run, apply-canary]
+        default: dry-run
+        required: true
+      approval:
+        description: Canary JSON (sourceSha, pinsSha256, deployIds up to5, approvedAt, apkDependenciesReviewed, changeWindowConfirmed)
+        type: string
+        required: false
+      confirmation:
+        description: Exact DELETE PREVIEWS siteId approvalSHA256 phrase; never a credential
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: netlify-preview-retention
+  cancel-in-progress: false
+
+jobs:
+  retention:
+    if: ${{ github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && github.actor == 'krzysztofcal' && github.triggering_actor == 'krzysztofcal' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout trusted workflow revision and versioned pins
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Plan or separately approved bounded canary
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NETLIFY_PREVIEW_RETENTION_TOKEN: ${{ secrets.NETLIFY_PREVIEW_RETENTION_TOKEN }}
+          NETLIFY_PREVIEW_RETENTION_CANARY_ENABLED: ${{ vars.NETLIFY_PREVIEW_RETENTION_CANARY_ENABLED }}
+          RETENTION_OPERATION: ${{ inputs.operation }}
+          RETENTION_APPROVAL: ${{ inputs.approval }}
+          RETENTION_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/netlify-preview-retention.mjs
+      - name: Preserve value-free audit (including uncertain deletion)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: netlify-preview-retention-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retention-artifacts/report.json
+          if-no-files-found: warn
