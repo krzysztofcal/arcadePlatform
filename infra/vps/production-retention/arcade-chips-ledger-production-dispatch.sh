@@ -12,6 +12,8 @@ case "$slot" in
   02:09) policy=existing-30d ;;
   ??:09) policy=bot-only-7d ;;
   ??:24) policy=closed-human-30d ;;
+  # Daily #1157 slot; escrow keeps its other 23 hourly runs.
+  03:39) policy=retention-12m ;;
   ??:39) policy=escrow ;;
   *) exit 0 ;;
 esac

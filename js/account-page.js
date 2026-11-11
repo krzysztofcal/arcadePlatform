@@ -43,6 +43,7 @@
     nodes.userName = doc.getElementById('accountName');
     nodes.signOut = doc.getElementById('signOutButton');
     nodes.deleteBtn = doc.getElementById('deleteAccountButton');
+    nodes.deletionInfo = doc.getElementById('account-deletion');
     nodes.deleteNote = doc.getElementById('deleteAccountNote');
     nodes.deletionDialog = doc.getElementById('accountDeletionDialog');
     nodes.deletionCancel = doc.getElementById('accountDeletionCancel');
@@ -135,6 +136,7 @@
     renderUser(user);
     loadChips();
     refreshWelcomeBonus(user);
+    if (!window.MOBILE_POKER_CONFIG && window.location.hash === '#account-deletion') return;
     if (window.location) window.location.hash = 'accountPanel';
     if (nodes.account && typeof nodes.account.scrollIntoView === 'function') nodes.account.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -229,6 +231,14 @@
     return normalized ? normalized : '';
   }
 
+  var deletionLinkFocused = false;
+  function focusDeletionLink(){
+    if (window.MOBILE_POKER_CONFIG || !currentUser || window.location.hash !== '#account-deletion' || deletionLinkFocused || !nodes.deleteBtn) return;
+    deletionLinkFocused = true;
+    if (nodes.deleteBtn.scrollIntoView) nodes.deleteBtn.scrollIntoView({block:'center'});
+    nodes.deleteBtn.focus({preventScroll:true});
+  }
+
   function renderUser(user){
     var incomingUserKey = getUserKey(user);
     if (incomingUserKey && deletionReceivedOwnerId === incomingUserKey) user = null;
@@ -254,6 +264,9 @@
     // Toggle panels
     setBlockVisibility(nodes.forms, !hasUser && !signupConfirmationPending);
     setBlockVisibility(nodes.account, hasUser);
+    setBlockVisibility(nodes.deletionInfo, !hasUser && !window.MOBILE_POKER_CONFIG);
+    if (!hasUser) deletionLinkFocused = false;
+    focusDeletionLink();
     setBlockVisibility(nodes.chipPanel, hasUser);
     if (!hasUser && signupConfirmationPending) setBlockVisibility(nodes.signupConfirmation, true);
     setWelcomeBonusVisibility(false);
@@ -1291,8 +1304,10 @@
     setDeletionBusy(false);
     if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deleting your account permanently forfeits CH, XP, achievements and profile data.');
   }
-  function deletionRequest(token, method){
-    return window.fetch(window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/account-delete') : '/.netlify/functions/account-delete', {
+  function deletionRequest(token, method, attempt){
+    var url = window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/account-delete') : '/.netlify/functions/account-delete';
+    if (method === 'POST') attempt.postAttempted = true;
+    return window.fetch(url, {
       method: method, cache: 'no-store',
       headers: method === 'POST' ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { Authorization: 'Bearer ' + token },
       body: method === 'POST' ? JSON.stringify({confirmation:'DELETE_ACCOUNT',acknowledgeForfeiture:true}) : undefined
@@ -1351,7 +1366,7 @@
         attempt.confirmed = confirmed;
         if (!confirmed) return;
         setDeletionBusy(true, true);
-        return deletionRequest(token, 'POST').catch(function(){
+        return deletionRequest(token, 'POST', attempt).catch(function(){
           // A lost response is UNKNOWN. Reconcile once; do not start a timer or
           // ask for consent again. A later click may safely replay the same POST.
           return deletionRequest(token, 'GET').then(function(saved){
@@ -1362,7 +1377,9 @@
       });
     }).catch(function(){
       if (!isCurrent()) return;
-      var message = t('accountDeletionUnavailable', 'We could not confirm receipt of your request. Try again; any saved request continues automatically.');
+      var message = attempt.postAttempted
+        ? t('accountDeletionUnavailable', 'We could not confirm receipt of your request. Try again; any saved request continues automatically.')
+        : t('accountDeletionLookupFailed', 'Could not check your account deletion status. No deletion request was sent by this attempt.');
       if (nodes.deleteNote) nodes.deleteNote.textContent = message;
       setStatus(message, 'error');
     }).then(function(){
@@ -1471,6 +1488,7 @@
     try { window.sessionStorage.removeItem('arcade:account-deletion-status'); } catch (_err){}
     setWelcomeBonusVisibility(false);
     wireEvents();
+    window.addEventListener('hashchange', function(){ deletionLinkFocused = false; focusDeletionLink(); });
     hydrateUser();
 
     doc.addEventListener('chips:tx-complete', loadChips);

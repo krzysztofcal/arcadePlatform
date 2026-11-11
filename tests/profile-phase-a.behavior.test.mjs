@@ -151,6 +151,7 @@ test('Terms endpoint trusts the verified identity only, rejects client-supplied 
  const handler=createOnboardingHandler(deps);
  const event={httpMethod:'GET',headers:{origin:'https://arcade.test',authorization:'Bearer test'}};
  const status=await handler(event);assert.equal(status.statusCode,200);assert.equal(JSON.parse(status.body).avatarVariants.length,6);
+ assert.equal(JSON.parse(status.body).privacyUrl,'/legal/privacy.2026-10-26-a1.en.html');
  const deny=await handler({...event,httpMethod:'POST',body:JSON.stringify({action:'acceptTerms',version:'2026-10-26-a1',requestId:'terms-12345',userId:'other'})});assert.equal(deny.statusCode,400);assert.equal(sqlCalls,1);
  const unauthorized=createOnboardingHandler({...deps,verifySupabaseJwt:async()=>({valid:false})});
  assert.equal((await unauthorized(event)).statusCode,401);assert.equal(sqlCalls,1);
@@ -199,6 +200,7 @@ test('Terms acceptance never posts under a replacement identity while credential
 });
 test('a changed Terms version is displayed with its document before another explicit acceptance',async()=>{
  const h=await termsClientFixture();h.rejectNextVersion();
+ assert.equal(h.dialog().querySelector('[data-privacy-link]').href,'/legal/privacy.2026-10-26-a1.en.html');
  await h.dialog().querySelector('[data-terms-accept]').onclick();await h.flush();
  const next=h.dialog();assert.ok(next);assert.match(next.querySelector('[data-terms-copy]').textContent,/next-version/);assert.match(next.querySelector('[data-terms-link]').href,/terms\.next-version\.en\.html/);
  await next.querySelector('[data-terms-accept]').onclick();assert.equal(h.posts.length,2);assert.equal(h.posts[0].body.version,'2026-10-26-a1');assert.equal(h.posts[1].body.version,'next-version');

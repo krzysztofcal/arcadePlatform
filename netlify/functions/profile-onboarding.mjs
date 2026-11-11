@@ -30,7 +30,7 @@ export function createOnboardingHandler(deps={}){
     if(!body||Array.isArray(body)||typeof body!=='object'||body.action!=='acceptTerms'||Object.keys(body).some(k=>!['action','version','requestId'].includes(k)))return reply(400,{error:'invalid_request'});
    }
    const state=await (deps.beginSql||beginSql)(tx=>event.httpMethod==='GET'?readTermsStatus(tx,principal):acceptTerms(tx,principal,body));
-   return reply(200,{...state,avatarVariants:PUBLIC_AVATAR_VARIANTS.slice(0,state.variantsEnabled?16:6),termsUrl:'/legal/terms.'+state.version+'.en.html',privacyUrl:'/legal/privacy.en.html'});
+   return reply(200,{...state,avatarVariants:PUBLIC_AVATAR_VARIANTS.slice(0,state.variantsEnabled?16:6),termsUrl:'/legal/terms.'+state.version+'.en.html',privacyUrl:'/legal/privacy.'+state.version+'.en.html'});
   }catch(error){
    klog('profile_terms_failed',{code:error?.code||'unavailable'});
    const codes=new Set(['terms_required','terms_not_active','terms_version_changed','request_conflict','invalid_request_id','account_not_active','unauthorized']);

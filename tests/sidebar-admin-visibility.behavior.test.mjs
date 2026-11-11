@@ -150,7 +150,7 @@ function collectHrefs(root) {
   return hrefs;
 }
 
-async function renderSidebarAs(statusCode) {
+async function renderSidebarAs(statusCode, mobilePath) {
   const document = createDocument();
   const sidebar = createElement("aside", "sidebar");
   sidebar.className = "sidebar";
@@ -160,6 +160,12 @@ async function renderSidebarAs(statusCode) {
   document.__nodes.set("sidebar", sidebar);
   document.__nodes.set("sbToggle", toggle);
 
+  if(mobilePath){
+    document.body=createElement('body');
+    document.querySelector=selector=>selector==='.shell'?document.body:null;
+    const get=document.getElementById.bind(document);
+    document.getElementById=id=>get(id)||document.body.children.find(node=>node.id===id)||null;
+  }
   const authListeners = [];
   const fetchCalls = [];
   const windowObj = {
@@ -176,6 +182,7 @@ async function renderSidebarAs(statusCode) {
     },
   };
 
+  if(mobilePath){windowObj.MOBILE_POKER_CONFIG={};windowObj.location.pathname=mobilePath;}
   const context = vm.createContext({
     window: windowObj,
     document,
@@ -227,4 +234,19 @@ test("sidebar closes when clicking outside the expanded panel", async () => {
   assert.equal(result.sidebar.classList.contains("expanded"), false);
   assert.equal(result.sidebar.classList.contains("collapsed"), true);
   assert.equal(result.toggle.getAttribute("aria-expanded"), "false");
+});
+
+
+test('APK Account and Lobby use one five-destination renderer; tables have none',async()=>{
+ for(const pathname of ['/account.html','/poker/index.html','/poker/table-v2.html']){
+  const h=await renderSidebarAs(403,pathname),nav=h.document.getElementById('mobileBottomNav');
+  if(pathname.endsWith('table-v2.html')){assert.equal(nav,null);continue;}
+  assert.equal(nav.children.length,5);
+  assert.deepEqual(nav.children.map(n=>n.href),['/poker/index.html#modes','/poker/index.html#tables','/poker/index.html#progression','/poker/index.html#bonus','/account.html']);
+  const active=nav.children.filter(n=>n.getAttribute('aria-current')==='page');assert.equal(active.length,1);
+  assert.equal(active[0].getAttribute('data-nav-id'),pathname==='/account.html'?'profile':'modes');
+  h.document.body.dataset.mobileLobbyView='tables';h.document.fireEvent('poker:lobby-view',{});
+  assert.equal(h.document.body.children.length,1);assert.equal(nav.children.length,5);
+  assert.equal(nav.children.find(n=>n.getAttribute('aria-current')==='page').getAttribute('data-nav-id'),pathname==='/account.html'?'profile':'tables');
+ }
 });

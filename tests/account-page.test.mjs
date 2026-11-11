@@ -1166,13 +1166,20 @@ test("chip history pagination shows total pages and jumps to the last page", asy
 });
 
 
-async function deletionHarness(replies) {
+async function deletionHarness(replies, options = {}) {
  const user={id:'00000000-0000-4000-8000-000000000111',user_metadata:{},email:'fixture@example.test'};
  const calls=[];let signedOut=0;
  const client={auth:{getSession:async()=>({data:{session:{access_token:'fixture-token',user}}}),signOut:async()=>{signedOut++;}}};
- const auth={getCurrentUser:async()=>user,onAuthChange(){},getClient:()=>client};
+ let authChanged;
+ const auth={getCurrentUser:async()=>options.signedOut?null:user,onAuthChange:fn=>{authChanged=fn;},getClient:()=>client};
  const chips={fetchBalance:async()=>({balance:0}),fetchLedger:async()=>({items:[]}),fetchBonusCampaigns:async()=>({items:[]})};
- const h=buildContext(chips,{auth});const dialog=h.document.getElementById('accountDeletionDialog');
+ const h=buildContext(chips,{auth});
+ const info=createElement('section','account-deletion');h.document.__nodes.set('account-deletion',info);
+ if(options.mobile)h.windowObj.MOBILE_POKER_CONFIG={};
+ h.windowObj.location.hash=options.hash||'';
+ const events={};h.windowObj.addEventListener=(name,fn)=>{events[name]=fn;};
+ const button=h.document.getElementById('deleteAccountButton');let scrolled=0;button.scrollIntoView=()=>{scrolled++;};
+ const dialog=h.document.getElementById('accountDeletionDialog');
  dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;};
  h.windowObj.confirm=()=>{throw Error('native confirm must not be called');};
  h.windowObj.fetch=async(url,options)=>{
@@ -1184,7 +1191,7 @@ async function deletionHarness(replies) {
  vm.runInContext(source,vm.createContext({window:h.windowObj,document:h.document,CustomEvent:function(){}}));
  await flush();await flush();
  const click=id=>h.document.getElementById(id).dispatchEvent({type:'click',preventDefault(){}});
- return {...h,dialog,calls,click,signedOut:()=>signedOut};
+ return {...h,dialog,calls,click,info,scrolled:()=>scrolled,changeUser:value=>authChanged('SIGNED_IN',value?user:null),hashChange:()=>events.hashchange(),signedOut:()=>signedOut};
 }
 
 test('deletion modal cancels without POST, traps keyboard and restores safe focus',async()=>{
@@ -1277,4 +1284,32 @@ test('avatar write binds the token before HTTP and suppresses obsolete profile p
   if(race==='token'){user='account-b';release('e30.'+Buffer.from(JSON.stringify({sub:'account-b'})).toString('base64url')+'.sig');}else{valid=false;release();}
   await assert.rejects(()=>saving);assert.equal(requests,race==='token'?0:1);assert.equal(published,0);
  }
+});
+
+
+test('initial deletion GET failure never implies a submitted request',async()=>{
+ for(const reply of [{status:503},new Error('offline'),{status:200,body:{}}]){
+  const h=await deletionHarness([reply]);h.click('deleteAccountButton');await flush();await flush();
+  assert.deepEqual(h.calls.map(x=>x.method),['GET']);assert.equal(h.signedOut(),0);assert.ok(!h.dialog.open);
+  assert.match(h.document.getElementById('deleteAccountNote').textContent,/No deletion request was sent by this attempt/);
+ }
+});
+test('uncertain POST remains uncertain even when a later status lookup fails',async()=>{
+ const h=await deletionHarness([{status:404},new Error('lost'),{status:404},{status:503}]);
+ h.click('deleteAccountButton');await flush();await flush();h.click('accountDeletionConfirmButton');await flush();await flush();
+ h.click('deleteAccountButton');await flush();await flush();
+ assert.deepEqual(h.calls.map(x=>x.method),['GET','POST','GET','GET']);
+ assert.match(h.document.getElementById('deleteAccountNote').textContent,/could not confirm receipt/);
+ assert.equal(h.signedOut(),0);
+});
+test('external deletion entry is signed-out WWW only and signed-in hash focuses the sole action without requests',async()=>{
+ for(const mobile of [false,true]){
+  const h=await deletionHarness([],{signedOut:true,mobile,hash:'#account-deletion'});
+  assert.equal(h.info.hidden,mobile);h.changeUser(true);await flush();assert.equal(h.info.hidden,true);
+  assert.equal(h.scrolled(),mobile?0:1);assert.deepEqual(h.calls,[]);
+  if(!mobile){assert.equal(h.document.activeElement.id,'deleteAccountButton');assert.equal(h.windowObj.location.hash,'#account-deletion');}
+  h.changeUser(false);await flush();assert.equal(h.info.hidden,mobile);
+ }
+ const h=await deletionHarness([],{hash:'#account-deletion'});assert.equal(h.info.hidden,true);assert.equal(h.scrolled(),1);
+ h.windowObj.location.hash='';h.hashChange();h.windowObj.location.hash='#account-deletion';h.hashChange();assert.equal(h.scrolled(),2);assert.deepEqual(h.calls,[]);
 });

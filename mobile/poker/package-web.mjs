@@ -51,7 +51,13 @@ const launch = await readFile(path.join(here, 'launch.html'), 'utf8');
 const launchStyle = launch.match(/<style id="pokerLaunchStyle">[\s\S]*?<\/style>/)[0];
 const launchBody = launch.match(/<div id="pokerLaunch"[\s\S]*?<\/div>\n<\/div>/)[0];
 await put('mobile/poker/launch.js', await readFile(path.join(here, 'launch.js')));
-const legalPages = ['legal/privacy.en.html','legal/privacy.pl.html','legal/terms.en.html','legal/terms.pl.html','legal/terms.2026-10-26-a1.en.html','legal/terms.2026-10-26-a1.pl.html'];
+// Keep current aliases and legacy policy documents; bundling a2 never activates it.
+const legalPages = ['legal/privacy.en.html','legal/privacy.pl.html','legal/terms.en.html','legal/terms.pl.html'];
+for (const version of ['2026-10-26-a1', '2026-10-28-a2']) {
+  for (const lang of ['en', 'pl']) {
+    for (const kind of ['terms', 'privacy']) legalPages.push(`legal/${kind}.${version}.${lang}.html`);
+  }
+}
 const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html', ...legalPages];
 await copy('css/profile-account.css');
 await copy('js/profile-onboarding.js');
@@ -81,6 +87,8 @@ for (const name of pages) {
   if (name === 'poker/index.html') {
     html = html.replace('<head>', '<head>' + launchStyle + launch.match(/<script src="\/mobile\/poker\/launch\.js"[^>]*><\/script>/)[0]);
     html = html.replace('<body class="poker-lobby">', '<body class="poker-lobby">' + launchBody);
+    // sidebar.js owns the one shared APK navigation on Lobby and Account.
+    html = html.replace(/<nav class="shortcuts"[\s\S]*?<\/nav>/, '');
   }
   // Only the table draws behind cutouts; other pages retain native viewport margins.
   if (name !== 'poker/table-v2.html') html = html.replace('viewport-fit=cover', 'viewport-fit=auto');
@@ -88,7 +96,7 @@ for (const name of pages) {
   html = html.split("\n").filter(line => !/^\s*<script\b[^>]*src=["'][^"']*(?:analytics|klaro-config|consent-services|consent-manager|vendor\/klaro\/klaro)\.js["'][^>]*><\/script>\s*$/.test(line)).join("\n");
   html = html.replace(/<link\b[^>]*href=["']https:\/\/fonts\.[^>]+>/g, '');
   html = html.replace(/<ul class="sb-list">[\s\S]*?<\/ul>/g, '<ul class="sb-list"></ul>');
-  html = html.replace(/Arcade Hub/g, 'Arcade Poker');
+  if (!legalPages.includes(name)) html = html.replace(/Arcade Hub/g, 'Arcade Poker');
   html = html.replace(/<a\b[^>]*id="manageCookies"[^>]*>[\s\S]*?<\/a>/g, '');
   html = html.replace(/(?:href|data-href-en|data-href-pl)="([^"]+)"/g, (match, value) => {
     if (/^(#|data:|mailto:|https?:)/.test(value)) return match;
