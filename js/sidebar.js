@@ -234,7 +234,13 @@
 
 
   function bottomNavItems(items){
-    if (window.MOBILE_POKER_CONFIG) return items.filter(function(item){ return item.id === 'poker' || item.id === 'profile'; });
+    if (window.MOBILE_POKER_CONFIG) return [
+      {id:'modes',labelKey:'mobileNavLobby',fallbackLabel:'Lobby',href:'/poker/index.html#modes',art:'/poker/assets/chips/chip-purple-3.png'},
+      {id:'tables',labelKey:'mobileNavTables',fallbackLabel:'Tables',href:'/poker/index.html#tables',art:'/poker/assets/chips/chip-purple-3.png'},
+      {id:'progression',labelKey:'mobileNavProgression',fallbackLabel:'Progression',href:'/poker/index.html#progression',art:'/poker/assets/chips/chip-green-4.png'},
+      {id:'bonus',labelKey:'mobileNavBonus',fallbackLabel:'Bonus',href:'/poker/index.html#bonus',art:'/poker/assets/lobby/bonus-v2.webp'},
+      {id:'profile',labelKey:'mobileNavProfile',fallbackLabel:'Profile',href:'/account.html',art:'/poker/assets/themes/midnight-sapphire/avatar-frame.svg'}
+    ];
     const wanted = ['home', 'search', 'favorites', 'poker', 'profile'];
     const byId = {};
     items.forEach(function(item){ byId[item.id] = item; });
@@ -251,6 +257,8 @@
   function renderBottomNav(items){
     if (!doc.body || typeof doc.body.appendChild !== 'function') return;
     if (!doc.querySelector('.shell')) return;
+    const mobile = !!window.MOBILE_POKER_CONFIG;
+    if (mobile && !['/poker/', '/poker/index.html', '/account.html'].includes(window.location.pathname)) return;
     let nav = doc.getElementById('mobileBottomNav');
     if (!nav){
       nav = doc.createElement('nav');
@@ -259,13 +267,26 @@
       nav.setAttribute('aria-label', 'Mobile navigation');
       doc.body.appendChild(nav);
     }
+    nav.className = mobile ? 'mobile-bottom-nav shortcuts' : 'mobile-bottom-nav';
+    if (mobile) { nav.setAttribute('data-poker-navigation', ''); doc.body.classList.add('mobile-poker-navigation'); }
     nav.innerHTML = '';
     bottomNavItems(items).forEach(function(item){
       const link = doc.createElement('a');
       link.className = 'mobile-bottom-nav__item';
       link.href = item.href || '#';
       link.setAttribute('data-nav-id', item.id);
-      if (item.id !== 'search' && isActive(item.href)) link.classList.add('is-active');
+      const active = mobile ? (window.location.pathname === '/account.html' ? 'profile' : doc.body.dataset.mobileLobbyView || 'modes') === item.id : item.id !== 'search' && isActive(item.href);
+      if (active) { link.classList.add('is-active'); link.setAttribute('aria-current', 'page'); }
+      if (mobile) {
+        link.classList.add('shortcut');
+        if (item.id === 'bonus') link.classList.add('shortcut--bonus');
+        link.addEventListener('click', function(event){
+          if (item.id !== 'profile' && window.location.pathname !== '/account.html' && window.location.hash === '#' + item.id) {
+            event.preventDefault();
+            window.dispatchEvent(new Event('hashchange'));
+          }
+        });
+      }
       if (item.id === 'search'){
         link.addEventListener('click', handleBottomSearchClick);
       }
@@ -273,7 +294,9 @@
       const icon = doc.createElement('span');
       icon.className = 'mobile-bottom-nav__icon';
       icon.setAttribute('aria-hidden', 'true');
-      if (item.iconSvg) icon.innerHTML = item.iconSvg;
+      if (mobile) {
+        const art = doc.createElement('img'); art.className = 'shortcut-art'; art.src = item.art; art.alt = ''; art.width = 30; art.height = 30; icon.appendChild(art);
+      } else if (item.iconSvg) icon.innerHTML = item.iconSvg;
 
       const label = doc.createElement('span');
       label.className = 'mobile-bottom-nav__label';
@@ -403,6 +426,7 @@
     if (event && event.key === 'Escape') close();
   }
 
+  if (window.MOBILE_POKER_CONFIG) doc.addEventListener('poker:lobby-view', function(){ renderBottomNav(getBottomItems()); });
   render();
   btn.addEventListener('click', toggle);
   doc.addEventListener('click', handleDocumentClick);

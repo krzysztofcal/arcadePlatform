@@ -62,6 +62,9 @@ test('approved legal content, both policy versions and deletion links survive th
     assert.match(deletionInfo, /href="#signinForm"/);
     assert.match(deletionInfo, /href="mailto:contact@kcswh\.pl"/);
     assert.match(account, /id="deleteAccountButton"/);
+    const lobby = await readFile(path.join(fixture, 'mobile/poker/www/poker/index.html'), 'utf8');
+    assert.doesNotMatch(lobby, /<nav class="shortcuts"/,'APK must not retain a second navigation source');
+    for (const page of [account,lobby]) assert.match(page,/sidebar\.js/, 'Account and Lobby share the same navigation renderer');
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
