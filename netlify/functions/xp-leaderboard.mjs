@@ -1,5 +1,5 @@
 import { xpStoreUnavailableResponse } from "./_shared/store-upstash.mjs";
-import { klog } from "./_shared/supabase-admin.mjs";
+import { extractBearerToken, verifySupabaseJwt, klog } from "./_shared/supabase-admin.mjs";
 import {
   allowLeaderboardRead,
   baseHeaders,
@@ -13,6 +13,7 @@ import { parseLeaderboardQuery, readLeaderboardPage } from "./_shared/xp-leaderb
 
 function createXpLeaderboardHandler(deps = {}) {
   const env = deps.env || process.env;
+  const verifyJwt = deps.verifySupabaseJwt || verifySupabaseJwt;
   const enabled = deps.leaderboardEnabled || leaderboardEnabled;
   const allowRead = deps.allowLeaderboardRead || ((event) => allowLeaderboardRead(event, {
     scope: "public",
@@ -25,12 +26,16 @@ function createXpLeaderboardHandler(deps = {}) {
     const cors = leaderboardCors(origin);
     if (!cors) return json(403, baseHeaders(), { error: "forbidden_origin" });
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
-    const unavailable = xpStoreUnavailableResponse(cors);
-    if (unavailable) return unavailable;
     if (event.httpMethod !== "GET") return json(405, cors, { error: "method_not_allowed" });
-    if (!enabled(env, event)) return json(404, cors, { error: "not_found" });
     let options;
     try {
+      const token = extractBearerToken(event.headers);
+      if (!token) return json(401, cors, { error: "unauthorized" });
+      const auth = await verifyJwt(token);
+      if (!auth.valid || !auth.userId) return json(401, cors, { error: "unauthorized" });
+      if (!enabled(env, event)) return json(404, cors, { error: "not_found" });
+      const unavailable = xpStoreUnavailableResponse(cors);
+      if (unavailable) return unavailable;
       if (!await allowRead(event)) {
         return json(429, { ...cors, "cache-control": "no-store", "retry-after": "60" }, { error: "rate_limit_exceeded" });
       }

@@ -12,7 +12,7 @@ We process your email address, account ID, authentication and session data, play
 
 If you choose to sign in with Google, Supabase receives identification and basic Google account information, including a name and photo. We do not receive your Google password. The Google name and photo are not automatically shown in your player profile. Any publication of a photo requires separate, informed permission.
 
-An account and an automatically generated profile may be created during registration, before you acknowledge the Terms. Profiles are public by default: people who are not signed in can also see the player name, handle, catalog avatar, XP and level. Accounts appear in the leaderboard by default. Opting out of the leaderboard does not hide the public profile. It does not display email, real name, sign-in credentials, balances or private game records. At a table, names and avatars help participants recognize each other. The public website profile is also available to people outside the game.
+An account and an automatically generated profile may be created during registration, before you acknowledge the Terms. Profiles are available to signed-in users by default: after signing in, they can see the player name, handle, catalog avatar, XP and level. Leaderboard data is available after signing in. Accounts appear in the leaderboard by default. Opting out of the leaderboard does not hide the public profile. It does not display email, real name, sign-in credentials, balances or private game records. At a table, names and avatars help participants recognize each other. The website profile is also available to signed-in people who are not taking part in that game.
 
 ## Purposes and legal grounds
 

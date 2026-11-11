@@ -14,3 +14,5 @@ Cztery teksty są kompletne w formie użytkowej. Administrator: **Krzysztof Cal*
 `manifest.json` identyfikuje wyłącznie cztery teksty, nie status prawny ani wdrożone HTML. Odbiór pozostaje otwarty w trzech punktach: zatwierdzenie treści, świadoma decyzja dotycząca opisanego ryzyka publiczności, minimalna praktyka retencji zapisów bez automatycznego końca. Dane dostawców oparto na oficjalnych źródłach i konfiguracji, nie wymyślonych okresach lub rzekomym EOG-only.
 
 Następny rollout wymaga osobnego GO: niezmienne snapshoty a2, zgodne WWW/API/WS/APK i kontrolowane Stage Terms acceptance. Obecny APK nie zawiera nowych tekstów ani nowej informacji signup. Nie wysyłać wewnętrznego rejestru decyzji jako dokumentu dla użytkownika. Bez push, deploy, SQL, TermsON, APK rebuild i merge w tej finalizacji.
+
+#1158 local proposal changes only the intended audience to signed-in viewers. These draft changes are NOT published and do not describe the current Production API until its separately authorized rollout. Version a1 remains immutable; a2 is an unpublished candidate requiring renewed content/version approval and matched WWW/APK publication. LEGAL OPEN.

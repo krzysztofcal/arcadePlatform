@@ -13,9 +13,9 @@ test("account auth UI supports validated signup and Supabase password recovery",
   assert.ok(html.indexOf('id="googleProfileNotice"')<html.indexOf('id="googleSignInButton"'));
   assert.match(page,/setBlockVisibility\(nodes.googleProfileNotice, googleEnabled\)/);
   assert.equal((html.match(/data-i18n="publicProfileSignupNotice"/g)||[]).length,2);
-  assert.match(html,/Anyone, including people who are not signed in, can view your profile/);
+  assert.match(html,/Signed-in users can view your profile/);
   const translations=await read('js/i18n.js');
-  assert.match(translations,/Każdy, również osoba niezalogowana, może zobaczyć Twój profil/);
+  assert.match(translations,/Zalogowani użytkownicy mogą zobaczyć Twój profil/);
   assert.match(html, /id="signupPassword"[^>]*minlength="8"/);
   assert.match(html, /id="signupPasswordConfirm"[^>]*minlength="8"/);
   assert.match(html, /id="forgotPasswordButton"/);

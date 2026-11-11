@@ -5,6 +5,7 @@
   var PUBLIC_URL = '/.netlify/functions/profile-public?handle=';
   var cache = null;
   var inFlight = null;
+  var publicGeneration = 0;
 
   function klog(kind, data){
     try { if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {}); } catch (_err){}
@@ -103,11 +104,18 @@
   }
 
   async function getPublic(handle){
-    var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(PUBLIC_URL + encodeURIComponent(String(handle || ''))) : PUBLIC_URL + encodeURIComponent(String(handle || '')), { headers: { Accept: 'application/json' } });
-    return parse(response);
+    var generation = publicGeneration;
+    var userId = await currentUserId();
+    if (!userId) throw Object.assign(new Error('not_authenticated'), { code: 'not_authenticated', status: 401 });
+    if (generation !== publicGeneration) throw staleIdentityError();
+    var response = await authedFetch(PUBLIC_URL + encodeURIComponent(String(handle || '')), { method: 'GET', cache: 'no-store', credentials: 'omit', headers: { Accept: 'application/json' } });
+    var profile = await parse(response);
+    var latestUserId = await currentUserId();
+    if (generation !== publicGeneration || latestUserId !== userId) throw staleIdentityError();
+    return profile;
   }
 
-  function clear(){ cache = null; inFlight = null; }
+  function clear(){ publicGeneration += 1; cache = null; inFlight = null; }
 
   window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, applyAvatar: applyAvatar, initials: initials };
   klog('profile:client_ready', {});

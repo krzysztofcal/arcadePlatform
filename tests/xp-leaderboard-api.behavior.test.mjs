@@ -44,7 +44,7 @@ function readProfiles(userIds) {
 }
 
 function event(query = {}, headers = {}) {
-  return { httpMethod: "GET", headers, queryStringParameters: query };
+  return { httpMethod: "GET", headers: {authorization:"Bearer token",...headers}, queryStringParameters: query };
 }
 
 function body(response) {
@@ -209,7 +209,7 @@ test("Redis range, lifetime MGET, and profile SQL failures stay non-cacheable 50
   });
 
   for (const scenario of scenarios) {
-    const handler = createXpLeaderboardHandler({
+    const handler = createXpLeaderboardHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_A}),
       leaderboardEnabled: () => true,
       allowLeaderboardRead: async () => true,
       readLeaderboardPage: (options) => readLeaderboardPage(options, {
@@ -247,7 +247,7 @@ test("authenticated me uses the same public projection and competition rank", as
 
 test("public handler stays fresh across visibility changes, is gated, rate-limited, and returns controlled failures", async () => {
   const publicPayload = { period: "all_time", rows: [] };
-  const handler = createXpLeaderboardHandler({
+  const handler = createXpLeaderboardHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_A}),
     leaderboardEnabled: () => true,
     allowLeaderboardRead: async () => true,
     readLeaderboardPage: async () => ({ response: publicPayload, diagnostics: { publicRows: 0, missingProfiles: 0, redisMs: 1, profileMs: 1 } }),
@@ -257,11 +257,11 @@ test("public handler stays fresh across visibility changes, is gated, rate-limit
   assert.equal(success.headers["cache-control"], "no-store");
   assert.deepEqual(body(success), publicPayload);
 
-  const disabled = await createXpLeaderboardHandler({ leaderboardEnabled: () => false })(event());
+  const disabled = await createXpLeaderboardHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_A}), leaderboardEnabled: () => false })(event());
   assert.equal(disabled.statusCode, 404);
   assert.equal(disabled.headers["cache-control"], "no-store");
 
-  const limited = await createXpLeaderboardHandler({ leaderboardEnabled: () => true, allowLeaderboardRead: async () => false })(event());
+  const limited = await createXpLeaderboardHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_A}), leaderboardEnabled: () => true, allowLeaderboardRead: async () => false })(event());
   assert.equal(limited.statusCode, 429);
   assert.equal(limited.headers["cache-control"], "no-store");
 
@@ -270,7 +270,7 @@ test("public handler stays fresh across visibility changes, is gated, rate-limit
   assert.deepEqual(body(invalid), { error: "invalid_page" });
   assert.equal(invalid.headers["cache-control"], "no-store");
 
-  const failed = await createXpLeaderboardHandler({
+  const failed = await createXpLeaderboardHandler({verifySupabaseJwt:async()=>({valid:true,userId:USER_A}),
     leaderboardEnabled: () => true,
     allowLeaderboardRead: async () => true,
     readLeaderboardPage: async () => { throw new Error("redis down"); },
@@ -323,3 +323,17 @@ test("leaderboard rollout defaults to previews and requires an explicit producti
  blocked=false;assert.equal((await readLeaderboardProfiles([id],run)).size,1);
  await assert.rejects(readLeaderboardProfiles([id],async()=>{throw Object.assign(new Error("missing column"),{code:"42703"});}),{code:"42703"});
  });
+
+
+test("leaderboard requires authentication before Redis, SQL and rate reads", async()=>{
+ for(const token of ["", "invalid", "expired", "wrong-project"]){
+  let reads=0;const handler=createXpLeaderboardHandler({leaderboardEnabled:()=>true,verifySupabaseJwt:async()=>({valid:false}),allowLeaderboardRead:async()=>{reads++;return true;},readLeaderboardPage:async()=>{reads++;throw Error("must not read");}});
+  const response=await handler(event({}, {origin:"https://arcade.test",authorization:token?"Bearer "+token:""}));assert.equal(response.statusCode,401);assert.deepEqual(body(response),{error:"unauthorized"});assert.equal(response.headers["cache-control"],"no-store");assert.equal(reads,0);
+ }
+});
+
+test("leaderboard OPTIONS does not require JWT and verifier errors deny data",async()=>{
+ let calls=0;const handler=createXpLeaderboardHandler({leaderboardEnabled:()=>true,verifySupabaseJwt:async()=>{calls++;throw Error("private auth detail");},readLeaderboardPage:async()=>{throw Error("must not read");}});
+ assert.equal((await handler({...event(),httpMethod:"OPTIONS"})).statusCode,204);assert.equal(calls,0);
+ const response=await handler(event());assert.equal(response.statusCode,503);assert.equal(calls,1);assert.equal(response.headers["cache-control"],"no-store");assert.equal(response.body.includes("private auth detail"),false);
+});

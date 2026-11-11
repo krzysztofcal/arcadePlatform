@@ -18,7 +18,7 @@ Korzystanie ze strony wymaga przeglądarki obsługującej JavaScript, pliki cook
 
 Rejestracja tworzy konto. Pierwsze logowanie Google również może utworzyć konto. Konto i automatycznie utworzony profil mogą powstać przed akceptacją regulaminu. Samo zalogowanie się nie oznacza jego akceptacji.
 
-Profil gracza jest domyślnie publiczny. Każdy, również osoba niezalogowana, może zobaczyć automatycznie nadaną nazwę i publiczny identyfikator gracza, avatar z katalogu, XP oraz poziom. E-mail i dane logowania nie należą do profilu publicznego. Konto jest domyślnie widoczne w rankingu. Widoczność w rankingu można wyłączyć w ustawieniach Konta; nie ukrywa to publicznego profilu. Nazwa i avatar przy stole pozwalają rozpoznać uczestników gry.
+Profil gracza jest domyślnie dostępny dla zalogowanych użytkowników. Po zalogowaniu mogą oni zobaczyć automatycznie nadaną nazwę i publiczny identyfikator gracza, avatar z katalogu, XP oraz poziom. E-mail i dane logowania nie należą do profilu publicznego. Dane rankingu są dostępne po zalogowaniu. Konto jest domyślnie widoczne w rankingu. Widoczność w rankingu można wyłączyć w ustawieniach Konta; nie ukrywa to publicznego profilu. Nazwa i avatar przy stole pozwalają rozpoznać uczestników gry.
 
 Gdy wymagana jest akceptacja aktualnego regulaminu, trzeba ją potwierdzić przed rozpoczęciem nowej gry po zalogowaniu, zmianą publicznego avatara, wysłaniem reakcji lub prezentu. Zapisujemy wersję i czas potwierdzenia. Akceptacja nie działa wstecz i nie jest zgodą na analitykę ani publikację zdjęcia Google. „Nie teraz” nie zapisuje akceptacji.
 
