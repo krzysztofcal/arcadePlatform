@@ -9,6 +9,7 @@
   var xp = document.getElementById('publicProfileXp');
   var level = document.getElementById('publicProfileLevel');
   var currentProfile = null;
+  var appliedAvatar = null;
   var generation = 0;
   var signIn = document.getElementById('publicProfileSignIn');
 
@@ -34,9 +35,20 @@
     return Number(value || 0).toLocaleString(locale);
   }
 
+  // #1140: a player blocked by the viewer is shown with the default Arcade avatar; re-applied when blocks change.
+  function applyProfileAvatar(){
+    if (!currentProfile || !window.ProfileClient || !window.ProfileClient.applyAvatar) return;
+    var masked = !!(window.ArcadeUgc && typeof window.ArcadeUgc.isBlockedHandle === 'function' && window.ArcadeUgc.isBlockedHandle(currentProfile.handle));
+    var key = String(currentProfile.handle || '') + (masked ? ':blocked' : ':shown');
+    if (key === appliedAvatar) return;
+    appliedAvatar = key;
+    window.ProfileClient.applyAvatar(avatar, masked ? { displayName: currentProfile.displayName, avatar: { type: 'default', variant: 'default' } } : currentProfile);
+  }
+
   function render(profile){
     currentProfile = profile;
-    if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(avatar, profile);
+    appliedAvatar = null;
+    applyProfileAvatar();
     name.textContent = profile.displayName || '';
     avatar.setAttribute('aria-label', t('publicProfileAvatar', 'Avatar') + ': ' + (profile.displayName || ''));
     handle.textContent = '@' + (profile.handle || '');
@@ -48,11 +60,13 @@
     card.hidden = false;
     card.setAttribute('aria-busy', 'false');
     setStatus('', '');
+    if (window.ArcadeUgc) window.ArcadeUgc.profileRendered(profile);
   }
 
   function reset(){
     generation += 1;
     currentProfile = null;
+    appliedAvatar = null;
     card.hidden = true;
     card.setAttribute('aria-busy', 'true');
     if (identity) identity.hidden = true;
@@ -63,6 +77,7 @@
     if (window.ProfileClient) window.ProfileClient.applyAvatar(avatar, null);
     avatar.setAttribute('aria-label', t('publicProfileAvatar', 'Avatar'));
     if (signIn) signIn.hidden = true;
+    if (window.ArcadeUgc) window.ArcadeUgc.profileRendered(null);
   }
 
   function showSignIn(){
@@ -83,6 +98,11 @@
       if (!value || !window.ProfileClient) throw { status: 404 };
       var profile = await window.ProfileClient.getPublic(value);
       if (request !== generation || document.hidden) return;
+      // The block list is known before the avatar is shown, so a blocked player's avatar never flashes.
+      if (window.ArcadeUgc && typeof window.ArcadeUgc.loadBlocks === 'function'){
+        try { await window.ArcadeUgc.loadBlocks(false); } catch (_err){}
+        if (request !== generation || document.hidden) return;
+      }
       render(profile);
     } catch (error){
       if (request !== generation || error && error.code === 'stale_identity') return;
@@ -92,6 +112,7 @@
   }
 
   function boot(){
+    if (window.ArcadeUgc && typeof window.ArcadeUgc.onChange === 'function') window.ArcadeUgc.onChange(applyProfileAvatar);
     if (window.SupabaseAuth && window.SupabaseAuth.onAuthChange){
       window.SupabaseAuth.onAuthChange(function(){ reset(); setTimeout(load, 0); });
     }

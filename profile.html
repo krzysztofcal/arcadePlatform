@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css">
   <link rel="stylesheet" href="/css/public-profile.css">
+  <link rel="stylesheet" href="/css/ugc.css">
   <script src="/js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
@@ -19,6 +20,7 @@
   <script src="/js/auth/supabaseClient.js" defer></script>
   <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/profile-client.js" defer></script>
+  <script src="/js/ugc-client.js" defer></script>
   <script src="/js/chips/client.js" defer></script>
   <script src="/js/core/number-format.js" defer></script>
   <script src="/js/topbar.js" defer></script>
@@ -66,6 +68,7 @@
           <div><strong class="public-profile__stat-loading" id="publicProfileXp" aria-label="Loading"></strong> <span data-i18n="publicProfileXpLabel">XP</span></div>
           <div><strong class="public-profile__stat-loading" id="publicProfileLevel" aria-label="Loading"></strong> <span data-i18n="publicProfileLevelLabel">Level</span></div>
         </div>
+        <div class="ugc-actions" id="publicProfileSafety" hidden></div>
       </article>
     </main>
   </div>

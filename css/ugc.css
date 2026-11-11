@@ -1,0 +1,25 @@
+/* #1140 UGC phase B: Report / Block controls and dialog (WWW and Android). One rule per selector. */
+.ugc-actions{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.ugc-actions[hidden],.ugc-table[hidden],.ugc-blocked[hidden]{ display:none; }
+.ugc-actions__report,.ugc-actions__block{ min-height:40px; padding:8px 14px; border:1px solid var(--border, rgba(255,255,255,.2)); border-radius:8px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.ugc-actions__report:disabled,.ugc-actions__block:disabled{ opacity:.6; cursor:default; }
+.ugc-actions__status{ flex-basis:100%; margin:0; font-size:.9em; opacity:.85; }
+.ugc-actions__status:empty{ display:none; }
+.ugc-table{ display:grid; gap:10px; margin:12px 0; }
+.ugc-table__title{ margin:0; font-size:1em; }
+.ugc-table__player{ display:grid; gap:6px; }
+.ugc-table__name{ font-weight:600; overflow-wrap:anywhere; }
+.ugc-blocked{ display:grid; gap:8px; margin-top:16px; }
+.ugc-blocked h3{ margin:0; font-size:1em; }
+.ugc-blocked__row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ugc-blocked__name{ overflow-wrap:anywhere; }
+.ugc-blocked__empty{ margin:0; opacity:.8; }
+.ugc-dialog{ max-width:min(420px, calc(100vw - 32px)); padding:20px; border:1px solid var(--border, rgba(255,255,255,.2)); border-radius:12px; background:#121a33; color:#f3f5ff; }
+.ugc-dialog::backdrop{ background:rgba(0,0,0,.6); }
+.ugc-dialog__form{ display:grid; gap:10px; margin:0; }
+.ugc-dialog__title{ margin:0; font-size:1.15em; }
+.ugc-dialog__text{ margin:0; }
+.ugc-dialog__reason{ display:flex; align-items:center; gap:8px; min-height:36px; }
+.ugc-dialog__actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+.ugc-dialog__cancel,.ugc-dialog__confirm{ min-height:40px; padding:8px 16px; border-radius:8px; border:1px solid rgba(255,255,255,.25); background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.ugc-dialog__confirm{ background:#3b5bdb; border-color:#3b5bdb; }

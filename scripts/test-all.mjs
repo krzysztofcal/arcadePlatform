@@ -149,6 +149,7 @@ run("node", ["tests/public-profiles.behavior.test.mjs"], "public-profiles-behavi
 run("node", ["tests/ugc-safety.behavior.test.mjs"], "ugc-safety-behavior");
 run("node", ["tests/ugc-moderation.behavior.test.mjs"], "ugc-moderation-behavior");
 run("node", ["tests/admin-ugc-reports.behavior.test.mjs"], "admin-ugc-reports-behavior");
+run("node", ["tests/ugc-client.behavior.test.mjs"], "ugc-client-behavior");
 run("node", ["tests/profile-avatar.behavior.test.mjs"], "profile-avatar-behavior");
 run("node", ["tests/public-profile-xp.e2e.test.mjs"], "public-profile-xp-e2e");
 run("node", ["tests/public-profile-ui.contract.test.mjs"], "public-profile-ui-contract");
