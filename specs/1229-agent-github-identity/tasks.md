@@ -2,11 +2,15 @@
 
 - [x] T001 Read-only identity and ruleset audit → `audit.md`.
 - [x] T002 Agent routing to the App with fail-closed `gh` for Claude Code, Codex and Antigravity (local configs; backups kept). Verified: fresh Claude Code session `which gh` → App wrapper, plain `gh` not logged in; Codex and agy child environments the same; git push already App-only.
-- [ ] T002-O OWNER credential removal from the VPS agent runtime — **OWNER GO** (draft, pending independent review):
+- [x] T002-O OWNER credential removal from the VPS agent runtime — **OWNER GO** (B done by OWNER, A.2 done 2026-11-11; A.3 choice pending):
   A. Personal connectors stay connected; only the VPS agent clients stop using them:
      1. Claude Code (VPS): already `permissions.deny: ["mcp__claude_ai_github"]` (claude.ai web/mobile unaffected).
      2. Codex (VPS): in `~/.codex/config.toml` replace the two auto-approve blocks of the GitHub app with
         `[apps.connector_76869538009648d5b282a4bb21c3d157]` `enabled = false` (only that app; ChatGPT unaffected).
+        Done 2026-11-11 (backup `~/.codex/config.toml.bak-1229-*`). Verified via a fresh `codex app-server`
+        `app/list` (no model call): GitHub `enabled=false`; Adobe Acrobat, BrowserStack, Figma, Gmail, Google Calendar,
+        Google Drive, Sites `enabled=true`. App-server daemons started before the change; restart them
+        (`codex app-server daemon restart`) when no Codex session is active.
         Not `features.apps = false`: it would also remove Figma, Adobe Acrobat and the Gmail/Google Drive plugins that
         Codex sessions use. MCP servers (supabase-stage, browserstack, OVH) do not depend on apps.
      3. Residual (verified, audit.md): these switches bind only the normal workflow. The OWNER's Claude and ChatGPT
@@ -22,6 +26,8 @@
         which rejects `gh auth`):
         `GH_CONFIG_DIR="$HOME/.config/gh" /home/copilot/.local/bin/gh auth logout --hostname github.com --user krzysztofcal`
         This removes the token from the VPS only. It does not invalidate it, so Termux is unaffected.
+     Done by OWNER 2026-11-11: no `oauth_token` left, `ghx api` works, Termux login kept (re-checked by the agent:
+     0 `oauth_token` entries, real `gh auth status` not logged in).
      3. Verify without printing the token:
         `GH_CONFIG_DIR="$HOME/.config/gh" /home/copilot/.local/bin/gh auth status --hostname github.com` → "not logged in"
         (non-zero exit); `grep -c oauth_token ~/.config/gh/hosts.yml` → `0` (or the file is absent);
