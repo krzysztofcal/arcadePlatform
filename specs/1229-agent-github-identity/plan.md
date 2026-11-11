@@ -12,17 +12,27 @@ Agent launch configuration (outside the repository, per agent):
 `GH_CONFIG_DIR` points plain `gh` at the empty App config, so a bypass of the wrapper finds no OWNER login (fail
 closed); `ghx` refuses `gh auth`; git already uses only the App helper (`quit=1` on failure).
 
-This routing is not isolation. The OWNER OAuth token in `~/.config/gh/hosts.yml` stays readable by the shared Unix
-user until the OWNER logs it out on the VPS (no revoke needed, so Termux keeps working). The OWNER's Claude/ChatGPT
-logins on the VPS keep their GitHub connectors technically reachable by agents. The VPS clients disable them, but the
-personal integrations are not changed (tasks.md T002-O).
+This routing is a workflow guarantee, **not credential isolation** (verified 2026-11-11, audit.md):
+- the OWNER `gh` token (`~/.config/gh/hosts.yml`) is readable by the agents' Unix user until T002-O B removes it;
+- the OWNER's claude.ai and ChatGPT logins (`~/.claude/.credentials.json`, `~/.codex/auth.json`, mode 0600, same
+  user) keep the personal GitHub connectors reachable: the client switches are user-level settings that a same-user
+  process can bypass (`claude --setting-sources`, `codex -c`), so a deliberately misbehaving agent could still act on
+  GitHub as the OWNER, including approving a PR.
+Minimal option without new infrastructure, accounts or disconnecting the connectors: on GitHub, limit the repository
+access of the connectors' GitHub App installations so they exclude `krzysztofcal/arcadePlatform`, but only if they are
+GitHub App installations and the OWNER does not need them for this repository. Otherwise the OWNER accepts the residual
+in writing before T003. Either way, T003 then protects the normal workflow and prevents mistakes; it is not proof
+against a deliberately misbehaving agent.
 
 ## T003 — ruleset (OWNER activation GO)
 New ruleset [main-owner-review.ruleset.json](main-owner-review.ruleset.json): `main`, 1 approval, code owner review,
-dismiss stale approvals; bypass only `RepositoryRole` 5 (admin) in `pull_request` mode. Existing rulesets
+dismiss stale approvals; bypass only the user `krzysztofcal` (`actor_type: User`, id 31594949) in `pull_request` mode.
+The GitHub REST docs list `User` as a bypass actor type (with `pull_request` mode) and exclude only `OrganizationAdmin`
+for personal repositories; it cannot be tested without creating a ruleset, so T003 verifies it by read-back. Existing rulesets
 12958021 and 12385707 are not modified, so required checks, PR requirement and no-force-push/deletion stay enforced
-without bypass. In this personal repository only the owner can hold `admin` (audit), so the bypass is OWNER-only;
-the App is neither admin nor a bypass actor, and a review by the App or by a PR author never satisfies a code-owner
+without bypass. If GitHub rejects the `User` actor here, the equivalent fallback is `RepositoryRole` 5 (admin), since in this personal
+repository only the owner can hold `admin` (audit); that fallback needs the OWNER's decision. The App is neither a
+bypass actor nor admin, and a review by the App or by a PR author never satisfies a code-owner
 review. Activate only after T002-O (no OWNER credential reachable by agents).
 
 ## Breaking impacts

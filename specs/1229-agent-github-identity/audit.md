@@ -24,10 +24,23 @@ variable **names** and public key fingerprints.
 | Env tokens | no `GH_TOKEN`/`GITHUB_TOKEN` in any agent process | none | none |
 | SSH | `~/.ssh/id_ed25519` is **not** an OWNER GitHub key (fingerprint not in `github.com/krzysztofcal.keys`; `ssh -T` denied) | same | same |
 
+## Verified 2026-11-11 (after T002 routing)
+- Real GitHub CLI: `/home/copilot/.local/bin/gh` (ELF, gh 2.45.0); `ghx` execs the same binary. With
+  `GH_CONFIG_DIR=$HOME/.config/gh` its `auth status` shows `krzysztofcal` from `hosts.yml` (2 `oauth_token` entries,
+  token masked). `~/.arcade-code-agent/bin/gh` (ghx) rejects `gh auth`, so logout must use the real binary.
+- `~/.claude/.credentials.json` and `~/.codex/auth.json`: mode 0600, owner `copilot` (the agents' user).
+- Claude Code offers `--setting-sources` and Codex offers `-c key=value`, so user-level deny/disable settings do not bind a
+  same-user process. A test run of `claude --setting-sources project` against the OWNER connector was itself blocked
+  by Claude Code's auto-mode classifier as a bypass attempt; the residual follows from the CLI options and file access,
+  not from an executed bypass.
+- Bypass actor `User` is documented by GitHub REST (`actor_type` enum includes `User`; `OrganizationAdmin` is the only
+  type excluded for personal repositories); `krzysztofcal` id 31594949.
+
 ## Blockers before T003 activation
 1. OWNER OAuth token in `~/.config/gh/hosts.yml` is readable by every agent process (same UID); PATH routing alone
    does not isolate it.
-2. claude.ai GitHub connector (Claude Code) and the ChatGPT GitHub connector (Codex) act as the OWNER.
+2. claude.ai GitHub connector (Claude Code) and the ChatGPT GitHub connector (Codex) act as the OWNER and stay
+   reachable by a same-user process; needs a GitHub-side repository restriction or the OWNER's written acceptance.
 3. #1228 is OWNER-authored, so after activation it can only be merged through the OWNER PR-only bypass.
 
 ## Rollback

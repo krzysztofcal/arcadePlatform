@@ -39,9 +39,9 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ### Agent GitHub identity (#1229)
 
-- Claude Code, Codex and Antigravity act on GitHub only as the GitHub App `arcade-code-agent[bot]` (#1159): `git push` through the global credential helper, `gh` through `~/.arcade-code-agent/bin/gh` (`ghx`) with `GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh`. Never use the OWNER's `gh` login, OWNER GitHub connectors (claude.ai / ChatGPT) or any other OWNER credential; if the App token is unavailable, stop and report — there is no fallback.
+- Claude Code, Codex and Antigravity act on GitHub only as the GitHub App `arcade-code-agent[bot]` (#1159): `git push` through the global credential helper, `gh` through `~/.arcade-code-agent/bin/gh` (`ghx`) with `GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh`. Never use the OWNER's `gh` login, OWNER GitHub connectors (claude.ai / ChatGPT) or any other OWNER credential; if the App token is unavailable, stop and report — there is no fallback. This routing is not credential isolation: agents share the OWNER's Unix user, so OWNER logins on the VPS stay technically reachable (see `specs/1229-agent-github-identity/`); never use or work around them.
 - Agents may implement, test, commit, push feature branches and open or update PRs as the App. Push to `main` and force push are forbidden.
-- Merging into `main` requires the code owner `@krzysztofcal`: an OWNER approval of an agent PR (a new push dismisses it), or the OWNER's own `pull_request`-only bypass for OWNER PRs. Agents never approve, bypass or merge on the OWNER's behalf. Activation of this rule and OWNER credential changes follow `specs/1229-agent-github-identity/`.
+- Merging into `main` requires the code owner `@krzysztofcal`: an OWNER approval of an agent PR (a new push dismisses it), or the `pull_request`-only bypass of the user `krzysztofcal` for OWNER PRs. Agents never approve, bypass or merge on the OWNER's behalf. Activation of this rule and OWNER credential changes follow `specs/1229-agent-github-identity/`.
 
 ---
 

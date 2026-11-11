@@ -9,19 +9,24 @@
         `[apps.connector_76869538009648d5b282a4bb21c3d157]` `enabled = false` (only that app; ChatGPT unaffected).
         Not `features.apps = false`: it would also remove Figma, Adobe Acrobat and the Gmail/Google Drive plugins that
         Codex sessions use. MCP servers (supabase-stage, browserstack, OVH) do not depend on apps.
-     3. Limitation (not closable without changing personal integrations): both switches are enforced by the agent
-        programs, but every agent runs as the same Unix user that holds the OWNER's Claude and ChatGPT logins
-        (`~/.claude/.credentials.json`, `~/.codex/auth.json`). A deliberately misbehaving agent could still reach the
-        connectors, and so act on GitHub as the OWNER (including PR approval), outside these clients. Options:
-        accept this residual; or restrict the connector's GitHub repository access so it excludes this repository
-        (also outside the VPS); or use separate non-OWNER Claude/ChatGPT accounts for the VPS (out of scope).
+     3. Residual (verified, audit.md): these switches bind only the normal workflow. The OWNER's Claude and ChatGPT
+        logins on the VPS (`~/.claude/.credentials.json`, `~/.codex/auth.json`, same Unix user) keep the connectors
+        reachable by a same-user process (`claude --setting-sources`, `codex -c`), so a deliberately misbehaving
+        agent could still act as the OWNER on GitHub, including approving a PR. Before T003 the OWNER chooses one:
+        a) GitHub → Settings → Applications → Installed GitHub Apps: if the Claude / ChatGPT connector is listed, set
+           its repository access to exclude `krzysztofcal/arcadePlatform` (personal use elsewhere is kept); or
+        b) accept this residual in writing (e.g. a comment on #1229).
   B. GitHub CLI token (`~/.config/gh/hosts.yml`), without losing the OWNER's own access:
      1. Pre-check: github.com in the browser (2FA) and Termux `gh auth status` both work.
-     2. VPS, OWNER's own shell (not an agent session):
-        `GH_CONFIG_DIR=$HOME/.config/gh gh auth logout -h github.com -u krzysztofcal`.
+     2. VPS, OWNER's own shell (not an agent session), real GitHub CLI by absolute path (`gh` on PATH may be `ghx`,
+        which rejects `gh auth`):
+        `GH_CONFIG_DIR="$HOME/.config/gh" /home/copilot/.local/bin/gh auth logout --hostname github.com --user krzysztofcal`
         This removes the token from the VPS only. It does not invalidate it, so Termux is unaffected.
-     3. Verify: `~/.config/gh/hosts.yml` has no `oauth_token`; `ghx api repos/krzysztofcal/arcadePlatform --jq .full_name`
-        and agent pushes still work (git uses only the App helper).
+     3. Verify without printing the token:
+        `GH_CONFIG_DIR="$HOME/.config/gh" /home/copilot/.local/bin/gh auth status --hostname github.com` → "not logged in"
+        (non-zero exit); `grep -c oauth_token ~/.config/gh/hosts.yml` → `0` (or the file is absent);
+        `~/.arcade-code-agent/bin/gh api repos/krzysztofcal/arcadePlatform --jq .full_name` → the repository name.
+        Never run `gh auth token` or `--show-token`.
      4. Optional hardening: revoking "GitHub CLI" under Authorized OAuth Apps invalidates **every** GitHub CLI token,
         Termux included. If chosen, do it after step 2 and re-login Termux at once with `gh auth login --web`
         (the browser is the independent channel). The 2026-11-10 audit found the token in no agent logs or transcripts,
@@ -34,9 +39,17 @@
      The #1159 quarantine catalog is not needed: the file holds a revocable token, so logout is the simpler, existing
      path. A root-custody copy would need a catalog entry like `github-app-key-quarantine` (reviewed PR + `vps-admin`
      approval).
-- [ ] T003 Ruleset activation — **OWNER GO**, after T002-O. Scope: it binds agents acting through the App and prevents mistakes; while T002-O A.3 holds it is not proof against a deliberately misbehaving agent. GitHub UI: Settings → Rules → Rulesets → New branch ruleset: name `main requires OWNER code owner review`; Enforcement **Active**; Bypass list: **Repository admin**, mode **For pull requests only**; Target: include `main`; rule **Require a pull request before merging** with Required approvals **1**, **Dismiss stale pull request approvals when new commits are pushed**, **Require review from Code Owners**. Nothing else; do not edit rulesets 12958021/12385707. Equivalent API from the OWNER channel: `gh api -X POST repos/krzysztofcal/arcadePlatform/rulesets --input main-owner-review.ruleset.json`. Read-back: the new ruleset has exactly one bypass actor `RepositoryRole 5 / pull_request`. Rollback: delete the new ruleset.
-- [ ] T004 Acceptance (NOT RUN until T003):
-  1. An App-authored PR (e.g. the #1229 PR) with green checks shows merge **blocked** until `@krzysztofcal` approves; `ghx pr merge` fails; an App review does not unblock it.
-  2. A new push to that PR dismisses the OWNER approval.
-  3. An OWNER-authored PR cannot be self-approved; the OWNER can merge it with the bypass option; `ghx pr merge` cannot.
-  4. Required checks of 12958021 still apply; merging deploys nothing (unchanged #1159 evidence: `netlify.toml` ignore for `main`, WS deploy only by approved dispatch).
+- [ ] T003 Ruleset activation — **OWNER GO**, after T002-O B and the A.3 choice. Scope: it binds agents acting through the App and prevents mistakes; while T002-O A.3 holds it is not proof against a deliberately misbehaving agent. GitHub UI: Settings → Rules → Rulesets → New branch ruleset: name `main requires OWNER code owner review`; Enforcement **Active**; Bypass list: user **krzysztofcal**, mode **For pull requests only** (if the UI or API does not accept a user, STOP; fallback **Repository admin** needs an OWNER decision); Target: include `main`; rule **Require a pull request before merging** with Required approvals **1**, **Dismiss stale pull request approvals when new commits are pushed**, **Require review from Code Owners**. Nothing else; do not edit rulesets 12958021/12385707. Equivalent API from the OWNER channel: `gh api -X POST repos/krzysztofcal/arcadePlatform/rulesets --input main-owner-review.ruleset.json`. Read-back: the new ruleset has exactly one bypass actor `User 31594949 / pull_request`. Rollback: delete the new ruleset.
+- [ ] T004 Acceptance (NOT RUN until T003; read-only checks, no merge without a separate OWNER GO):
+  1. Use a **Ready** (not Draft), unmerged App-authored PR with all required checks green, which the OWNER
+     designated for this test (e.g. #1230 after it is marked Ready). Expect from
+     `ghx pr view <n> --json isDraft,reviewDecision,mergeStateStatus,statusCheckRollup`: `isDraft=false`, checks
+     SUCCESS, `reviewDecision=REVIEW_REQUIRED`, `mergeStateStatus=BLOCKED` (green checks and Ready, so the block comes
+     from the missing code-owner review). No merge attempt.
+  2. The OWNER approves → `reviewDecision=APPROVED`. An agent pushes one trivial commit → `REVIEW_REQUIRED` again
+     (stale approval dismissed). No merge.
+  3. Bypass eligibility only: `ghx api repos/krzysztofcal/arcadePlatform/rulesets/<id> --jq .current_user_can_bypass`
+     → `never` (App); the same read from the OWNER channel → `pull_requests_only`. An actual OWNER bypass merge is a
+     separate GO.
+  4. Rulesets 12958021 and 12385707 read back unchanged (required checks, no force push); merging deploys nothing
+     (#1159 evidence: `netlify.toml` ignore for `main`, WS deploy only by approved dispatch).
