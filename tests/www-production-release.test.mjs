@@ -390,7 +390,16 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
   const input = { releaseSha: c, actor: 'arcade-code-agent[bot]', triggeringActor: 'arcade-code-agent[bot]', runId: '30', attempt: '1', checks: checkRequest({ ...ok, releaseSha: c, confirmation: `DEPLOY WS PRODUCTION ${c}`, githubSha: c, headSha: c, mainSha: c }) };
   const text = renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: change });
   for (const part of [`## Approve only if expected: WS Production release ${c}`, `| Last confirmed deploy | \`${a}\` (run 20). GitHub evidence`, 'not read from the VPS',
-    '2 commit(s) since the last confirmed deploy; 1 WS input file(s) changed', '- `ws-server/server.mjs`', '- NOT RUN YET', 'the impact and validate jobs succeeded (their logs show which steps ran)', ...AFTER_APPROVAL]) assert.ok(text.includes(part), part);
+    '2 commit(s) since the last confirmed deploy; 1 WS input file(s) changed', '- [`ws-server/server.mjs`]', '- NOT RUN YET', 'the impact and validate jobs succeeded (their logs show which steps ran)', ...AFTER_APPROVAL]) assert.ok(text.includes(part), part);
+  const compare = `https://github.com/krzysztofcal/arcadePlatform/compare/${a}..${c}`;
+  assert.ok(text.includes(`[View changes](${compare})`));
+  const { createHash } = await import('node:crypto');
+  const fileAnchor = createHash('sha256').update('ws-server/server.mjs').digest('hex');
+  assert.ok(text.includes(`- [\`ws-server/server.mjs\`](${compare}#diff-${fileAnchor})`), 'file links point into the exact comparison, including deleted files');
+  const unknown = renderSummary({ ...input, last: null, scope: null });
+  assert.ok(unknown.includes(`[View commit](https://github.com/krzysztofcal/arcadePlatform/commit/${c})`));
+  assert.doesNotMatch(unknown, /\/compare\//, 'unknown baseline never invents a diff');
+  assert.throws(() => renderSummary({ ...input, last: { sha: 'main', runId: 20 }, scope: change }), /invalid_summary_input/);
   assert.match(text, /\n- `[a-f0-9]{12}` `docs only x b \[Approve\]\(https:\/\/example\.com\) !\[i\]\(https:\/\/example\.com\/i\.png\)`\n/, 'a subject is one closed code span');
   assert.doesNotMatch(text, /PASS|<b>|\| `x`|^- `[a-f0-9]{12}` [^`]/m, 'no unrun check is reported as passed and no subject renders as Markdown');
   assert.match(renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: docs }), /no WS input file changed \(packaged files and the deploy workflow\); the artifact is rebuilt, not compared/);
@@ -398,5 +407,28 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
   assert.match(renderSummary({ ...input, last: { sha: a, runId: 20 }, scope: null, scopeError: true }), /\| Scope \| unknown: the history/);
   assert.match(renderSummary({ ...input, last: { sha: c, runId: 20 }, scope: releaseScope(c, a, git) }), /NOT an ancestor/);
   assert.throws(() => renderSummary({ ...input, actor: 'a b', last: null }), /invalid_summary_input/);
+  fs.unlinkSync(path.join(repo, 'ws-server/server.mjs'));
+  const deleted = commit('README.md', 'deleted WS input\n', 'delete WS input');
+  const deletedScope = releaseScope(wf, deleted, git);
+  assert.deepEqual(deletedScope.wsFiles, ['ws-server/server.mjs']);
+  const deletedText = renderSummary({ ...input, releaseSha: deleted, last: { sha: wf, runId: 20 }, scope: deletedScope });
+  assert.ok(deletedText.includes(`- [\`ws-server/server.mjs\`](https://github.com/krzysztofcal/arcadePlatform/compare/${wf}..${deleted}#diff-${fileAnchor})`), 'a deleted file links to its immutable diff, not a missing blob');
+
+  git(['checkout', '--detach', a]);
+  const diverged = commit('ws-server/server.mjs', 'other branch\n', 'divergent WS change');
+  const divergentScope = releaseScope(c, diverged, git);
+  assert.equal(divergentScope.relation, 'not_ancestor');
+  assert.notEqual(git(['diff', c, diverged]).stdout, git(['diff', `${c}...${diverged}`]).stdout, 'a merge-base diff is not the deployed-to-candidate diff');
+  const divergentText = renderSummary({ ...input, releaseSha: diverged, last: { sha: c, runId: 20 }, scope: divergentScope });
+  assert.ok(divergentText.includes(`[View changes](https://github.com/krzysztofcal/arcadePlatform/compare/${c}..${diverged})`));
+  assert.match(divergentText, /NOT an ancestor/);
+  const unusualPath = 'shared/żółw "quoted"\nname.mjs';
+  const unusual = commit(unusualPath, 'unusual path\n', 'unusual WS path');
+  const unusualScope = releaseScope(diverged, unusual, git);
+  assert.deepEqual(unusualScope.wsFiles, [unusualPath], 'diff paths are literal, not Git-quoted or split on embedded newlines');
+  const unusualText = renderSummary({ ...input, releaseSha: unusual, last: { sha: diverged, runId: 20 }, scope: unusualScope });
+  assert.ok(unusualText.includes(`#diff-${createHash('sha256').update(unusualPath).digest('hex')})`), 'the link hashes the original UTF-8 path');
+
+
   fs.rmSync(repo, { recursive: true, force: true });
 });
