@@ -42,6 +42,21 @@ test('approved legal content, both policy versions and deletion links survive th
         assert.match(packaged, /href="mailto:contact@kcswh\.pl"/);
       }
     }
+    const a3Dir = 'specs/1157-settled-data-retention/legal-candidate-a3/';
+    const a3 = JSON.parse(await readFile(path.join(root, a3Dir, 'manifest.json'), 'utf8'));
+    for (const [file, expectedHash] of Object.entries(a3.files)) {
+      const page = `legal/${file}`;
+      const source = await readFile(path.join(root, page), 'utf8');
+      assert.equal(createHash('sha256').update(source).digest('hex'), expectedHash, `a3 hash mismatch: ${page}`);
+      assert.equal(source, await readFile(path.join(root, a3Dir, file), 'utf8'), `a3 differs from accepted candidate: ${page}`);
+      assert.ok(receipt.sourcePages.includes(page), `missing packaged ${page}`);
+      const packaged = await readFile(path.join(fixture, 'mobile/poker/www', page), 'utf8');
+      assert.equal(main(packaged), main(source), `packaging changed legal content: ${page}`);
+      assert.equal(htmlText(main(packaged)), htmlText(main(source)));
+      assert.match(packaged, /id="account-deletion"/);
+      assert.match(packaged, /href="mailto:contact@kcswh\.pl"/);
+    }
+    assert.ok(!receipt.sourcePages.some(page => page.startsWith('legal/terms.') && page.includes(a3.candidateVersion)), 'a3 adds no Terms page');
     for (const lang of ['pl', 'en']) {
       for (const version of ['2026-10-26-a1', manifest.candidateVersion]) {
         for (const kind of ['terms', 'privacy']) assert.ok(receipt.sourcePages.includes(`legal/${kind}.${version}.${lang}.html`));

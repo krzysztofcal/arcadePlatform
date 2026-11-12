@@ -20,6 +20,8 @@
       ":(exclude)legal/terms.2026-10-28-a2.en.html",
       ":(exclude)legal/privacy.2026-10-28-a2.pl.html",
       ":(exclude)legal/privacy.2026-10-28-a2.en.html",
+      ":(exclude)legal/privacy.2026-11-12-a3.pl.html",
+      ":(exclude)legal/privacy.2026-11-12-a3.en.html",
       "tests/index.html"
     ]
   },

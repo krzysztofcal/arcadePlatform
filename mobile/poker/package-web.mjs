@@ -58,6 +58,8 @@ for (const version of ['2026-10-26-a1', '2026-10-28-a2']) {
     for (const kind of ['terms', 'privacy']) legalPages.push(`legal/${kind}.${version}.${lang}.html`);
   }
 }
+// #1157: Privacy a3 is bundled as a versioned page only; aliases stay on a1.
+for (const lang of ['en', 'pl']) legalPages.push(`legal/privacy.2026-11-12-a3.${lang}.html`);
 const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html', ...legalPages];
 await copy('css/profile-account.css');
 await copy('js/profile-onboarding.js');
