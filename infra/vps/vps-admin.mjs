@@ -448,12 +448,110 @@ function installWsRestartGate(host, runId) {
   }
 }
 
+// #1240 one-time public npm tarball cache only. These SHA-512/size pairs were independently
+// checked against https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/<version>.
+// No metadata/index, installation, session, test directory or caller-selected path is eligible.
+const NPM_CACHE_1240 = Object.freeze([
+  { version: "2.1.318", size: 157335063, digest: "197fbb0949e0d91e5fed2b00db0d0b697947d9feb67d10850ff6764947b1a1e1f707429fba5290b790ed63d35e0f6629dd5101cfafe4ff15926c63d48ba355d8" },
+  { version: "2.1.319", size: 158448451, digest: "14ee12776dc13b554240f8897b9bc6ddb367995e7e6224dabbba3596a2b716be55944e132dd2a2c98a70411c045cef75904da5d76129da2ec9d7d4fc31dda839" },
+  { version: "2.1.322", size: 159262440, digest: "d03a1a3405cb58261820669c85604291352c4bc74e3a0be4e11d9f14a76b2de8cef579514f069650c0fd38d7439afd1cb1da70c63e2a2d437acd631a1b64b3ea" },
+]);
+
+function verifyNpmBlob(host, parent, name, blob, uid, rootDevice, deadline) {
+  let fd;
+  try { fd = fs.openSync(at(parent, name), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
+  catch { throw new Unverifiable("npm_blob_open"); }
+  try {
+    const s = fs.fstatSync(fd);
+    const age = host.now() - s.mtimeMs;
+    if (!s.isFile() || s.uid !== uid || s.nlink !== 1 || s.dev !== rootDevice || s.size !== blob.size
+      || age < 48 * 3600000 || age > 365 * 86400000 || host.now() >= deadline) throw new Unverifiable("npm_blob_identity_or_age");
+    const hash = crypto.createHash("sha512");
+    const buffer = Buffer.alloc(1024 * 1024);
+    for (let offset = 0; offset < blob.size;) {
+      if (host.now() >= deadline) throw new Unverifiable("npm_blob_timeout");
+      const count = fs.readSync(fd, buffer, 0, Math.min(buffer.length, blob.size - offset), offset);
+      if (!count) throw new Unverifiable("npm_blob_short_read");
+      hash.update(buffer.subarray(0, count));
+      offset += count;
+    }
+    if (hash.digest("hex") !== blob.digest || !sameFile(s, fs.fstatSync(fd))
+      || !sameFile(s, lstatOrNull(at(parent, name)))) throw new Unverifiable("npm_blob_digest_or_change");
+    return s;
+  } finally { fs.closeSync(fd); }
+}
+
+function npmCache1240(host, runId, apply) {
+  // Overrides exist only for the imported fundamental fixtures, never the two-argument CLI.
+  const spec = host.npmCache1240 || { blobs: NPM_CACHE_1240, base: "/var/lib/arcade-admin/npm-cache-1240", rootDevice: fs.statSync("/").dev };
+  const q = { ...host.quarantine, base: spec.base, files: spec.blobs.map((b) =>
+    `.npm/_cacache/content-v2/sha512/${b.digest.slice(0, 2)}/${b.digest.slice(2, 4)}/${b.digest.slice(4)}`) };
+  const id = host.run(["/usr/bin/id", "-u", q.user]);
+  if (id.status !== 0 || !/^[1-9][0-9]{0,9}$/.test(id.stdout)) throw new Unverifiable("owner_uid");
+  const uid = Number(id.stdout);
+  const deadline = host.now() + 120000;
+  const stats = [];
+  const fds = [];
+  try {
+    if (spec.blobs.length !== 3 || spec.blobs.some((b) => !/^[0-9a-f]{128}$/.test(b.digest)
+      || !Number.isSafeInteger(b.size) || b.size < 1) || spec.blobs.reduce((n, b) => n + b.size, 0) > 512 * 1024 * 1024) throw new Unverifiable("npm_manifest");
+    for (const [i, rel] of q.files.entries()) {
+      const parent = pinParent(q.home, rel, uid, fds);
+      if (typeof parent === "string") throw new Unverifiable(`npm_${parent}`);
+      stats.push(verifyNpmBlob(host, parent, path.basename(rel), spec.blobs[i], uid, spec.rootDevice, deadline));
+    }
+  } finally { for (const fd of fds) fs.closeSync(fd); }
+  if (inUse(q.proc, stats)) return { ok: false, blocked: "npm_blob_in_use" };
+  if (host.now() >= deadline) throw new Unverifiable("npm_blob_timeout");
+  const allocated = stats.reduce((sum, s) => sum + s.blocks * 512, 0);
+  if (!apply) return { ok: true, details: `dry_run=yes files=3 allocated_bytes=${allocated} deleted=0 execution_rechecks=required` };
+
+  // Reuse the existing descriptor-pinned, all-target preflight, same-filesystem rename and
+  // durable custody manifest. Never unlink from a copilot-writable directory: a pathname
+  // could be exchanged after its last stat. Failed/partial custody never reaches deletion.
+  const custody = quarantineSnapshots({ ...host, quarantine: q }, runId);
+  if (!custody.ok) return custody;
+  const runDir = path.join(q.base, String(runId));
+  let deleted = 0, deletedBytes = 0, run, manifest;
+  const failed = (step) => ({ ok: false, failed: `npm_${step} custody=protected deleted=${deleted}/3 deleted_allocated_bytes=${deletedBytes} inspect=${runDir}/MANIFEST no_retry=yes` });
+  try {
+    run = fs.openSync(runDir, O_DIR);
+    const rs = fs.fstatSync(run);
+    if (rs.uid !== q.rootUid || rs.gid !== q.rootGid || (rs.mode & 0o7777) !== 0o700) return failed("custody_directory");
+    const names = q.files.map((rel, i) => `${i}-${path.basename(rel)}`);
+    for (const [i, name] of names.entries()) {
+      const s = verifyNpmBlob(host, run, name, spec.blobs[i], uid, spec.rootDevice, deadline);
+      if (!sameFile(stats[i], s)) return failed("custody_identity");
+    }
+    if (inUse(q.proc, stats)) return failed("custody_in_use");
+    manifest = fs.openSync(at(run, "MANIFEST"), fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const ms = fs.fstatSync(manifest);
+    if (!ms.isFile() || ms.uid !== q.rootUid || ms.gid !== q.rootGid || ms.nlink !== 1 || (ms.mode & 0o7777) !== 0o600) return failed("manifest_identity");
+    const record = (line) => { fs.appendFileSync(manifest, `${line}\n`); fs.fsyncSync(manifest); };
+    for (const [i, name] of names.entries()) {
+      if (host.now() >= deadline || !sameFile(stats[i], lstatOrNull(at(run, name)))) return failed("changed_before_delete");
+      record(`deleting ${i}`);
+      // The only unlink sites are these three verified regular files inside root-only custody.
+      (host.npmCacheUnlink || fs.unlinkSync)(at(run, name));
+      deleted += 1;
+      deletedBytes += stats[i].blocks * 512;
+      fs.fsyncSync(run);
+      record(`deleted ${i}`);
+    }
+    record(`delete_complete ${deleted}`);
+    return { ok: true, details: `deleted=${deleted} deleted_allocated_bytes=${deletedBytes} df_verification=required manifest=${runDir}/MANIFEST` };
+  } catch { return failed("deletion_or_verification_uncertain"); }
+  finally { if (manifest !== undefined) fs.closeSync(manifest); if (run !== undefined) fs.closeSync(run); }
+}
+
 export const OPERATIONS = Object.freeze({
   "ledger-dispatchers-status": (host) => ({
     ok: true,
     details: LEDGER.map((u) => `${u}=${read(host, `${u}.service`, "User")}/${read(host, `${u}.service`, "ActiveState")}`
       + `/timer:${read(host, `${u}.timer`, "ActiveState")}/reload:${read(host, `${u}.service`, "NeedDaemonReload")}`).join(" "),
   }),
+  "npm-cache-1240-check": (host, runId) => npmCache1240(host, runId, false),
+  "npm-cache-1240-cleanup": (host, runId) => npmCache1240(host, runId, true),
   // Stop both timers first so no dispatcher starts, then wait until none runs. One 5-minute deadline covers both
   // dispatchers and every systemctl call. On timeout the timers stay stopped: the owner decides what comes next.
   "ledger-dispatchers-pause": (host) => {

@@ -14,6 +14,8 @@ on:
         type: choice
         options:
           - ledger-dispatchers-status
+          - npm-cache-1240-check
+          - npm-cache-1240-cleanup
           - ledger-dispatchers-pause
           - ledger-dispatchers-resume
           - systemd-daemon-reload
