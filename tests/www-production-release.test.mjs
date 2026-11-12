@@ -50,6 +50,10 @@ test('GitHub WS evidence: latest started deploy succeeded and nothing unfinished
   assert.equal(githubWsRelease([run(ws, [], 'queued'), older]), null);
   assert.equal(githubWsRelease([run(ws, [job('failure', '2026-10-26T10:00:00Z'), job('success', '2026-10-26T11:00:00Z')])]), ws);
   assert.equal(githubWsRelease([]), null);
+  // Evidence comes only from deploy-capable dispatch runs; a stuck validate-only push run cannot block it.
+  const source = fs.readFileSync(new URL('../scripts/www-production-release.mjs', import.meta.url), 'utf8');
+  assert.match(source, /ws-server-deploy\.yml\/runs\?branch=main&event=workflow_dispatch&per_page=50/);
+  assert.match(source, /runs\.filter\(r => r\.event === 'workflow_dispatch'\)/);
 });
 
 test('VPS WS evidence: current release, metadata and a service started after installation; both sources must agree', () => {
