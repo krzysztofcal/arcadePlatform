@@ -105,9 +105,11 @@ function run(cmd, args) {
   return r.stdout;
 }
 
+// Only workflow_dispatch runs can deploy WS Production (push validates only), as in ws-release-approval.mjs.
+// Any unfinished or failed dispatch still fails closed through githubWsRelease.
 function readWsRelease(sshTarget) {
-  const runs = JSON.parse(run('gh', ['api', 'repos/krzysztofcal/arcadePlatform/actions/workflows/ws-server-deploy.yml/runs?branch=main&per_page=50'])).workflow_runs;
-  const github = githubWsRelease(runs.filter(r => r.event !== 'pull_request').map(r => ({ head_sha: r.head_sha, status: r.status, jobs: JSON.parse(run('gh', ['api', `repos/krzysztofcal/arcadePlatform/actions/runs/${r.id}/jobs?filter=all&per_page=100`])).jobs })));
+  const runs = JSON.parse(run('gh', ['api', 'repos/krzysztofcal/arcadePlatform/actions/workflows/ws-server-deploy.yml/runs?branch=main&event=workflow_dispatch&per_page=50'])).workflow_runs;
+  const github = githubWsRelease(runs.filter(r => r.event === 'workflow_dispatch').map(r => ({ head_sha: r.head_sha, status: r.status, jobs: JSON.parse(run('gh', ['api', `repos/krzysztofcal/arcadePlatform/actions/runs/${r.id}/jobs?filter=all&per_page=100`])).jobs })));
   const r = sshTarget ? spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=yes', sshTarget, VPS_READ], { encoding: 'utf8', timeout: 30000 }) : null;
   const vps = r?.status === 0 ? vpsWsRelease(r.stdout) : null;
   return { github, vps, active: activeWsRelease(vps, github) };
