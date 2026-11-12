@@ -6,7 +6,8 @@ change.
 - `privacy.2026-11-12-a3.pl.html`, `privacy.2026-11-12-a3.en.html`: copies of `legal/privacy.2026-10-28-a2.{pl,en}.html`
   with two changes only: the version line, and the a2 row "Historia gry, rozliczeń, usuwania kont i uprawnień do
   plików" / "Game, settlement, account-deletion and file-permission records" replaced by the two rows from
-  [`../privacy-data-safety.md`](../privacy-data-safety.md) section 1 (deletion-delay sentence as corrected by OWNER).
+  [`../privacy-data-safety.md`](../privacy-data-safety.md) section 1 (deletion-delay sentence and completed
+  deletion-request clarification as corrected by OWNER).
 - `manifest.json`: SHA-256 of both candidate files and of the a2 sources they are based on.
 
 The files sit outside `legal/`, so no alias, packager or Account link points to them. The repository root is the
