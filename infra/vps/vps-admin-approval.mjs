@@ -22,6 +22,22 @@ export const APPROVAL = Object.freeze({
     sideEffects: "Start and end entries in the VPS journal (tag arcade-vps-admin).",
     rollback: "Not needed: read-only.",
   },
+  "npm-cache-1240-check": {
+    title: "Verify exactly three public npm cache archives for incident 1240",
+    readOnly: true,
+    changes: "None. Hashes only the three fixed SHA-512 blobs for public claude-code-linux-x64 versions 2.1.318, 2.1.319 and 2.1.322 in the copilot npm content cache. Checks owner, regular single-link files, root device, expected size, age of 48 hours to one year and PID/fd/mmap use. Reports current allocated bytes. No staging, deletion or service control.",
+    risk: "Bounded file hashing of at most 512 MiB; no downtime. Missing files, ambiguous process inventory, changed identity, digest, age or active references block. A check is not deletion approval and execution repeats validation.",
+    sideEffects: "Normal admin lock and audit entries; count and byte totals in Actions logs. Does not inspect cache index, credentials, package installations or agent sessions.",
+    rollback: "Not needed: read-only. npm-cache-1240-cleanup is a distinct OWNER-approved request.",
+  },
+  "npm-cache-1240-cleanup": {
+    title: "Delete only three verified public npm archive cache copies for incident 1240",
+    readOnly: false,
+    changes: "Repeats npm-cache-1240-check, then reuses protected descriptor-based custody to rename only those three files into /var/lib/arcade-admin/npm-cache-1240/runId on the same filesystem. Revalidates every inode and SHA-512 and scans processes again before unlinking only the three regular files in root-only custody. Retains a durable MANIFEST and reports deletion counts, not an asserted df improvement.",
+    risk: "Irreversible cache eviction; a future reinstall may need a network download. No installed Claude, active session, ledger evidence, backup, Production data or service is changed. Validation failure before custody deletes nothing. Failed or partial custody/deletion requires OWNER manifest inspection; no automatic retry or restore.",
+    sideEffects: "Creates root-only custody metadata; no second archive copy. A failure can leave archives in protected custody. Cache index is retained and npm can refetch missing content. Audit and Actions record counts, byte totals and manifest path; no file contents. No scheduled purge or restart.",
+    rollback: "Deleted public tarballs can only be fetched again using the normal non-root package path and pinned integrity. Do not copy protected files back into a copilot-owned tree as root. Verify actual root df and service health separately after execution.",
+  },
   "ledger-dispatchers-pause": {
     title: "Stop both ledger dispatcher timers and wait until no dispatcher runs",
     readOnly: false,

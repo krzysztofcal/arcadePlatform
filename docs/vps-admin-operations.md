@@ -19,6 +19,8 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | Operation | Effect |
 |---|---|
 | `ledger-dispatchers-status` | Read-only: user, state, timer state and pending `daemon-reload` of both ledger dispatchers |
+| `npm-cache-1240-check` | Read-only check of three fixed public npm archive blobs: owner, size, age, SHA-512, root device and process references. No move or deletion. |
+| `npm-cache-1240-cleanup` | One-time eviction of exactly those three verified archive cache copies through existing protected custody. No installed package/session data or wildcard cleanup. See #1240 below. |
 | `ledger-dispatchers-pause` | Stops both dispatcher timers, then waits until no dispatcher runs. One 5-minute deadline covers both dispatchers and every `systemctl` call, and a state read after it is a timeout even if idle; on timeout it reports `timeout_timers_left_stopped` with each service state and leaves the timers stopped for the owner's decision (no automatic resume) |
 | `ledger-dispatchers-resume` | Refuses while any of the two services or two timers needs `daemon-reload`; otherwise starts both timers and checks they are active |
 | `systemd-daemon-reload` | `systemctl daemon-reload` |
@@ -141,3 +143,73 @@ The fixed non-root signer run-as rule is not a root shell or admin-catalog permi
 Do not use the legacy mixed-snapshot quarantine to retire only the App key: it requires every old
 snapshot and can block after earlier moves. The dedicated operation reuses that implementation with
 one fixed target. Neither operation is authorized by merge or this documentation.
+
+
+## #1240: one-time public npm archive cache eviction
+
+The earlier report-only proposal is deferred. There is no minimum reclaim
+threshold. This operation reserves all ledger evidence, secrets, backups,
+Production state, agent installations/sessions and test directories.
+
+The entire deletion allowlist is `NPM_CACHE_1240` in `vps-admin.mjs`: three
+public `@anthropic-ai/claude-code-linux-x64` tarball versions, 2.1.318, 2.1.319
+and 2.1.322. Each SHA-512 and size was compared to the public npm registry
+version document. The digest gives the exact path below
+`/home/copilot/.npm/_cacache/content-v2/sha512/` as first two hex characters,
+next two, remaining 124. No directory traversal, cache index, installed package,
+metadata response, `.npmrc`, `_npx` tree or new path is eligible. The constants
+are public package metadata; live allocated-byte measurements stay outside Git.
+See [npm cache design](https://docs.npmjs.com/cli/v11/commands/npm-cache/):
+cache misses may be refetched, and cache data is not a persistent store.
+Offline reinstall may require downloading the verified package again.
+
+`npm-cache-1240-check` reports candidate file allocations without creating
+custody directories. Both modes check all three regular, single-link copilot
+files, size/digest, root device, age (48 hours to one year), pinned parent
+ownership/no symlinks and visible process cwd/root/exe/fd/mmap references.
+Missing targets or an incomplete process scan fail closed. A 120-second
+validation deadline is checked during hashing and before deletion; the existing
+synchronous process scan/custody calls may overrun that deadline, after which
+no deletion starts. The workflow retains its outer timeout.
+
+Cleanup repeats checks, reuses `quarantineSnapshots` to rename into a fresh
+root-only run directory under `/var/lib/arcade-admin/npm-cache-1240`, then
+rechecks all original inodes, hashes and process use before deleting anything.
+Only regular files in that protected directory are unlinked, avoiding unlink
+races in copilot-writable cache paths. Streaming hashes use a 1 MiB buffer.
+There is no second data copy and no new helper/dependency/scheduler.
+The normal admin lock and audit remain mandatory. Custody and deletion markers
+are fsynced in `MANIFEST`; any failure requires inspecting this manifest and
+remaining files. Never auto-retry or infer an unchanged cache after failure.
+Do not restore into copilot-owned paths as root. Deleted tarballs have no local
+rollback; any later fetch uses normal non-root package tooling and integrity.
+
+The reported `deleted_allocated_bytes` sums the unlinked files' allocated
+blocks; it is not a measurement of root headroom gained. Concurrent writes,
+unknown references or incomplete execution can change actual recovery. Compare
+`df -B1 /` and `df -i /` before/after, then verify WS Production/Preview, Caddy,
+dispatcher timers, and the unchanged current/verified rollback release.
+
+### Publication and separate OWNER GO
+
+The agent does not expand App/signer permissions. OWNER publishes the companion
+workflow choice update together with the reviewed catalog change; catalog,
+workflow, sudoers and approval descriptions must match before installation.
+The agent supplies a reviewed patch, not an alternative dispatch or credential.
+A merge does not authorize staging, checking or deletion.
+
+After review/publication, a separate OWNER GO covers trusted installation from
+the reviewed merged main through `stage-vps-admin.sh` (including its existing
+support files). Verify installed source equality. Then request the check via
+the App wrapper and approve that distinct run in `vps-admin`:
+
+`GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh /home/copilot/.arcade-code-agent/bin/gh workflow run vps-admin-operation.yml --ref main -f operation=npm-cache-1240-check -f 'confirmation=RUN npm-cache-1240-check' -f 'reason=Issue 1240 verify three fixed public npm cache archives'`
+
+Read the successful check, current service/release baseline and expected
+allocation. Only a separate OWNER approval may authorize the cleanup request:
+
+`GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh /home/copilot/.arcade-code-agent/bin/gh workflow run vps-admin-operation.yml --ref main -f operation=npm-cache-1240-cleanup -f 'confirmation=RUN npm-cache-1240-cleanup' -f 'reason=Issue 1240 evict three verified public npm cache archives'`
+
+Neither command is executed while preparing the patch. No broad test/build or
+prevention rollout is part of this incident. Focused fundamental validation:
+`TMPDIR=/dev/shm node --test --test-name-pattern='VPS admin' ws-tests/infra-vps-workflow.guard.test.mjs`.
