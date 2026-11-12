@@ -3,6 +3,8 @@
 # No shell, interpreter, editor, package manager or free command is granted.
 Cmnd_Alias ARCADE_ADMIN_COMMANDS = \
     /usr/local/sbin/arcade-vps-admin ledger-dispatchers-status *, \
+    /usr/local/sbin/arcade-vps-admin npm-cache-1240-check *, \
+    /usr/local/sbin/arcade-vps-admin npm-cache-1240-cleanup *, \
     /usr/local/sbin/arcade-vps-admin ledger-dispatchers-pause *, \
     /usr/local/sbin/arcade-vps-admin ledger-dispatchers-resume *, \
     /usr/local/sbin/arcade-vps-admin systemd-daemon-reload *, \

@@ -1158,7 +1158,7 @@ test("VPS admin approval summary describes every catalog operation from reviewed
   const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
   assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
   assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
-  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status"], "only the status read is read-only");
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status", "npm-cache-1240-check"], "only catalogued status/check operations are read-only");
   assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
   assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
 
@@ -1420,5 +1420,88 @@ test("compatibility provider invokes only the fixed non-root isolated issuer", a
       assert.equal(calls[0][2].env.PATH, "/usr/bin:/bin");
       assert.deepEqual(Array.from(calls[0][2].stdio), ["ignore", "inherit", "inherit"]);
     }
+  }
+});
+
+
+function npmCacheFixture() {
+  const fx = quarantineFixture();
+  const blobs = ["public-package-a", "public-package-b", "public-package-c"].map((text) => {
+    const digest = crypto.createHash("sha512").update(text).digest("hex");
+    const rel = `.npm/_cacache/content-v2/sha512/${digest.slice(0, 2)}/${digest.slice(2, 4)}/${digest.slice(4)}`;
+    const file = path.join(fx.home, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text, { mode: 0o444 });
+    fs.utimesSync(file, new Date(0), new Date(Date.now() - 72 * 3600000));
+    return { digest, size: Buffer.byteLength(text), rel, file };
+  });
+  fx.host.npmCache1240 = { blobs, base: fx.base, rootDevice: fs.statSync(fx.top).dev };
+  fx.host.now = () => Date.now();
+  return { ...fx, blobs };
+}
+
+test("VPS admin npm cache #1240 checks and deletes only the three verified public blobs through protected custody", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const fx = npmCacheFixture();
+  const evidence = path.join(fx.home, "ledger-evidence.json");
+  fs.writeFileSync(evidence, "untouched-evidence");
+  try {
+    const check = runOperation("npm-cache-1240-check", "1240", fx.host);
+    assert.equal(check.ok, true, check.line);
+    assert.match(check.line, /dry_run=yes files=3 .*deleted=0/);
+    assert.equal(fs.existsSync(fx.base), false, "check never creates staging or moves files");
+    assert.ok(fx.blobs.every((b) => fs.existsSync(b.file)));
+    const clean = runOperation("npm-cache-1240-cleanup", "1241", fx.host);
+    assert.equal(clean.ok, true, clean.line);
+    assert.match(clean.line, /deleted=3 .*df_verification=required/);
+    assert.ok(fx.blobs.every((b) => !fs.existsSync(b.file)));
+    const manifest = fs.readFileSync(path.join(fx.base, "1241/MANIFEST"), "utf8");
+    assert.match(manifest, /delete_complete 3/);
+    assert.equal(fs.readFileSync(evidence, "utf8"), "untouched-evidence");
+    assert.equal(runOperation("npm-cache-1240-cleanup", "1242", fx.host).ok, false, "missing/repeated targets never widen scope");
+  } finally { fs.rmSync(fx.top, { recursive: true, force: true }); }
+});
+
+test("VPS admin npm cache #1240 fails closed before mutation on changed, young, linked or in-use targets", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const problem of ["digest", "young", "hardlink", "symlink", "parent", "fd", "mmap", "proc", "device", "owner", "age_changed"]) {
+    const fx = npmCacheFixture(); const first = fx.blobs[0];
+    try {
+      if (problem === "digest") { fs.chmodSync(first.file, 0o644); fs.writeFileSync(first.file, "secret-evidence!"); }
+      if (problem === "young") fs.utimesSync(first.file, new Date(), new Date());
+      if (problem === "hardlink") fs.linkSync(first.file, path.join(fx.home, "other"));
+      if (problem === "symlink") { fs.unlinkSync(first.file); fs.symlinkSync(path.join(fx.home, "ledger-evidence"), first.file); }
+      if (problem === "parent") { const cache = path.join(fx.home, ".npm"); fs.renameSync(cache, cache + "-saved"); fs.symlinkSync(cache + "-saved", cache); }
+      if (problem === "fd") fx.addProcess("2", first.file);
+      if (problem === "mmap") { const st = fs.statSync(first.file); const d = BigInt(st.dev); const major = ((d >> 8n) & 0xfffn) | ((d >> 32n) & ~0xfffn); const minor = (d & 0xffn) | ((d >> 12n) & ~0xffn); fx.addProcess("2", null, `0-1 r--p 00000000 ${major.toString(16).padStart(2,"0")}:${minor.toString(16).padStart(2,"0")} ${st.ino} ${first.file}\n`); }
+      if (problem === "proc") fx.host.quarantine.proc = path.join(fx.top, "missing-proc");
+      if (problem === "device") fx.host.npmCache1240.rootDevice = -1;
+      if (problem === "owner") { const run = fx.host.run; fx.host.run = (a) => a[0] === "/usr/bin/id" ? { status: 0, stdout: String(process.getuid()+1) } : run(a); }
+      if (problem === "age_changed") { let calls=0; fx.host.now=()=> calls++ ? 0 : Date.now(); }
+      const result = runOperation("npm-cache-1240-cleanup", "1243", fx.host);
+      assert.equal(result.ok, false, `${problem}: ${result.line}`);
+      assert.equal(fs.existsSync(fx.base), false, `${problem}: no custody/mutation before all checks pass`);
+    } finally { fs.rmSync(fx.top, { recursive: true, force: true }); }
+  }
+});
+
+test("VPS admin npm cache #1240 never deletes changed custody and reports partial deletion without retry", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const problem of ["changed_move", "changed_move_preserve_time", "open_after_move", "partial_delete", "audit_start", "audit_end"]) {
+    const fx = npmCacheFixture();
+    try {
+      if (problem === "changed_move") { const rename=fx.host.rename; fx.host.rename=(a,b)=> { rename(a,b); fs.chmodSync(b,0o644); fs.writeFileSync(b,"different-bytes!"); }; }
+      if (problem === "changed_move_preserve_time") { const rename=fx.host.rename; fx.host.rename=(a,b)=> { const st=fs.statSync(a); rename(a,b); fs.chmodSync(b,0o644); fs.writeFileSync(b,"different-bytes!"); fs.utimesSync(b,st.atime,st.mtime); }; }
+      if (problem === "open_after_move") { const rename=fx.host.rename; fx.host.rename=(a,b)=> { rename(a,b); fx.addProcess("9",b); }; }
+      if (problem === "partial_delete") { let n=0; fx.host.npmCacheUnlink=(p)=> { if (n++===1) throw new Error("simulated I/O failure"); fs.unlinkSync(p); }; }
+      if (problem.startsWith("audit_")) { let n=0; const run=fx.host.run; fx.host.run=(a)=> { if(a[0]==="/usr/bin/logger" && ++n===(problem==="audit_start"?1:2))return {status:1,stdout:""}; return run(a); }; }
+      const result=runOperation("npm-cache-1240-cleanup","1244",fx.host);
+      assert.equal(result.ok,false,`${problem}: ${result.line}`);
+      if (problem==="partial_delete") {
+        assert.match(result.line,/deleted=1\/3/);
+        assert.equal(fs.readdirSync(path.join(fx.base,"1244")).length,3,"two blobs plus manifest remain");
+      } else if(problem==="audit_end") assert.match(result.line,/audit_end_after_ok/);
+      else assert.ok(fx.blobs.every((b,i)=>fs.existsSync(b.file)||fs.existsSync(path.join(fx.base,"1244",`${i}-${path.basename(b.file)}`))),"no blob deleted");
+    } finally { fs.rmSync(fx.top,{recursive:true,force:true}); }
   }
 });
