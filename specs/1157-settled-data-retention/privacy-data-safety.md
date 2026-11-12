@@ -70,7 +70,14 @@ at entry time). #1157 therefore changes no Data safety answer:
 2. **Version and rollout (separate GO).** Copy into `legal/` as an immutable snapshot, alias, APK allowlist, guard
    exclusions, CSP where applicable and tests, following `.agents/skills/arcade-legal-docs/references/release-gates.md`,
    with consistency with the authenticated profile/leaderboard (#1158) and the Play Data safety answers.
-3. **Exceptions stay visible.** The retained identifier of a deleted account (D3) and the kept settlement history of a
+3. **Completed deletion requests (review finding, not applied).** The row title names completed account-deletion
+   requests, but its 12-month sentence names only settled game and settlement records, while
+   `chips_settled_retention_12m_run` also minimizes `COMPLETED` requests older than the same cutoff (D3). Optional
+   wording for OWNER decision: PL "…, w tym ich prywatne kopie archiwalne i awaryjne, oraz dane zakończonych wniosków o
+   usunięcie konta usuwamy lub ograniczamy…"; EN "…, including their private archive and recovery copies, and the data
+   of completed account-deletion requests, are automatically deleted or minimized…". Applying it changes the a3 files
+   and their manifest hashes.
+4. **Exceptions stay visible.** The retained identifier of a deleted account (D3) and the kept settlement history of a
    deleted account (D5) are explicit exceptions. They are not evidence of a general 12-month deletion of all data.
 
 The `bot-only-7d` storage incident (#1236) is closed: fixed by #1237 (merge `4edf67ad`); batch `626` was `cleaned`
