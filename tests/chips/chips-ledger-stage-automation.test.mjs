@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import {
   BOT_ONLY_EXPORT_SCHEMA_VERSION,
@@ -72,6 +74,11 @@ import {
   serializeAccountRecovery,
 } from "../../scripts/ops/_shared/chips-ledger-escrow-retention.mjs";
 import { inspectDurableRecoveryState as inspectProductionRecovery, persistDurableRecovery as persistProductionRecovery, runRetentionCycle } from "../../scripts/ops/_shared/chips-ledger-retention-cycle.mjs";
+
+// Own only this process's synthetic fixtures; never scan existing /tmp or operational evidence.
+const testTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "arcade-test-ledger-automation-"));
+// Normal completion and uncaught assertions run this; fatal signals cannot guarantee cleanup.
+process.once("exit", () => fs.rmSync(testTempRoot, { recursive: true, force: true }));
 
 const STAGE_DB_URL = "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres";
 const STAGE_URL = "https://krydukthwdvccggbyjfw.supabase.co";
@@ -208,7 +215,7 @@ const productionExportBoundarySql = {
     },
   }),
 };
-const productionExportBoundaryRoot = fs.mkdtempSync("/tmp/chips-ledger-production-export-boundary-");
+const productionExportBoundaryRoot = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-production-export-boundary-"));
 try {
   const productionExportBoundary = await runProductionAutomation({
     env: PRODUCTION_ENV,
@@ -349,7 +356,7 @@ function makeProductionResumeHarness(row, options = {}) {
   const deps = {
     sql,
     storageTarget: { target: "prod", projectRef: PRODUCTION_PROJECT_REF, baseUrl: PRODUCTION_ENV.SUPABASE_PROD_URL, serviceKey: "production-test-key" },
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-production-resume-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-production-resume-")),
     pruneStore: { getManifest: async () => row },
     verifyBucket: async () => { calls.verifyBucket += 1; },
     inspectDurableRecovery: async () => {
@@ -1088,7 +1095,7 @@ function productionCutoffTestSql({ candidate = null, entries = [], discovery = [
 }
 
 async function runProductionCutoffExport(invocation, fixture = {}) {
-  const root = fs.mkdtempSync("/tmp/chips-ledger-production-cutoff-");
+  const root = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-production-cutoff-"));
   const { calls, sql } = productionCutoffTestSql(fixture);
   try {
     const result = await invocation.run({
@@ -1240,7 +1247,7 @@ const productionEscrowPrepareSql = {
 };
 const productionEscrowPrepareReadPaths = [];
 let productionEscrowPrepareUploadCalls = 0;
-const productionEscrowPrepareRoot = fs.mkdtempSync("/tmp/chips-ledger-production-escrow-prepare-");
+const productionEscrowPrepareRoot = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-production-escrow-prepare-"));
 try {
   const productionEscrowPrepared = await runProductionAutomation({
     env: PRODUCTION_ENV,
@@ -1315,7 +1322,7 @@ const productionEscrowUnavailableSql = {
     throw new Error(`unexpected unavailable Production escrow SQL: ${query}`);
   },
 };
-const productionEscrowUnavailableRoot = fs.mkdtempSync("/tmp/chips-ledger-production-escrow-unavailable-");
+const productionEscrowUnavailableRoot = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-production-escrow-unavailable-"));
 try {
   await assert.rejects(
     runProductionAutomation({
@@ -1733,7 +1740,7 @@ const pendingAutomationResult = await runBotOnlyStageAutomation({
   deps: {
     sql: botOnlySql,
     storageTarget,
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-pending-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-bot-only-pending-")),
     pruneStore: { getManifest: async () => committedPendingRow },
     verifyBucket: async () => {},
     exportArchive: async ({ argv }) => {
@@ -1776,7 +1783,7 @@ const noCandidateBotOnly = await runBotOnlyStageAutomation({
   deps: {
     sql: noCandidateBotSql,
     storageTarget,
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-no-candidate-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-bot-only-no-candidate-")),
     verifyBucket: async () => {},
     exportArchive: async () => ({
       noCandidate: true,
@@ -1908,7 +1915,7 @@ function makeCanaryHarness(row, { exactBatch = true } = {}) {
   const deps = {
     sql,
     storageTarget,
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-exact-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-bot-only-exact-")),
     pruneStore,
     verifyBucket: async () => { calls.verifyBucket += 1; },
     inspectDurableRecovery: async () => durable,
@@ -2220,7 +2227,7 @@ const repairSql = {
   }),
 };
 const repairPruneCalls = [];
-const repairTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-recovery-repair-");
+const repairTempRoot = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-recovery-repair-"));
 let repairManifestReads = 0;
 const repairDeps = {
   sql: repairSql,
@@ -2371,7 +2378,7 @@ function makeBatch9923RepairHarness({
       },
     }),
   };
-  const tempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-bot-only-9923-repair-");
+  const tempRoot = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-bot-only-9923-repair-"));
   const deps = {
     sql,
     storageTarget,
@@ -2786,7 +2793,7 @@ const correctionSql = {
 };
 let correctionManifestReads = 0;
 const correctionPruneCalls = [];
-const correctionTempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-batch-15-correction-");
+const correctionTempRoot = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-batch-15-correction-"));
 const correctionDeps = {
   sql: correctionSql,
   storageTarget,
@@ -3005,7 +3012,7 @@ function makeStage30Harness({ row = makeStage30Row(), objects = new Map(), exact
       },
     }),
   };
-  const tempRoot = fs.mkdtempSync("/tmp/chips-ledger-stage-30d-repair-test-");
+  const tempRoot = fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-30d-repair-test-"));
   const stage30Deps = {
     sql: stage30Sql,
     storageTarget,
@@ -3270,7 +3277,7 @@ const resumeResult = await runStageAutomation({
     storageTarget,
     pruneStore: { getManifest: async () => resumeCycleRow },
     verifyBucket: async () => {},
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-automation-resume-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-automation-resume-")),
     pruneArchive: async ({ argv }) => {
       const mode = argv.includes("--execute") ? "execute" : argv.includes("--register-proof") ? "register-proof" : "dry-run";
       resumeCalls.push(mode);
@@ -3299,7 +3306,7 @@ const closedHumanResumeResult = await runClosedHumanTableStagePrepare({
     storageTarget,
     pruneStore: { getManifest: async () => closedHumanResumeRow },
     verifyBucket: async () => {},
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-automation-closed-human-resume-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-automation-closed-human-resume-")),
     pruneArchive: async ({ argv }) => {
       const mode = argv.includes("--execute") ? "execute" : argv.includes("--register-proof") ? "register-proof" : "dry-run";
       closedHumanResumeCalls.push(mode);
@@ -3446,7 +3453,7 @@ function makeClosedHumanCanaryHarness({ row = makeClosedHumanCanaryRow(), exactR
   const deps = {
     sql,
     storageTarget,
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-closed-human-canary-test-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-closed-human-canary-test-")),
     pruneStore,
     verifyBucket: async () => { calls.verifyBucket += 1; },
     inspectDurableRecovery: async () => {
@@ -3677,7 +3684,7 @@ function makeClosedHumanLifecycleHarness({ row = makeClosedHumanLifecycleRow(), 
   const deps = {
     sql,
     storageTarget,
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-closed-human-lifecycle-test-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-closed-human-lifecycle-test-")),
     pruneStore: {
       getManifest: async () => row,
     },
@@ -4021,7 +4028,7 @@ function makeAutomaticClosedHumanHarness({
   const deps = {
     sql,
     storageTarget,
-    tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-closed-human-automatic-test-"),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-closed-human-automatic-test-")),
     pruneStore,
     verifyBucket: async () => { state.verifyBucketCalls += 1; },
     inspectDurableRecovery: async (_target, row) => {
@@ -4439,7 +4446,7 @@ await assert.rejects(
       storageTarget,
       pruneStore: { getManifest: async () => resumeCycleRow },
       verifyBucket: async () => {},
-      tempRoot: fs.mkdtempSync("/tmp/chips-ledger-stage-automation-no-recovery-"),
+      tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-automation-no-recovery-")),
       pruneArchive: async () => {
         noRecoveryCalls.push(true);
         return { state: "ready", evidence };

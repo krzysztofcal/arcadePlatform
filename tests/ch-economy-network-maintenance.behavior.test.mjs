@@ -5,6 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+// Own only this process's synthetic fixtures; never scan existing /tmp or operational evidence.
+const testTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "arcade-test-network-maintenance-"));
+// Normal completion and uncaught assertions run this; fatal signals cannot guarantee cleanup.
+process.once("exit", () => fs.rmSync(testTempRoot, { recursive: true, force: true }));
+
 const SCRIPT = path.resolve("scripts/ops/ch-economy-network-maintenance.sh");
 const STAGE_REF = "krydukthwdvccggbyjfw";
 const PROD_REF = "otbqfijerkieoxwpxjnm";
@@ -16,7 +21,7 @@ function writeExecutable(file, source) {
 }
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ch-network-maintenance-"));
+  const root = fs.mkdtempSync(path.join(testTempRoot, "ch-network-maintenance-"));
   const stateDir = path.join(root, "state");
   const apiState = path.join(root, "api.json");
   const cliLog = path.join(root, "cli.log");
