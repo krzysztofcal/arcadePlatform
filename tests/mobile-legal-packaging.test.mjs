@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const PRIVACY_A1_SHA256 = { pl: '706b8ab2855a8eb77c139ce22da5b3cfc1ebf28a1d5878febca385608bd366de', en: 'ba49aaefb9e8e441c87f24bc0cae0f4d1bba809e91e45441f0ce7646f8bcf759' };
 const legal = 'specs/1114-arcade-profiles-avatars/legal-drafts/';
 const main = html => html.match(/<main\b[^>]*>[\s\S]*?<\/main>/)?.[0];
 const normalize = text => text.replace(/\s+/g, ' ').trim();
@@ -63,8 +64,13 @@ test('approved legal content, both policy versions and deletion links survive th
       }
       const alias = await readFile(path.join(root, `legal/privacy.${lang}.html`), 'utf8');
       assert.match(alias, /id="account-deletion"/);
+      assert.match(alias, /href="mailto:contact@kcswh\.pl"/);
+      // #1157: the active alias carries the accepted a3 text byte for byte; a1 stays immutable for past acceptances.
+      const active = await readFile(path.join(root, `legal/privacy.${a3.candidateVersion}.${lang}.html`), 'utf8');
+      const inner = html => html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)[1];
+      assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the accepted a3 text');
       const legacy = await readFile(path.join(root, `legal/privacy.2026-10-26-a1.${lang}.html`), 'utf8');
-      assert.equal(htmlText(main(legacy)), htmlText(main(alias)), 'legacy Privacy must capture the current alias without editing its text');
+      assert.equal(createHash('sha256').update(legacy).digest('hex'), PRIVACY_A1_SHA256[lang], 'Privacy a1 must stay immutable');
     }
     assert.equal(receipt.securityChecks.csp, 'PASS');
     assert.equal(receipt.securityChecks.sri, 'PASS');

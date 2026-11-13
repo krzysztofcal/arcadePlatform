@@ -86,94 +86,78 @@
     </aside>
 
     <main style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
-    <h1>Polityka prywatności</h1>
-    <p>Data aktualizacji: 26-10-2026</p>
-
-    <h2>Kim jesteśmy</h2>
-    <p>Administrator danych: KCSWH, contact@kcswh.pl. Polityka obejmuje portal Arcade Hub, gry, system XP oraz opcjonalne konta użytkowników oparte na Supabase.</p>
-
-    <h2>Jakie dane zbieramy</h2>
-    <ul>
-      <li>Adres e-mail do logowania i kontaktu.</li>
-      <li>Hash hasła przechowywany wyłącznie w Supabase; nigdy nie zapisujemy haseł w formie jawnej.</li>
-      <li>Tokeny sesji i cookies uwierzytelniające wydawane przez Supabase.</li>
-      <li>Metadane konta, np. nazwa wyświetlana i inicjały awatara.</li>
-      <li>Dane profilu: automatyczny identyfikator i nazwa gracza, awatar katalogowy oraz wersja i czas akceptacji regulaminu.</li>
-      <li>XP oraz postępy w grach powiązane z Twoim identyfikatorem użytkownika na potrzeby synchronizacji w chmurze.</li>
-      <li>Logi bezpieczeństwa i aktywności (np. zdarzenia logowania, diagnostyka błędów).</li>
-      <li>Dane o zgodach i analityce, jeśli wyrazisz zgodę w menedżerze zgód.</li>
-    </ul>
-
-    <h2>Logowanie przez Google</h2>
-    <p>Logowanie przez Google jest opcjonalne. Jeśli je wybierzesz, Google przekazuje Supabase identyfikator konta Google, zweryfikowany adres e-mail oraz podstawowe dane profilu, takie jak nazwa i zdjęcie profilowe. Dane te są przechowywane w ramach uwierzytelnienia Supabase i używane do utworzenia lub połączenia konta Arcade Hub, logowania oraz utrzymywania sesji. Nie otrzymujemy Twojego hasła Google ani dostępu do Gmaila, Dysku lub Kalendarza. SDK Supabase w przeglądarce przechowuje dane sesji i może zachować token dostępu Google; aplikacja nie kopiuje ani nie przekazuje tego tokena do swoich API. Zakres widoczności profilu gracza opisano poniżej; adres e-mail i tokeny nie są publiczne. Żądanie usunięcia konta można wysłać na contact@kcswh.pl zgodnie z sekcją dotyczącą praw użytkownika.</p>
-
-    <h2>Cele i podstawy prawne</h2>
-    <ul>
-      <li>Zakładanie konta, logowanie i weryfikacja e-mail – art. 6 ust. 1 lit. b RODO (umowa).</li>
-      <li>Synchronizacja XP i zarządzanie kontem – art. 6 ust. 1 lit. b RODO.</li>
-      <li>Bezpieczeństwo, zapobieganie nadużyciom i integralność usług – art. 6 ust. 1 lit. f RODO (prawnie uzasadniony interes).</li>
-      <li>Wykonywanie obowiązków prawnych (np. logi bezpieczeństwa) – art. 6 ust. 1 lit. c RODO.</li>
-      <li>Analityka i pomiary opcjonalne – art. 6 ust. 1 lit. a RODO (zgoda przez menedżera zgód).</li>
-    </ul>
-
-    <h2>Jak wykorzystujemy dane</h2>
-    <ul>
-      <li>Zapewniamy i zabezpieczamy konto, w tym logowanie, wylogowanie i obsługę sesji.</li>
-      <li>Synchronizujemy XP, osiągnięcia i postępy w grach między urządzeniami.</li>
-      <li>Wysyłamy e-maile weryfikacyjne oraz wymagane komunikaty serwisowe.</li>
-      <li>Utrzymujemy logi bezpieczeństwa, wykrywamy nadużycia i chronimy przed oszustwami lub cheatami.</li>
-      <li>Prowadzimy analitykę dopiero po wyrażeniu zgody na cookies statystyczne.</li>
-    </ul>
-
-    <h2>Publiczne profile graczy</h2>
-    <p>Konta otrzymują automatyczną nazwę i identyfikator gracza oraz trwały awatar katalogowy. Możesz wybrać inny awatar z galerii. BIO, ręczna edycja tożsamości i przesyłanie plików są niedostępne. Dane Google pozostają prywatnymi danymi uwierzytelniania; ta wersja nie importuje zdjęć Google. Publiczny profil pokazuje tożsamość gracza, awatar, łączne XP i poziom, ale nie e-mail, UUID konta, CH ani dane gry. Dawne własne dane profilu są porządkowane; stare adresy zmienionych profili mogą przestać działać.</p>
-
-    <h2>Zapis akceptacji i lokalne dane Offline</h2><p>Zapisujemy wersję regulaminu, serwerowy czas oraz identyfikator żądania przypisane do konta w celu wykazania akceptacji i ochrony integralności usługi. Potwierdzenia konta są usuwane wraz z kontem. Potwierdzenia gościa wygasają po godzinie i są usuwane w ramach retencji. Akceptacja regulaminu jest niezależna od ewentualnej przyszłej dobrowolnej zgody na zdjęcie Google. Dawne obiekty zdjęć podlegają istniejącej kontrolowanej retencji, bez ponownej publikacji lub wykorzystania. Offline Chips, karty i sesje pozostają na urządzeniu i nie synchronizują się z CH ani XP.</p>
-    <h2>Publiczny ranking XP</h2>
-    <p>Uwierzytelnione konta są domyślnie uwzględniane w publicznym rankingu XP. Wpis w rankingu może pokazywać pozycję, identyfikator profilu, nazwę wyświetlaną, awatar, XP dla wybranego okresu (dzisiaj, w tym tygodniu lub łącznie), poziom i link do profilu publicznego. Gracze korzystający z trybu gościa nie są uwzględniani. Ranking nie pokazuje adresu e-mail, identyfikatora użytkownika Supabase, salda żetonów, ledgera, danych pokera, danych sesji ani szczegółowych zdarzeń XP.</p>
-    <p>Możesz ukryć konto w rankingu w Ustawieniach. Spowoduje to usunięcie go z wyników i obliczeń pozycji, ale nie ustawi profilu pod adresem <code>/u/&lt;handle&gt;</code> jako prywatnego.</p>
-
-    <h2>Przetwarzanie danych i rola Supabase</h2>
-    <p>Korzystamy z Supabase (Supabase Inc., 970 Toa Payoh North #07-04, Singapur; infrastruktura w UE i USA) jako podmiotu przetwarzającego do uwierzytelniania, bazy danych i weryfikacji e-mail. Supabase przetwarza w naszym imieniu e-mail, hash hasła, tokeny sesji, metadane konta oraz rekordy XP. Dane mogą być przekazywane do USA; Supabase stosuje Standardowe Klauzule Umowne (SCC) oraz zabezpieczenia opisane w ich <a class="ft-link" href="https://supabase.com/legal/dpa" target="_blank" rel="noopener">Data Processing Agreement</a>. Supabase przechowuje kopie zapasowe zgodnie ze swoim harmonogramem i zabezpiecza dane szyfrowaniem w tranzycie i w spoczynku.</p>
-
-    <h2>Gry podmiotów trzecich i iframy</h2>
-    <p>Część gier może być ładowana od zewnętrznych dostawców w ramkach (iframe). Podmioty te mogą działać jako niezależni administratorzy danych i przetwarzać je zgodnie z własnymi regulaminami oraz politykami prywatności. Korzystając z takich gier, zapoznaj się z komunikatami lub odnośnikami prezentowanymi przy grze, aby zrozumieć, w jaki sposób mogą być przetwarzane Twoje dane.</p>
-
-    <h2>Cookies i podobne technologie</h2>
-    <ul>
-      <li>Cookies uwierzytelniające Supabase są niezbędne i ich wyłączenie uniemożliwi logowanie.</li>
-      <li>Cookies preferencji zapisują Twoje wybory w menedżerze zgód.</li>
-      <li>Cookies analityczne (np. Google Analytics) ładują się dopiero po udzieleniu zgody w menedżerze zgód.</li>
-      <li>W każdej chwili możesz zmienić wybory przez opcję <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#">Zarządzaj cookies</a>.</li>
-    </ul>
-
-    <h2>Okres przechowywania</h2>
-    <ul>
-      <li>Dane konta (e-mail, metadane, XP i dane profilu publicznego) przechowujemy do czasu usunięcia konta lub zgłoszenia żądania usunięcia.</li>
-      <li>Logi bezpieczeństwa i diagnostyczne przechowujemy ok. 30–90 dni, chyba że dłuższy okres jest konieczny ze względów bezpieczeństwa lub prawnych.</li>
-      <li>Kopie zapasowe są utrzymywane zgodnie z harmonogramem Supabase.</li>
-    </ul>
-
-    <h2>Przekazywanie danych poza UE</h2>
-    <p>Supabase i inni dostawcy mogą przetwarzać dane poza Twoim krajem, w tym w USA. Przekazywanie opiera się na SCC i równoważnych zabezpieczeniach.</p>
-
-    <h2>Twoje prawa</h2>
-    <p>Przysługują Ci prawa dostępu, sprostowania, usunięcia, ograniczenia, przenoszenia danych oraz sprzeciwu. Zgodę na analitykę możesz wycofać w dowolnym momencie przez menedżera zgód. Aby skorzystać z praw, napisz na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Skargę możesz wnieść do Prezesa UODO.</p>
-
-    <h2 id="account-deletion">Usuwanie konta</h2>
-    <p>Możesz złożyć wniosek o usunięcie konta w <a href="/account.html">Koncie</a>, gdy funkcja w aplikacji jest dostępna. Wniosek o usunięcie lub prośbę o pomoc możesz również wysłać na <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Wnioski są obsługiwane w istniejącej procedurze usuwania konta; ograniczone dowody księgowe lub bezpieczeństwa mogą być zachowane zgodnie z polityką retencji i obowiązującym prawem.</p>
-
-    <h2>Bezpieczeństwo</h2>
-    <p>Stosujemy środki zgodne z dobrymi praktykami, korzystamy z zabezpieczeń zarządzanych przez Supabase i ograniczamy dostęp do danych osobowych. Żaden system nie jest w 100% bezpieczny – chroń urządzenie i dane logowania.</p>
-
-    <h2>Powiązane dokumenty</h2>
-    <p>Zapoznaj się z <a class="ft-link" href="terms.pl.html">Regulaminem</a> oraz <a class="ft-link" href="cookies-notice.pl.html">Notą o cookies</a>, aby poznać zasady korzystania z serwisu i wybory dotyczące cookies.</p>
-
-    <h2>Zmiany</h2>
-    <p>Polityka może być aktualizowana. Istotne zmiany opublikujemy tutaj wraz z nową datą.</p>
-
-    <p style="margin-top:16px;"><a class="ft-link" href="../index.html?lang=pl">Wróć do portalu</a></p>
-    </main>
+<h1>Polityka prywatności Arcade Hub i Arcade Poker</h1>
+<p>Wersja: 2026-11-12-a3</p>
+<h2>Administrator i kontakt</h2>
+<p>Administrator danych: Krzysztof Cal. KCSWH to marka projektu hobbystycznego, w ramach którego bezpłatnie udostępniane są usługi Arcade Hub i Arcade Poker. Kontakt w sprawach projektu i danych osobowych: <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>.</p>
+<h2>Jakie dane przetwarzamy</h2>
+<p>Przetwarzamy adres e-mail, identyfikator konta, dane uwierzytelniania i sesji, profil gracza, XP, przebieg gry, rozliczenia wirtualnych jednostek oraz dane techniczne, takie jak adres IP i informacje o błędach. Hasła są obsługiwane przez usługę logowania Supabase i nie są przechowywane w jawnej postaci.</p>
+<p>Jeśli wybierzesz logowanie Google, Supabase otrzymuje dane identyfikujące konto oraz podstawowe informacje z konta Google, w tym nazwę i zdjęcie. Nie otrzymujemy Twojego hasła Google. Nazwa i zdjęcie z konta Google nie są automatycznie publikowane w profilu gracza. Ewentualna publikacja zdjęcia wymaga osobnego świadomego zezwolenia.</p>
+<p>Konto i automatyczny profil mogą powstać przy rejestracji, przed potwierdzeniem regulaminu. Profil jest domyślnie dostępny dla zalogowanych użytkowników: po zalogowaniu mogą oni zobaczyć nazwę gracza, identyfikator gracza, avatar z katalogu, XP i poziom. Dane rankingu są dostępne po zalogowaniu. Konto jest domyślnie widoczne w rankingu. Wyłączenie widoczności w rankingu nie ukrywa publicznego profilu. Nie publikujemy w nim e-maila, prawdziwego nazwiska, danych logowania, salda ani prywatnych zapisów gry. Nazwa i avatar przy stole pomagają rozpoznać uczestników gry. Profil na stronie jest dostępny także zalogowanym osobom spoza danej gry.</p>
+<h2>Cele i podstawy prawne</h2>
+<ul>
+<li>Utworzenie konta na Twoje żądanie, logowanie oraz niezbędne funkcje gry i konta: art. 6 ust. 1 lit. b RODO, w zakresie wykonania umowy o świadczenie usługi lub podjęcia na Twoje żądanie niezbędnych działań przed jej zawarciem. Podstawa ta nie zależy wyłącznie od późniejszej akceptacji regulaminu.</li>
+<li>Publiczna tożsamość gracza i ranking: art. 6 ust. 1 lit. f RODO, czyli interes w rozpoznawaniu uczestników i porównywaniu wyników graczy. Potwierdzenie regulaminu nie jest zgodą na publikację danych.</li>
+<li>Bezpieczeństwo, ochrona przed nadużyciami, integralność rozliczeń i przechowywanie podstawowych informacji potwierdzających akceptację zasad: art. 6 ust. 1 lit. f RODO, czyli ochrona użytkowników i prawidłowego działania projektu.</li>
+<li>Obsługa praw dotyczących danych: art. 6 ust. 1 lit. c RODO, w zakresie obowiązków administratora.</li>
+<li>Opcjonalna analiza korzystania ze strony: odrębna zgoda z art. 6 ust. 1 lit. a RODO. Można ją wycofać w menedżerze zgód; nie zmienia to legalności wcześniejszego przetwarzania opartego na zgodzie.</li>
+</ul>
+<p>Bez danych koniecznych do konta nie można korzystać z jego funkcji. Prywatna gra gościa z botami i Poker Offline nie wymagają konta.</p>
+<h2>Dostawcy i transfery</h2>
+<p>Netlify obsługuje stronę i jej funkcje serwerowe, Supabase — logowanie, bazę i przechowywanie plików, a Upstash — dane pomocnicze związane z grą i XP. Korzystamy także z usług hostingu serwera i poczty. Google uczestniczy w wybranym logowaniu oraz, po zgodzie, w analityce WWW.</p>
+<p>Dane mogą być przetwarzane poza Europejskim Obszarem Gospodarczym, w tym w USA. Region bazy Supabase znajduje się we Francji; nie oznacza to, że wszystkie działania dostawców odbywają się w EOG. Umowy powierzenia Netlify i Upstash przewidują ramy ochrony danych UE–USA dla objętych nimi transferów i standardowe klauzule umowne w przewidzianych przypadkach. Supabase opisuje standardowe klauzule umowne jako zabezpieczenie transferów do Singapuru i USA. Informacje o zabezpieczeniach i ich kopii można uzyskać przez <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Aktualne zasady dostawców: <a href="https://www.netlify.com/gdpr-ccpa/">Netlify</a>, <a href="https://supabase.com/legal/customer-resources/data-processing-addendum">Supabase</a>, <a href="https://upstash.com/static/trust/dpa.pdf">Upstash</a>.</p>
+<p>Własne strony WWW nie korzystają z AdSense. Google Analytics uruchamia się tylko po zgodzie. Aplikacja Android nie dołącza skryptów Analytics ani AdSense. Zewnętrzne gry mogą korzystać z odrębnych usług opisanych przy ich udostępnieniu.</p>
+<h2>Przechowywanie danych</h2>
+<table>
+<thead>
+<tr>
+<th>Dane</th>
+<th>Okres lub kryterium przechowywania</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Konto i profil</td>
+<td>Do zakończenia usuwania konta, z uwzględnieniem bezpieczeństwa i rozliczenia trwającej gry.</td>
+</tr>
+<tr>
+<td>Potwierdzenia akceptacji regulaminu przez użytkownika konta</td>
+<td>Przez czas istnienia konta, bez odrębnego terminu wygaśnięcia. Usunięcie konta obejmuje powiązane potwierdzenia.</td>
+</tr>
+<tr>
+<td>Potwierdzenia gościa</td>
+<td>Są ważne przez godzinę. Obecnie wygasłe zapisy są usuwane partiami przy kolejnych akceptacjach regulaminu. Wygaśnięcie nie oznacza fizycznego usunięcia dokładnie po godzinie.</td>
+</tr>
+<tr>
+<td>Sesje, limity i pamięć podręczna</td>
+<td>Według ważności sesji, czasu wygaśnięcia danego wpisu lub zastąpienia zawartości pamięci podręcznej. Poszczególne rodzaje danych mają różne terminy.</td>
+</tr>
+<tr>
+<td>Dzienniki zdarzeń i kopie awaryjne</td>
+<td>Do rotacji lub usunięcia według limitów pojemności, zakresu usługi i zasad dostawcy. Czas przechowywania zależy od rodzaju zapisu i dostępnego planu; nie ma jednego terminu dla wszystkich tych danych. Usunięcie rekordu z bazy nie usuwa go od razu z istniejącej kopii.</td>
+</tr>
+<tr>
+<td>Historia gry i rozliczeń oraz zakończone wnioski o usunięcie konta</td>
+<td>Rozliczone zapisy gry i rozliczeń, w tym ich prywatne kopie archiwalne i awaryjne, oraz dane zakończonych wniosków o usunięcie konta usuwamy lub ograniczamy automatycznie, gdy są starsze niż 12 miesięcy. Usuwanie odbywa się cyklicznie i partiami, dlatego może nastąpić po upływie tego terminu, a przy zaległościach może trwać dłużej. Dłużej przechowujemy wyłącznie: historię salda konta, które nadal istnieje, bo jest potrzebna do wykazania tego salda; historię rozliczeń usuniętego konta jako zapis finansowy, bez profilu i danych logowania; identyfikator usuniętego konta, aby nie mógł zostać użyty ponownie; zapisy potrzebne do dokończenia trwającej gry lub rozliczenia.</td>
+</tr>
+<tr>
+<td>Uprawnienia do plików i inne zapisy techniczne konta</td>
+<td>Część zapisów nie ma automatycznego terminu usunięcia i może pozostać po usunięciu konta. Dalsze przechowywanie wymaga konkretnego uzasadnienia, np. sprawdzenia zakwestionowanego rozliczenia, wyjaśnienia nierozstrzygniętego incydentu lub sporu albo wykonania obowiązku prawnego. Sam brak automatycznego usuwania nie uzasadnia przechowywania bez końca.</td>
+</tr>
+<tr>
+<td>Korespondencja</td>
+<td>Na czas obsługi sprawy oraz potrzebnego zachowania jej przebiegu w razie dalszych pytań, sporu lub obowiązku prawnego.</td>
+</tr>
+</tbody>
+</table>
+<p>Potwierdzenie zasad obejmuje identyfikator, wersję, czas serwera i identyfikator żądania. Jego ważność nie określa retencji pozostałych danych.</p>
+<p>Pliki cookie i dane zapisane na urządzeniu służą utrzymaniu sesji, ustawień i pamięci podręcznej. Ustawienia zgód dotyczących strony są zapamiętywane przez 180 dni. Lokalny avatar może służyć wyglądowi w Offline, ale nie synchronizuje postępów gry. Wylogowanie nie usuwa lokalnych zapisów; można je usunąć w ustawieniach przeglądarki lub aplikacji.</p>
+<h2 id="account-deletion">Twoje prawa i usunięcie konta</h2>
+<p>Jeżeli sprzeciw dotyczący widoczności profilu zostanie uwzględniony, operator może zablokować udostępnianie profilu innym zalogowanym użytkownikom bez usuwania konta. Nie jest to przełącznik w ustawieniach użytkownika. Blokada profilu nie usuwa tożsamości potrzebnej uczestnikom trwającej gry; zakres żądania dotyczącego rankingu rozpatrujemy oddzielnie.</p>
+<p>Możesz żądać dostępu, sprostowania, usunięcia i ograniczenia przetwarzania, a gdy ma zastosowanie — przeniesienia danych. Możesz wnieść sprzeciw wobec przetwarzania opartego na prawnie uzasadnionym interesie, także dotyczącego publicznego profilu, przez <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Wyłączenie widoczności w rankingu jest odrębnym ustawieniem i nie zastępuje prawa do sprzeciwu. Wniosek może dotyczyć również zapisów pozostałych po usunięciu konta. Przy jego rozpatrywaniu trzeba ustalić, jakie dane są nadal potrzebne, do jakiego konkretnego celu i na jakiej podstawie. Ewentualna odmowa usunięcia wymaga uzasadnienia. Nie każdy wniosek oznacza usunięcie całej historii rozliczeń lub wszystkich plików. Rozpatrujemy także wnioski dotyczące danych osób niepełnoletnich.</p>
+<p>Usunięcie konta zgłosisz w Koncie, gdy funkcja jest dostępna, albo przez e-mail. Proces usuwa profil i tożsamość logowania po bezpiecznej obsłudze udziału w grze i wirtualnego salda. Nie obiecujemy natychmiastowego usunięcia wszystkich logów, kopii i zapisów integralności. Akceptacja nowej wersji regulaminu nie jest warunkiem złożenia wniosku ani uzyskania pomocy.</p>
+<p>Odpowiadamy bez zbędnej zwłoki, zasadniczo w ciągu miesiąca. Jeśli zgodnie z RODO konieczne będzie przedłużenie tego terminu, poinformujemy o tym w ciągu pierwszego miesiąca. Możemy poprosić o proporcjonalne potwierdzenie tożsamości; nie przesyłaj haseł ani tokenów. Możesz złożyć skargę do Prezesa Urzędu Ochrony Danych Osobowych.</p>
+</main>
   </div>
 
   <footer class="site-footer" role="contentinfo">
