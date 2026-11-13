@@ -12,6 +12,7 @@
     arcadeAvatarUnsaved: { en: 'Selection not saved. Press Set avatar to confirm.', pl: 'Wybór nie jest zapisany. Naciśnij Ustaw avatar, aby potwierdzić.' },
     arcadeAvatarConflict: { en: 'The profile changed. Your selection was kept; check it and try again.', pl: 'Profil się zmienił. Zachowano wybór — sprawdź go i spróbuj ponownie.' },
     arcadeAvatarTermsRequired: { en: 'Accept the current Terms to choose an avatar.', pl: 'Zaakceptuj aktualny regulamin, aby wybrać awatar.' },
+    pokerTermsRequired: { en: 'Accept the current Terms to start a new game.', pl: 'Zaakceptuj aktualny regulamin, aby rozpocząć nową grę.' },
     arcadeAvatarNotActive: { en: 'This avatar is awaiting catalog activation.', pl: 'Ten awatar oczekuje na aktywację katalogu.' },
     arcadeAvatarSaveError: { en: 'Could not save avatar. Your selection was kept. Try again.', pl: 'Nie udało się zapisać avatara. Zachowano wybór. Spróbuj ponownie.' },
     profileSaveVisibility: { en: 'Save visibility', pl: 'Zapisz widoczność' },

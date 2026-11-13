@@ -994,6 +994,14 @@
     return payload && payload.sub ? payload.sub : null;
   }
 
+  // #1140: a 409 terms_required opens the existing Terms dialog (js/profile-onboarding.js) instead of a raw code.
+  function handleTermsRequired(el, err){
+    if (!err || err.code !== 'terms_required') return false;
+    setError(el, t('pokerTermsRequired', 'Accept the current Terms to start a new game.'));
+    document.dispatchEvent(new CustomEvent('profile:terms-required'));
+    return true;
+  }
+
   function setError(el, msg){
     if (!el) return;
     if (msg){
@@ -2675,6 +2683,7 @@
           });
           return;
         }
+        if (handleTermsRequired(errorEl, err)) return;
         klog('poker_quick_seat_error', { error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
       } finally {
@@ -2758,7 +2767,7 @@
           setError(errorEl, 'This start request has expired. Start a new game to continue.');
           singlePlayRequestId = null;
           refreshProgression();
-        } else {
+        } else if (!handleTermsRequired(errorEl, err)) {
           klog('poker_single_player_error', { error: err.message || err.code });
           setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
         }
@@ -2866,6 +2875,7 @@
           });
           return;
         }
+        if (handleTermsRequired(errorEl, err)) return;
         klog('poker_create_error', { error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrCreateTable', 'Failed to create table'));
       } finally {
