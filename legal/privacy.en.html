@@ -86,94 +86,78 @@
     </aside>
 
     <main style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
-    <h1>Privacy Policy</h1>
-    <p>Last updated: 2026-10-26</p>
-
-    <h2>Who we are</h2>
-    <p>Data controller: KCSWH, contact@kcswh.pl. This policy covers the Arcade Hub portal, its games, XP system, and optional Supabase-backed user accounts.</p>
-
-    <h2>What data we collect</h2>
-    <ul>
-      <li>Email address for account login and communications.</li>
-      <li>Password hash stored only by Supabase; we never store raw passwords.</li>
-      <li>Session tokens and authentication cookies issued by Supabase.</li>
-      <li>Account metadata such as display name and avatar initials.</li>
-      <li>Public-profile data: automatic gaming handle and display name, chosen catalog avatar, Terms version and acceptance time.</li>
-      <li>XP and game progress tied to your user ID for cloud sync.</li>
-      <li>Security and activity logs (e.g., sign-in events, error diagnostics).</li>
-      <li>Consent and analytics data when you opt in via the consent manager.</li>
-    </ul>
-
-    <h2>Google sign-in</h2>
-    <p>Google sign-in is optional. If you choose it, Google provides Supabase with your Google account identifier, verified email address and basic profile data, such as your name and profile image. These data are stored as part of Supabase authentication and used to create or link your Arcade Hub account, sign you in and maintain your session. We do not receive your Google password or access to Gmail, Drive or Calendar. The Supabase browser SDK stores session data and may retain a Google access token; the application does not copy or forward that token to its APIs. Gaming-profile visibility is described below; your email address and tokens are not public. You can request account deletion by emailing contact@kcswh.pl as described in the user-rights section.</p>
-
-    <h2>Purposes and legal bases</h2>
-    <ul>
-      <li>Account creation, authentication, and email verification – Art. 6(1)(b) GDPR (contract).</li>
-      <li>XP cloud sync and account management – Art. 6(1)(b) GDPR.</li>
-      <li>Security, fraud prevention, service integrity – Art. 6(1)(f) GDPR (legitimate interest).</li>
-      <li>Compliance with legal obligations (e.g., security logging) – Art. 6(1)(c) GDPR.</li>
-      <li>Analytics and optional measurements – Art. 6(1)(a) GDPR (consent via the consent manager).</li>
-    </ul>
-
-    <h2>How we use your data</h2>
-    <ul>
-      <li>Provide and secure your account, including sign-in, sign-out, and session management.</li>
-      <li>Sync XP, achievements, and game progress across devices.</li>
-      <li>Send verification emails and required service notices.</li>
-      <li>Maintain security logs, detect abuse, and protect against fraud or cheating.</li>
-      <li>Run analytics only after you consent to statistics cookies.</li>
-    </ul>
-
-    <h2>Public gaming profiles</h2>
-    <p>Accounts receive an automatic gaming name/handle and a permanent catalog avatar. You may choose a different catalog avatar. BIO, manual identity editing and file uploads are unavailable. Google identity data remain private authentication data; this release does not import Google photos. The public profile shows gaming identity, avatar, total XP and level, not email, account UUID, CH or game records. Legacy custom identity is normalized; changed old profile URLs may no longer work.</p>
-
-    <h2>Terms records and local Offline data</h2><p>We store the accepted Terms version, server timestamp and a request identifier linked to your account, to demonstrate acceptance and protect service integrity. Account receipts are removed with the account. Guest receipts expire after one hour and are removed by routine retention. Accepting Terms is separate from any future voluntary Google-photo consent. Old profile image objects are removed through the existing controlled retention process, not by publishing or reusing them. Offline Chips, cards and sessions stay on the device and are not synchronized with CH or XP.</p>
-    <h2>Public XP leaderboard</h2>
-    <p>Authenticated accounts are included in the public XP leaderboard by default. Leaderboard entries may show rank, profile handle, display name, avatar, XP for the selected period (today, this week, or all time), level, and a link to the public profile. Guest players are not included. The leaderboard does not display email addresses, Supabase user IDs, chip balances, ledger or poker data, session data, or detailed XP events.</p>
-    <p>You can hide your account from the leaderboard in Settings. This removes it from leaderboard results and rank calculations, but does not make the public profile at <code>/u/&lt;handle&gt;</code> private.</p>
-
-    <h2>Data processing &amp; Supabase notice</h2>
-    <p>We use Supabase (Supabase Inc., 970 Toa Payoh North #07-04, Singapore; infrastructure in the EU and USA) as our data processor for authentication, database storage, and email verification. Supabase processes email, password hash, session tokens, account metadata, and XP records on our behalf. Data may be transferred to the USA; Supabase applies Standard Contractual Clauses (SCCs) and the safeguards described in their <a class="ft-link" href="https://supabase.com/legal/dpa" target="_blank" rel="noopener">Data Processing Agreement</a>. Supabase stores backups according to its retention policy and secures data with encryption in transit and at rest.</p>
-
-    <h2>Third-party games and iframes</h2>
-    <p>Some games may be loaded from external providers in iframes. These partners may act as independent controllers for their services and may process data in line with their own terms and privacy policies. When you use such games, please review the notices or links presented with them to understand how your data may be processed.</p>
-
-    <h2>Cookies and similar technologies</h2>
-    <ul>
-      <li>Authentication cookies from Supabase are strictly necessary and cannot be turned off without disabling sign-in.</li>
-      <li>Preferences and consent cookies store your consent manager choices.</li>
-      <li>Analytics cookies (e.g., Google Analytics) load only after you provide consent through the consent manager.</li>
-      <li>You can revisit choices anytime via the <a class="ft-link manage-cookies" data-i18n="manageCookies" href="#">Manage cookies</a> control.</li>
-    </ul>
-
-    <h2>Data retention</h2>
-    <ul>
-      <li>Account data (email, metadata, XP, and public-profile data) is retained until you delete your account or request removal.</li>
-      <li>Security and diagnostic logs are kept for approximately 30–90 days unless required longer for safety or legal reasons.</li>
-      <li>Backups are retained per Supabase’s backup schedules.</li>
-    </ul>
-
-    <h2>International transfers</h2>
-    <p>Supabase and other providers may process data outside your country, including in the USA. Transfers rely on SCCs and comparable safeguards.</p>
-
-    <h2>Your rights</h2>
-    <p>You can request access, rectification, deletion, restriction, portability, or objection to processing. You may withdraw consent for analytics at any time via the consent manager. To exercise rights, email <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. You may lodge a complaint with the Polish Data Protection Authority (UODO).</p>
-
-    <h2 id="account-deletion">Account deletion</h2>
-    <p>You can request account deletion in <a href="/account.html">Account</a> when the in-app feature is available. You can also request deletion or assistance by emailing <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Requests follow the existing account-deletion process; restricted accounting or security evidence may be retained as required by the retention policy and applicable law.</p>
-
-    <h2>Security</h2>
-    <p>We apply industry-standard measures, use Supabase’s managed security controls, and limit access to personal data. No system is perfectly secure; please keep your device and credentials safe.</p>
-
-    <h2>Links and related terms</h2>
-    <p>See our <a class="ft-link" href="terms.en.html">Terms of Service</a> and <a class="ft-link" href="cookies-notice.en.html">Cookies Notice</a> for more details on service rules and cookie choices.</p>
-
-    <h2>Changes</h2>
-    <p>We may update this policy. Material changes will be posted here with an updated date.</p>
-
-    <p style="margin-top:16px;"><a class="ft-link" href="../index.html?lang=en">Back to portal</a></p>
-    </main>
+<h1>Arcade Hub and Arcade Poker Privacy Policy</h1>
+<p>Version: 2026-11-12-a3</p>
+<h2>Controller and contact</h2>
+<p>Data controller: Krzysztof Cal. KCSWH is the brand of a hobby project offering the free Arcade Hub and Arcade Poker services. Contact for the project and personal data: <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>.</p>
+<h2>Data we process</h2>
+<p>We process your email address, account ID, authentication and session data, player profiles, XP, game records, virtual-unit settlements and technical data such as IP addresses and error information. Supabase provides authentication; passwords are not stored in plain text.</p>
+<p>If you choose to sign in with Google, Supabase receives identification and basic Google account information, including a name and photo. We do not receive your Google password. The Google name and photo are not automatically shown in your player profile. Any publication of a photo requires separate, informed permission.</p>
+<p>An account and an automatically generated profile may be created during registration, before you acknowledge the Terms. Profiles are available to signed-in users by default: after signing in, they can see the player name, handle, catalog avatar, XP and level. Leaderboard data is available after signing in. Accounts appear in the leaderboard by default. Opting out of the leaderboard does not hide the public profile. It does not display email, real name, sign-in credentials, balances or private game records. At a table, names and avatars help participants recognize each other. The website profile is also available to signed-in people who are not taking part in that game.</p>
+<h2>Purposes and legal grounds</h2>
+<ul>
+<li>Account creation at your request, sign-in and necessary game and account features: GDPR Article 6(1)(b), where necessary to perform a contract for the service or take necessary steps at your request before entering into it. This legal ground does not depend solely on later acceptance of the Terms.</li>
+<li>Public player identity and the leaderboard: Article 6(1)(f), the interest in recognizing participants and comparing players’ results. Acknowledging the Terms is not consent to data publication.</li>
+<li>Security, abuse prevention, settlement integrity and keeping basic records of acceptance of the rules: Article 6(1)(f), protecting users and proper project operation.</li>
+<li>Handling data rights: Article 6(1)(c), to meet the controller's legal obligations.</li>
+<li>Optional website analytics: separate consent under Article 6(1)(a). You can withdraw it in the consent manager without affecting earlier lawful processing based on consent.</li>
+</ul>
+<p>Without data necessary for an account, account features cannot be used. Private guest play against bots and Poker Offline do not require an account.</p>
+<h2>Providers and transfers</h2>
+<p>Netlify hosts the website and API, Supabase provides authentication, the database and file storage, and Upstash supports game and XP data. We also use server-hosting and email services. Google participates in chosen sign-in and, after consent, website analytics.</p>
+<p>Processing may take place outside the European Economic Area, including in the USA. The Supabase database region is in France; this does not mean all provider operations stay in the EEA. Netlify and Upstash processing agreements provide for the EU–US Data Privacy Framework for covered transfers and standard contractual clauses in the specified circumstances. Supabase describes standard contractual clauses as safeguards for transfers to Singapore and the USA. Contact <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a> for information about safeguards and a copy. Current provider terms: <a href="https://www.netlify.com/gdpr-ccpa/">Netlify</a>, <a href="https://supabase.com/legal/customer-resources/data-processing-addendum">Supabase</a>, <a href="https://upstash.com/static/trust/dpa.pdf">Upstash</a>.</p>
+<p>Arcade's own websites do not use AdSense. Google Analytics starts only after consent. The Android app does not include Analytics or AdSense scripts. External games may use separate services described when they are made available.</p>
+<h2>Retention</h2>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Period or retention criterion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Account and profile</td>
+<td>Until account deletion is completed, allowing for security and settlement of ongoing games.</td>
+</tr>
+<tr>
+<td>Account Terms acceptance records</td>
+<td>For as long as the account exists, with no separate expiry. Account deletion includes the related acceptance records.</td>
+</tr>
+<tr>
+<td>Guest Terms acceptance records</td>
+<td>Valid for one hour. Expired records are currently deleted in batches during later acceptances of the Terms. Expiry does not mean physical deletion exactly one hour later.</td>
+</tr>
+<tr>
+<td>Sessions, limits and caches</td>
+<td>According to session validity, the expiry of each entry or cache replacement. Redis data does not all share one expiry period.</td>
+</tr>
+<tr>
+<td>Logs and recovery backups</td>
+<td>Until rotation or deletion under capacity limits, service scope and provider rules. Retention depends on the type of record and available plan; there is no single period for all these data. Deleting a database record does not immediately erase it from an existing backup.</td>
+</tr>
+<tr>
+<td>Game and settlement history, and completed account-deletion requests</td>
+<td>Settled game and settlement records, including their private archive and recovery copies, and the data of completed account-deletion requests, are automatically deleted or minimized once they are older than 12 months. Deletion runs periodically and in batches, so it may happen after this period ends and may take longer when there is a backlog. We keep only the following for longer: the balance history of an account that still exists, because it is needed to prove that balance; the settlement history of a deleted account as a financial record, without the profile or sign-in data; the identifier of a deleted account, so that it cannot be reused; records needed to finish a game or settlement in progress.</td>
+</tr>
+<tr>
+<td>File permissions and other technical account records</td>
+<td>Some records have no automatic deletion date and may remain after account deletion. Further retention needs a specific justification, such as checking a disputed settlement, resolving an outstanding incident or dispute, or meeting a legal obligation. The absence of automatic deletion alone does not justify keeping data indefinitely.</td>
+</tr>
+<tr>
+<td>Correspondence</td>
+<td>While handling the matter and preserving its history where needed for follow-up questions, a dispute or a legal obligation.</td>
+</tr>
+</tbody>
+</table>
+<p>An acknowledgement contains an identifier, version, server timestamp and request ID. Its validity does not determine retention of other data.</p>
+<p>Cookies and local storage support sessions, preferences and caches. Website consent choices have a 180-day validity. A remembered avatar may be used for Offline appearance, without synchronizing game progress. Signing out does not remove local saves; you can clear them through browser or app settings.</p>
+<h2 id="account-deletion">Your rights and account deletion</h2>
+<p>If an objection to profile visibility is upheld, the operator can block the profile from being shared with other signed-in users without deleting the account. This is not a switch in user settings. A profile block does not remove the identity needed by participants in an ongoing game; we consider any request about leaderboard visibility separately.</p>
+<p>You may request access, correction, erasure and restriction, and portability where applicable. You may object to processing based on legitimate interests, including the public profile, through <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Leaderboard opt-out is a separate setting and does not replace this right. Your request may also cover records remaining after account deletion. Reviewing it requires identifying which data is still needed, for what specific purpose and on what legal ground. Any refusal to erase data must be explained. Not every request entails deleting the entire settlement history or all files. We also consider requests concerning children's data.</p>
+<p>Request account deletion in Account when the feature is available, or by email. The process removes the profile and sign-in identity after safely handling game participation and the virtual balance. We do not promise immediate deletion of all logs, backups and integrity records. You do not need to accept new Terms to make a request or obtain support.</p>
+<p>We respond without undue delay, normally within one month. If an extension is necessary under the GDPR, we will explain it within the first month. We may request proportionate identity verification; do not send passwords or tokens. You may complain to the Polish supervisory authority, the President of the Personal Data Protection Office (UODO).</p>
+</main>
   </div>
 
   <footer class="site-footer" role="contentinfo">
