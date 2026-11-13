@@ -58,7 +58,7 @@
   dialog.querySelector('[data-terms-link]').textContent=label('Terms','Regulamin');
   dialog.querySelector('[data-privacy-link]').textContent=label('Privacy','Prywatność');
   dialog.querySelector('[data-terms-link]').href='/legal/terms.'+status.version+'.'+(pl()?'pl':'en')+'.html';
-  dialog.querySelector('[data-privacy-link]').href='/legal/privacy.'+status.version+'.'+(pl()?'pl':'en')+'.html';
+  dialog.querySelector('[data-privacy-link]').href='/legal/privacy.'+(pl()?'pl':'en')+'.html';
   dialog.querySelector('[data-terms-accept]').textContent=label('I accept the Terms','Akceptuję regulamin');
   dialog.querySelector('[data-terms-back]').textContent=label('Not now','Nie teraz');
   dialog.querySelector('[data-terms-account]').textContent=label('Account / Sign out / Delete account','Konto / Wylogowanie / Usuń konto');

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const PRIVACY_A1_SHA256 = { pl: '706b8ab2855a8eb77c139ce22da5b3cfc1ebf28a1d5878febca385608bd366de', en: 'ba49aaefb9e8e441c87f24bc0cae0f4d1bba809e91e45441f0ce7646f8bcf759' };
+const TERMS_A1_SHA256 = { pl: 'c16ae10d74f829875b9fa0f5e6d9b7cba058e1671b709eed2c7bb3d1b1e22479', en: '5ce77ceaf1f77dc854a1e5065d992b37d85fda2e6d8c872c19b2902a441cfc72' };
 const legal = 'specs/1114-arcade-profiles-avatars/legal-drafts/';
 const main = html => html.match(/<main\b[^>]*>[\s\S]*?<\/main>/)?.[0];
 const normalize = text => text.replace(/\s+/g, ' ').trim();
@@ -71,6 +72,14 @@ test('approved legal content, both policy versions and deletion links survive th
       assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the accepted a3 text');
       const legacy = await readFile(path.join(root, `legal/privacy.2026-10-26-a1.${lang}.html`), 'utf8');
       assert.equal(createHash('sha256').update(legacy).digest('hex'), PRIVACY_A1_SHA256[lang], 'Privacy a1 must stay immutable');
+      // #1140: the active Terms alias carries the approved a2 text byte for byte; Terms a1 stays immutable for past acceptances.
+      const terms = await readFile(path.join(root, `legal/terms.${lang}.html`), 'utf8');
+      const termsA2 = await readFile(path.join(root, `legal/terms.${manifest.candidateVersion}.${lang}.html`), 'utf8');
+      assert.equal(inner(terms), inner(termsA2), 'active Terms alias must equal the approved a2 text');
+      const packagedTerms = await readFile(path.join(fixture, `mobile/poker/www/legal/terms.${lang}.html`), 'utf8');
+      assert.equal(main(packagedTerms), main(terms), 'packaging changed the active Terms alias');
+      const termsA1 = await readFile(path.join(root, `legal/terms.2026-10-26-a1.${lang}.html`), 'utf8');
+      assert.equal(createHash('sha256').update(termsA1).digest('hex'), TERMS_A1_SHA256[lang], 'Terms a1 must stay immutable');
     }
     assert.equal(receipt.securityChecks.csp, 'PASS');
     assert.equal(receipt.securityChecks.sri, 'PASS');
