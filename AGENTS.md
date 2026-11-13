@@ -73,6 +73,14 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ---
 
+## Task workspace lifecycle
+
+- Reuse the task's existing isolated checkout across reviews and follow-ups; do not create another worktree for each round.
+- At task handoff, identify any retained worktree and why it is still needed. Once the work is merged, propose its cleanup through the approved procedure after checking tracked, untracked and ignored files and process/dependency use. Preserve branches and shared Git history. Missing evidence or approval means retain it; age alone never authorizes removal.
+- Tests must clean only their own newly allocated synthetic fixtures when the test process finishes, including assertion failure. Do not apply test cleanup to operational ledger evidence, existing temporary directories, sessions, secrets or backups. Forced termination can leave fixtures behind; it does not authorize a periodic prefix-wide purge.
+
+---
+
 ## Codex handoff: Claude Code review (MANDATORY)
 
 **CLAUDE_CODE_REVIEW_ENABLED: true**
