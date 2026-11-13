@@ -728,7 +728,7 @@ test("VPS admin helper runs only its catalog, refuses unverifiable reads and una
   assert.equal(runOperation("ledger-dispatchers-status", "13", { ...outer.host, run: fakeAdminHost().host.run }).ok, true, "the lock is released");
   const helper = fileText("infra/vps/vps-admin.mjs");
   assert.match(helper, /spawnSync\("\/usr\/bin\/flock", \["-n", "3"\]/);
-  assert.doesNotMatch(helper, /mkdirSync|process\.pid|isAlive/, "no PID-file lock to go stale");
+  assert.doesNotMatch(helper.slice(helper.indexOf("function acquireLock("), helper.indexOf("export function runOperation(")), /mkdirSync|process\.pid|isAlive/, "no PID-file lock to go stale");
 
   const cli = spawnSync(process.execPath, ["infra/vps/vps-admin.mjs", "ledger-dispatchers-status"], { encoding: "utf8" });
   assert.equal(cli.status, 1);
@@ -1504,4 +1504,59 @@ test("VPS admin npm cache #1240 never deletes changed custody and reports partia
       else assert.ok(fx.blobs.every((b,i)=>fs.existsSync(b.file)||fs.existsSync(path.join(fx.base,"1244",`${i}-${path.basename(b.file)}`))),"no blob deleted");
     } finally { fs.rmSync(fx.top,{recursive:true,force:true}); }
   }
+});
+
+test("volume workdir creates only on the verified mount and refuses conflicting destinations", async (t) => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "volume-workdir-"));
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  fs.chmodSync(parent, 0o755);
+  const mount = path.join(parent, "HC_Volume_107462648");
+  fs.mkdirSync(mount, { mode: 0o755 });
+  const dest = path.join(mount, "copilot-work");
+  const device = BigInt(fs.statSync(mount).dev);
+  const major = ((device >> 8n) & 0xfffn) | ((device >> 32n) & ~0xfffn);
+  const minor = (device & 0xffn) | ((device >> 12n) & ~0xffn);
+  const dev = `${major}:${minor}`;
+  let mountInfo = `${mount} /dev/sdb ext4 rw,relatime ${dev}`;
+  let resolved = "/dev/sdb";
+  const fx = fakeAdminHost();
+  t.after(() => fs.rmSync(path.dirname(fx.host.lockFile), { recursive: true, force: true }));
+  const run = fx.host.run;
+  const host = { ...fx.host, volumeWorkdir: { parent, rootUid: process.getuid(), rootGid: process.getgid() },
+    run(argv) {
+      if (argv[0] === "/usr/bin/findmnt") return { status: 0, stdout: mountInfo };
+      if (argv[0] === "/usr/bin/readlink") return { status: 0, stdout: resolved };
+      if (argv[0] === "/usr/bin/lsblk") return { status: 0, stdout: `${dev} disk ext4` };
+      if (argv[0] === "/usr/bin/id") return { status: 0, stdout: String(process.getuid()) };
+      if (argv[0] === "/usr/bin/getent") return { status: 0, stdout: `copilot:x:${process.getgid()}:` };
+      return run(argv);
+    } };
+  for (const info of ["", `${mount} /dev/sdb xfs rw ${dev}`, `${mount} /dev/sdb ext4 ro ${dev}`, `${mount} /dev/sdb ext4 rw 8:99`]) {
+    mountInfo = info;
+    assert.equal(runOperation("volume-workdir-prepare", "1245", host).ok, false);
+    assert.equal(fs.existsSync(dest), false);
+  }
+  mountInfo = `${mount} /dev/sdb ext4 rw,relatime ${dev}`;
+  resolved = "/dev/sdc";
+  assert.equal(runOperation("volume-workdir-prepare", "1245", host).ok, false);
+  assert.equal(fs.existsSync(dest), false);
+  resolved = "/dev/sdb";
+  const result = runOperation("volume-workdir-prepare", "1245", host);
+  assert.equal(result.ok, true, result.line);
+  const s = fs.lstatSync(dest);
+  assert.equal(s.uid, process.getuid()); assert.equal(s.gid, process.getgid()); assert.equal(s.mode & 0o7777, 0o750);
+  assert.equal(runOperation("volume-workdir-prepare", "1246", host).ok, true);
+  assert.equal(fs.lstatSync(dest).ino, s.ino);
+  fs.chmodSync(dest, 0o755);
+  assert.equal(runOperation("volume-workdir-prepare", "1247", host).ok, false);
+  assert.equal(fs.lstatSync(dest).mode & 0o7777, 0o755);
+  fs.rmdirSync(dest);
+  fs.symlinkSync(parent, dest);
+  assert.equal(runOperation("volume-workdir-prepare", "1248", host).ok, false);
+  assert.equal(fs.lstatSync(dest).isSymbolicLink(), true);
+  fs.unlinkSync(dest);
+  fs.chmodSync(mount, 0o777);
+  assert.equal(runOperation("volume-workdir-prepare", "1249", host).ok, false);
+  assert.equal(fs.existsSync(dest), false);
 });

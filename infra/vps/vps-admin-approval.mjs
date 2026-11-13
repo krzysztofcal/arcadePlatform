@@ -118,6 +118,14 @@ export const APPROVAL = Object.freeze({
     sideEffects: "Updates the protected backup manifest and journal; dedicated accounts remain inert. No automatic WS start, restart or DRAIN removal.",
     rollback: "No automatic undo or retry. Inspect the protected recovery state and obtain a separate reviewed recovery decision from OWNER.",
   },
+  "volume-workdir-prepare": {
+    title: "Prepare the fixed copilot work directory on the Hetzner volume",
+    readOnly: false,
+    changes: "Verifies /mnt/HC_Volume_107462648 is the writable EXT4 mount of /dev/sdb and /dev/disk/by-id/scsi-0HC_Volume_107462648 resolves to that device. Creates only copilot-work with copilot:copilot 0750 through a pinned root-owned parent. Accepts an already correct directory; refuses conflicting paths without repair.",
+    risk: "Grants copilot write access only inside the new directory. No service downtime, mount, fstab, formatting or data migration. An uncertain failure may leave a partial directory; inspect before any new request.",
+    sideEffects: "One directory and the existing admin journal records only. No helper installation, service, restart, database or financial operation.",
+    rollback: "No automatic deletion or retry. OWNER inspects the directory; removal or repair requires a separate approved procedure.",
+  },
 });
 
 const REPOSITORY = "https://github.com/krzysztofcal/arcadePlatform";

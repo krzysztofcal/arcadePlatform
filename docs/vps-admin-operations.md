@@ -18,6 +18,7 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 
 | Operation | Effect |
 |---|---|
+| `volume-workdir-prepare` | Verifies the fixed writable EXT4 `/dev/sdb` mount and Hetzner by-id identity, then creates only `/mnt/HC_Volume_107462648/copilot-work` as `copilot:copilot 0750`. Correct existing directory is a no-op; symlinks or conflicting ownership/modes block without repair. No mount/fstab/format/service/data changes. |
 | `ledger-dispatchers-status` | Read-only: user, state, timer state and pending `daemon-reload` of both ledger dispatchers |
 | `npm-cache-1240-check` | Read-only check of three fixed public npm archive blobs: owner, size, age, SHA-512, root device and process references. No move or deletion. |
 | `npm-cache-1240-cleanup` | One-time eviction of exactly those three verified archive cache copies through existing protected custody. No installed package/session data or wildcard cleanup. See #1240 below. |
@@ -213,3 +214,24 @@ allocation. Only a separate OWNER approval may authorize the cleanup request:
 Neither command is executed while preparing the patch. No broad test/build or
 prevention rollout is part of this incident. Focused fundamental validation:
 `TMPDIR=/dev/shm node --test --test-name-pattern='VPS admin' ws-tests/infra-vps-workflow.guard.test.mjs`.
+
+## Volume work directory preparation
+
+OWNER confirmed a 50 GB EXT4 volume `/dev/sdb`, mounted at
+`/mnt/HC_Volume_107462648`, with its existing fstab entry and
+`/dev/disk/by-id/scsi-0HC_Volume_107462648` pointing to `/dev/sdb`.
+The empty mount directory is `root:root 0755`; the operation preserves it.
+The helper rechecks mount/device identity and root-owned non-writable ancestors
+before creating the single child through pinned directory descriptors.
+It does not migrate checkouts, caches, credentials or other data.
+
+This PR only adds the catalog entry. It does not install or run the helper.
+Before approval, OWNER must separately arrange the reviewed helper and sudoers
+installation through the approved maintenance procedure and verify installed
+bytes against the reviewed source. The workflow uses the installed helper;
+merging this entry alone does not update it. A later explicit request uses
+`operation=volume-workdir-prepare` and `confirmation=RUN volume-workdir-prepare`,
+with its own `vps-admin` OWNER approval. This task authorizes neither step.
+
+A failure is never retried automatically. Inspect any partial directory before
+requesting recovery; there is no recursive chown/chmod, repair or deletion path.
