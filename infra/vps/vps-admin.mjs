@@ -544,6 +544,68 @@ function npmCache1240(host, runId, apply) {
   finally { if (manifest !== undefined) fs.closeSync(manifest); if (run !== undefined) fs.closeSync(run); }
 }
 
+// Fixed volume only; overrides are available to imported synthetic fixtures, never CLI input.
+function prepareVolumeWorkdir(host) {
+  const spec = host.volumeWorkdir || { parent: "/mnt", rootUid: 0, rootGid: 0 };
+  const name = "HC_Volume_107462648";
+  const mount = path.join(spec.parent, name);
+  const byId = "/dev/disk/by-id/scsi-0HC_Volume_107462648";
+  const fds = [];
+  try {
+    // Root-owned, non-writable ancestors prevent an unprivileged path exchange.
+    let parent;
+    for (const [i, part] of ["/", spec.parent, name].entries()) {
+      parent = fs.openSync(i < 2 ? part : at(parent, part), O_DIR);
+      fds.push(parent);
+      const s = fs.fstatSync(parent);
+      if (s.uid !== (i === 0 ? 0 : spec.rootUid) || s.gid !== (i === 0 ? 0 : spec.rootGid) || (s.mode & 0o022)) {
+        return { ok: false, blocked: "volume_parent_permissions" };
+      }
+    }
+    const mounted = host.run(["/usr/bin/findmnt", "--noheadings", "--raw", "--mountpoint", mount,
+      "--output", "TARGET,SOURCE,FSTYPE,OPTIONS,MAJ:MIN"]);
+    const fields = mounted.stdout.split(/\s+/);
+    const resolved = host.run(["/usr/bin/readlink", "--canonicalize-existing", byId]);
+    const block = host.run(["/usr/bin/lsblk", "--nodeps", "--noheadings", "--raw", "--output", "MAJ:MIN,TYPE,FSTYPE", "/dev/sdb"]);
+    const [dev, type, filesystem, ...extra] = block.stdout.split(/\s+/);
+    if (mounted.status !== 0 || fields.length !== 5 || fields[0] !== mount || fields[1] !== "/dev/sdb"
+      || fields[2] !== "ext4" || !fields[3].split(",").includes("rw") || fields[3].split(",").includes("ro")
+      || resolved.status !== 0 || resolved.stdout !== "/dev/sdb" || block.status !== 0 || extra.length
+      || type !== "disk" || filesystem !== "ext4" || !/^\d+:\d+$/.test(dev) || fields[4] !== dev
+      || devText(fs.fstatSync(parent).dev) !== dev.split(":").map((n) => Number(n).toString(16).padStart(2, "0")).join(":")) {
+      return { ok: false, blocked: "volume_identity_or_mount" };
+    }
+    const user = host.run(["/usr/bin/id", "-u", "copilot"]);
+    const group = host.run(["/usr/bin/getent", "group", "copilot"]);
+    const g = group.stdout.split(":");
+    if (user.status !== 0 || !/^[1-9][0-9]{0,9}$/.test(user.stdout)
+      || group.status !== 0 || g.length !== 4 || g[0] !== "copilot" || !/^[1-9][0-9]{0,9}$/.test(g[2])) {
+      return { ok: false, blocked: "copilot_identity" };
+    }
+    const uid = Number(user.stdout), gid = Number(g[2]);
+    const dest = at(parent, "copilot-work");
+    const current = lstatOrNull(dest);
+    const correct = (s) => s && s.isDirectory() && s.uid === uid && s.gid === gid
+      && (s.mode & 0o7777) === 0o750 && s.dev === fs.fstatSync(parent).dev;
+    if (current) return correct(current)
+      ? { ok: true, details: "already_prepared owner=copilot:copilot mode=0750" }
+      : { ok: false, blocked: "workdir_conflict" };
+    // Exclusive mkdir, no recursive creation and no repair of any existing inode.
+    fs.mkdirSync(dest, { mode: 0o700 });
+    const fd = fs.openSync(dest, O_DIR);
+    fds.push(fd);
+    fs.fchownSync(fd, uid, gid);
+    fs.fchmodSync(fd, 0o750);
+    fs.fsyncSync(fd);
+    fs.fsyncSync(parent);
+    const final = lstatOrNull(dest);
+    if (!correct(final) || final.ino !== fs.fstatSync(fd).ino) return { ok: false, failed: "workdir_verification_no_retry" };
+    return { ok: true, details: "created owner=copilot:copilot mode=0750" };
+  } catch {
+    return { ok: false, failed: "workdir_inspect_no_retry" };
+  } finally { for (const fd of fds) fs.closeSync(fd); }
+}
+
 export const OPERATIONS = Object.freeze({
   "ledger-dispatchers-status": (host) => ({
     ok: true,
@@ -604,6 +666,7 @@ export const OPERATIONS = Object.freeze({
       return { ok: false, failed: "preview_isolation_inspect_protected_manifest" };
     },
   ])),
+  "volume-workdir-prepare": prepareVolumeWorkdir,
 });
 
 function audit(host, fields) {
