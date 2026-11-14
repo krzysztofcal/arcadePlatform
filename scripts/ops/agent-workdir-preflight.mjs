@@ -41,8 +41,8 @@ export function checkAgentStorage(io = {}) {
     const rootCapacity = capacity("/");
     const volumeCapacity = capacity(ROOT);
     const minimum = 4 * 1024 ** 3;
-    if (rootCapacity.usedPercent >= 90 || rootCapacity.availableBytes < minimum) stop("root_capacity_critical");
-    if (volumeCapacity.availableBytes < minimum) stop("volume_capacity_low");
+    if (rootCapacity.usedPercent >= 90 || rootCapacity.availableBytes < minimum) stop(`root_capacity_critical used_percent=${rootCapacity.usedPercent} available_bytes=${rootCapacity.availableBytes}`);
+    if (volumeCapacity.availableBytes < minimum) stop(`volume_capacity_low available_bytes=${volumeCapacity.availableBytes}`);
     if (rootCapacity.usedPercent >= 85) (io.warn || ((message) => process.stderr.write(`${message}\n`)))("WARN agent_workdir root_usage_at_least_85_percent");
     return { root: rootCapacity, volume: volumeCapacity };
   } catch (error) {

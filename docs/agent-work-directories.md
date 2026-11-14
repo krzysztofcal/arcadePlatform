@@ -119,7 +119,7 @@ legacy task resumes), run the reviewed current preflight, not a stale task copy:
 node /path/to/trusted-current-checkout/scripts/ops/agent-workdir-preflight.mjs --check || exit 1
 ```
 
-`--check` verifies the same fixed Volume identity/ownership/access without
+Requires Node >=18.15 (VPS inspected with Node 22). `--check` verifies the same fixed Volume identity/ownership/access without
 allocating a name, and prints root/Volume capacity as JSON. New allocations also
 perform this check. Root usage follows `df` (used / (used + available), rounded
 up): WARN on stderr at **85%**, STOP at **90%** or **less than 4 GiB available**.
@@ -133,7 +133,14 @@ runtime directory. This works for a new Volume checkout or a legacy checkout
 without moving it. Replace `task-unique-runtime` with a unique task identifier;
 keep its returned path in the handoff and reuse it for follow-ups after checking
 canonical path, ownership, permissions, device and absence of symlinked children.
-Do not allocate a fresh runtime directory for each review round.
+Do not allocate a fresh runtime directory for each review round. For reuse, run
+`--check`, then `realpath -e -- "$agent_runtime"`,
+`stat -c '%u:%g %a %d' -- "$agent_runtime" "$agent_runtime/tmp" "$agent_runtime/cache" "$agent_runtime/artifacts"`
+and `find "$agent_runtime" -type l -print`. Require the recorded canonical path,
+invoking uid/gid, mode 700 for all four directories, device matching
+`stat -c %d /mnt/HC_Volume_107462648`, no symlinks and successful inspection;
+otherwise STOP. Skip allocation/mkdir and export the same variables in the
+subshell. These checks are not a lock against concurrent filesystem changes.
 
 ```bash
 # Run from the task checkout; preflight is from a trusted current checkout.
@@ -165,6 +172,11 @@ processes, not hardcoded `/tmp` writes or agent-private state. XDG_CACHE_HOME
 alone does not redirect npm, Playwright, Gradle or agent session stores; the
 explicit variables above cover these tools. Gradle's task cache can contain
 user properties: do not copy the existing ~/.gradle or secrets into it.
+Fresh task caches require dependency/browser downloads and consume additional
+Volume space per task; Playwright needs its browser installation in the scoped
+path before browser tests. Builds needing existing Gradle user properties or
+credentials must be postponed/reported until a separately approved task setup
+exists. Do not copy the global user configuration to make them work.
 Set output paths explicitly for each invoked tool (Playwright `--output`, build
 output options, screenshot destinations, shell redirects). `artifacts` is a
 convention, not an environment variable that redirects all tools. Do not route

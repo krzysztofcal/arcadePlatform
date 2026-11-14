@@ -1600,6 +1600,9 @@ test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe
   const statfs = io.fs.statfsSync;
   io.fs.statfsSync = () => { throw new Error("unavailable"); };
   assert.throws(() => checkAgentStorage(io), /STOP/);
+  // 50% usage with 3 GiB available isolates the byte gate from the percentage gate.
+  io.fs.statfsSync = () => ({ blocks: 10, bfree: 7, bavail: 3, bsize: 1024 ** 3 });
+  assert.throws(() => checkAgentStorage(io), /root_capacity_critical/);
   io.fs.statfsSync = () => ({ blocks: 10, bfree: 8, bavail: 4, bsize: 1024 ** 3 });
   assert.equal(checkAgentStorage(io).root.availableBytes, 4 * 1024 ** 3);
   for (const invalid of [
