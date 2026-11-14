@@ -38,6 +38,10 @@
   function selectNodes(){
     nodes.status = doc.getElementById('accountStatus');
     nodes.forms = doc.getElementById('authForms');
+    nodes.authTabSignIn = doc.getElementById('authTabSignIn');
+    nodes.authTabSignUp = doc.getElementById('authTabSignUp');
+    nodes.authSignInPanel = doc.getElementById('authSignInPanel');
+    nodes.authSignUpPanel = doc.getElementById('authSignUpPanel');
     nodes.account = doc.getElementById('accountPanel');
     nodes.userEmail = doc.getElementById('accountEmail');
     nodes.userName = doc.getElementById('accountName');
@@ -235,6 +239,8 @@
   function focusDeletionLink(){
     if (window.MOBILE_POKER_CONFIG || !currentUser || window.location.hash !== '#account-deletion' || deletionLinkFocused || !nodes.deleteBtn) return;
     deletionLinkFocused = true;
+    var dangerZone = nodes.deleteBtn.closest ? nodes.deleteBtn.closest('.account-danger-zone') : null;
+    if (dangerZone) dangerZone.classList.add('account-danger-highlight');
     if (nodes.deleteBtn.scrollIntoView) nodes.deleteBtn.scrollIntoView({block:'center'});
     nodes.deleteBtn.focus({preventScroll:true});
   }
@@ -252,6 +258,7 @@
       setBlockVisibility(nodes.signupConfirmation, false);
     }
     if (previousUserKey !== nextUserKey){
+      deletionLinkFocused = false;
       if (nextUserKey && deletionAttempt && nextUserKey !== deletionAttempt.ownerId) resetDeletionAttempt();
       avatarSelection = null; avatarSaving = null; avatarMessage = '';
       publicProfile = null;
@@ -317,7 +324,11 @@
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
     if (nodes.publicProfileBrowserHint) nodes.publicProfileBrowserHint.hidden = !window.MobilePoker;
     if (!profile) return;
-    if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
+    if (window.ProfileClient && window.ProfileClient.applyAvatar){
+      window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
+      var summaryAv = doc.getElementById('accountSummaryAvatar');
+      if (summaryAv) window.ProfileClient.applyAvatar(summaryAv, profile);
+    }
     if (nodes.publicDisplayName) nodes.publicDisplayName.textContent = profile.displayName || '';
     if(nodes.publicHandle)nodes.publicHandle.textContent='@'+(profile.handle||'');
     renderAvatarGallery();
@@ -1392,6 +1403,38 @@
   }
 
   function wireEvents(){
+    function switchAuthTab(targetTab){
+      var isSignUp = targetTab === 'signup';
+      if (nodes.authTabSignIn){
+        nodes.authTabSignIn.classList.toggle('on', !isSignUp);
+        nodes.authTabSignIn.setAttribute('aria-selected', String(!isSignUp));
+      }
+      if (nodes.authTabSignUp){
+        nodes.authTabSignUp.classList.toggle('on', isSignUp);
+        nodes.authTabSignUp.setAttribute('aria-selected', String(isSignUp));
+      }
+      if (nodes.authSignInPanel) nodes.authSignInPanel.hidden = isSignUp;
+      if (nodes.authSignUpPanel) nodes.authSignUpPanel.hidden = !isSignUp;
+    }
+    if (nodes.authTabSignIn){
+      nodes.authTabSignIn.addEventListener('click', function(){ switchAuthTab('signin'); });
+      nodes.authTabSignIn.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowRight' && nodes.authTabSignUp) { nodes.authTabSignUp.focus(); switchAuthTab('signup'); }
+      });
+    }
+    if (nodes.authTabSignUp){
+      nodes.authTabSignUp.addEventListener('click', function(){ switchAuthTab('signup'); });
+      nodes.authTabSignUp.addEventListener('keydown', function(e){
+        if (e.key === 'ArrowLeft' && nodes.authTabSignIn) { nodes.authTabSignIn.focus(); switchAuthTab('signin'); }
+      });
+    }
+    function checkAuthHash(){
+      if (window.location && window.location.hash === '#signup') switchAuthTab('signup');
+      else if (window.location && window.location.hash === '#signin') switchAuthTab('signin');
+    }
+    checkAuthHash();
+    window.addEventListener('hashchange', checkAuthHash);
+
     var googleEnabled = !!(auth && auth.isGoogleEnabled && auth.isGoogleEnabled());
     setBlockVisibility(nodes.googleProfileNotice, googleEnabled);
     setBlockVisibility(nodes.googleSignIn, googleEnabled);

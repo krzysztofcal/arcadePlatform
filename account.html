@@ -15,88 +15,17 @@
     @keyframes page-boot-shimmer{to{background-position:-240% 0}}@keyframes page-boot-float{from{transform:translateY(-7px) rotate(-4deg)}to{transform:translateY(7px) rotate(4deg)}}@keyframes page-boot-failsafe{to{opacity:0;visibility:hidden;pointer-events:none}}
     @media(max-width:560px){.page-boot__cards{grid-template-columns:1fr}.page-boot__cards i:nth-child(n+2){display:none}}@media(prefers-reduced-motion:reduce){.page-boot__logo,.page-boot__line,.page-boot__hero,.page-boot__cards i{animation:none}}
   </style>
+  <style>
+    .page-account .chip-panel{min-height:0;}
+    .account-bonus[hidden]{display:none !important;}
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="css/portal.css">
   <link rel="stylesheet" href="/css/xp-overlay.css">
   <link rel="stylesheet" href="/css/xp.css">
-  <style>
-    .account-grid{ display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); }
-
-    .account-note{ color:#a0aec0; font-size:14px; line-height:1.5; }
-
-    .account-status{ margin:0 0 16px; padding:12px 14px; border-radius:12px; background:rgba(255, 255, 255, 0.05); }
-
-    .account-status[data-tone="error"]{ color:#fda4af; background:rgba(255, 77, 109, 0.1); }
-
-    .account-status[data-tone="success"]{ color:#86efac; background:rgba(22, 163, 74, 0.1); }
-
-    .account-status[data-tone="info"]{ color:#7dd3fc; background:rgba(14, 165, 233, 0.12); }
-
-    .account-form label{ display:block; font-weight:600; margin-bottom:6px; }
-
-    .account-form input{ width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.1); background:rgba(255, 255, 255, 0.04); color:#e2e8f0; }
-
-    .account-form input:focus{ outline:2px solid #6ee7e7; outline-offset:2px; }
-
-    .account-form button{ margin-top:12px; width:100%; padding:12px; border:none; border-radius:12px; background:linear-gradient(90deg, #6ee7e7, #a78bfa); color:#0b1020; font-weight:700; cursor:pointer; }
-
-    .account-form button:hover{ opacity:0.95; }
-    .account-form .account-google{ display:flex; align-items:center; justify-content:center; gap:12px; min-height:44px; padding:12px; border:1px solid #747775; border-radius:12px; background:#fff; color:#1f1f1f; font:600 14px/20px Arial,sans-serif; }
-    .account-form .account-google[hidden]{ display:none; }
-    .account-form .account-google:focus-visible{ outline:3px solid #6ee7e7; outline-offset:3px; }
-    .account-form .account-google:disabled{ cursor:wait; opacity:.65; }
-    .account-google svg{ flex:none; width:20px; height:20px; }
-    .account-google-divider{ display:flex; align-items:center; gap:12px; margin:16px 0; color:#a0aec0; font-size:13px; }
-    .account-google-divider[hidden]{ display:none; }
-    .account-google-divider::before,.account-google-divider::after{ content:""; flex:1; height:1px; background:rgba(255,255,255,.15); }
-
-    .account-panel__actions{ display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
-
-    .account-panel__btn{ padding:10px 14px; border-radius:12px; border:none; cursor:pointer; font-weight:600; }
-
-    .account-panel__btn--primary{ background:linear-gradient(90deg, #6ee7e7, #a78bfa); color:#0b1020; }
-
-    .account-panel__btn--ghost{ background:rgba(255, 255, 255, 0.08); color:#e2e8f0; }
-
-    .account-bonus{ display:grid; gap:10px; margin-top:16px; padding:14px; border-radius:14px; border:1px solid rgba(110, 231, 231, 0.18); background:rgba(255, 255, 255, 0.03); }
-    .account-bonus[hidden]{ display:none !important; }
-
-    .account-bonus__title{ font-size:15px; font-weight:700; color:#f8fafc; }
-
-    .account-bonus__btn{ justify-self:start; padding:10px 14px; border:none; border-radius:12px; background:linear-gradient(90deg, #f7c948, #6ee7e7); color:#0b1020; font-weight:700; cursor:pointer; }
-
-    .account-bonus__btn[hidden]{ display:none; }
-
-    .public-profile-editor{ display:grid; gap:14px; margin-top:18px; padding-top:18px; border-top:1px solid rgba(255,255,255,.1); }
-    .public-profile-editor__identity{ display:flex; align-items:center; gap:12px; }
-    .public-profile-editor__avatar{ position:relative; width:48px; height:48px; border-radius:50%; display:grid; place-items:center; color:#fff; font:700 16px/1 Poppins, sans-serif; transition:transform .2s ease, box-shadow .2s ease; }
-    .public-profile-editor__avatar.profile-avatar--uploaded{ background-position:center; background-size:cover; }
-    .public-profile-editor__avatar-actions{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-    .public-profile-editor__avatar-input{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-    .public-profile-editor__avatar-btn{ padding:8px 11px; border:1px solid rgba(255,255,255,.14); border-radius:9px; background:rgba(255,255,255,.07); color:#e2e8f0; font:600 13px/1.2 Poppins,sans-serif; cursor:pointer; }
-    .public-profile-editor__avatar-btn:disabled{ cursor:wait; opacity:.58; }
-    .public-profile-editor__avatar-status{ min-height:18px; margin:0; color:#a5f3fc; font-size:13px; }
-    .public-profile-editor__avatar-status[data-tone="success"]{ color:#86efac; }
-    .public-profile-editor__avatar-status[data-tone="error"]{ color:#fda4af; }
-    .public-profile-editor__avatar[data-upload-state="validating"],.public-profile-editor__avatar[data-upload-state="uploading"],.public-profile-editor__avatar[data-upload-state="processing"],.public-profile-editor__avatar[data-upload-state="removing"]{ box-shadow:0 0 0 3px rgba(50,246,255,.22); }
-    .public-profile-editor__avatar[data-upload-state="validating"]::after,.public-profile-editor__avatar[data-upload-state="uploading"]::after,.public-profile-editor__avatar[data-upload-state="processing"]::after,.public-profile-editor__avatar[data-upload-state="removing"]::after{ content:""; position:absolute; inset:-5px; border:2px solid rgba(255,255,255,.22); border-top-color:#32f6ff; border-radius:50%; animation:public-avatar-spin .75s linear infinite; }
-    .public-profile-editor__avatar[data-upload-state="success"]{ animation:public-avatar-success .42s ease-out; box-shadow:0 0 0 3px rgba(134,239,172,.28); }
-    .public-profile-editor__url{ color:#a5f3fc; overflow-wrap:anywhere; }
-    .public-profile-editor__field-error{ min-height:18px; margin:4px 0 0; color:#fda4af; font-size:13px; }
-    .public-profile-editor textarea{ width:100%; min-height:92px; padding:10px 12px; resize:vertical; border:1px solid rgba(255,255,255,.1); border-radius:10px; background:rgba(255,255,255,.04); color:#e2e8f0; font:inherit; }
-    .public-profile-save{ display:inline-flex !important; align-items:center; justify-content:center; gap:8px; min-height:42px; transition:background .18s ease, color .18s ease, transform .18s ease; }
-    .public-profile-save[data-state="saving"]{ cursor:wait; opacity:.82; }
-    .public-profile-save[data-state="saved"]{ background:#86efac !important; color:#0b1020 !important; animation:public-profile-save-pop .28s ease-out; }
-    .public-profile-save__spinner{ display:none; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; }
-    .public-profile-save[data-state="saving"] .public-profile-save__spinner{ display:inline-block; animation:public-profile-save-spin .7s linear infinite; }
-    .public-profile-save__status{ min-height:18px; color:#86efac; font-size:13px; }
-    @keyframes public-profile-save-spin{ to{ transform:rotate(360deg); } }
-    @keyframes public-profile-save-pop{ 0%{ transform:scale(.98); } 60%{ transform:scale(1.02); } 100%{ transform:scale(1); } }
-    @keyframes public-avatar-spin{ to{ transform:rotate(360deg); } }
-    @keyframes public-avatar-success{ 0%{ transform:scale(.9); } 65%{ transform:scale(1.08); } 100%{ transform:scale(1); } }
-  </style>
+  <link rel="stylesheet" href="/css/profile-account.css">
 
 <script src="js/analytics.js" defer></script>
   <script src="js/i18n.js" defer></script>
@@ -125,7 +54,6 @@
   <script src="js/klaro-config.js" defer></script>
   <script src="js/vendor/klaro/klaro.js" defer></script>
   <script src="js/consent-services.js" defer></script>
-  <link rel="stylesheet" href="/css/profile-account.css">
   <link rel="stylesheet" href="/css/ugc.css">
 </head>
 <body class="page-account">
@@ -211,34 +139,32 @@
       </nav>
     </aside>
 
-    <main>
+    <main class="layout">
       <article class="xp-page" aria-labelledby="accountTitle">
-        <header class="xp-header">
-          <h1 id="accountTitle" data-i18n="accountTitle">Your account</h1>
-          <p class="xp-subtitle" data-i18n="accountSubtitle">Sign in to sync XP and manage your Arcade Hub profile.</p>
+        <header class="xp-header" style="margin-bottom:16px;">
+          <h1 id="accountTitle" data-i18n="accountTitle" class="h1" style="font-size:clamp(22px,2.5vw,30px);margin:0 0 6px;">Your account</h1>
+          <p class="xp-subtitle sub" data-i18n="accountSubtitle">Sign in to sync XP and manage your Arcade Hub profile.</p>
         </header>
-
-        <section class="xp-card" id="account-deletion" hidden aria-labelledby="accountDeletionWebTitle">
-          <h2 class="xp-card__title" id="accountDeletionWebTitle" data-i18n="accountDeletionWebTitle">Delete your Arcade Poker account</h2>
-          <p class="account-note" data-i18n="accountDeletionWebSteps">You can request deletion here in your browser, even after uninstalling the app. Sign in, then choose Delete account in Account and confirm. This deletes your shared game account, not just the app on your device.</p>
-          <p class="account-note"><a href="#signinForm" data-i18n="signIn">Sign in</a> · <span data-i18n="accountDeletionWebHelp">Cannot sign in or need help? Contact</span> <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>.</p>
-        </section>
 
         <div class="account-status" id="accountStatus" aria-live="polite" hidden></div>
 
-        <section class="account-grid" id="authForms" data-i18n-aria="authentication" aria-label="Authentication">
-          <div class="xp-card">
-            <h2 class="xp-card__title" data-i18n="signIn">Sign in</h2>
+        <section id="authForms" data-i18n-aria="authentication" aria-label="Authentication">
+          <div class="account-auth-tabs seg" role="tablist" aria-label="Sign in or create account">
+            <button type="button" class="account-auth-tab on" id="authTabSignIn" role="tab" aria-selected="true" aria-controls="authSignInPanel" data-i18n="signIn">Sign in</button>
+            <button type="button" class="account-auth-tab" id="authTabSignUp" role="tab" aria-selected="false" aria-controls="authSignUpPanel" data-i18n="createAccount">Create account</button>
+          </div>
+
+          <div class="card auth-panel" id="authSignInPanel" role="tabpanel" aria-labelledby="authTabSignIn">
+            <div id="googleProfileNotice" hidden>
+              <p class="account-note sub" data-i18n="publicProfileSignupNotice">Creating an account gives you a player profile with an automatically generated name and avatar. Signed-in users can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
+              <p class="account-note sub"><a href="/legal/terms.en.html" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> · <a href="/legal/privacy.en.html" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy</a></p>
+            </div>
+            <button type="button" class="account-google" id="googleSignInButton" aria-describedby="googleProfileNotice" hidden>
+              <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6C44.4 38.03 46.98 31.87 46.98 24.55z"/><path fill="#FBBC05" d="M10.53 28.59A14.41 14.41 0 0 1 9.75 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.87 23.87 0 0 0 0 24c0 3.87.93 7.53 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.91-5.8l-7.73-6c-2.15 1.45-4.92 2.3-8.18 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+              <span data-i18n="continueWithGoogle">Continue with Google</span>
+            </button>
+            <div class="account-google-divider" id="googleSignInDivider" hidden><span data-i18n="orSignInWithEmail">or sign in with email</span></div>
             <form class="account-form" id="signinForm">
-              <div id="googleProfileNotice" hidden>
-                <p class="account-note" data-i18n="publicProfileSignupNotice">Creating an account gives you a player profile with an automatically generated name and avatar. Signed-in users can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
-                <p class="account-note"><a href="/legal/terms.en.html" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> · <a href="/legal/privacy.en.html" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy</a></p>
-              </div>
-              <button type="button" class="account-google" id="googleSignInButton" aria-describedby="googleProfileNotice" hidden>
-                <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6C44.4 38.03 46.98 31.87 46.98 24.55z"/><path fill="#FBBC05" d="M10.53 28.59A14.41 14.41 0 0 1 9.75 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.87 23.87 0 0 0 0 24c0 3.87.93 7.53 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.91-5.8l-7.73-6c-2.15 1.45-4.92 2.3-8.18 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-                <span data-i18n="continueWithGoogle">Continue with Google</span>
-              </button>
-              <div class="account-google-divider" id="googleSignInDivider" hidden><span data-i18n="orSignInWithEmail">or sign in with email</span></div>
               <label for="signinEmail" data-i18n="email">Email</label>
               <input id="signinEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
               <label for="signinPassword" data-i18n="password">Password</label>
@@ -257,13 +183,13 @@
               <input id="recoveryPassword" type="password" autocomplete="new-password" minlength="8" required>
               <label for="recoveryPasswordConfirm" data-i18n="confirmPassword">Confirm password</label>
               <input id="recoveryPasswordConfirm" type="password" autocomplete="new-password" minlength="8" required>
-              <p class="account-note" data-i18n="passwordRequirements">Use at least 8 characters.</p>
+              <p class="account-note sub" data-i18n="passwordRequirements">Use at least 8 characters.</p>
               <button type="submit" data-i18n="saveNewPassword">Save new password</button>
             </form>
+            <div class="sub" style="font-size:13px;line-height:1.5;margin-top:6px;">Signed-in users can view your profile, level and achievements. Your email and sign-in credentials remain private. <a href="/legal/terms.en.html" class="lk ft-link" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html" data-i18n="terms">Terms</a> · <a href="/legal/privacy.en.html" class="lk ft-link" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html" data-i18n="privacy">Privacy</a></div>
           </div>
 
-          <div class="xp-card">
-            <h2 class="xp-card__title" data-i18n="createAccount">Create account</h2>
+          <div class="card auth-panel" id="authSignUpPanel" role="tabpanel" aria-labelledby="authTabSignUp" hidden>
             <form class="account-form" id="signupForm" aria-describedby="signupProfileNotice">
               <label for="signupEmail" data-i18n="email">Email</label>
               <input id="signupEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
@@ -271,96 +197,152 @@
               <input id="signupPassword" name="password" type="password" autocomplete="new-password" minlength="8" data-i18n-placeholder="choosePassword" required placeholder="Choose a password">
               <label for="signupPasswordConfirm" data-i18n="confirmPassword">Confirm password</label>
               <input id="signupPasswordConfirm" name="passwordConfirm" type="password" autocomplete="new-password" minlength="8" required placeholder="••••••••">
-              <p class="account-note" data-i18n="passwordRequirements">Use at least 8 characters.</p>
-              <p class="account-note" id="signupProfileNotice" data-i18n="publicProfileSignupNotice">Creating an account gives you a player profile with an automatically generated name and avatar. Signed-in users can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
-              <p class="account-note"><span data-i18n="profileTermsSignupNote">After email verification, accept the current Terms before using your account.</span> <a href="/legal/terms.en.html" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> · <a href="/legal/privacy.en.html" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy</a>.</p>
+              <p class="account-note sub" data-i18n="passwordRequirements">Use at least 8 characters.</p>
+              <p class="account-note sub" id="signupProfileNotice" data-i18n="publicProfileSignupNotice">Creating an account gives you a player profile with an automatically generated name and avatar. Signed-in users can view your profile, level and achievements. Your email and sign-in credentials remain private.</p>
+              <p class="account-note sub"><span data-i18n="profileTermsSignupNote">After email verification, accept the current Terms before using your account.</span> <a href="/legal/terms.en.html" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">Terms</a> · <a href="/legal/privacy.en.html" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html">Privacy</a>.</p>
               <button type="submit" data-i18n="signUp">Sign up</button>
             </form>
-            <p class="account-note" data-i18n="accountVerification">We may ask you to verify your email before unlocking cloud sync.</p>
+            <p class="account-note sub" data-i18n="accountVerification">We may ask you to verify your email before unlocking cloud sync.</p>
           </div>
         </section>
 
-        <section class="xp-card account-confirmation" id="signupConfirmation" role="status" aria-live="polite" hidden>
-          <div class="account-confirmation__icon" aria-hidden="true">✦</div>
+        <section class="card" id="account-deletion" hidden aria-labelledby="accountDeletionWebTitle">
+          <h2 class="h2" id="accountDeletionWebTitle" data-i18n="accountDeletionWebTitle" style="font-size:16px;">Delete your Arcade Poker account</h2>
+          <p class="account-note sub" data-i18n="accountDeletionWebSteps">You can request deletion here in your browser, even after uninstalling the app. Sign in, then choose Delete account in Account and confirm. This deletes your shared game account, not just the app on your device.</p>
+          <p class="account-note sub"><a href="#signinForm" data-i18n="signIn" class="lk">Sign in</a> · <span data-i18n="accountDeletionWebHelp">Cannot sign in or need help? Contact</span> <a href="mailto:contact@kcswh.pl" class="lk">contact@kcswh.pl</a>.</p>
+        </section>
+
+        <section class="card account-confirmation" id="signupConfirmation" role="status" aria-live="polite" hidden>
+          <div class="account-confirmation__icon" aria-hidden="true" style="font-size:24px;color:var(--gold);">✦</div>
           <div>
-            <h2 class="xp-card__title" data-i18n="confirmationEmailSentTitle">Confirmation email sent</h2>
-            <p class="xp-details__text" id="signupConfirmationMessage"></p>
-            <p class="account-note" data-i18n="confirmationEmailHint">Open the link within 24 hours. You can sign in after your email is confirmed.</p>
+            <h2 class="h2" data-i18n="confirmationEmailSentTitle">Confirmation email sent</h2>
+            <p class="xp-details__text sub" id="signupConfirmationMessage"></p>
+            <p class="account-note sub" data-i18n="confirmationEmailHint">Open the link within 24 hours. You can sign in after your email is confirmed.</p>
             <button type="button" class="account-form__link" id="signupConfirmationBack" data-i18n="backToSignIn">Back to sign in</button>
           </div>
         </section>
 
-        <section class="xp-card" id="accountPanel" hidden data-i18n-aria="account" aria-label="Account details">
-          <h2 class="xp-card__title" data-i18n="account">Account</h2>
-          <p class="xp-details__text"><span data-i18n="signedInAs">Signed in as</span> <strong id="accountName">Player</strong>.</p>
-          <p class="xp-details__text"><span data-i18n="email">Email</span>: <strong id="accountEmail">you@example.com</strong></p>
-          <section class="public-profile-editor" id="publicProfileEditor" aria-labelledby="publicProfileTitle" hidden>
-            <div class="public-profile-editor__identity">
-              <div class="public-profile-editor__avatar" id="publicProfileAvatar" aria-hidden="true" aria-busy="false" data-upload-state="idle">AH</div>
-              <div>
-                <h3 class="xp-card__title" id="publicProfileTitle" data-i18n="publicProfileTitle">Public profile</h3>
-                <a class="public-profile-editor__url" id="publicProfileUrl" href="#">/u/handle</a>
+        <section id="accountPanel" hidden data-i18n-aria="account" aria-label="Account details">
+          <div class="account-desktop-grid">
+            <div class="account-col-left">
+              <div class="card fx account-header-card" id="accountSummary">
+                <div class="av" id="accountSummaryAvatar" style="background-image:url(/poker/assets/avatars/bots/bot-female-02-v1.webp)"></div>
+                <div style="flex:1;min-width:0">
+                  <div class="h2" id="accountName" style="font-size:20px;font-weight:800;margin:0;">Player</div>
+                  <div class="sub" style="margin-top:2px;"><span id="accountEmail">you@example.com</span> <span class="account-email-private" data-i18n="accountEmailPrivate">(private)</span></div>
+                </div>
+              </div>
+
+              <section class="card public-profile-editor" id="publicProfileEditor" aria-labelledby="publicProfileTitle" hidden>
+                <div class="sh" style="margin-bottom:4px;">
+                  <h3 class="h2" id="publicProfileTitle" data-i18n="publicProfileTitle" style="margin:0;">Public profile</h3>
+                  <a class="public-profile-editor__url lk" id="publicProfileUrl" href="#">/u/handle ↗</a>
+                </div>
+                <p class="account-note sub" id="publicProfileBrowserHint" data-i18n="profileBrowserSessionHint" hidden>This link opens in your browser. You may need to sign in there separately from the app.</p>
+                <p class="account-note sub" data-i18n="publicProfileNotice">Signed-in users can view your Arcade name, handle and avatar. Your account email stays private.</p>
+                <p><strong id="publicDisplayName"></strong> <span id="publicHandle"></span></p>
+                <div class="public-profile-editor__identity" style="display:none;">
+                  <div class="public-profile-editor__avatar" id="publicProfileAvatar" aria-hidden="true" aria-busy="false" data-upload-state="idle">AH</div>
+                </div>
+                <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" data-i18n-aria="arcadeAvatarGallery" aria-label="Arcade avatars"></div>
+                <button id="publicAvatarSave" type="button" class="btn sm gh arcade-avatar-save" aria-describedby="publicAvatarStatus" aria-busy="false" disabled><span id="publicAvatarSaveLabel" data-i18n="arcadeAvatarSet">Set avatar</span></button>
+                <p id="publicAvatarStatus" class="account-note sub" role="status" aria-live="polite" aria-atomic="true"></p>
+                <form class="account-form" id="publicProfileForm">
+                  <fieldset class="public-profile-editor__privacy" style="border:0;padding:0;margin:0;"><label style="display:flex;align-items:center;gap:8px;font-weight:600;"><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note sub" style="margin-top:4px;" data-i18n="profileRemainsPublic">This does not hide your player profile from signed-in users.</p></fieldset>
+                  <button type="submit" class="public-profile-save btn sm gh" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel" data-i18n="profileSaveVisibility">Save visibility</span></button>
+                  <span id="publicProfileSaveStatus" role="status"></span>
+                </form>
+              </section>
+
+              <div class="card account-settings-card">
+                <section class="ugc-blocked li" data-ugc-section hidden aria-labelledby="ugcBlockedTitle">
+                  <div style="flex:1;">
+                    <div class="t" id="ugcBlockedTitle" data-i18n="ugcBlockedListTitle">Blocked players</div>
+                    <div id="ugcBlockedList" class="d"></div>
+                  </div>
+                  <span class="sub">›</span>
+                </section>
+                <div class="li">
+                  <div style="flex:1;">
+                    <div class="t" data-i18n="legalDocuments">Terms · Privacy · Cookies</div>
+                    <div class="d" data-i18n="legalDocumentsSub">Legal agreements and consent preferences</div>
+                  </div>
+                  <a href="/legal/terms.en.html" class="sub ft-link" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html">›</a>
+                </div>
+                <div class="li">
+                  <div style="flex:1;">
+                    <div class="t" data-i18n="language">Language</div>
+                  </div>
+                  <div class="seg lang-switch" style="width:110px;" aria-label="Language">
+                    <button type="button" class="lang-btn on" data-lang="pl" aria-pressed="false" style="flex:1;border:0;background:transparent;cursor:pointer;font-weight:700;">PL</button>
+                    <button type="button" class="lang-btn" data-lang="en" aria-pressed="false" style="flex:1;border:0;background:transparent;cursor:pointer;font-weight:700;">EN</button>
+                  </div>
+                </div>
+                <div class="li">
+                  <div style="flex:1;">
+                    <div class="t" data-i18n="aboutAndLicenses">About · Licenses</div>
+                  </div>
+                  <a href="/about.en.html" class="sub ft-link" data-href-en="/about.en.html" data-href-pl="/about.pl.html">›</a>
+                </div>
               </div>
             </div>
-            <p class="account-note" id="publicProfileBrowserHint" data-i18n="profileBrowserSessionHint" hidden>This link opens in your browser. You may need to sign in there separately from the app.</p>
-            <p class="account-note" data-i18n="publicProfileNotice">Signed-in users can view your Arcade name, handle and avatar. Your account email stays private.</p>
-            <p><strong id="publicDisplayName"></strong> <span id="publicHandle"></span></p>
-            <div id="arcadeAvatarGallery" class="arcade-avatar-gallery" role="group" data-i18n-aria="arcadeAvatarGallery" aria-label="Arcade avatars"></div>
-            <button id="publicAvatarSave" type="button" class="account-panel__btn account-panel__btn--primary arcade-avatar-save" aria-describedby="publicAvatarStatus" aria-busy="false" disabled><span id="publicAvatarSaveLabel" data-i18n="arcadeAvatarSet">Set avatar</span></button>
-            <p id="publicAvatarStatus" class="account-note" role="status" aria-live="polite" aria-atomic="true"></p>
-            <form class="account-form" id="publicProfileForm">
-              <fieldset class="public-profile-editor__privacy"><label><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note" data-i18n="profileRemainsPublic">This does not hide your player profile from signed-in users.</p></fieldset>
-              <button type="submit" class="public-profile-save" id="publicProfileSave" data-state="idle"><span id="publicProfileSaveLabel" data-i18n="profileSaveVisibility">Save visibility</span></button>
-              <span id="publicProfileSaveStatus" role="status"></span>
-            </form>
-          </section>
-          <section class="ugc-blocked" data-ugc-section hidden aria-labelledby="ugcBlockedTitle"><h3 id="ugcBlockedTitle" data-i18n="ugcBlockedListTitle">Blocked players</h3><div id="ugcBlockedList"></div></section>
-          <div class="account-panel__actions">
-            <button type="button" class="account-panel__btn account-panel__btn--primary" id="signOutButton" data-i18n="signOut">Sign out</button>
-          </div>
-          <div class="account-bonus" id="welcomeBonusPanel" hidden>
-            <div class="account-bonus__title" id="welcomeBonusTitle">Available chip bonuses</div>
-            <div id="bonusCampaignList"></div>
-            <button type="button" class="account-bonus__btn" id="welcomeBonusClaimButton" data-i18n="claimBonus" hidden>Claim bonus</button>
-            <p class="account-note" id="welcomeBonusStatus" aria-live="polite"></p>
-          </div>
-          <section class="account-danger-zone" aria-labelledby="accountDangerZoneTitle">
-            <h3 class="xp-card__title" id="accountDangerZoneTitle" data-i18n="accountDangerZone">Danger Zone</h3>
-            <button type="button" class="account-panel__btn account-panel__btn--danger" id="deleteAccountButton" aria-haspopup="dialog" aria-controls="accountDeletionDialog" aria-busy="false" data-i18n="deleteAccount">Delete account</button>
-            <p class="account-note" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">Deleting your account permanently forfeits CH, XP, achievements and profile data.</p>
-          </section>
-        </section>
 
-        <section class="xp-card chip-panel" id="chipPanel" hidden data-i18n-aria="arcadeChips" aria-label="Arcade chips">
-          <div class="chip-panel__header">
-            <h2 class="xp-card__title" data-i18n="arcadeChips">Arcade chips</h2>
-            <div class="chip-balance">
-              <span class="chip-balance__label" data-i18n="balance">Balance</span>
-              <span class="chip-balance__value" id="chipBalanceValue">—</span>
+            <div class="account-col-right">
+              <section class="card chip-panel" id="chipPanel" hidden data-i18n-aria="arcadeChips" aria-label="Arcade chips">
+                <div class="sh">
+                  <h2 class="h2" style="margin:0;" data-i18n="arcadeChips">Arcade chips</h2>
+                </div>
+                <div class="chip-balance-grid">
+                  <div class="chip-balance-tile">
+                    <b id="chipBalanceValue">—</b>
+                    <span data-i18n="balance">Balance</span>
+                  </div>
+                  <div class="chip-balance-tile">
+                    <b>0 CH</b>
+                    <span data-i18n="pokerInPlay">At poker tables</span>
+                  </div>
+                </div>
+                <section class="card account-bonus" id="pokerAccountPanel" hidden aria-labelledby="pokerAccountTitle">
+                  <div class="account-bonus__title" id="pokerAccountTitle" data-i18n="accountPokerTables">Poker tables</div>
+                  <p class="account-note sub" id="pokerAccountStatus" aria-live="polite" hidden></p>
+                  <div id="pokerTableList"></div>
+                </section>
+                <p class="account-note sub" id="chipStatus" aria-live="polite"></p>
+                <div class="chip-ledger__scroll" id="chipLedgerScroll">
+                  <div class="chip-ledger__spacer" id="chipLedgerSpacer"></div>
+                  <ul class="chip-ledger" id="chipLedgerList"></ul>
+                </div>
+                <p class="account-note sub" id="chipLedgerEmpty" data-i18n="noChipActivity" hidden>No chip activity yet.</p>
+                <nav class="chip-ledger__pagination" id="chipLedgerPagination" aria-label="Chip history pages">
+                  <button type="button" id="chipLedgerFirst" data-i18n="firstPage">First</button>
+                  <button type="button" id="chipLedgerPrev" data-i18n="previousPage">Previous</button>
+                  <div class="chip-ledger__pages" id="chipLedgerPages" aria-label="Available pages"></div>
+                  <span class="chip-ledger__page-status" id="chipLedgerPage" aria-live="polite">Page 1 of 1</span>
+                  <button type="button" id="chipLedgerNext" data-i18n="nextPage">Next</button>
+                  <button type="button" id="chipLedgerLast" data-i18n="lastPage">Last</button>
+                  <label class="chip-ledger__page-size" for="chipLedgerPageSize" style="display:flex;align-items:center;gap:6px;"><span data-i18n="recordsPerPage">Records per page</span>
+                    <select id="chipLedgerPageSize" style="height:32px;border-radius:8px;background:var(--bg2);color:var(--tx);border:1px solid var(--bd);"><option value="10">10</option><option value="25">25</option><option value="50">50</option></select>
+                  </label>
+                </nav>
+              </section>
+
+              <div class="card gd account-bonus" id="welcomeBonusPanel" hidden>
+                <div class="h2" id="welcomeBonusTitle" style="font-size:16px;">Available chip bonuses</div>
+                <div id="bonusCampaignList"></div>
+                <button type="button" class="btn sm gold" id="welcomeBonusClaimButton" data-i18n="claimBonus" hidden>Claim bonus</button>
+                <p class="account-note sub" id="welcomeBonusStatus" aria-live="polite"></p>
+              </div>
             </div>
           </div>
-          <section class="xp-card account-bonus" id="pokerAccountPanel" hidden aria-labelledby="pokerAccountTitle">
-            <div class="account-bonus__title" id="pokerAccountTitle" data-i18n="accountPokerTables">Poker tables</div>
-            <p class="account-note" id="pokerAccountStatus" aria-live="polite" hidden></p>
-            <div id="pokerTableList"></div>
-          </section>
-          <p class="account-note" id="chipStatus" aria-live="polite"></p>
-          <div class="chip-ledger__scroll" id="chipLedgerScroll">
-            <div class="chip-ledger__spacer" id="chipLedgerSpacer"></div>
-            <ul class="chip-ledger" id="chipLedgerList"></ul>
+
+          <div class="account-bottom-actions" style="display:flex;flex-direction:column;gap:16px;">
+            <button type="button" class="btn gh" id="signOutButton" data-i18n="signOut" style="align-self:flex-start;">Sign out</button>
+            <section class="card account-danger-zone" aria-labelledby="accountDangerZoneTitle">
+              <h3 class="h2" style="color:var(--red);margin:0 0 6px;" id="accountDangerZoneTitle" data-i18n="accountDangerZone">Danger Zone</h3>
+              <p class="account-note sub" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">Deleting your account permanently forfeits CH, XP, achievements and profile data.</p>
+              <button type="button" class="btn sm dg" id="deleteAccountButton" aria-haspopup="dialog" aria-controls="accountDeletionDialog" aria-busy="false" data-i18n="deleteAccount" style="width:max-content;margin-top:12px;">Delete account</button>
+            </section>
           </div>
-          <p class="account-note" id="chipLedgerEmpty" data-i18n="noChipActivity" hidden>No chip activity yet.</p>
-          <nav class="chip-ledger__pagination" id="chipLedgerPagination" aria-label="Chip history pages">
-            <button type="button" id="chipLedgerFirst" data-i18n="firstPage">First</button>
-            <button type="button" id="chipLedgerPrev" data-i18n="previousPage">Previous</button>
-            <div class="chip-ledger__pages" id="chipLedgerPages" aria-label="Available pages"></div>
-            <span class="chip-ledger__page-status" id="chipLedgerPage" aria-live="polite">Page 1 of 1</span>
-            <button type="button" id="chipLedgerNext" data-i18n="nextPage">Next</button>
-            <button type="button" id="chipLedgerLast" data-i18n="lastPage">Last</button>
-            <label class="chip-ledger__page-size" for="chipLedgerPageSize"><span data-i18n="recordsPerPage">Records per page</span>
-              <select id="chipLedgerPageSize"><option value="10">10</option><option value="25">25</option><option value="50">50</option></select>
-            </label>
-          </nav>
         </section>
       </article>
     </main>
@@ -368,14 +350,14 @@
 
   <dialog class="account-delete-dialog" id="accountDeletionDialog" aria-labelledby="accountDeletionDialogTitle" aria-describedby="accountDeletionDialogWarning">
     <div class="account-delete-dialog__content">
-      <button type="button" class="account-delete-dialog__close" id="accountDeletionClose" data-i18n-aria="accountDeletionClose" aria-label="Cancel and close">×</button>
-      <span class="account-delete-dialog__icon" aria-hidden="true">!</span>
-      <p class="account-delete-dialog__eyebrow" data-i18n="accountDangerZone">Danger Zone</p>
-      <h2 id="accountDeletionDialogTitle" data-i18n="accountDeletionDialogTitle">Delete your account?</h2>
-      <p id="accountDeletionDialogWarning" data-i18n="accountDeletionConfirm">Your account will be permanently deleted. You will lose all CH (including Poker winnings), XP, achievements and profile data. This cannot be undone.</p>
+      <div class="sh">
+        <h2 id="accountDeletionDialogTitle" class="h2" style="margin:0;" data-i18n="accountDeletionDialogTitle">Delete your account?</h2>
+        <button type="button" class="close" id="accountDeletionClose" data-i18n-aria="accountDeletionClose" aria-label="Cancel and close">×</button>
+      </div>
+      <p id="accountDeletionDialogWarning" class="sub" data-i18n="accountDeletionConfirm">Your account will be permanently deleted. You will lose all CH (including Poker winnings), XP, achievements and profile data. This cannot be undone.</p>
       <div class="account-delete-dialog__actions">
-        <button type="button" class="account-panel__btn account-panel__btn--ghost" id="accountDeletionCancel" data-i18n="accountDeletionCancel" autofocus>Cancel</button>
-        <button type="button" class="account-panel__btn account-panel__btn--danger account-panel__btn--danger-solid" id="accountDeletionConfirmButton" data-i18n="deleteAccount">Delete account</button>
+        <button type="button" class="btn gh" id="accountDeletionCancel" data-i18n="accountDeletionCancel" autofocus style="flex:1;">Cancel</button>
+        <button type="button" class="btn dg" id="accountDeletionConfirmButton" data-i18n="deleteAccount" style="flex:1;background:var(--red);color:#2a0606;border:0;">Delete account</button>
       </div>
     </div>
   </dialog>
