@@ -359,20 +359,12 @@
   }
 }
 
-/* Approved #1069 V3 composition; isolated from table pages. */
-body.poker-lobby{color-scheme:dark;--ink:#fff;--muted:#c6bde8;--gold:#ffe69c;--bg:#090c35;font-family:Arial,Helvetica,sans-serif;}
-body.poker-lobby *{box-sizing:border-box;}
-body.poker-lobby{margin:0;background:radial-gradient(ellipse at 15% 28%,#007cce77,transparent 48%),radial-gradient(ellipse at 87% 25%,#b414b865,transparent 45%),radial-gradient(ellipse at 55% 100%,#3f17b99c,transparent 65%),#080c30;color:var(--ink);}
-body.poker-lobby::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(circle at 9% 12%,#6fa9ff33 0 14px,transparent 16px),radial-gradient(circle at 88% 30%,#fa80ff33 0 24px,transparent 26px),radial-gradient(circle at 70% 80%,#613dff55 0 40px,transparent 43px);}
-body.poker-lobby button{font:inherit;cursor:pointer;color:inherit;-webkit-tap-highlight-color:transparent;}
-body.poker-lobby a{color:inherit;text-decoration:none;-webkit-tap-highlight-color:transparent;}
-body.poker-lobby button:focus-visible{outline:3px solid #fff396;outline-offset:4px;}
-body.poker-lobby a:focus-visible{outline:3px solid #fff396;outline-offset:4px;}
-body.poker-lobby button:disabled{cursor:default;}
+/* Emerald Night lobby composition */
 body.poker-lobby [hidden]{display:none!important;}
-body.poker-lobby{background:var(--bg);color:var(--tx);padding:0;margin:0;}
-body.poker-lobby .shell{display:flex;width:100%;min-height:100svh;}
-body.poker-lobby .poker-page{flex:1;min-width:0;max-width:1400px;margin:0 auto;width:100%;padding:20px max(24px,env(safe-area-inset-right)) 80px max(24px,env(safe-area-inset-left));}
+body.poker-lobby #chipsPill[hidden]{display:none!important;}
+.topbar[data-user-ui-chips-state="anonymous"] #chipsPill{display:none!important;}
+.topbar:not([data-user-ui-chips-state="signed_in"]) #chipsPill{display:none!important;}
+body.poker-lobby .poker-page{flex:1;min-width:0;max-width:1400px;margin:0 auto;width:100%;padding:12px 0 80px;}
 @media(max-width:600px){
 body.poker-lobby .poker-page{padding:14px max(14px,env(safe-area-inset-right)) 80px max(14px,env(safe-area-inset-left));}
 }
