@@ -1560,3 +1560,46 @@ test("volume workdir creates only on the verified mount and refuses conflicting 
   assert.equal(runOperation("volume-workdir-prepare", "1249", host).ok, false);
   assert.equal(fs.existsSync(dest), false);
 });
+
+test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe destinations", async () => {
+  const { newAgentWorkdir } = await import("../scripts/ops/agent-workdir-preflight.mjs");
+  const mount = "/mnt/HC_Volume_107462648";
+  const root = `${mount}/copilot-work`;
+  let mountOutput = `${mount} /dev/sdb ext4 rw,relatime,discard`;
+  let mountStatus = 0, rootDevice = 16, rootMode = 0o750, rootUid = 1000, rootGid = 1000;
+  let canonical = root, exists = false, device = "/dev/sdb", canWrite = true;
+  const directory = (dev, uid = 0, gid = 0, mode = 0o755) => ({ dev, uid, gid, mode, isDirectory: () => true });
+  const io = {
+    uid: 1000, gid: 1000,
+    run: () => ({ status: mountStatus, stdout: mountOutput }),
+    fs: {
+      realpathSync: (p) => p.endsWith("scsi-0HC_Volume_107462648") ? device : canonical,
+      statSync: (p) => p === "/dev/sdb" ? { isBlockDevice: () => true, rdev: 16 } : directory(16),
+      lstatSync: (p) => {
+        if (p === root) return directory(rootDevice, rootUid, rootGid, rootMode);
+        if (exists) return directory(16);
+        throw Object.assign(new Error("absent"), { code: "ENOENT" });
+      },
+      accessSync: () => { if (!canWrite) throw new Error("read only"); },
+    },
+  };
+  assert.equal(newAgentWorkdir("task-1246", io), `${root}/task-1246`);
+  for (const output of ["", `/ /dev/sda1 ext4 rw`, `${mount} /dev/sdc ext4 rw`, `${mount} /dev/sdb xfs rw`, `${mount} /dev/sdb ext4 ro`, `${mount} /dev/sdb ext4 rw\n${mount} /dev/sdb ext4 rw`]) {
+    mountOutput = output;
+    assert.throws(() => newAgentWorkdir("task-1246", io), /STOP/);
+  }
+  mountOutput = `${mount} /dev/sdb ext4 rw`;
+  mountStatus = 1; assert.throws(() => newAgentWorkdir("task-1246", io), /STOP/); mountStatus = 0;
+  for (const change of [
+    () => { rootDevice = 1; }, () => { rootMode = 0o777; }, () => { rootUid = 0; },
+    () => { rootGid = 0; }, () => { canonical = "/home/copilot/work"; },
+    () => { device = "/dev/sdc"; }, () => { canWrite = false; }, () => { exists = true; },
+  ]) {
+    change(); assert.throws(() => newAgentWorkdir("task-1246", io), /STOP/);
+    rootDevice = 16; rootMode = 0o750; rootUid = 1000; rootGid = 1000;
+    canonical = root; device = "/dev/sdb"; canWrite = true; exists = false;
+  }
+  for (const slug of ["", ".", "..", "../escape", "/tmp/task", "a/b", "task name", "a".repeat(81)]) {
+    assert.throws(() => newAgentWorkdir(slug, io), /STOP/);
+  }
+});
