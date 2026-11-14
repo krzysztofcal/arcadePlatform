@@ -1158,7 +1158,7 @@ test("VPS admin approval summary describes every catalog operation from reviewed
   const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
   assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
   assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
-  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status", "npm-cache-1240-check"], "only catalogued status/check operations are read-only");
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status", "npm-cache-1240-check", "codex-bwrap-apparmor-check"], "only catalogued status/check operations are read-only");
   assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
   assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
 
@@ -1642,4 +1642,170 @@ test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe
   for (const slug of ["", ".", "..", "../escape", "/tmp/task", "a/b", "task name", "a".repeat(81)]) {
     assert.throws(() => newAgentWorkdir(slug, io), /STOP/);
   }
+});
+
+test("VPS admin Codex AppArmor routes only three fixed isolated Python actions", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const lockFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "bwrap-route-")), "lock");
+  try {
+    for (const action of ["check", "install", "rollback"]) {
+      const calls = [];
+      const result = runOperation(`codex-bwrap-apparmor-${action}`, "1250", { lockFile, run(argv) {
+        if (argv[0] === "/usr/bin/logger") return { status: 0, stdout: "" };
+        calls.push(argv);
+        return { status: 0, stdout: "BWRAP_OK verified" };
+      } });
+      assert.equal(result.ok, true);
+      assert.deepEqual(calls, [["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/codex-bwrap-apparmor.py", action, "1250"]]);
+    }
+  } finally { fs.rmSync(path.dirname(lockFile), { recursive: true, force: true }); }
+});
+
+test("VPS admin Codex AppArmor synthetic policy, custody and rollback gates fail closed", () => {
+  const script = String.raw`
+import importlib.util, pathlib, tempfile, os, hashlib, json
+spec = importlib.util.spec_from_file_location('repair', 'infra/vps/codex-bwrap-apparmor.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+os.umask(0o022)
+asset = pathlib.Path('infra/vps/bwrap-userns-restrict').read_bytes()
+assert hashlib.sha256(asset).hexdigest() == m.PROFILE_SHA256
+assert m.attachment_matches('/usr/{bin,sbin}/b*', '/usr/bin/bwrap')
+assert not m.attachment_matches('/opt/**', '/usr/bin/bwrap')
+assert m.attachment_matches('/**/bwrap', '/usr/bin/bwrap')
+assert m.attachment_matches('/usr/bin/bwra?', '/usr/bin/bwrap')
+assert m.attachment_matches('/usr/bin/[^x]wrap', '/usr/bin/bwrap')
+assert not m.attachment_matches('/usr/lib/mongodb-compass/MongoDB Compass', '/usr/bin/bwrap')
+
+def fixture(base):
+    def put(name, data):
+        f=base/name.lstrip('/');f.parent.mkdir(parents=True, exist_ok=True);f.write_text(data);return f
+    put('/etc/os-release', 'ID=ubuntu\nVERSION_ID="24.04"\n')
+    put('/sys/module/apparmor/parameters/enabled','Y\n')
+    put('/sys/kernel/security/apparmor/.ns_level','0\n')
+    put('/sys/kernel/security/apparmor/.ns_stacked','no\n')
+    put('/proc/sys/kernel/apparmor_restrict_unprivileged_userns','1\n')
+    put('/proc/self/attr/current','unconfined\n')
+    for ns in ['user','mnt','pid']:
+        f=put('/proc/1/ns/'+ns,'namespace');g=base/('proc/self/ns/'+ns);g.parent.mkdir(parents=True,exist_ok=True);os.link(f,g)
+    put('/proc/1/task/1/attr/current','unconfined\n');put('/proc/1/task/1/status','State:\tS (sleeping)\n');put('/proc/1/comm','init\n');put('/proc/1/status','State:\tS (sleeping)\nKthread:\t0\n')
+    os.symlink('/usr/sbin/init',base/'proc/1/exe')
+    put('/sys/kernel/security/apparmor/profiles','other (enforce)\n')
+    q=base/'sys/kernel/security/apparmor/policy';(q/'namespaces').mkdir(parents=True)
+    def policy(name,attach):
+        d=q/'profiles'/name;d.mkdir(parents=True)
+        for k,v in {'name':name,'attach':attach,'mode':'enforce','sha256':'a'*64}.items():(d/k).write_text(v+'\n')
+    policy('other','/opt/other')
+    put('/etc/apparmor.d/other','profile other /opt/other {}\n')
+    put('/usr/local/libexec/arcade-vps-admin/bwrap-userns-restrict',asset.decode())
+    for name in ['/usr/bin/bwrap','/usr/sbin/apparmor_parser']:put(name,'fixture').chmod(0o755)
+    (base/'var/lib/arcade-admin').mkdir(parents=True)
+    calls=[]
+    def run(argv):
+        calls.append(argv)
+        if '-a' in argv:
+            policy('bwrap','/usr/bin/bwrap');policy('unpriv_bwrap','unpriv_bwrap')
+            put('/sys/kernel/security/apparmor/profiles','other (enforce)\nbwrap (enforce)\nunpriv_bwrap (enforce)\n')
+        if '-R' in argv:
+            import shutil
+            for name in ['bwrap','unpriv_bwrap']:shutil.rmtree(q/'profiles'/name)
+            put('/sys/kernel/security/apparmor/profiles','other (enforce)\n')
+        return ''
+    c=m.Context(base, owner=(os.getuid(),os.getgid()), runner=run)
+    return c,put,calls,q
+
+with tempfile.TemporaryDirectory(prefix='bwrap-admin-') as td:
+    root=pathlib.Path(td)
+    c,put,calls,q=fixture(root/'ok')
+    child=q/'profiles/other/profiles/hat';child.mkdir(parents=True)
+    for k,v in {'name':'hat','attach':'hat','mode':'enforce','sha256':'b'*64}.items():(child/k).write_text(v+'\n')
+    put('/sys/kernel/security/apparmor/profiles','other (enforce)\nother//hat (enforce)\n')
+    # Keep a simple baseline for the simulated parser load/remove paths below.
+    assert 'other//hat' in c.policy()
+    import shutil
+    shutil.rmtree(q/'profiles/other/profiles')
+    put('/sys/kernel/security/apparmor/profiles','other (enforce)\n')
+    before=sorted(str(x) for x in (root/'ok').rglob('*'))
+    c.execute('check','1250')
+    assert sorted(str(x) for x in (root/'ok').rglob('*'))==before and not calls
+    c.execute('install','1251')
+    target=c.p('/etc/apparmor.d/bwrap-userns-restrict');assert target.read_bytes()==asset
+    assert any('-a' in x for x in calls) and not any('-r' in x for x in calls)
+    c.execute('rollback','1252');assert not target.exists()
+    assert c.p('/var/lib/arcade-admin/codex-bwrap-apparmor/retired-profile').read_bytes()==asset
+    try:c.execute('rollback','1253')
+    except m.Blocked:pass
+    else:raise AssertionError('second rollback accepted')
+    for case in ['conflict','unknown','missing','namespace','hash','local','busy','drift','policy-drift','partial','incomplete','process-hidden','target-exists','policy-namespace','post-load-busy','zombie-leader','source-drift']:
+        c,put,calls,q=fixture(root/case)
+        if case=='conflict':(q/'profiles/other/attach').write_text('/usr/{bin,sbin}/b*\n')
+        if case=='unknown':(q/'profiles/other/attach').write_text('<unknown>\n')
+        if case=='missing':(q/'profiles/other/attach').unlink()
+        if case=='policy-namespace':put('/sys/kernel/security/apparmor/.ns_level','1\n')
+        if case=='incomplete':put('/sys/kernel/security/apparmor/profiles','')
+        if case=='process-hidden':(root/case/'proc/1/task/1/attr/current').unlink()
+        if case=='target-exists':put('/etc/apparmor.d/bwrap-userns-restrict','other vendor')
+        if case=='namespace':(q/'namespaces/hidden').mkdir()
+        if case=='hash':c.p('/usr/local/libexec/arcade-vps-admin/bwrap-userns-restrict').write_text('changed')
+        if case=='local':put('/etc/apparmor.d/local/unpriv_bwrap','allow capability,')
+        if case=='busy':put('/proc/1/task/1/attr/current','bwrap//&unpriv_bwrap (enforce)\n')
+        if case in ['drift','policy-drift','zombie-leader','source-drift']:
+            c.execute('install','1260');calls.clear()
+            if case=='drift':c.p('/etc/apparmor.d/bwrap-userns-restrict').write_text('changed')
+            elif case=='policy-drift':(q/'profiles/bwrap/sha256').write_text('b'*64+'\n')
+            elif case=='source-drift':put('/etc/apparmor.d/other','profile other /opt/updated {}\n')
+            else:
+                put('/proc/1/status','State:\tZ (zombie)\n')
+                put('/proc/1/task/1/status','State:\tZ (zombie)\n')
+                put('/proc/1/task/2/status','State:\tS (sleeping)\n')
+                put('/proc/1/task/2/attr/current','bwrap//&unpriv_bwrap (enforce)\n')
+        if case=='partial':
+            old=c.runner
+            def fail(argv):
+                if '-a' in argv:
+                    old(argv)
+                    raise m.Blocked('parser_failed')
+                return old(argv)
+            c.runner=fail
+        if case=='post-load-busy':
+            old=c.runner
+            def busy_after(argv):
+                answer=old(argv)
+                if '-a' in argv:put('/proc/1/task/1/attr/current','bwrap (enforce)\n')
+                return answer
+            c.runner=busy_after
+            c.execute('install','1261')
+            assert c.p('/etc/apparmor.d/bwrap-userns-restrict').exists()
+            try:c.execute('rollback','1262')
+            except m.Blocked:pass
+            else:raise AssertionError('rollback accepted active dependent')
+            continue
+        try:c.execute('rollback' if case in ['drift','policy-drift','zombie-leader','source-drift'] else 'install','1261')
+        except m.Blocked:pass
+        else:raise AssertionError('accepted '+case)
+        assert not any('-R' in x for x in calls),case
+        if case=='partial':
+            assert not c.p('/etc/apparmor.d/bwrap-userns-restrict').exists(), 'persistent policy after failed load'
+            try:c.execute('rollback','1262')
+            except m.Blocked:pass
+            else:raise AssertionError('accepted incomplete install rollback')
+        elif case not in ['drift','policy-drift','zombie-leader','source-drift','target-exists']:assert not c.p('/etc/apparmor.d/bwrap-userns-restrict').exists(),case
+print('synthetic bwrap gates PASS')
+`;
+  const result = spawnSync("python3", ["-I", "-B", "-c", script], { encoding: "utf8", timeout: 30000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /synthetic bwrap gates PASS/);
+});
+
+test("VPS admin staging refuses an agent-writable source tree before installing catalog support", () => {
+  const stage = fileText("infra/vps/stage-vps-admin.sh");
+  const match = stage.match(/python3 -I -B - "\$REPO_ROOT" "\$\{BASH_SOURCE\[0\]\}" <<'PY_TRUST'\n([\s\S]*?)\nPY_TRUST/);
+  assert.ok(match, "trusted staging source preflight exists");
+  assert.ok(stage.indexOf(match[0]) < stage.indexOf("getent group arcade-admin"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stage-source-"));
+  try {
+    fs.chmodSync(dir, 0o777);
+    const run = spawnSync("python3", ["-I", "-B", "-", dir, path.resolve("infra/vps/stage-vps-admin.sh")], { input: match[1], encoding: "utf8" });
+    assert.notEqual(run.status, 0, "untrusted writable source cannot be staged as root");
+    assert.match(run.stderr, /untrusted_staging_source/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

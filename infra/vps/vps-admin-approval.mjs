@@ -126,11 +126,38 @@ export const APPROVAL = Object.freeze({
     sideEffects: "One directory and the existing admin journal records only. No helper installation, service, restart, database or financial operation.",
     rollback: "No automatic deletion or retry. OWNER inspects the directory; removal or repair requires a separate approved procedure.",
   },
+  "codex-bwrap-apparmor-check": {
+    title: "Read active AppArmor policy and inspect bubblewrap attachment conflicts",
+    readOnly: true,
+    changes: "Reads Ubuntu identity, the unchanged userns restriction, the complete kernel profile tree and flat list, attachments and hashes, source files and process thread labels. Blocks on unknown attachments, policy namespaces, conflicts or incomplete inspection. No profile or state file is written.",
+    risk: "No application downtime or policy change. Conservative matching can block on unrelated complex policy. A successful check is a point-in-time observation, not authorization for install or proof the sandbox works.",
+    sideEffects: "Only the existing admin lock, journal and Actions audit. No namespace probe, CLI smoke, service or signal.",
+    rollback: "No mutation to roll back. Install is a separate operation requiring its own OWNER approval.",
+  },
+  "codex-bwrap-apparmor-install": {
+    title: "Install only the byte-pinned Ubuntu noble bubblewrap AppArmor profile",
+    readOnly: false,
+    changes: "Repeats full conflict and process inspection, verifies the trusted staged Ubuntu profile hash, compiles without loading, loads and verifies two profiles from protected custody using parser ADD, then publishes only an absent /etc/apparmor.d/bwrap-userns-restrict with no-clobber hardlink. Keeps a root-only manifest and profile custody under /var/lib/arcade-admin/codex-bwrap-apparmor.",
+    risk: "Affects future /usr/bin/bwrap callers including other tools, not only Codex. Nested sandboxes may be restricted. OWNER must arrange a quiet launch window; the admin lock does not serialize independent agent launches. Any partial failure needs protected-manifest inspection, never automatic retry.",
+    sideEffects: "No packages, sysctl, global Codex settings, restarts or smoke. The global userns restriction must remain 1. Active users or uninspectable state block; no process is stopped. Two kernel profiles and one policy file are added only after checks pass.",
+    rollback: "Separate codex-bwrap-apparmor-rollback approval, only after a complete own install with matching inode, file hash, kernel policy hashes, baseline and no active dependents. Partial or uncertain installs block rollback for OWNER recovery review.",
+  },
+  "codex-bwrap-apparmor-rollback": {
+    title: "Retire only the verified own bubblewrap profile and restore its absent baseline",
+    readOnly: false,
+    changes: "Requires the protected successful-install manifest, exact file identity and policy hashes, unchanged baseline and complete process inspection. Moves only the owned profile to protected custody and removes only its two kernel profiles; retains every byte and the audit trail.",
+    risk: "Refuses active users, drift or partial state. OWNER must arrange a quiet launch window. Rollback restores the previous sandbox failure as well as the previous policy state. Unloading a profile in use could change protection, so any uncertain dependency blocks.",
+    sideEffects: "No service, signal, restart, package removal, sysctl or Codex configuration change. No automatic retry or smoke. Evidence remains in root-only custody.",
+    rollback: "No automatic reinstallation. A completed rollback retains its manifest and blocks another install at that state path; any later repair or partial recovery needs a separately reviewed OWNER decision.",
+  },
 });
 
 const REPOSITORY = "https://github.com/krzysztofcal/arcadePlatform";
 const PREVIEW_IMPLEMENTATION = ["infra/vps/ws-preview-isolation.py", "infra/vps/prepare-ws-preview-v3.py", "infra/vps/ws-server-preview.service.d/99-preview-isolation.conf"];
 const IMPLEMENTATION_FILES = {
+  ...Object.fromEntries(["check", "install", "rollback"].map((action) => [
+    `codex-bwrap-apparmor-${action}`, ["infra/vps/codex-bwrap-apparmor.py", "infra/vps/bwrap-userns-restrict", "infra/vps/stage-vps-admin.sh"],
+  ])),
   "ledger-production-dispatcher-install": ["infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
   "ws-restart-gate-install": ["infra/vps/ws-restart-gate.mjs"],
   "github-app-token-prepare": ["infra/vps/github-app-token.py"],

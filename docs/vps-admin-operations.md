@@ -235,3 +235,152 @@ with its own `vps-admin` OWNER approval. This task authorizes neither step.
 
 A failure is never retried automatically. Inspect any partial directory before
 requesting recovery; there is no recursive chown/chmod, repair or deletion path.
+
+## Codex CLI bubblewrap AppArmor repair (preparation only)
+
+The three fixed catalog operations below implement the Ubuntu 24.04 profile path
+recommended by [OpenAI](https://learn.chatgpt.com/docs/sandboxing#prerequisites).
+They preserve `kernel.apparmor_restrict_unprivileged_userns=1`, existing Codex
+configuration and services. No operation installs packages, enables networking,
+changes `sandbox_mode`, restarts a service, signals an agent or runs a CLI smoke.
+
+| Operation | Effect and separate approval |
+|---|---|
+| `codex-bwrap-apparmor-check` | Read-only kernel policy/attachment/hash, source and process inspection. Reports conflicts, unknown or incomplete policy as BLOCKED. Only the standard admin lock/audit writes occur. |
+| `codex-bwrap-apparmor-install` | Repeats the check, verifies the trusted staged profile and offline compilation, uses parser ADD from protected custody, verifies loaded policy, then publishes only an absent policy file, never replace. Keeps protected evidence. Requires its own OWNER approval. |
+| `codex-bwrap-apparmor-rollback` | Only a complete, unchanged own install with no active dependents may return to the recorded absent baseline. Retains the file in custody and removes only the two owned kernel profiles. Requires its own OWNER approval. |
+
+### Pinned source and installation scope
+
+`infra/vps/bwrap-userns-restrict` is an unmodified profile extracted from Ubuntu
+`noble-updates/main`, package `apparmor-profiles`, version
+`4.0.1really4.0.1-0ubuntu0.24.04.9`. The package SHA-256 is
+`90b02aa006eea7702cd4e851343e469e41365dda42145a3cb035de1d6c773b8c`;
+the profile SHA-256 is
+`11d39094f044f0cda0febb3ad517b830301da6b2ce929664af09ee9e4dd264f9`.
+The download URL and upstream copyright/license accompany the asset in
+`infra/vps/bwrap-userns-restrict.LICENSE`. Preparation verified the package hash
+against the VPS's existing APT metadata and compiled the profile with AppArmor
+4.0.1 using `-Q -K` without loading it. Trusted OWNER preparation must verify
+Ubuntu signed repository metadata and the package/profile digests before staging
+from the reviewed merged source; the root helper never trusts a file in an
+agent-writable checkout or a caller-provided download/path.
+
+OWNER staging installs only two new inert support files under
+`/usr/local/libexec/arcade-vps-admin/`: `codex-bwrap-apparmor.py` and the pinned
+profile, both `root:root 0644`. It refuses non-root-owned, writable or symlinked source paths/ancestors (including
+the running stager, even when it is outside the selected checkout) before
+any account/file change, verifies the profile digest and compares installed support bytes. It does not copy the profile into
+`/etc/apparmor.d` or load it. No new package dependency is installed; the host
+must already have `/usr/sbin/apparmor_parser` and bubblewrap. Existing staging
+and sudoers verification remain mandatory. Use an OWNER-controlled trusted
+checkout, never run the root stager against a copilot-owned working tree.
+
+### Conflict and dependency gates
+
+The check requires Ubuntu 24.04, active AppArmor, restriction value 1, an
+unconfined caller in PID 1's user/mount/PID namespaces, AppArmor namespace level
+zero without stacking, and complete access to:
+
+- the kernel's `policy/profiles` tree, including child profiles, `name`, `attach`,
+  `mode` and SHA-256, with an exact match to the flat kernel `profiles` list;
+- the `policy/namespaces` directory; any nested policy namespace blocks;
+- root-owned, non-writable, non-symlink AppArmor source paths and includes;
+- all visible process/thread AppArmor labels, executable names and identities.
+
+Another profile name `bwrap` or `unpriv_bwrap`, or any attachment that can match
+`/usr/bin/bwrap`, blocks install. Brace patterns are expanded; glob/class
+matching deliberately overapproximates and may produce a safe false positive.
+Unknown attachments, unsupported syntax, missing hashes, unreadable processes,
+source mentions of dormant vendor bubblewrap policy or local overrides block.
+No other vendor's profile is disabled, removed or replaced. This avoids the
+attachment collision described in [Codex #38715](https://github.com/openai/codex/issues/38715).
+
+Existing `/etc/apparmor.d/bwrap-userns-restrict`, state directory, local includes,
+disable/complain overrides or inspection races block instead of being repaired.
+The install's state parent and target must be on the same filesystem. Kernel
+introspection unsupported by the host is a STOP, not an invitation to weaken
+inspection or turn off AppArmor.
+
+Active `bwrap` processes or threads using either owned profile block mutation.
+No process is stopped. OWNER must arrange a quiet launch window: the admin lock
+serializes catalog operations but cannot prevent independent sandbox launches
+or root policy edits. Pre/post checks reduce this race; they do not eliminate
+it. The new profile affects future `/usr/bin/bwrap` users beyond Codex and its
+child capability restrictions can affect nested sandbox consumers.
+
+### Installation evidence and rollback limits
+
+The one-shot state directory is
+`/var/lib/arcade-admin/codex-bwrap-apparmor` (`root:root 0700`). An append-only,
+fsynced `manifest.jsonl` records the absent baseline, source/kernel snapshots,
+publication/loading phases, target inode/hash and verified post-install policy
+hashes. The target is `root:root 0644`. Atomic no-clobber publication uses a
+hardlink to the protected profile copy; both links are retained, so the expected
+link count is two. Parser `-a -K -I /etc/apparmor.d` loads the protected custody copy before
+publication and verifies both profiles without replacing an existing one. Only
+then is the persistent file linked into `/etc/apparmor.d`. A failed ADD leaves no
+persistent policy file for a later boot/reload to activate. No automatic retry,
+recovery or broad AppArmor reload occurs. Post-mutation verification reads policy,
+source and identity; it does not reject success because a new process started.
+Process dependency gates remain mandatory immediately before mutation. Every
+live thread is inspected even if its group leader is a zombie; only individual
+dead threads and confirmed exited tasks are skipped.
+
+A failed load may have changed only part of the kernel policy. FAILED never
+means unchanged. Any manifest without a complete successful install blocks the
+rollback operation and needs OWNER inspection and a separately reviewed recovery
+path. The helper does not guess whether a concurrently present profile is ours.
+
+Rollback rechecks the exact target/protected-copy identity, source baseline,
+kernel policy hashes and all process dependencies. Even an unrelated policy or
+source update after install blocks rollback. Drift or incomplete inspection
+means STOP. It moves only its verified target into `retired-profile` custody,
+then removes its two kernel profiles using the retained source. It keeps all
+bytes and phase evidence. Failure during rollback leaves explicit incomplete
+state and is not retried. A completed rollback restores the original missing
+profile and the original sandbox limitation; it does not make Codex work.
+The retained state deliberately blocks automatic reinstallation.
+
+### Publication and OWNER GO order
+
+1. Review this PR and its independent Claude Code review; OWNER decides merge.
+   Merge alone performs no VPS catalog installation or AppArmor activation.
+2. Separate OWNER GO: trusted installation of the merged catalog/support files
+   and sudoers via `infra/vps/stage-vps-admin.sh`. Verify installed bytes and the
+   existing restricted `arcade-admin` contract. No AppArmor operation is run by
+   staging, and no workflow is dispatched as part of this PR.
+3. Separate `VPS Admin Operation` dispatch from `main` for
+   `codex-bwrap-apparmor-check`, confirmation
+   `RUN codex-bwrap-apparmor-check`, with its own `vps-admin` approval. Inspect
+   the successful evidence; BLOCKED/FAILED stops this sequence.
+4. Separate OWNER GO and `vps-admin` approval for
+   `codex-bwrap-apparmor-install`, confirmation
+   `RUN codex-bwrap-apparmor-install`, in the quiet window. Installation repeats
+   every check; a previous successful check does not authorize a stale mutation.
+5. Only a further explicit GO permits the previously blocked non-root Codex CLI
+   smoke, using its retained Volume checkout/runtime and the sandbox. Neither
+   successful profile installation nor synthetic tests prove that smoke passes.
+6. If needed, rollback is an alternative later request, not a mandatory step:
+   `codex-bwrap-apparmor-rollback`, confirmation
+   `RUN codex-bwrap-apparmor-rollback`, with separate OWNER approval and all gates.
+
+Fundamental verification (synthetic files and mocked parser only, no root):
+`node --test --test-name-pattern='VPS admin' ws-tests/infra-vps-workflow.guard.test.mjs`.
+The guard suite verifies catalog/workflow/sudoers parity and exercises policy
+conflicts, incomplete inspection, pinned data, no-clobber publication, drift,
+process dependencies, partial load and rollback. Preserve the incident's Volume
+smoke artifacts and preparation package; this change authorizes no cleanup.
+
+If the App cannot publish workflow changes, do not expand its permissions or use
+OWNER credentials. Keep the PR Draft and blocked. OWNER must publish the three
+choices below immediately after `volume-workdir-prepare` in the existing workflow
+before merge; catalog-parity checks must stay failing until that companion change
+is present. A Draft containing only the publishable files is not a complete or
+merge-ready catalog update.
+
+```yaml
+          - codex-bwrap-apparmor-check
+          - codex-bwrap-apparmor-install
+          - codex-bwrap-apparmor-rollback
+```

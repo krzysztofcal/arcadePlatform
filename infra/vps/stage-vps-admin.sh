@@ -15,6 +15,31 @@ HELPER_DEST="/usr/local/sbin/arcade-vps-admin"
 SUDOERS_SRC="$REPO_ROOT/infra/vps/arcade-admin.sudoers"
 SUDOERS_DEST="/etc/sudoers.d/arcade-admin"
 
+# Root must never execute or stage source controlled by an agent account.
+# Inspect every ancestor and every source inode, before any account/file change.
+/usr/bin/python3 -I -B - "$REPO_ROOT" "${BASH_SOURCE[0]}" <<'PY_TRUST'
+import os, pathlib, stat, sys
+root = pathlib.Path(sys.argv[1])
+script = pathlib.Path(os.path.abspath(sys.argv[2]))
+try:
+    if not root.is_absolute() or root != root.resolve() or script != script.resolve():
+        raise ValueError()
+    sources = [root, *root.parents, script, *script.parents, root/'infra', root/'infra/vps',
+               root/'infra/vps/ws-server-preview.service.d']
+    sources += [root/'infra/vps'/name for name in (
+        'vps-admin.mjs', 'arcade-admin.sudoers', 'github-app-token.py',
+        'ws-preview-isolation.py', 'prepare-ws-preview-v3.py', 'ws-preview-owner.pub',
+        'codex-bwrap-apparmor.py', 'bwrap-userns-restrict',
+        'ws-server-preview.service.d/99-preview-isolation.conf')]
+    for file in sources:
+        info = file.lstat()
+        if (stat.S_ISLNK(info.st_mode) or (info.st_uid, info.st_gid) != (0, 0)
+                or info.st_mode & 0o022 or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))):
+            raise ValueError()
+except (OSError, ValueError):
+    sys.exit('untrusted_staging_source: use an OWNER-controlled root-owned reviewed checkout')
+PY_TRUST
+
 for required in "$HELPER_SRC" "$SUDOERS_SRC" /usr/bin/node /usr/bin/logger; do
   if [[ ! -e "$required" || -L "$required" ]]; then
     echo "refusing staging: missing or symlinked prerequisite: $required" >&2
@@ -31,6 +56,11 @@ if ! visudo -cf "$SUDOERS_SRC"; then
   echo "refusing staging: invalid arcade admin sudoers contract in repository" >&2
   exit 1
 fi
+
+# Catalog support only: stage the pinned profile as inert data, never under /etc/apparmor.d.
+# This staging must use an OWNER-controlled trusted checkout of reviewed merged main.
+[[ -f "$REPO_ROOT/infra/vps/bwrap-userns-restrict" && ! -L "$REPO_ROOT/infra/vps/bwrap-userns-restrict" ]] || exit 1
+[[ "$(sha256sum "$REPO_ROOT/infra/vps/bwrap-userns-restrict" | cut -d ' ' -f 1)" == "11d39094f044f0cda0febb3ad517b830301da6b2ce929664af09ee9e4dd264f9" ]] || exit 1
 
 # The admin account must not share a group with the agent account copilot.
 getent group arcade-admin >/dev/null || groupadd --system arcade-admin
@@ -90,9 +120,10 @@ for directory in /usr/local/libexec /usr/local/libexec/arcade-vps-admin /var/lib
 done
 install -d -o root -g root -m 0755 /usr/local/libexec/arcade-vps-admin
 install -d -o root -g root -m 0700 /var/lib/arcade-admin
-for asset in github-app-token.py ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub; do
+for asset in github-app-token.py ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub codex-bwrap-apparmor.py bwrap-userns-restrict; do
   test -f "$REPO_ROOT/infra/vps/$asset" && test ! -L "$REPO_ROOT/infra/vps/$asset" || exit 1
   install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"
+  cmp -- "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"
 done
 install -d -o root -g root -m 0755 /usr/local/libexec/arcade-vps-admin/ws-server-preview.service.d
 install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/ws-server-preview.service.d/99-preview-isolation.conf" /usr/local/libexec/arcade-vps-admin/ws-server-preview.service.d/99-preview-isolation.conf

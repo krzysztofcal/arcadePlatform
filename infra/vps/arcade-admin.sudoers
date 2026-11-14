@@ -15,6 +15,9 @@ Cmnd_Alias ARCADE_ADMIN_COMMANDS = \
     /usr/local/sbin/arcade-vps-admin github-app-key-quarantine *, \
     /usr/local/sbin/arcade-vps-admin ws-preview-isolation-provision *, \
     /usr/local/sbin/arcade-vps-admin ws-preview-isolation-rollback *, \
-    /usr/local/sbin/arcade-vps-admin volume-workdir-prepare *
+    /usr/local/sbin/arcade-vps-admin volume-workdir-prepare *, \
+    /usr/local/sbin/arcade-vps-admin codex-bwrap-apparmor-check *, \
+    /usr/local/sbin/arcade-vps-admin codex-bwrap-apparmor-install *, \
+    /usr/local/sbin/arcade-vps-admin codex-bwrap-apparmor-rollback *
 
 arcade-admin ALL=(root) NOPASSWD: ARCADE_ADMIN_COMMANDS
