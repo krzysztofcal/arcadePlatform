@@ -53,6 +53,10 @@
       </a>
     </div>
     <div class="topbar-right">
+      <div id="chipsPill" class="chips-pill" aria-label="Arcade chips">
+        <span class="chips-pill__icon" aria-hidden="true"></span>
+        <span id="chipsBalance" class="chips-pill__balance">—</span>
+      </div>
       <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="../xp.html">
         <span class="xp-badge__label">XP</span>
       </a>
@@ -79,88 +83,251 @@
     <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation"></aside>
 
   <main class="poker-page lobby">
+    <div class="poker-tabs seg" role="tablist" aria-label="Poker lobby navigation">
+      <button type="button" class="poker-tab on" id="pokerTabModes" role="tab" data-view="modes" aria-selected="true" aria-controls="pokerModesView"><span data-i18n="pokerTabModes">Modes</span></button>
+      <button type="button" class="poker-tab" id="pokerTabTables" role="tab" data-view="tables" aria-selected="false" aria-controls="pokerTablesView"><span data-i18n="pokerTabTables">Tables</span></button>
+      <button type="button" class="poker-tab" id="pokerTabProgression" role="tab" data-view="progression" aria-selected="false" aria-controls="pokerProgressionView"><span data-i18n="pokerTabProgression">Progression</span></button>
+      <button type="button" class="poker-tab" id="pokerTabBonus" role="tab" data-view="bonus" aria-selected="false" aria-controls="pokerBonusView"><span data-i18n="pokerTabBonus">Bonus</span><span id="pokerBonusDot" class="poker-tab-dot dot" hidden></span></button>
+    </div>
+
     <div id="pokerError" class="poker-error" role="alert" hidden></div>
-      <div id="pokerWelcomeBonusBanner" class="poker-bonus-banner" hidden>
-        <div class="poker-bonus-banner__copy">
-          <strong>Your Welcome Bonus is ready.</strong>
-          <span>Claim it to use persistent chips across Arcade Hub.</span>
-        </div>
-        <button id="pokerWelcomeBonusClaim" class="poker-btn poker-btn--primary" type="button">Claim bonus</button>
+    <div id="pokerWelcomeBonusBanner" class="poker-bonus-banner card gd fx" hidden>
+      <div class="poker-bonus-banner__copy" style="flex:1">
+        <strong data-i18n="welcomeBonusReady">Your Welcome Bonus is ready.</strong>
+        <div class="sub" data-i18n="welcomeBonusSub">Claim it to use persistent chips across Arcade Hub.</div>
       </div>
-
+      <button id="pokerWelcomeBonusClaim" class="btn sm gold" type="button" data-i18n="claimBonus">Claim bonus</button>
+    </div>
     <p id="pokerWelcomeBonusStatus" class="bonus-disclaimer" role="status" aria-live="polite" tabindex="-1" hidden></p>
-    <div id="pokerModesView"><div class="intro"><div><span class="eyebrow">WELCOME TO THE CARD ROOM</span><h1>YOUR NEXT HAND.</h1><p>Online poker · virtual chips · no cash-out.</p></div><div class="carousel-controls"><span>SWIPE TO EXPLORE</span><button class="arrow" type="button" data-step="-1" aria-label="Previous mode">‹</button><button class="arrow" type="button" data-step="1" aria-label="Next mode">›</button></div></div><section class="carousel" aria-label="Poker game modes" tabindex="0"><article class="tile tile--online" aria-label="Poker Online, ONLINE POKER"><img src="/poker/assets/lobby/online-v2.webp" alt="" width="768" height="1152" fetchpriority=high decoding="async"><span class="tile-status">ONLINE POKER</span><div class="tile-copy"><span class="tile-number">THE CARD ROOM</span><h2>Poker Online</h2><p>Choose your table tier. Join or resume your game.</p><div id="pokerLobbyContent" hidden>
-  <div id="pokerQuickTiers" class="quick-tiers" role="group" aria-label="Quick Play buy-in"></div>
-  <button id="pokerQuickSeat" class="tile-action" type="button" disabled>PLAY NOW</button>
-  <div id="pokerQuickStatus" class="quick-status" role="status">Loading progression…</div>
-</div>
-<div id="pokerAuthMsg" class="poker-auth-msg" hidden>
-  <div class="poker-auth-text">Guest play uses temporary chips.</div>
-  <div class="poker-auth-actions">
-    <button id="pokerGuestPlay" class="tile-action" type="button">PLAY AS GUEST</button>
-    <button id="pokerSignIn" class="poker-btn" type="button">Create account or sign in</button>
-  </div>
-</div></div></article>
-<article class="tile tile--single" aria-label="Single Player, VS BOTS"><img src="/poker/assets/lobby/single-v2.webp" alt="" width="768" height="1152" loading=lazy decoding="async"><span class="tile-status">VS BOTS</span><div class="tile-copy"><span class="tile-number">YOU VS BOTS</span><h2>Single Player</h2><p>One human. Bot opponents. Always online.</p><div id="pokerSingleLobbyContent" hidden>
-  <div id="pokerSingleResumeShell" class="quick-resume-shell" hidden>
-    <select id="pokerSingleResumeSelect" class="quick-resume-select" aria-label="Select table to resume" hidden></select>
-    <button id="pokerSingleResume" class="tile-action" type="button">RESUME GAME</button>
-  </div>
-  <div id="pokerSingleQuickTiers" class="quick-tiers" role="group" aria-label="Single Player buy-in"></div>
-  <button id="pokerSinglePlay" class="tile-action" type="button" disabled>PLAY VS BOTS</button>
-  <div id="pokerSingleStatus" class="quick-status" role="status">Loading progression…</div>
-</div>
-<div id="pokerSingleAuthMsg" class="poker-auth-msg" hidden>
-  <div class="poker-auth-text">Sign in to play Single Player vs bots.</div>
-  <div class="poker-auth-actions">
-    <button id="pokerSingleSignIn" class="poker-btn" type="button">Create account or sign in</button>
-  </div>
-</div></div></article>
-<article class="tile tile--offline" aria-label="Poker Offline"><img src="/poker/assets/lobby/offline-v1.webp" alt="" width="768" height="1152" loading="lazy" decoding="async"><span class="tile-status">OFFLINE</span><div class="tile-copy"><span class="tile-number">YOUR TABLE. ANYWHERE.</span><h2>Poker Offline</h2><p>Play with bots, even without internet.</p><div id="offlineLobbyContent"><div id="offlineResumeShell" class="quick-resume-shell" hidden><button id="offlineResume" class="tile-action" type="button" hidden>RESUME GAME</button></div><div class="quick-tiers" role="group" aria-label="Offline buy-in"><button class="quick-tier" type="button" data-offline-buy-in="100" aria-pressed="true">100</button><button class="quick-tier" type="button" data-offline-buy-in="500" aria-pressed="false">500</button><button class="quick-tier" type="button" data-offline-buy-in="1000" aria-pressed="false">1000</button></div><button class="tile-action" id="offlinePlay" type="button">PLAY NOW</button><div class="quick-status"><span data-offline-balance>5,000 Offline Chips</span></div><p id="offlineError" role="alert"></p><button id="offlineRecoveryReset" class="poker-btn" type="button" hidden>Reset Offline Progress</button></div></div></article>
-</section><nav class="indicators" aria-label="Game mode carousel"><button class="dot" type="button" data-index="0" aria-label="Show Poker Online" aria-current="true"></button><button class="dot" type="button" data-index="1" aria-label="Show Single Player" aria-current="false"></button><button class="dot" type="button" data-index="2" aria-label="Show Poker Offline" aria-current="false"></button></nav></div>
-    <section id="pokerTablesView" class="lobby-subview" aria-labelledby="pokerTablesTitle" hidden><button class="poker-btn" type="button" data-view="modes">‹ Back to modes</button>
-      <div class="poker-header"><h2 id="pokerTablesTitle">Online Tables</h2><button id="pokerRefresh" class="poker-btn" type="button" data-i18n="refresh">Refresh</button></div>
-      <div class="poker-panel">
-        <h3 data-i18n="createTable">Create Table</h3>
-        <div class="poker-form-row">
-          <label class="poker-label"><span data-i18n="buyIn">Buy-in</span>:</label>
-          <select id="pokerBuyIn" class="poker-input">
-            <option value="" selected>Loading tiers…</option>
-          </select>
-          <label class="poker-label"><span data-i18n="maxPlayers">Max Players</span>:</label>
-          <input type="number" id="pokerMaxPlayers" class="poker-input" value="6" min="2" max="6">
+
+    <div id="pokerModesView">
+      <div id="pokerResumeBanner" class="card hl fx" hidden style="margin-bottom:14px;align-items:center;">
+        <div class="ico" style="background:var(--ac);color:var(--ink);border:0;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-size:14px;font-weight:800;" aria-hidden="true">▶</div>
+        <div style="flex:1">
+          <div class="t" style="font-weight:800;font-size:15px" data-i18n="pokerResumeGame">Resume game</div>
+          <div class="sub" id="pokerResumeDetails" data-i18n="pokerResumeDetails">Return to your table in progress.</div>
         </div>
-        <div class="poker-form-row">
-          <button id="pokerCreate" class="poker-btn poker-btn--primary" data-i18n="createTable">Create Table</button>
-        </div>
+        <button type="button" class="btn sm" id="pokerResumeBannerBtn" data-i18n="pokerResumeReturn">Return</button>
       </div>
 
-      <div class="poker-panel">
-        <h3 data-i18n="openTables">Open Tables</h3>
-        <div id="pokerTableList" class="poker-table-list">
-          <div class="poker-loading" data-i18n="loading">Loading...</div>
+      <div class="h1" style="font-size:clamp(22px,2.5vw,30px);margin:12px 0 16px;" data-i18n="pokerModesHeading">Your next hand.</div>
+
+      <div class="poker-modes-grid">
+        <article class="card mc tile--online" aria-label="Poker Online">
+          <div class="im" style="background-image:url(/poker/assets/lobby/online-v2.webp);">
+            <img src="/poker/assets/lobby/online-v2.webp" alt="" class="poker-mode-img" style="display:none;" />
+            <span class="tag">ONLINE</span>
+          </div>
+          <div class="bd">
+            <h3>Poker Online</h3>
+            <p class="sub" data-i18n="pokerOnlineSub">Choose your table tier. Join or resume your game.</p>
+            <div id="pokerLobbyContent" hidden>
+              <div id="pokerQuickTiers" class="quick-tiers seg" role="group" aria-label="Quick Play buy-in"></div>
+              <div id="pokerQuickStatus" class="quick-status sub" role="status">Loading progression…</div>
+              <button id="pokerQuickSeat" class="tile-action btn" type="button" disabled>PLAY NOW</button>
+            </div>
+            <div id="pokerAuthMsg" class="poker-auth-msg" hidden>
+              <div class="poker-auth-text sub" data-i18n="pokerGuestNotice">Guest play uses temporary chips.</div>
+              <div class="poker-auth-actions" style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+                <button id="pokerGuestPlay" class="tile-action btn" type="button" data-i18n="playAsGuest">PLAY AS GUEST</button>
+                <button id="pokerSignIn" class="poker-btn btn gh" type="button" data-i18n="signInOrCreateAccount">Create account or sign in</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card mc tile--single" aria-label="Single Player">
+          <div class="im" style="background-image:url(/poker/assets/lobby/single-v2.webp);">
+            <img src="/poker/assets/lobby/single-v2.webp" alt="" class="poker-mode-img" style="display:none;" />
+            <span class="tag">VS BOTS</span>
+          </div>
+          <div class="bd">
+            <h3>Single Player</h3>
+            <p class="sub" data-i18n="pokerSingleSub">One human. Bot opponents. Always online.</p>
+            <div id="pokerSingleLobbyContent" hidden>
+              <div id="pokerSingleResumeShell" class="quick-resume-shell" hidden>
+                <select id="pokerSingleResumeSelect" class="quick-resume-select inp" aria-label="Select table to resume" hidden></select>
+                <button id="pokerSingleResume" class="tile-action btn" type="button">RESUME GAME</button>
+              </div>
+              <div id="pokerSingleQuickTiers" class="quick-tiers seg" role="group" aria-label="Single Player buy-in"></div>
+              <div id="pokerSingleStatus" class="quick-status sub" role="status">Loading progression…</div>
+              <button id="pokerSinglePlay" class="tile-action btn" type="button" disabled>PLAY VS BOTS</button>
+            </div>
+            <div id="pokerSingleAuthMsg" class="poker-auth-msg" hidden>
+              <div class="poker-auth-text sub" data-i18n="pokerSingleAuthNotice">Sign in to play Single Player vs bots.</div>
+              <div class="poker-auth-actions" style="margin-top:10px;">
+                <button id="pokerSingleSignIn" class="poker-btn btn gh" type="button" data-i18n="signInOrCreateAccount">Create account or sign in</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card mc tile--offline" aria-label="Poker Offline">
+          <div class="im" style="background-image:url(/poker/assets/lobby/offline-v1.webp);">
+            <img src="/poker/assets/lobby/offline-v1.webp" alt="" class="poker-mode-img" style="display:none;" />
+            <span class="tag">OFFLINE</span>
+          </div>
+          <div class="bd">
+            <h3>Poker Offline</h3>
+            <p class="sub" data-i18n="pokerOfflineSub">Play with bots, even without internet.</p>
+            <div id="offlineLobbyContent">
+              <div id="offlineResumeShell" class="quick-resume-shell" hidden>
+                <button id="offlineResume" class="tile-action btn" type="button" hidden>RESUME GAME</button>
+              </div>
+              <div class="quick-tiers seg" role="group" aria-label="Offline buy-in">
+                <button class="quick-tier on" type="button" data-offline-buy-in="100" aria-pressed="true">100</button>
+                <button class="quick-tier" type="button" data-offline-buy-in="500" aria-pressed="false">500</button>
+                <button class="quick-tier" type="button" data-offline-buy-in="1000" aria-pressed="false">1000</button>
+              </div>
+              <button class="tile-action btn gh" id="offlinePlay" type="button">PLAY NOW</button>
+              <div class="quick-status sub" style="font-size:13px;margin-top:8px;">
+                <strong data-offline-balance>5,000 Offline Chips</strong> — <span data-i18n="offlineChipsNotice">separate device-local balance not connected to CH.</span>
+              </div>
+              <p id="offlineError" role="alert" class="sub" style="color:var(--red);margin:0;"></p>
+              <button id="offlineRecoveryReset" class="poker-btn btn gh" type="button" hidden>Reset Offline Progress</button>
+            </div>
+          </div>
+        </article>
+      </div>
+      <div class="sub" style="text-align:center;font-size:13px;margin:24px 0 16px;">Arcade Poker · virtual chips · no cash-out</div>
+    </div>
+
+    <section id="pokerTablesView" class="lobby-subview" aria-labelledby="pokerTablesTitle" hidden>
+      <div class="card state" id="pokerTablesLocked" hidden>
+        <div class="big">🔒</div>
+        <h2 class="h2" data-i18n="pokerTablesLockedTitle">Tables require an account</h2>
+        <p class="sub" data-i18n="pokerTablesLockedSub">Sign in to browse persistent-chip tables and your progression, or play as guest.</p>
+        <button type="button" class="btn" id="pokerTablesSignIn" style="align-self:stretch" data-i18n="signInOrCreateAccount">Sign in / Create account</button>
+        <button type="button" class="btn gh" id="pokerTablesGuest" style="align-self:stretch" data-i18n="playAsGuest">Play as guest</button>
+      </div>
+
+      <div class="poker-tables-content" id="pokerTablesContent">
+        <div class="sh" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h2 id="pokerTablesTitle" class="h2" style="margin:0;" data-i18n="openTables">Open Tables</h2>
+          <button id="pokerRefresh" class="btn sm gh" type="button" data-i18n="refresh">↻ Refresh</button>
         </div>
+        <div class="card" style="padding:4px 16px;">
+          <div id="pokerTableList" class="poker-table-list">
+            <div class="poker-loading" data-i18n="loading">Loading...</div>
+          </div>
+        </div>
+        <div class="sub" style="font-size:13px;margin:8px 0 16px;" data-i18n="pokerUnavailableNotice">"Unavailable" = buy-in above your unlocked tier (see Progression).</div>
+        <button type="button" class="btn" id="pokerOpenCreate" data-i18n="createTableBtn">＋ Create table</button>
       </div>
     </section>
-    <section id="pokerProgressionView" class="lobby-subview" hidden><button class="poker-btn" type="button" data-view="modes">‹ Back to modes</button>      <section class="poker-panel poker-progression-panel" aria-labelledby="pokerProgressTitle">
-        <h3 id="pokerProgressTitle">Progress Roadmap</h3>
-        <div id="pokerProgressBankroll" class="poker-progression-bankroll">Current bankroll: — CH</div>
+
+    <section id="pokerProgressionView" class="lobby-subview" aria-labelledby="pokerProgressTitle" hidden>
+      <div class="card state" id="pokerProgressionLocked" hidden>
+        <div class="big">🔒</div>
+        <h2 class="h2" data-i18n="pokerProgressionLockedTitle">Progression requires an account</h2>
+        <p class="sub" data-i18n="pokerTablesLockedSub">Sign in to browse persistent-chip tables and your progression, or play as guest.</p>
+        <button type="button" class="btn" id="pokerProgressionSignIn" style="align-self:stretch" data-i18n="signInOrCreateAccount">Sign in / Create account</button>
+        <button type="button" class="btn gh" id="pokerProgressionGuest" style="align-self:stretch" data-i18n="playAsGuest">Play as guest</button>
+      </div>
+
+      <div class="poker-progression-panel" id="pokerProgressionContent">
+        <div class="card poker-progression-card" style="margin-bottom:18px;">
+          <div class="sub" data-i18n="currentBankroll">Current bankroll</div>
+          <div id="pokerProgressBankroll" class="h1" style="font-size:34px;margin:2px 0 10px">— <span style="font-size:16px;color:var(--gold)">CH</span></div>
+          <div class="bar g" id="pokerProgressBar"><i id="pokerProgressBarFill" style="width:0%"></i></div>
+          <div class="sub" style="margin-top:8px" id="pokerProgressBankrollSub"></div>
+        </div>
+
         <div id="pokerProgressCelebration" class="poker-progression-celebration" role="status" hidden></div>
-        <div id="pokerProgressRoadmap" class="poker-progression-roadmap">
-          <div class="poker-loading">Loading progression...</div>
-        </div>
-      </section>
 
+        <h2 id="pokerProgressTitle" class="h2" style="margin:16px 0 10px;" data-i18n="progressRoadmap">Progress Roadmap</h2>
+        <div class="card" style="padding:6px 16px;">
+          <div id="pokerProgressRoadmap" class="poker-progression-roadmap">
+            <div class="poker-loading">Loading progression...</div>
+          </div>
+        </div>
+        <div class="sub" style="font-size:13px;margin-top:8px" data-i18n="progressionHelp">Further tiers up to 5,000,000 CH. Single Player: max buy-in 1,000 CH.</div>
+      </div>
     </section>
-<nav class="shortcuts" aria-label="Lobby shortcuts"><button class="shortcut" type="button" data-view="tables"><img class="shortcut-art" src="/poker/assets/chips/chip-purple-3.png" alt="" width="45" height="45"><span>Online Tables<small>CREATE · JOIN · REFRESH</small></span></button><button class="shortcut" type="button" data-view="progression"><img class="shortcut-art" src="/poker/assets/chips/chip-green-4.png" alt="" width="45" height="45"><span>Progression<small>BANKROLL & TIERS</small></span></button><button class="shortcut shortcut--bonus" type="button" data-panel="daily"><img class="shortcut-art" src="/poker/assets/lobby/bonus-v2.webp" alt="" width="45" height="45"><span>Daily Bonus<small>DAILY UTC REWARDS</small></span></button><a class="shortcut" href="/account.html"><img class="shortcut-art" src="/poker/assets/themes/midnight-sapphire/avatar-frame.svg" alt="" width="45" height="45"><span>Profile<small>YOUR ARCADE ACCOUNT</small></span></a></nav><div class="footer-mark">ARCADE POKER · VIRTUAL CHIPS · NO CASH-OUT</div>
+
+    <section id="pokerBonusView" class="lobby-subview" aria-labelledby="dailyTitle" hidden>
+      <div class="card poker-daily-bonus-card" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="bonus-heading fx" style="gap:14px;align-items:center;">
+          <img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="54" height="54">
+          <div>
+            <div class="eyebrow" style="color:var(--gold)" data-i18n="dailyBonus">Daily Bonus</div>
+            <h2 id="dailyTitle" class="h1" style="font-size:22px;margin:2px 0 0 0;" data-i18n="dailyBonus">DAILY BONUS</h2>
+          </div>
+        </div>
+        <p id="dailyEligibility" class="sub" style="margin:0;">Daily rewards are available only to signed-in Arcade players. Guest play does not qualify.</p>
+        <span id="dailyProgress" class="concept-tag" style="display:inline-block;width:max-content;">Sign in to claim</span>
+        <div id="dailySuccess" class="bonus-success card hl" role="status" aria-live="polite" hidden style="text-align:center;padding:12px;">
+          <strong style="font-size:18px;color:var(--ac);display:block;"></strong>
+          <span class="sub"></span>
+        </div>
+        <ol class="bonus-days days" aria-label="Daily rewards" style="margin:0;padding:0;list-style:none;">
+          <li class="bonus-day bonus-day--upcoming day" data-daily-day="1">
+            <strong>DAY 1</strong>
+            <div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="44" height="44" loading="lazy"></div>
+            <span class="day-state">—</span>
+            <div class="reward-space">— CH</div>
+          </li>
+          <li class="bonus-day bonus-day--upcoming day" data-daily-day="2">
+            <strong>DAY 2</strong>
+            <div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="44" height="44" loading="lazy"></div>
+            <span class="day-state">—</span>
+            <div class="reward-space">— CH</div>
+          </li>
+          <li class="bonus-day bonus-day--upcoming day" data-daily-day="3">
+            <strong>DAY 3</strong>
+            <div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="44" height="44" loading="lazy"></div>
+            <span class="day-state">—</span>
+            <div class="reward-space">— CH</div>
+          </li>
+          <li class="bonus-day bonus-day--upcoming day" data-daily-day="4">
+            <strong>DAY 4+</strong>
+            <div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="44" height="44" loading="lazy"></div>
+            <span class="day-state">—</span>
+            <div class="reward-space">— CH</div>
+          </li>
+        </ol>
+        <p id="dailyDisclaimer" class="bonus-disclaimer sub" role="status" aria-live="polite" style="margin:0;">Sign in to claim. A missed UTC day resets your streak; Day 4+ repeats indefinitely.</p>
+        <div class="bonus-footer" style="display:flex;flex-direction:column;gap:10px;">
+          <button id="dailyClaim" class="claim-concept btn gold" type="button" disabled>CLAIM</button>
+          <button id="dailySignIn" class="claim-concept btn" type="button">Sign in / Create account</button>
+          <div class="availability sub" style="font-size:13px;">Next UTC reset: <strong id="dailyReset">—</strong></div>
+        </div>
+      </div>
+    </section>
   </main>
   </div>
-<div id="welcomeFlyin" class="daily-flyin welcome-flyin" popover="manual" aria-hidden="true" hidden><div class="daily-flyin__art"><b>WELCOME BONUS</b><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384"><strong></strong><span>REWARD CLAIMED</span></div></div>
-<!-- offline-confirm:start -->
-<dialog id="offlineConfirm" class="offline-confirm" aria-labelledby="offlineConfirmTitle" aria-describedby="offlineConfirmCopy"><div class="poker-confirm-dialog"><h2 id="offlineConfirmTitle">Offline Chips</h2><p id="offlineConfirmCopy"></p><div class="poker-confirm-actions"><button type="button" class="poker-btn poker-live-btn" id="offlineConfirmCancel">Cancel</button><button type="button" class="poker-btn poker-live-btn poker-live-btn--accent" id="offlineConfirmYes">Confirm</button></div></div></dialog>
-<!-- offline-confirm:end -->
-<dialog id="infoDialog" aria-labelledby="infoTitle"><div class="dialog-top"><span class="eyebrow">COMING SOON · IN DEVELOPMENT</span><button class="close" type="button" data-close aria-label="Close details">×</button></div><h2 id="infoTitle"></h2><p id="infoCopy"></p><p>No launch date, entry fee or reward is announced.</p></dialog>
-<dialog id="dailyDialog" aria-labelledby="dailyTitle" aria-describedby="dailyDisclaimer"><div id="dailyFlyin" class="daily-flyin" aria-hidden="true" hidden><div class="daily-flyin__art"><b>DAILY BONUS</b><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384"><strong></strong><span></span></div></div><div class="dialog-top"><span class="eyebrow">DAILY BONUS</span><button class="close" type="button" data-close aria-label="Close Daily Bonus">×</button></div><div class="bonus-heading"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384"><div><h2 id="dailyTitle">DAILY BONUS</h2><p id="dailyEligibility">Daily rewards are available only to signed-in Arcade players. Guest play does not qualify.</p><span id="dailyProgress" class="concept-tag">Sign in to claim</span></div></div><p id="dailyDisclaimer" class="bonus-disclaimer" role="status" aria-live="polite">Sign in to claim. A missed UTC day resets your streak; Day 4+ repeats indefinitely.</p><div id="dailySuccess" class="bonus-success" role="status" aria-live="polite" hidden><strong></strong><span></span></div><ol class="bonus-days" aria-label="Daily rewards"><li class="bonus-day bonus-day--upcoming" data-daily-day="1"><strong>DAY 1</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"></div><span class="day-state">—</span><div class="reward-space">— CH</div></li><li class="bonus-day bonus-day--upcoming" data-daily-day="2"><strong>DAY 2</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"></div><span class="day-state">—</span><div class="reward-space">— CH</div></li><li class="bonus-day bonus-day--upcoming" data-daily-day="3"><strong>DAY 3</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"></div><span class="day-state">—</span><div class="reward-space">— CH</div></li><li class="bonus-day bonus-day--upcoming" data-daily-day="4"><strong>DAY 4+</strong><div class="day-illustration"><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384" loading="lazy"></div><span class="day-state">—</span><div class="reward-space">— CH</div></li></ol><div class="bonus-footer"><div class="availability">Next UTC reset<strong id="dailyReset">—</strong></div><button id="dailySignIn" class="claim-concept" type="button">Sign in / Create account</button><button id="dailyClaim" class="claim-concept" type="button" disabled>CLAIM</button></div></dialog>
+
+  <dialog id="pokerCreateDialog" class="poker-create-dialog sheet" aria-labelledby="pokerCreateTitle">
+    <div class="dialog-content" style="display:flex;flex-direction:column;gap:14px;padding:20px;">
+      <div class="dialog-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <h2 id="pokerCreateTitle" class="h2" style="margin:0;" data-i18n="createTable">Create Table</h2>
+        <button type="button" class="close" data-close aria-label="Close dialog" style="border:0;background:transparent;color:var(--mu);font-size:22px;cursor:pointer;">×</button>
+      </div>
+      <div class="poker-form-group">
+        <label for="pokerBuyIn" class="lbl" data-i18n="buyIn">Buy-in</label>
+        <select id="pokerBuyIn" class="poker-input inp" style="width:100%;padding:10px;border-radius:10px;background:var(--bg2);color:var(--tx);border:1px solid var(--bd);">
+          <option value="" selected>Loading tiers…</option>
+        </select>
+        <div class="sub" style="font-size:13px;margin-top:6px;" data-i18n="createTableTierHelp">List contains only unlocked tiers.</div>
+      </div>
+      <div class="poker-form-group">
+        <label for="pokerMaxPlayers" class="lbl" data-i18n="maxPlayers">Max Players (2–6)</label>
+        <input type="number" id="pokerMaxPlayers" class="poker-input inp" value="6" min="2" max="6" style="width:100%;padding:10px;border-radius:10px;background:var(--bg2);color:var(--tx);border:1px solid var(--bd);">
+      </div>
+      <div class="dialog-actions" style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+        <button id="pokerCreate" class="poker-btn btn" data-i18n="createTable">Create Table</button>
+        <button type="button" class="btn gh" data-close data-i18n="cancel">Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="welcomeFlyin" class="daily-flyin welcome-flyin" popover="manual" aria-hidden="true" hidden><div class="daily-flyin__art"><b>WELCOME BONUS</b><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384"><strong></strong><span>REWARD CLAIMED</span></div></div>
+  <div id="dailyFlyin" class="daily-flyin" aria-hidden="true" hidden><div class="daily-flyin__art"><b>DAILY BONUS</b><img src="/poker/assets/lobby/bonus-v2.webp" alt="" width="384" height="384"><strong></strong><span></span></div></div>
+  <!-- offline-confirm:start -->
+  <dialog id="offlineConfirm" class="offline-confirm" aria-labelledby="offlineConfirmTitle" aria-describedby="offlineConfirmCopy"><div class="poker-confirm-dialog"><h2 id="offlineConfirmTitle">Offline Chips</h2><p id="offlineConfirmCopy"></p><div class="poker-confirm-actions"><button type="button" class="poker-btn poker-live-btn" id="offlineConfirmCancel">Cancel</button><button type="button" class="poker-btn poker-live-btn poker-live-btn--accent" id="offlineConfirmYes">Confirm</button></div></div></dialog>
+  <!-- offline-confirm:end -->
+  <dialog id="infoDialog" aria-labelledby="infoTitle"><div class="dialog-top"><span class="eyebrow">COMING SOON · IN DEVELOPMENT</span><button class="close" type="button" data-close aria-label="Close details">×</button></div><h2 id="infoTitle"></h2><p id="infoCopy"></p><p>No launch date, entry fee or reward is announced.</p></dialog>
+  <dialog id="dailyDialog" aria-labelledby="dailyTitle" aria-describedby="dailyDisclaimer" hidden style="display:none;"></dialog>
   <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>
