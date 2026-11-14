@@ -1735,7 +1735,7 @@ with tempfile.TemporaryDirectory(prefix='bwrap-admin-') as td:
     try:c.execute('rollback','1253')
     except m.Blocked:pass
     else:raise AssertionError('second rollback accepted')
-    for case in ['conflict','unknown','missing','namespace','hash','local','busy','drift','policy-drift','partial','incomplete','process-hidden','target-exists','policy-namespace','post-load-busy','zombie-leader','source-drift']:
+    for case in ['conflict','unknown','missing','namespace','hash','local','busy','drift','policy-drift','partial-none','partial-one','partial','incomplete','process-hidden','target-exists','policy-namespace','post-load-busy','zombie-leader','source-drift']:
         c,put,calls,q=fixture(root/case)
         if case=='conflict':(q/'profiles/other/attach').write_text('/usr/{bin,sbin}/b*\n')
         if case=='unknown':(q/'profiles/other/attach').write_text('<unknown>\n')
@@ -1758,11 +1758,14 @@ with tempfile.TemporaryDirectory(prefix='bwrap-admin-') as td:
                 put('/proc/1/task/1/status','State:\tZ (zombie)\n')
                 put('/proc/1/task/2/status','State:\tS (sleeping)\n')
                 put('/proc/1/task/2/attr/current','bwrap//&unpriv_bwrap (enforce)\n')
-        if case=='partial':
+        if case in ['partial-none','partial-one','partial']:
             old=c.runner
             def fail(argv):
                 if '-a' in argv:
-                    old(argv)
+                    if case!='partial-none':old(argv)
+                    if case=='partial-one':
+                        shutil.rmtree(q/'profiles/unpriv_bwrap')
+                        put('/sys/kernel/security/apparmor/profiles','other (enforce)\nbwrap (enforce)\n')
                     raise m.Blocked('parser_failed')
                 return old(argv)
             c.runner=fail
@@ -1783,12 +1786,30 @@ with tempfile.TemporaryDirectory(prefix='bwrap-admin-') as td:
         except m.Blocked:pass
         else:raise AssertionError('accepted '+case)
         assert not any('-R' in x for x in calls),case
-        if case=='partial':
+        if case in ['partial-none','partial-one','partial']:
             assert not c.p('/etc/apparmor.d/bwrap-userns-restrict').exists(), 'persistent policy after failed load'
+            manifest=c.p('/var/lib/arcade-admin/codex-bwrap-apparmor/manifest.jsonl')
+            before_manifest=manifest.read_bytes()
+            phases=[json.loads(line) for line in before_manifest.splitlines()]
+            assert [event['phase'] for event in phases]==['prepared','loading']
+            assert phases[0]['profile_sha256']==m.PROFILE_SHA256
+            assert set(phases[0]['baseline']['policy'])=={'other'}
+            kernel_before=c.policy()
+            expected={'partial-none':set(),'partial-one':{'bwrap'},'partial':{'bwrap','unpriv_bwrap'}}[case]
+            assert set(kernel_before)-{'other'}==expected
+            custody=c.p('/var/lib/arcade-admin/codex-bwrap-apparmor/profile')
+            assert custody.read_bytes()==asset and custody.stat().st_nlink==1
             try:c.execute('rollback','1262')
-            except m.Blocked:pass
+            except m.Blocked as error:assert str(error)=='manifest_incomplete'
             else:raise AssertionError('accepted incomplete install rollback')
-        elif case not in ['drift','policy-drift','zombie-leader','source-drift','target-exists']:assert not c.p('/etc/apparmor.d/bwrap-userns-restrict').exists(),case
+            assert manifest.read_bytes()==before_manifest, 'uncertain rollback changed manifest'
+            assert c.policy()==kernel_before, 'uncertain rollback removed kernel policy'
+            assert custody.read_bytes()==asset, 'uncertain rollback lost custody evidence'
+            assert not any('-R' in argv for argv in calls), 'uncertain rollback invoked parser removal'
+        elif case=='target-exists':
+            assert c.p('/etc/apparmor.d/bwrap-userns-restrict').read_text()=='other vendor'
+            assert not any('-a' in argv for argv in calls), 'existing profile reached parser ADD'
+        elif case not in ['drift','policy-drift','zombie-leader','source-drift']:assert not c.p('/etc/apparmor.d/bwrap-userns-restrict').exists(),case
 print('synthetic bwrap gates PASS')
 `;
   const result = spawnSync("python3", ["-I", "-B", "-c", script], { encoding: "utf8", timeout: 30000 });
