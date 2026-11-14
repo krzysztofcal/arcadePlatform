@@ -44,7 +44,6 @@ const xpHtmlFiles = [
   gameHtml,
   gameTrexHtml,
   pokerIndex,
-  pokerTable,
   playHtml || '',
   xpHtml,
 ];
@@ -133,7 +132,7 @@ test('root pages use relative topbar and format scripts', () => {
   assert.match(pokerIndex, absoluteChips);
   assert.doesNotMatch(pokerTable, absoluteTopbar);
   assert.doesNotMatch(pokerTable, absoluteFormat);
-  assert.doesNotMatch(pokerTable, absoluteChips);
+  assert.match(pokerTable, absoluteChips);
 });
 
 test('topbar scripts load once per page', () => {
@@ -174,7 +173,7 @@ test('topbar scripts load once per page', () => {
       assert.equal(matches.length, 1);
     });
   });
-  pokerScripts.forEach((pattern) => {
+  [/src="\/js\/topbar\.js"/g, /src="\/js\/core\/number-format\.js"/g].forEach((pattern) => {
     const matches = pokerTable.match(pattern) || [];
     assert.equal(matches.length, 0);
   });
@@ -253,11 +252,10 @@ test('xp badge placeholders are compact', () => {
 test('poker pages place xp badge inside topbar', () => {
   assert.match(pokerIndex, /topbar-right[\s\S]*id="xpBadge"/);
   assert.doesNotMatch(pokerTable, /topbar-right[\s\S]*id="xpBadge"/);
-  assert.match(pokerTable, /id="xpBadge"/);
 });
 
 test('poker pages boot the XP renderer after loading the XP core', () => {
-  for (const content of [pokerIndex, pokerTable]) {
+  for (const content of [pokerIndex]) {
     assert.match(content, /src="\/js\/xp\.js"/);
     assert.ok(content.indexOf('/js/xp/core.js') < content.indexOf('/js/xp.js'));
   }

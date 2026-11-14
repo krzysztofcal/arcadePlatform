@@ -148,10 +148,10 @@
     const list = ensureList();
     const items = getItems();
     const groups = [
-      { id: 'arcadeHub', labelKey: 'menuArcadeHub', fallbackLabel: 'Arcade Hub', items: items.filter(function(item){ return !item.section && !item.requiresAdmin; }) },
-      { id: 'about', items: items.filter(function(item){ return item.section === 'about'; }), heading: false },
-      { id: 'language', labelKey: 'menuLanguage', fallbackLabel: 'Language', language: true },
-      { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', items: items.filter(function(item){ return item.requiresAdmin; }) }
+      { id: 'arcadeHub', labelKey: 'menuArcadeHub', fallbackLabel: 'Arcade Hub', heading: false, items: items.filter(function(item){ return !item.section && !item.requiresAdmin; }) },
+      { id: 'account', labelKey: 'account', fallbackLabel: 'Account', items: items.filter(function(item){ return item.section === 'account'; }) },
+      { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', items: items.filter(function(item){ return item.requiresAdmin; }) },
+      { id: 'language', labelKey: 'menuLanguage', fallbackLabel: 'Language', language: true }
     ];
     list.innerHTML = '';
     groups.forEach(function(group){
@@ -241,16 +241,9 @@
       {id:'bonus',labelKey:'mobileNavBonus',fallbackLabel:'Bonus',href:'/poker/index.html#bonus',art:'/poker/assets/lobby/bonus-v2.webp'},
       {id:'profile',labelKey:'mobileNavProfile',fallbackLabel:'Profile',href:'/account.html',art:'/poker/assets/themes/midnight-sapphire/avatar-frame.svg'}
     ];
-    const wanted = ['home', 'search', 'favorites', 'poker', 'profile'];
+    const wanted = ['home', 'poker', 'leaderboard', 'favorites', 'profile'];
     const byId = {};
     items.forEach(function(item){ byId[item.id] = item; });
-    byId.search = {
-      id: 'search',
-      labelKey: 'search',
-      fallbackLabel: 'Search',
-      href: '#search',
-      iconSvg: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m20.7 19.3-4.1-4.1a7.5 7.5 0 1 0-1.4 1.4l4.1 4.1 1.4-1.4ZM5 10.5a5.5 5.5 0 1 1 11 0 5.5 5.5 0 0 1-11 0Z"/></svg>'
-    };
     return wanted.map(function(id){ return byId[id]; }).filter(Boolean);
   }
 
@@ -426,6 +419,7 @@
     if (event && event.key === 'Escape') close();
   }
 
+  window.SidebarApp = { playRandomGame: handleRandomGameClick };
   if (window.MOBILE_POKER_CONFIG) doc.addEventListener('poker:lobby-view', function(){ renderBottomNav(getBottomItems()); });
   render();
   btn.addEventListener('click', toggle);
