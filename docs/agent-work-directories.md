@@ -116,17 +116,26 @@ Before each heavy agent launch, dependency install, build or test batch (includi
 legacy task resumes), run the reviewed current preflight, not a stale task copy:
 
 ```bash
-node /path/to/trusted-current-checkout/scripts/ops/agent-workdir-preflight.mjs --check || exit 1
+node /path/to/trusted-current-checkout/scripts/ops/agent-workdir-preflight.mjs --check
 ```
 
 Requires Node >=18.15 (VPS inspected with Node 22). `--check` verifies the same fixed Volume identity/ownership/access without
 allocating a name, and prints root/Volume capacity as JSON. New allocations also
 perform this check. Root usage follows `df` (used / (used + available), rounded
-up): WARN on stderr at **85%**, STOP at **90%** or **less than 4 GiB available**.
-Volume must also have at least 4 GiB available. Missing/invalid capacity data is
-STOP. Stdout for a successful name allocation remains exactly one path. This is
-a point-in-time check, not a quota: rerun between heavy steps; stop scheduling
-new heavy work on failure. Do not kill or reconfigure existing processes.
+up): **WARN at 85%**, **CRITICAL at 90% or less than 4 GiB available**.
+Volume below 4 GiB available also emits CRITICAL. These messages go to stderr
+and are advisory only: capacity does not change the successful exit code or
+block allocation/continuation. Missing/invalid capacity metrics produce WARN
+and `null` for that filesystem in the JSON; they do not invalidate an otherwise
+verified destination. Stdout for successful name allocation remains one path.
+
+Fail-closed checks apply only to unsafe/unverifiable locations for **new Volume
+writes** (mount identity, canonical path, permissions, conflicts). On a location
+failure, do not allocate/write there and never fall back to root. Existing work
+may continue in its recorded location; do not interrupt active tasks, sessions,
+builds or services. A read-only `--check` failure is not a command to terminate
+them. New scoped launches in the recipe below exit on location failure only.
+This is a point-in-time check, not a quota or an automatic stop mechanism.
 
 Use the existing launchers inside a subshell with a fresh, separately checked
 runtime directory. This works for a new Volume checkout or a legacy checkout
@@ -184,7 +193,7 @@ financial/audit evidence into disposable artifacts. Relative build outputs in
 a Volume checkout (node_modules, dist, test-results) already stay on Volume;
 a legacy checkout's relative outputs still use root unless explicitly redirected.
 Do not run tools with unsupported output overrides: retain/report that root
-write or postpone the heavy step. Tools that ignore these settings need their
+write explicitly while continuing existing work in its recorded location. Tools that ignore these settings need their
 own verified task setting before claiming coverage.
 
 ## VPS inspection and activation status (2026-11-14)
@@ -249,7 +258,7 @@ between heavy steps; compare its capacity JSON and bounded `du -sx` snapshots of
 falls. For unattended detection, OWNER may connect these capacity metrics to an
 existing external VPS monitor if available (not verified here), or approve a
 small copilot user timer invoking `--check` every 15 minutes with bounded
-journald output and a warning/STOP notification route. No automatic cleanup,
+journald output and a WARN/CRITICAL notification route (notification only, never process termination). No automatic cleanup,
 new workspace manager, Production timer change or monitoring activation is in
 this PR. A timer that only logs is not an alert until notification delivery is
 configured and tested.

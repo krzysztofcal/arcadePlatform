@@ -1569,7 +1569,7 @@ test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe
   let mountStatus = 0, rootDevice = 16, rootMode = 0o750, rootUid = 1000, rootGid = 1000;
   let canonical = root, exists = false, device = "/dev/sdb", canWrite = true;
   const directory = (dev, uid = 0, gid = 0, mode = 0o755) => ({ dev, uid, gid, mode, isDirectory: () => true });
-  let usedPercent = 82, availableGiB = 18, volumeGiB = 47;
+  let usedPercent = 82, volumeGiB = 47;
   const warnings = [];
   const io = {
     warn: (message) => warnings.push(message),
@@ -1577,7 +1577,7 @@ test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe
     run: () => ({ status: mountStatus, stdout: mountOutput }),
     fs: {
       statfsSync: (p) => p === "/"
-        ? { blocks: 100 * 1024 ** 2, bfree: (100 - usedPercent) * 1024 ** 2, bavail: Math.min(availableGiB, 100 - usedPercent) * 1024 ** 2, bsize: 1024 }
+        ? { blocks: 100 * 1024 ** 2, bfree: (100 - usedPercent) * 1024 ** 2, bavail: (100 - usedPercent) * 1024 ** 2, bsize: 1024 }
         : { blocks: 49, bfree: volumeGiB, bavail: volumeGiB, bsize: 1024 ** 3 },
       realpathSync: (p) => p.endsWith("scsi-0HC_Volume_107462648") ? device : canonical,
       statSync: (p) => p === "/dev/sdb" ? { isBlockDevice: () => true, rdev: 16 } : directory(16),
@@ -1591,20 +1591,28 @@ test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe
   };
   assert.equal(newAgentWorkdir("task-1246", io), `${root}/task-1246`);
   assert.equal(checkAgentStorage(io).root.usedPercent, 82);
-  usedPercent = 85; checkAgentStorage(io); assert.equal(warnings.length, 1);
-  usedPercent = 89; checkAgentStorage(io);
-  usedPercent = 90; assert.throws(() => checkAgentStorage(io), /root_capacity_critical/);
-  usedPercent = 82; availableGiB = 3; assert.throws(() => checkAgentStorage(io), /root_capacity_critical/);
-  availableGiB = 18; volumeGiB = 3; assert.throws(() => checkAgentStorage(io), /volume_capacity_low/);
+  usedPercent = 85; checkAgentStorage(io); assert.match(warnings.at(-1), /^WARN .*root_capacity/);
+  usedPercent = 89; checkAgentStorage(io); assert.match(warnings.at(-1), /^WARN /);
+  usedPercent = 90;
+  assert.equal(newAgentWorkdir("task-1246", io), `${root}/task-1246`);
+  assert.match(warnings.at(-1), /^CRITICAL .*root_capacity/);
+  usedPercent = 82; volumeGiB = 3;
+  assert.equal(newAgentWorkdir("task-1246", io), `${root}/task-1246`);
+  assert.match(warnings.at(-1), /^CRITICAL .*volume_capacity_low/);
   volumeGiB = 47;
   const statfs = io.fs.statfsSync;
   io.fs.statfsSync = () => { throw new Error("unavailable"); };
-  assert.throws(() => checkAgentStorage(io), /STOP/);
-  // 50% usage with 3 GiB available isolates the byte gate from the percentage gate.
+  assert.deepEqual(checkAgentStorage(io), { root: null, volume: null });
+  assert.equal(newAgentWorkdir("task-1246", io), `${root}/task-1246`);
+  assert.match(warnings.at(-1), /^WARN .*capacity_unverifiable/);
+  // 50% usage with 3 GiB available isolates the advisory byte threshold.
   io.fs.statfsSync = () => ({ blocks: 10, bfree: 7, bavail: 3, bsize: 1024 ** 3 });
-  assert.throws(() => checkAgentStorage(io), /root_capacity_critical/);
+  assert.equal(checkAgentStorage(io).root.usedPercent, 50);
+  assert.ok(warnings.some((message) => /^CRITICAL .*root_capacity used_percent=50 /.test(message)));
+  const count = warnings.length;
   io.fs.statfsSync = () => ({ blocks: 10, bfree: 8, bavail: 4, bsize: 1024 ** 3 });
   assert.equal(checkAgentStorage(io).root.availableBytes, 4 * 1024 ** 3);
+  assert.equal(warnings.length, count);
   for (const invalid of [
     { blocks: 0, bfree: 0, bavail: 0, bsize: 4096 },
     { blocks: 10, bfree: 10, bavail: 0, bsize: 4096 },
@@ -1612,7 +1620,8 @@ test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe
     { blocks: NaN, bfree: 4, bavail: 4, bsize: 4096 },
   ]) {
     io.fs.statfsSync = () => invalid;
-    assert.throws(() => checkAgentStorage(io), /capacity_unverifiable/);
+    assert.deepEqual(checkAgentStorage(io), { root: null, volume: null });
+    assert.match(warnings.at(-1), /^WARN .*capacity_unverifiable/);
   }
   io.fs.statfsSync = statfs;
   for (const output of ["", `/ /dev/sda1 ext4 rw`, `${mount} /dev/sdc ext4 rw`, `${mount} /dev/sdb xfs rw`, `${mount} /dev/sdb ext4 ro`, `${mount} /dev/sdb ext4 rw\n${mount} /dev/sdb ext4 rw`]) {

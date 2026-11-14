@@ -30,25 +30,34 @@ export function checkAgentStorage(io = {}) {
       || mount.dev !== device.rdev || root.dev !== mount.dev) stop("unexpected_filesystem");
     if (uid === 0 || root.uid !== uid || root.gid !== gid || (root.mode & 0o7777) !== 0o750) stop("workdir_owner_or_mode");
     disk.accessSync(ROOT, fs.constants.W_OK | fs.constants.X_OK);
-    const capacity = (path) => {
-      const { blocks, bfree, bavail, bsize } = disk.statfsSync(path);
-      if (![blocks, bfree, bavail, bsize].every(Number.isSafeInteger)
-        || blocks <= 0 || bsize <= 0 || bavail < 0 || bfree < bavail || bfree > blocks) stop("capacity_unverifiable");
-      const used = blocks - bfree;
-      if (used + bavail <= 0 || !Number.isSafeInteger(bavail * bsize)) stop("capacity_unverifiable");
-      return { usedPercent: Math.ceil(100 * used / (used + bavail)), availableBytes: bavail * bsize };
-    };
-    const rootCapacity = capacity("/");
-    const volumeCapacity = capacity(ROOT);
-    const minimum = 4 * 1024 ** 3;
-    if (rootCapacity.usedPercent >= 90 || rootCapacity.availableBytes < minimum) stop(`root_capacity_critical used_percent=${rootCapacity.usedPercent} available_bytes=${rootCapacity.availableBytes}`);
-    if (volumeCapacity.availableBytes < minimum) stop(`volume_capacity_low available_bytes=${volumeCapacity.availableBytes}`);
-    if (rootCapacity.usedPercent >= 85) (io.warn || ((message) => process.stderr.write(`${message}\n`)))("WARN agent_workdir root_usage_at_least_85_percent");
-    return { root: rootCapacity, volume: volumeCapacity };
   } catch (error) {
     if (error.message?.startsWith("STOP agent_workdir ")) throw error;
     stop("mount_or_path_unavailable_no_fallback");
   }
+  // Capacity is advisory; only the new-write location checks above fail closed.
+  const warn = io.warn || ((message) => process.stderr.write(`${message}\n`));
+  const capacity = (path, label) => {
+    try {
+      const { blocks, bfree, bavail, bsize } = disk.statfsSync(path);
+      if (![blocks, bfree, bavail, bsize].every(Number.isSafeInteger)
+        || blocks <= 0 || bsize <= 0 || bavail < 0 || bfree < bavail || bfree > blocks) throw new Error("invalid_capacity");
+      const used = blocks - bfree;
+      if (used + bavail <= 0 || !Number.isSafeInteger(bavail * bsize)) throw new Error("invalid_capacity");
+      return { usedPercent: Math.ceil(100 * used / (used + bavail)), availableBytes: bavail * bsize };
+    } catch {
+      warn(`WARN agent_workdir ${label}_capacity_unverifiable`);
+      return null;
+    }
+  };
+  const rootCapacity = capacity("/", "root");
+  const volumeCapacity = capacity(ROOT, "volume");
+  const minimum = 4 * 1024 ** 3;
+  if (rootCapacity) {
+    const critical = rootCapacity.usedPercent >= 90 || rootCapacity.availableBytes < minimum;
+    if (critical || rootCapacity.usedPercent >= 85) warn(`${critical ? "CRITICAL" : "WARN"} agent_workdir root_capacity used_percent=${rootCapacity.usedPercent} available_bytes=${rootCapacity.availableBytes}`);
+  }
+  if (volumeCapacity && volumeCapacity.availableBytes < minimum) warn(`CRITICAL agent_workdir volume_capacity_low available_bytes=${volumeCapacity.availableBytes}`);
+  return { root: rootCapacity, volume: volumeCapacity };
 }
 
 export function newAgentWorkdir(slug, io = {}) {
