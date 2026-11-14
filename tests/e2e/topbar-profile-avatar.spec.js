@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-const AVATAR_URL = 'https://stage-test.supabase.co/storage/v1/object/public/profile-avatars/smoke.webp';
+const AVATAR_URL = '/assets/avatars/arcade/fox-blue.webp';
 const PAGES = ['/', '/games-open/2048/'];
 
 async function mockAuthenticatedSession(page) {
@@ -30,13 +30,13 @@ const profile = () => ({
   handle: 'avatar-player',
   displayName: 'Avatar Player',
   bio: '',
-  avatar: { type: 'uploaded', variant: 'fox-blue', url: AVATAR_URL },
+  avatar: { type: 'default', variant: 'fox-blue' },
   handleCanCustomize: false,
 });
 
 test.describe('authenticated topbar profile avatar', () => {
   for (const path of PAGES) {
-    test(`renders uploaded avatar on ${path}`, async ({ page }) => {
+    test(`renders Arcade catalog avatar on ${path}`, async ({ page }) => {
       await mockAuthenticatedSession(page);
       let profileRequests = 0;
       await page.route('**/.netlify/functions/profile-me', (route) => {
@@ -52,11 +52,11 @@ test.describe('authenticated topbar profile avatar', () => {
       const avatar = page.locator('#avatarInitials');
       const menuAvatar = page.locator('#avatarMenuInitials');
       await expect.poll(() => profileRequests).toBeGreaterThan(0);
-      await expect(avatar).toHaveClass(/profile-avatar--uploaded/);
-      await expect(avatar).toHaveCSS('background-image', `url("${AVATAR_URL}")`);
+      await expect(avatar).toHaveAttribute('data-avatar-variant', 'fox-blue');
+      await expect(avatar).toHaveCSS('background-image', `url("${new URL(AVATAR_URL, page.url()).href}")`);
       await expect(avatar).toHaveText('');
-      await expect(menuAvatar).toHaveClass(/profile-avatar--uploaded/);
-      await expect(menuAvatar).toHaveCSS('background-image', `url("${AVATAR_URL}")`);
+      await expect(menuAvatar).toHaveAttribute('data-avatar-variant', 'fox-blue');
+      await expect(menuAvatar).toHaveCSS('background-image', `url("${new URL(AVATAR_URL, page.url()).href}")`);
       await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-chips-state', 'ready');
       await expect(page.locator('#chipBadgeAmount')).toHaveText('896');
     });
@@ -72,6 +72,13 @@ test.describe('authenticated topbar profile avatar', () => {
       if (requests > 1) await profileGate;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(profile()) });
     });
+    let delayAvatar = false;
+    let releaseAvatar;
+    const avatarGate = new Promise(resolve => { releaseAvatar = resolve; });
+    await page.route('**' + AVATAR_URL, async route => {
+      if (delayAvatar) await avatarGate;
+      await route.continue();
+    });
     await page.addInitScript(() => {
       window.__avatarFrames = [];
       function sample(){
@@ -83,7 +90,7 @@ test.describe('authenticated topbar profile avatar', () => {
             state: bar.getAttribute('data-user-ui-state'),
             text: node.textContent.trim(),
             color: style.color,
-            uploaded: node.classList.contains('profile-avatar--uploaded'),
+            variant: node.dataset.avatarVariant,
           });
         }
         requestAnimationFrame(sample);
@@ -92,17 +99,24 @@ test.describe('authenticated topbar profile avatar', () => {
     });
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#avatarInitials')).toHaveClass(/profile-avatar--uploaded/);
+    await expect(page.locator('#avatarInitials')).toHaveAttribute('data-avatar-variant', 'fox-blue');
+    await expect(page.locator('#avatarInitials')).toHaveCSS('background-image', `url("${new URL(AVATAR_URL, page.url()).href}")`);
+    delayAvatar = true;
     await page.goto('/games-open/2048/', { waitUntil: 'domcontentloaded' });
     await expect.poll(() => requests).toBe(2);
     await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-profile-state', 'hydrated');
-    await expect(page.locator('#avatarInitials')).toHaveClass(/profile-avatar--uploaded/);
-    await expect(page.locator('#avatarInitials')).toHaveCSS('background-image', `url("${AVATAR_URL}")`);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assertNoVisibleInitials(await page.evaluate(() => window.__avatarFrames));
+    releaseAvatar();
+    await expect(page.locator('#avatarInitials')).toHaveAttribute('data-avatar-variant', 'fox-blue');
+    await expect(page.locator('#avatarInitials')).toHaveCSS('background-image', `url("${new URL(AVATAR_URL, page.url()).href}")`);
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const frames = await page.evaluate(() => window.__avatarFrames);
     assertNoVisibleInitials(frames);
     releaseProfile();
     await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-profile-state', 'ready');
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assertNoVisibleInitials(await page.evaluate(() => window.__avatarFrames));
   });
 });
 

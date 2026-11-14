@@ -21,7 +21,12 @@ export const createPokerTableWithState = async (tx, {
   if (!Number.isSafeInteger(normalizedBuyIn) || normalizedBuyIn <= 0) {
     throw new Error("poker_table_buy_in_invalid");
   }
-  if (accountDeletionEnabled()) await assertAccountActive(tx, userId);
+  // Only the internal managed-table provisioner creates ownerless system tables.
+  const isManagedSystemTable = userId === null
+    && lifecycleKind === "CONTINUOUS_BOT"
+    && managedProfileKey === "CONTINUOUS_BOT_DEFAULT"
+    && isSinglePlayer === false;
+  if (accountDeletionEnabled() && !isManagedSystemTable) await assertAccountActive(tx, userId);
   const tableRows = await tx.unsafe(
     `
 insert into public.poker_tables (

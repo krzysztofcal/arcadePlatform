@@ -46,7 +46,7 @@ test('leaderboard UI keeps a public/auth cache boundary and safe DOM projection'
   assert.match(controller, /new Set\(rows\.map/);
   assert.match(controller, /nodes\.me\.hidden\s*=\s*!me\s*\|\|\s*loadedHandles\.has/);
   assert.match(controller, /state\.meGeneration\s*\+=\s*1/);
-  assert.match(controller, /generation\s*!==\s*state\.meGeneration/);
+  assert.match(controller, /meGeneration\s*===\s*state\.meGeneration/);
 });
 
 test('leaderboard row validation rejects unsafe public projection values', () => {
@@ -78,4 +78,27 @@ test('sidebar, localization and responsive styles expose the complete leaderboar
   assert.match(css, /\.leaderboard-entry--me/);
   assert.match(css, /@media \(max-width:820px\)/);
   assert.match(css, /prefers-reduced-motion/);
+});
+
+
+test('leaderboard clears on session/visibility changes and rejects late data while hidden', async()=>{
+ for(const {nextUser,hide} of [{nextUser:null},{nextUser:{id:'viewer-b'}},{nextUser:{id:'viewer-b'},hide:true}]){
+  const nodes=new Map(),listeners={};let authChange,release,renders=0,user={id:'viewer-a'};const requests=[];
+  function node(){return {hidden:false,textContent:'',dataset:{},children:[],get firstChild(){return this.children[0]||null;},removeChild(child){this.children.splice(this.children.indexOf(child),1);},setAttribute(){},addEventListener(){},appendChild(child){this.children.push(child);}};}
+  const period=node();period.dataset.period='all_time';
+  const document={hidden:false,readyState:'complete',getElementById:id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);},querySelectorAll:()=>[period],addEventListener:(name,fn)=>{listeners[name]=fn;},createElement(){renders++;return node();}};
+  const window={document,location:{search:'',href:'https://arcade.test/leaderboard.html'},history:{replaceState(){}},addEventListener(){},SupabaseAuth:{getCurrentUser:async()=>user,onAuthChange:fn=>{authChange=fn;}},SupabaseAuthBridge:{getAccessToken:async()=>user?'token-'+user.id:null}};
+  const fetch=async(url,options)=>{requests.push({url,options});if(url.includes('-me'))return {ok:true,json:async()=>({me:null})};if(!release)return new Promise(resolve=>{release=resolve;});return {ok:true,json:async()=>({rows:[],hasMore:false})};};
+  vm.runInNewContext(controller,{window,document,fetch,URL,URLSearchParams,Intl,Date,Number,Set,AbortController,Promise,setTimeout,clearTimeout});await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(requests[0].options.headers.Authorization,'Bearer token-viewer-a');assert.equal(requests[0].options.cache,'no-store');assert.equal(requests[0].url.includes('token-'),false);
+  nodes.get('leaderboardList').children.push({textContent:'old identity'});if(hide){document.hidden=true;listeners.visibilitychange();}user=nextUser;authChange('SIGNED_OUT',null);
+  assert.equal(nodes.get('leaderboardResults').hidden,true);assert.equal(nodes.get('leaderboardList').children.length,0);
+  release({ok:true,json:async()=>({rows:[{rank:1,handle:'old-player',displayName:'Old Player',xp:1,level:1}],hasMore:false})});await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(renders,0);assert.equal(nodes.get('leaderboardResults').hidden,true);
+  if(!nextUser)assert.equal(nodes.get('leaderboardSignIn').hidden,false);
+  if(hide){
+   assert.equal(requests.length,2,'no requests while hidden');document.hidden=false;listeners.visibilitychange();await new Promise(resolve=>setTimeout(resolve,0));
+   assert.equal(requests.length,4);assert.equal(requests[2].options.headers.Authorization,'Bearer token-viewer-b');
+  }
+ }
 });

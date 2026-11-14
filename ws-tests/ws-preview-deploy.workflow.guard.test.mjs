@@ -32,7 +32,7 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.doesNotMatch(text, /^\s+push:/m);
   assert.doesNotMatch(text, /^\s+pull_request:/m);
 
-  assert.match(text, /inputs:\n\s+ref:\n\s+description: Git ref to deploy to the preview WS host\n\s+required: true\n\s+type: string/);
+  assert.match(text, /inputs:\n\s+ref:\n\s+description: Exact approved 40-character commit SHA to deploy to the preview WS host\n\s+required: true\n\s+type: string/);
   assert.match(text, /ref: \$\{\{ inputs\.ref \}\}/);
 
   assert.match(text, /WS_PREVIEW_HOST/);
@@ -61,6 +61,13 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.doesNotMatch(deploySection, /readlink -f/);
   assert.doesNotMatch(deploySection, /PREVIOUS_TARGET/);
   assert.doesNotMatch(validateSection, /PREVIEW_RELEASES_DIR/);
+});
+
+test("ws preview secret-using jobs require owner main dispatch", () => {
+  const text = workflowText();
+  const guard = "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}";
+  for (const job of ["validate", "deploy"]) assert.ok(text.includes(`  ${job}:\n${guard}\n`), `${job} must require owner/owner main`);
+  assert.doesNotMatch(text, /WS_RELEASE_AGENT/);
 });
 
 test("ws preview deploy validates workflow files from workflow ref and builds app from inputs.ref", () => {
@@ -278,10 +285,10 @@ test("V3 generated context gate rejects foreign Stage/version and checks both ar
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),"preview-context-"));
   try {
     const file=path.join(dir,"context.mjs");
-    for(const values of [ ["deploy-preview","3","stage"], ["production","3","stage"], ["deploy-preview","2","stage"], ["deploy-preview","3","prod"], ["unknown",null,null] ]) {
-      fs.writeFileSync(file,["BUILD_DEPLOY_CONTEXT","BUILD_XP_REDIS_VERSION","BUILD_XP_REDIS_ENV"].map((key,i)=>`export const ${key}=${JSON.stringify(values[i])};`).join("\n"));
+    for(const values of [ ["deploy-preview","3","stage","ws-preview",null], ["production","3","stage","ws-preview",null], ["deploy-preview","2","stage","ws-preview",null], ["deploy-preview","3","prod","ws-preview",null], ["unknown",null,null,null,null], ["deploy-preview","3","stage","netlify-functions",null], ["deploy-preview","3","stage","ws-preview","https://preview.invalid"] ]) {
+      fs.writeFileSync(file,["BUILD_DEPLOY_CONTEXT","BUILD_XP_REDIS_VERSION","BUILD_XP_REDIS_ENV","BUILD_ARTIFACT_IDENTITY","BUILD_DEPLOY_ORIGIN"].map((key,i)=>`export const ${key}=${JSON.stringify(values[i])};`).join("\n"));
       const result=spawnSync(process.execPath,["--input-type=module","-e",match[1],file]);
-      assert.equal(result.status,values.join()==="deploy-preview,3,stage"?0:1);
+      assert.equal(result.status,values.join()==="deploy-preview,3,stage,ws-preview,"?0:1);
     }
     assert.equal((workflow.match(/verify_deploy_context "\$/g)||[]).length,4);
     assert.ok(workflow.indexOf('# END REDIS DEPLOY GATE')<workflow.indexOf('rsync -a --no-owner'));
@@ -317,4 +324,11 @@ test("Stage deletion window derives ON from protected OFF and refuses missing, t
   assert.throws(check(on+"DRIFT=1\n","on"));
   assert.throws(check(on+"DRIFT=1\n","on",{on:sha(on+"DRIFT=1\n")}));
   assert.throws(check(on,"on",{baseline_record:"foreign"}));
+});
+
+test("Preview secrets are scoped and the old deployment identity has no fallback", () => {
+  const text = workflowText();
+  assert.equal((text.match(/environment: ws-preview/g) || []).length, 2);
+  assert.ok(text.includes('test "$PREVIEW_WS_USER" = arcade-preview-deploy'));
+  assert.ok(text.includes('[[ "$PREVIEW_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]'));
 });

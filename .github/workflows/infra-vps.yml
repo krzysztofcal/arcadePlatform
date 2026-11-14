@@ -39,8 +39,6 @@ jobs:
   validate:
     needs: impact
     if: ${{ needs.impact.outputs.infra == 'true' }}
-    outputs:
-      caddy: ${{ steps.caddy.outputs.changed }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,17 +47,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Detect existing Caddy deploy surface
-        id: caddy
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          changed=false
-          if [ "${GITHUB_EVENT_NAME}" = push ] && git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- infra/vps/Caddyfile | grep -q .; then
-            changed=true
-          fi
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -95,7 +82,7 @@ jobs:
 
   apply:
     needs: validate
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.validate.outputs.caddy == 'true')
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
     runs-on: ubuntu-latest
     env:
       INFRA_REMOTE_TMP_DIR: /tmp/arcadeplatform-infra-${{ github.run_id }}-${{ github.run_attempt }}

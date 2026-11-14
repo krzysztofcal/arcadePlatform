@@ -1,0 +1,84 @@
+name: Chips Ledger Stage Settled Retention
+
+# #1157: owner-only 12-month settled history cap on Stage. The script holds the
+# Stage retention advisory lock and stays dark unless the DB control is enabled
+# (automatic) or an exact EXPIRE ARCHIVE confirmation is given (canary).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Settled retention mode
+        required: true
+        default: diagnostic
+        type: choice
+        options:
+          - diagnostic
+          - canary
+          - automatic
+      batch_id:
+        description: Exact archive batch ID (canary only)
+        required: false
+        type: string
+      confirmation:
+        description: Exact EXPIRE ARCHIVE <batch_id> confirmation (canary only)
+        required: false
+        type: string
+      cutoff:
+        description: Optional Stage-only UTC ISO cutoff override (T002)
+        required: false
+        type: string
+
+concurrency:
+  group: chips-ledger-stage-automation
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  stage-settled-retention:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform' && github.event.repository.fork != true && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && (inputs.mode != 'automatic' || vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1') }}
+    runs-on: ubuntu-latest
+    environment: stage-automation
+    timeout-minutes: 30
+    env:
+      SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DB_URL }}
+      SUPABASE_STAGE_URL: ${{ secrets.SUPABASE_STAGE_URL }}
+      SUPABASE_STAGE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGE_SERVICE_ROLE_KEY }}
+      EXPECTED_SUPABASE_STAGE_PROJECT_REF: krydukthwdvccggbyjfw
+      CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED: ${{ vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED || '0' }}
+      DEPLOYED_COMMIT_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout exact dispatch SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run bounded Stage settled retention
+        shell: bash
+        env:
+          SETTLED_MODE: ${{ inputs.mode }}
+          SETTLED_BATCH_ID: ${{ inputs.batch_id || '' }}
+          SETTLED_CONFIRMATION: ${{ inputs.confirmation || '' }}
+          SETTLED_CUTOFF: ${{ inputs.cutoff || '' }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER"
+          args=(--target stage --mode "$SETTLED_MODE")
+          if [[ -n "$SETTLED_BATCH_ID" ]]; then args+=(--batch-id "$SETTLED_BATCH_ID"); fi
+          if [[ -n "$SETTLED_CONFIRMATION" ]]; then args+=(--confirmation "$SETTLED_CONFIRMATION"); fi
+          if [[ -n "$SETTLED_CUTOFF" ]]; then args+=(--cutoff "$SETTLED_CUTOFF"); fi
+          node scripts/ops/chips-ledger-settled-retention.mjs "${args[@]}"

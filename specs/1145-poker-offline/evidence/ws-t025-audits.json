@@ -1,0 +1,52 @@
+[
+  {
+    "evidence": {
+      "at": "2026-10-26T10:32:35.397314+00:00",
+      "audits": [
+        {
+          "at": "2026-10-26T10:30:32.469807+00:00",
+          "handId": "ws_hand_07e8e43f-e731-4845-96e9-d8df2c05c080_263_5",
+          "tableId": "07e8e43f-e731-4845-96e9-d8df2c05c080",
+          "version": 287,
+          "integrity": {
+            "flags": [],
+            "status": "OK",
+            "payoutTotal": 46,
+            "returnedTotal": 0,
+            "awardedPotTotal": 46,
+            "endingStackTotal": 500,
+            "contributionTotal": 46,
+            "startingStackTotal": 500,
+            "contestablePotTotal": 46,
+            "potConservationDelta": 0,
+            "stackConservationDelta": 0,
+            "payoutConservationDelta": 0
+          },
+          "participantCount": 5
+        },
+        {
+          "at": "2026-10-26T10:32:33.780183+00:00",
+          "handId": "ws_hand_f1650226-5fa2-40e4-9dcc-d4bc0cd8b54c_1_6",
+          "tableId": "f1650226-5fa2-40e4-9dcc-d4bc0cd8b54c",
+          "version": 27,
+          "integrity": {
+            "flags": [],
+            "status": "OK",
+            "payoutTotal": 32,
+            "returnedTotal": 0,
+            "awardedPotTotal": 32,
+            "endingStackTotal": 600,
+            "contributionTotal": 32,
+            "startingStackTotal": 600,
+            "contestablePotTotal": 32,
+            "potConservationDelta": 0,
+            "stackConservationDelta": 0,
+            "payoutConservationDelta": 0
+          },
+          "participantCount": 6
+        }
+      ],
+      "wallet": 342
+    }
+  }
+]

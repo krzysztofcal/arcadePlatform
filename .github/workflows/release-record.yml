@@ -1,0 +1,210 @@
+name: Release Record
+
+# #1159 Addendum B: records the running WWW, WS and Android versions as one GitHub Release (tag
+# release-<UTC date>-<run number>, single asset release-manifest.json). Each record changes one component, verified
+# from existing evidence, and carries the others unchanged from the previous record. It deploys nothing: no
+# deployment, WS restart, migration, WWW publication or Google Play upload is reachable here, and a tag or release
+# created with GITHUB_TOKEN starts no workflow. The record job (dry run, owner or release agent) has read-only
+# permissions; only the publish job, run solely when the owner dispatched with publish=true, may create the tag and
+# release. Android attestation is owner-only.
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: The one component whose release is recorded
+        required: true
+        type: choice
+        options:
+          - www
+          - ws
+          - android
+      confirmation:
+        description: Exact RECORD <component> RELEASE
+        required: true
+        type: string
+      publish:
+        description: Create the GitHub Release (false = dry run, manifest in the summary only)
+        required: true
+        type: boolean
+        default: false
+      ws_run_id:
+        description: ws only - id of the successful WS Server Deploy dispatch run
+        required: false
+        type: string
+      www_deploy_id:
+        description: www only - Netlify deploy id now published on play.kcswh.pl
+        required: false
+        type: string
+      android_sha:
+        description: android only - main commit the AAB was built from
+        required: false
+        type: string
+      android_version_name:
+        description: android only - versionName, e.g. 1.0.0
+        required: false
+        type: string
+      android_version_code:
+        description: android only - versionCode
+        required: false
+        type: string
+      android_aab_sha256:
+        description: android only - SHA-256 of the AAB uploaded to Google Play (the AAB itself is never attached)
+        required: false
+        type: string
+      android_track:
+        description: android only - Google Play track
+        required: false
+        type: choice
+        default: internal
+        options:
+          - internal
+          - closed
+          - open
+          - production
+
+concurrency:
+  group: release-record
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  record:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner) || (vars.WS_RELEASE_AGENT != '' && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check the request
+        env:
+          COMPONENT: ${{ inputs.component }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "RECORD $COMPONENT RELEASE" ]] || { echo "confirmation phrase mismatch"; exit 1; }
+          OWNER_RUN=false
+          [[ "$GITHUB_ACTOR" == "$GITHUB_REPOSITORY_OWNER" && "$GITHUB_TRIGGERING_ACTOR" == "$GITHUB_REPOSITORY_OWNER" ]] && OWNER_RUN=true
+          # Publishing and the Android attestation are the owner's own act; an agent may only dry-run.
+          [[ "$PUBLISH" != true || "$OWNER_RUN" == true ]] || { echo "only the owner may publish a release record"; exit 1; }
+          [[ "$COMPONENT" != android || "$OWNER_RUN" == true ]] || { echo "only the owner may attest an Android release"; exit 1; }
+
+      # Read-only: the previous record and the evidence of the changed component.
+      - name: Collect evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENT: ${{ inputs.component }}
+          WS_RUN_ID: ${{ inputs.ws_run_id }}
+          WWW_DEPLOY_ID: ${{ inputs.www_deploy_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .release
+          LATEST="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')"
+          if [[ -n "$LATEST" ]]; then
+            gh release download "$LATEST" --repo "$GITHUB_REPOSITORY" --pattern release-manifest.json --dir .release/previous
+            # Provenance of the previous record: the release itself and the Release Record run its manifest names.
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$LATEST" > .release/previous-release.json
+            PREVIOUS_RUN_ID="$(jq -r '.recordedBy.runId // ""' .release/previous/release-manifest.json)"
+            [[ "$PREVIOUS_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || { echo "previous record names no Release Record run"; exit 1; }
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID" > .release/previous-run.json
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/jobs?per_page=100" > .release/previous-jobs.json
+            { echo "PREVIOUS_MANIFEST_FILE=.release/previous/release-manifest.json"; echo "PREVIOUS_RELEASE_FILE=.release/previous-release.json"; echo "PREVIOUS_RUN_FILE=.release/previous-run.json"; echo "PREVIOUS_JOBS_FILE=.release/previous-jobs.json"; } >> "$GITHUB_ENV"
+          fi
+          case "$COMPONENT" in
+            ws)
+              [[ "$WS_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || { echo "ws_run_id must be a run id"; exit 1; }
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$WS_RUN_ID" > .release/ws-run.json
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$WS_RUN_ID/jobs?per_page=100" > .release/ws-jobs.json
+              gh run download "$WS_RUN_ID" --repo "$GITHUB_REPOSITORY" --name ws-release-receipt --dir .release/ws-receipt
+              # The recent main dispatches with all deploy job attempts, for the "still the latest deploy" check.
+              gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ws-server-deploy.yml/runs?branch=main&event=workflow_dispatch&per_page=50" \
+                --jq '[.workflow_runs[] | {id, head_sha, status}]' > .release/ws-runs.json
+              for id in $(jq -r '.[].id' .release/ws-runs.json); do
+                gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=all&per_page=100" --jq "{id: $id, jobs: [.jobs[] | {name, status, conclusion, started_at}]}"
+              done | jq -s . > .release/ws-run-jobs.json
+              jq --slurpfile j .release/ws-run-jobs.json '[.[] | . as $r | $r + {jobs: ([$j[0][] | select(.id == $r.id) | .jobs][0] // [])}]' .release/ws-runs.json > .release/ws-recent-runs.json
+              { echo "WS_RUN_FILE=.release/ws-run.json"; echo "WS_JOBS_FILE=.release/ws-jobs.json"; echo "WS_RECEIPT_FILE=.release/ws-receipt/ws-release-receipt.json"; echo "WS_RECENT_RUNS_FILE=.release/ws-recent-runs.json"; } >> "$GITHUB_ENV"
+              ;;
+            www)
+              [[ "$WWW_DEPLOY_ID" =~ ^[a-f0-9]{24}$ ]] || { echo "www_deploy_id must be a Netlify deploy id"; exit 1; }
+              curl -fsS --max-time 20 https://play.kcswh.pl/js/build-info.js -o .release/build-info.js
+              echo "WWW_BUILD_INFO_FILE=.release/build-info.js" >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      - name: Build the release manifest
+        env:
+          RELEASE_COMPONENT: ${{ inputs.component }}
+          WWW_DEPLOY_ID: ${{ inputs.www_deploy_id }}
+          ANDROID_SHA: ${{ inputs.android_sha }}
+          ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
+          ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+          ANDROID_AAB_SHA256: ${{ inputs.android_aab_sha256 }}
+          ANDROID_TRACK: ${{ inputs.android_track }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          node scripts/release-manifest.mjs
+          TAG="$(node -p 'require("./release-manifest.json").tag')"
+          TARGET="$(node -p 'const m = require("./release-manifest.json"); m.components[m.changed].sha')"
+          # The tag may only point at a commit that is on main.
+          git merge-base --is-ancestor "$TARGET" origin/main || { echo "release target $TARGET is not on main"; exit 1; }
+          # ls-remote --exit-code: 0 = tag exists, 2 = no such tag, anything else = cannot tell.
+          TAG_CHECK=0; git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null || TAG_CHECK=$?
+          [[ "$TAG_CHECK" == 2 ]] || { echo "tag $TAG exists or could not be checked ($TAG_CHECK)"; exit 1; }
+          { echo "### Release record $TAG (publish: $PUBLISH)"; echo '```json'; cat release-manifest.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the manifest for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-record
+          path: |
+            release-manifest.json
+            release-notes.md
+          retention-days: 7
+          if-no-files-found: error
+
+  # Only the owner's own dispatch with publish=true reaches contents: write; the release agent never does.
+  publish:
+    needs: record
+    if: ${{ inputs.publish && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Get the reviewed manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: release-record
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$(jq -r .tag release-manifest.json)"
+          TARGET="$(jq -r '.components[.changed].sha' release-manifest.json)"
+          [[ "$TAG" =~ ^release-[0-9]{8}-[1-9][0-9]{0,9}$ && "$TARGET" =~ ^[a-f0-9]{40}$ ]] || { echo "invalid manifest"; exit 1; }
+          # Rechecked without a checkout: the target is still on main and the tag still absent.
+          STATUS="$(gh api "repos/$GITHUB_REPOSITORY/compare/$TARGET...main" --jq .status)"
+          [[ "$STATUS" == ahead || "$STATUS" == identical ]] || { echo "release target $TARGET is not on main ($STATUS)"; exit 1; }
+          EXISTING="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq "[.[] | select(.ref == \"refs/tags/$TAG\")] | length")"
+          [[ "$EXISTING" == 0 ]] || { echo "tag $TAG already exists"; exit 1; }
+          gh release create "$TAG" release-manifest.json --repo "$GITHUB_REPOSITORY" --target "$TARGET" --title "$TAG" --notes-file release-notes.md
+          # Immutable Releases (repository setting) lock the asset and tag; the next record refuses a mutable one.
+          IMMUTABLE="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .immutable)"
+          [[ "$IMMUTABLE" == true ]] || { echo "release $TAG is not immutable: enable Immutable Releases; the next record will refuse it"; exit 1; }

@@ -1,3 +1,4 @@
+import {requireCurrentTerms,cleanupExpiredGuestReceipts} from '../shared/profile-terms.mjs';
 import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
 import { createGiftAdapter } from './poker/persistence/gift-adapter.mjs';
 import { handleGiftSendCommand } from './poker/handlers/gift.mjs';
@@ -24,6 +25,7 @@ import { createTableManager } from "./poker/table/table-manager.mjs";
 import { adaptPersistedBootstrap } from "./poker/bootstrap/persisted-bootstrap-adapter.mjs";
 import { createSessionStore } from "./poker/runtime/session-store.mjs";
 import { createDisconnectCleanupRuntime } from "./poker/runtime/disconnect-cleanup.mjs";
+import { isWsDrainActive, newHandsHoldStatus, summarizeRestartFinancials } from "./poker/runtime/new-hands-hold.mjs";
 import { createBotReactionOverrideStore } from "./poker/runtime/bot-reaction-override.mjs";
 import { createReactionTimers, shouldObservePersistedReactionMutation } from "./poker/runtime/reaction-timers.mjs";
 import {
@@ -32,10 +34,10 @@ import {
   matchesNonRetryableTerminalJanitorSuppression,
   runTableJanitor
 } from "./poker/runtime/table-janitor.mjs";
-import { buildStateSnapshotPayload, normalizePrivateBranch } from "./poker/read-model/state-snapshot.mjs";
+import { buildStateSnapshotPayload, normalizePrivateBranch, refreshResumeSnapshot } from "./poker/read-model/state-snapshot.mjs";
 import { buildStatePatch } from "./poker/read-model/state-patch.mjs";
 import { createStreamLog } from "./poker/runtime/stream-log.mjs";
-import { createPersistedStateWriter } from "./poker/persistence/persisted-state-writer.mjs";
+import { createPersistedStateWriter, maybeWriteSettlementAudit } from "./poker/persistence/persisted-state-writer.mjs";
 import { createTableSnapshotLoader } from "./poker/table/table-snapshot.mjs";
 import { handleJoinCommand } from "./poker/handlers/join.mjs";
 import { handleActCommand } from "./poker/handlers/act.mjs";
@@ -422,7 +424,8 @@ async function loadAuthoritativeLeaveExecutor() {
       .then((module) => module.createAuthoritativeLeaveExecutor({
         env: process.env,
         klog: klogSafe,
-        hasConnectedHumanPresence: ({ tableId }) => tableManager.hasConnectedHumanPresence(tableId)
+        hasConnectedHumanPresence: ({ tableId }) => tableManager.hasConnectedHumanPresence(tableId),
+        writeSettlementAudit: maybeWriteSettlementAudit
       }));
   }
   return authoritativeLeaveExecutorPromise;
@@ -1233,32 +1236,44 @@ let accountDeletionRuntimePromise = null;
 async function runAccountDeletionTick() {
   if (!accountDeletionEnabled()) return;
   if (!accountDeletionRuntimePromise) accountDeletionRuntimePromise = (async () => {
-    const {createAccountDeletionRuntime} = await import('./poker/runtime/account-deletion.mjs');
+    const {createAccountDeletionRuntime,createDeletionPokerLeave} = await import('./poker/runtime/account-deletion.mjs');
     const beginSql = await loadBeginSqlWs();
     const privacy=await getDeletionPokerCoordinator();
+    const leavePoker=createDeletionPokerLeave({coordinate:privacy.coordinate,
+      executeLeave:async input=>(await loadAuthoritativeLeaveExecutor())(input)});
     return createAccountDeletionRuntime({beginSql,klog:klogSafe,
       coordinatePokerPrivacy:privacy.coordinate,resyncPokerPrivacy:privacy.resync,
       disconnectUser: async (userId) => {
         for (const socket of sessionStore.connectionsForUser(userId) || []) invalidateSocketSession(socket,{reason:'account_deletion_pending',send_stale:false});
         for (const sessionId of sessionStore.forgetUser(userId)) streamLog.forgetReceiver(sessionId);
       },
-      leaveFromTable: async ({tableId,userId,requestId}) => enqueueTableCommand({tableId,commandName:'account_delete_leave',run:async () => {
-        const executeLeave = await loadAuthoritativeLeaveExecutor();
-        // Use fresh idempotency attempt per authoritative version; existing Leave
-        // reconciles settled deferred seats, including all-in winnings.
-        const left = await executeLeave({tableId,userId,requestId:requestId + ':' + Date.now()});
-        if (!left?.ok) throw new Error('deletion_leave_unconfirmed');
-        const restored = tableManager.buildAuthoritativeLeaveRestore({tableId,userId,stateVersion:left.state?.version,pokerState:left.state?.state,tableStatus:left.tableStatus});
-        if (!restored?.ok || !tableManager.restoreTableFromPersisted(tableId,restored.restoredTable)?.ok) throw new Error('deletion_leave_restore_failed');
+      leaveFromTable: async input => {
+        await leavePoker(input);
+        const {tableId}=input;
         broadcastStateSnapshots(tableId); broadcastTableState(tableId);
         maybeScheduleSettledRollover(tableId);
         scheduleObservedBotTurn({tableId,trigger:'account_deletion_leave'});
-      }})
+      }
     });
   })().catch((error) => { accountDeletionRuntimePromise=null; throw error; });
   await (await accountDeletionRuntimePromise).tick();
 }
+// Reuse the maintenance cadence; no Terms/deletion flag and no overlapping local run.
+let guestReceiptCleanupRunning=false;
+async function runGuestReceiptCleanupTick(){
+  if(guestReceiptCleanupRunning)return;
+  guestReceiptCleanupRunning=true;
+  try{
+    const beginSql=await loadBeginSqlWs();
+    await beginSql(async tx=>{
+      await tx.unsafe("set local lock_timeout='250ms';");
+      await tx.unsafe("set local statement_timeout='2s';");
+      await cleanupExpiredGuestReceipts(tx);
+    });
+  }finally{guestReceiptCleanupRunning=false;}
+}
 const pokerAccessRefreshTimer = setInterval(() => {
+  void runGuestReceiptCleanupTick().catch(()=>klogSafe('profile_terms_retention_failed',{code:'dependency_unavailable'}));
   void runAccountDeletionTick().catch(() => klogSafe('account_deletion_tick_failed',{code:'dependency_unavailable'}));
   void refreshActivePokerAccess().catch((error) => {
     klogSafe("ws_poker_access_refresh_sweep_failed", { code: error?.code || "access_refresh_sweep_failed" });
@@ -1503,6 +1518,9 @@ function enqueueTableCommand({ tableId, commandName, dedupeKey = null, run }) {
     run: async () => {
       try {
         if (tableManager.isTableMutationBlocked(tableId) && commandName!=='account_delete_privacy') throw new Error('table_resync_required');
+        if (commandName !== "settled_rollover" && isWsDrainActive()) {
+          return { ok: false, changed: false, retryable: true, code: "ws_drain_active", reason: "ws_drain_active" };
+        }
         return await run();
       } catch (error) {
         klogSafe("ws_table_command_failed", {
@@ -2126,7 +2144,19 @@ function broadcastTableState(tableId, { excludeWs = null } = {}) {
 
 
 
-async function persistMutatedState({
+let stateWritesInFlight = 0;
+const WS_DRAIN_REJECTED_FRAME_TYPES = new Set(["act", "start_hand", "table_join", "join", "table_leave", "leave", "table_rebuy", "rebuy", "gift_send"]);
+
+async function persistMutatedState(options) {
+  stateWritesInFlight += 1;
+  try {
+    return await persistMutatedStateNow(options);
+  } finally {
+    stateWritesInFlight -= 1;
+  }
+}
+
+async function persistMutatedStateNow({
   tableId,
   expectedVersion,
   mutationKind,
@@ -2671,6 +2701,10 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
   if (settledRolloverGenerationKey(tableId, pokerState) !== generationKey) {
     return finishSettledRollover({ ok: true, changed: false, reason: "settled_generation_changed" });
   }
+  if (isWsDrainActive()) {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    return finishSettledRollover({ ok: true, changed: false, reason: "ws_drain_active" });
+  }
   klogVerbose("ws_settled_rollover_start", () => ({ tableId, attempt }), { tableId });
   if (!isGuestTableId(tableId) && hasSupabaseDbUrl) {
     const ejection = await reconcileInactivityEjections(tableId);
@@ -2744,6 +2778,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
 
   if (isGuestTableId(tableId)) {
     const guestRollover = tableManager.rolloverSettledHand({ tableId, nowMs: Date.now(), economyMode: "none" });
+    if (guestRollover?.reason === "new_hands_on_hold") {
+      scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+    }
     if (!guestRollover?.ok || !guestRollover.changed) {
       return finishSettledRollover(guestRollover);
     }
@@ -2802,6 +2839,9 @@ async function runSettledRolloverCommand({ tableId, generationKey, attempt = 0 }
     managedBotProfile,
     allowBotFunding
   });
+  if (prepared?.reason === "new_hands_on_hold") {
+    scheduleSettledRolloverRetry({ tableId, generationKey, attempt: attempt + 1 });
+  }
   if (!prepared?.ok || !prepared.changed) {
     return finishSettledRollover(prepared);
   }
@@ -3599,7 +3639,7 @@ async function loadPersistedTableHealthSnapshot(tableId) {
   if (!persistedBootstrapEnabled) return null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    return beginSqlWs(async (tx) => {
+    return await beginSqlWs(async (tx) => {
       const tableRows = await tx.unsafe(
         "select id, status, created_at, updated_at, last_activity_at, lifecycle_kind, managed_profile_key, rotation_due_at from public.poker_tables where id = $1 limit 1;",
         [tableId]
@@ -3837,7 +3877,7 @@ async function listZombieOpenTableIds({ limit = 25 } = {}) {
   const boundedLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 25;
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    return beginSqlWs(async (tx) => {
+    return await beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
         `select t.id
          from public.poker_tables t
@@ -3886,7 +3926,7 @@ async function listOpenTableIdsForJanitor({ limit = 10 } = {}) {
   const cursorTableId = hasCursor ? openTableJanitorCursor.tableId.trim() : null;
   try {
     const beginSqlWs = await loadBeginSqlWs();
-    return beginSqlWs(async (tx) => {
+    return await beginSqlWs(async (tx) => {
       const rows = await tx.unsafe(
          `select
            t.id,
@@ -4238,10 +4278,70 @@ function getPokerMaintenanceEnvironment() {
   return environment === "preview" || environment === "production" ? environment : null;
 }
 
+const RESTART_PREFLIGHT_LIVE_PHASES = ["PREFLOP", "FLOP", "TURN", "RIVER", "SHOWDOWN"];
+const RESTART_PREFLIGHT_SQL = `select ps.table_id::text as table_id, ps.version, ps.state->>'phase' as phase, t.status
+from public.poker_state ps join public.poker_tables t on t.id = ps.table_id
+where ps.table_id::text = any($1::text[])
+  or (t.status = 'OPEN' and ps.state->>'phase' = any($2::text[])); -- ws_restart_preflight`;
+const RESTART_PREFLIGHT_MONEY_SQL = `select t.id::text as table_id, ps.table_id is not null as has_state, ps.state->'stacks' as stacks,
+  ps.state->'pot' as pot, ps.state->'potTotal' as pot_total, a.status as escrow_status, a.balance as escrow_balance
+from public.poker_tables t
+left join public.poker_state ps on ps.table_id = t.id
+left join public.chips_accounts a on a.account_type = 'ESCROW' and a.system_key = 'POKER_TABLE:' || t.id::text
+where t.status = 'OPEN'; -- ws_restart_preflight_money`;
+const RESTART_PREFLIGHT_REQUESTS_SQL = "select count(*)::int as unresolved from public.poker_requests where result_json is null; -- ws_restart_preflight_requests";
+
+// Counts only: no card data or player ids. restartSafe needs hold+drain, an idle queue,
+// no state write, no hand in progress in memory or DB, DB versions equal to the loaded tables,
+// and verifiable money: state and escrow for every OPEN table, valid amounts, escrow equal to stacks, no open requests.
+async function buildNewHandsHoldStatus() {
+  const hold = newHandsHoldStatus();
+  const persistedTableIds = [];
+  let loadedHandsInProgress = 0;
+  for (const tableId of tableManager.listTableIds()) {
+    if (RESTART_PREFLIGHT_LIVE_PHASES.includes(tableManager.persistedPokerState(tableId)?.phase)) loadedHandsInProgress += 1;
+    if (!isGuestTableId(tableId)) persistedTableIds.push(tableId);
+  }
+  const status = {
+    ...hold,
+    loadedHandsInProgress,
+    tableCommandsInFlight: tableCommandQueue.pendingTotal(),
+    stateWritesInFlight,
+    supervisorSweepInProgress: continuousBotTableSupervisor?.status?.()?.sweepInProgress === true,
+    dbHandsInProgress: null,
+    dbVersionMismatches: null,
+    dbFinancialIssues: null,
+    restartSafe: false
+  };
+  if (!hold.active || !persistedStateWriteEnabled) return status;
+  try {
+    const beginSqlWs = await loadBeginSqlWs();
+    const { rows, moneyRows, requestRows } = await beginSqlWs(async (tx) => ({
+      rows: await tx.unsafe(RESTART_PREFLIGHT_SQL, [persistedTableIds, RESTART_PREFLIGHT_LIVE_PHASES]),
+      moneyRows: await tx.unsafe(RESTART_PREFLIGHT_MONEY_SQL),
+      requestRows: await tx.unsafe(RESTART_PREFLIGHT_REQUESTS_SQL)
+    }));
+    status.dbFinancialIssues = summarizeRestartFinancials(moneyRows, requestRows?.[0]?.unresolved);
+    const versionByTableId = new Map(rows.map((row) => [row.table_id, Number(row.version)]));
+    status.dbHandsInProgress = rows.filter((row) => row.status === "OPEN" && RESTART_PREFLIGHT_LIVE_PHASES.includes(row.phase)).length;
+    status.dbVersionMismatches = persistedTableIds
+      .filter((tableId) => versionByTableId.get(tableId) !== Number(tableManager.persistedStateVersion(tableId)))
+      .length;
+  } catch (error) {
+    klogSafe("ws_restart_preflight_db_failed", { message: error?.message || "unknown" });
+    return status;
+  }
+  status.restartSafe = hold.drain && loadedHandsInProgress === 0 && status.tableCommandsInFlight === 0
+    && stateWritesInFlight === 0 && !status.supervisorSweepInProgress
+    && status.dbHandsInProgress === 0 && status.dbVersionMismatches === 0
+    && Object.values(status.dbFinancialIssues).every((count) => count === 0);
+  return status;
+}
+
 async function buildInternalPokerMaintenanceStatus(environment) {
   const repositoryStatus = await continuousBotTableRepository?.readStatus?.();
   if (!repositoryStatus?.ok) {
-    return { ok: false, error: repositoryStatus?.reason || "continuous_maintenance_unavailable" };
+    return { ok: false, error: repositoryStatus?.reason || "continuous_maintenance_unavailable", newHandsHold: await buildNewHandsHoldStatus() };
   }
   const loadedTableIds = new Set(tableManager.listTableIds());
   const tables = repositoryStatus.tables.map((table) => {
@@ -4287,7 +4387,8 @@ async function buildInternalPokerMaintenanceStatus(environment) {
       }
     },
     cleanup,
-    closedTableCleanup: closedTableCleanupStatus
+    closedTableCleanup: closedTableCleanupStatus,
+    newHandsHold: await buildNewHandsHoldStatus()
   };
 }
 
@@ -4961,6 +5062,10 @@ wss.on("connection", (ws) => {
     }
 
     const frame = validation.value;
+    if (WS_DRAIN_REJECTED_FRAME_TYPES.has(frame.type) && isWsDrainActive()) {
+      sendError(ws, connState, { code: "INVALID_COMMAND", message: "ws_drain_active", requestId: frame.requestId ?? null });
+      return;
+    }
     if (
       PROTECTED_MESSAGE_TYPES.has(frame.type)
       && connState.session.userId
@@ -5147,7 +5252,7 @@ wss.on("connection", (ws) => {
     }
 
     if (frame.type === "reaction_send") {
-      const react = async () => {
+      const react = async (termsTx) => {
       const resolvedRoomId = resolveRoomId(frame);
       if (!resolvedRoomId.ok) {
         sendError(ws, connState, {
@@ -5191,6 +5296,15 @@ wss.on("connection", (ws) => {
           status: "rejected",
           reason: "not_seated"
         });
+        return;
+      }
+
+      try {
+        const principal={kind:connState.session.identityMode==='guest'?'guest':'account',id:senderUserId};
+        if(termsTx)await requireCurrentTerms(termsTx,principal);
+        else {const transact=await loadBeginSqlWs();await transact(tx=>requireCurrentTerms(tx,principal));}
+      } catch(error) {
+        sendCommandResult(ws,connState,{requestId:frame.requestId??null,tableId,status:'rejected',reason:error?.code==='terms_required'?'terms_required':'terms_unavailable'});
         return;
       }
 
@@ -5297,7 +5411,7 @@ wss.on("connection", (ws) => {
         const transact = await loadBeginSqlWs();
         await transact(async (tx) => {
           await assertAccountActive(tx, connState.session.userId);
-          await react();
+          await react(tx);
         });
       } else await react();
       return;
@@ -5635,8 +5749,9 @@ wss.on("connection", (ws) => {
           reason: replay.reason,
           expectedSeq: replay.latestSeq ?? 0
         });
-        await tableManager.refreshPublicProfiles(tableId);
-        const tableSnapshot = tableManager.tableSnapshot(tableId, connState.session.userId);
+        const tableSnapshot = await refreshResumeSnapshot({
+          tableManager, tableId, userId: connState.session.userId, reason: replay.reason
+        });
         await nextEventLoopTurn();
         sendStateSnapshot(ws, connState, { tableSnapshot, reason: replay.reason });
         void recoverGiftState(ws, connState, tableId).catch(() => {});
@@ -5808,6 +5923,7 @@ wss.on("connection", (ws) => {
           tableId,
           tableManager,
           loadAuthoritativeLeaveExecutor,
+          restoreTableFromPersisted,
           sendCommandResult,
           broadcastStateSnapshots,
           broadcastTableState,
@@ -6349,15 +6465,38 @@ const closedTableCleanup = hasSupabaseDbUrl
     })
   : null;
 
-if (actionHistoryCleanup || closedTableCleanup) {
-  const actionHistoryCleanupTimer = setInterval(() => {
-    void actionHistoryCleanup.sweep().finally(() => {
-      if (!closedTableCleanup) return;
-      void closedTableCleanup.sweep({
+async function runRetentionCleanups() {
+  if (actionHistoryCleanup) {
+    try {
+      const historyResult = await actionHistoryCleanup.sweep();
+      if (!historyResult || historyResult.ok !== true || (historyResult.skipped === true && historyResult.reason === "sweep_in_progress")) {
+        return;
+      }
+    } catch (error) {
+      klogSafe("ws_action_history_cleanup_failed", {
+        message: error?.message || "unknown"
+      });
+      return;
+    }
+  }
+
+  if (closedTableCleanup) {
+    try {
+      await closedTableCleanup.sweep({
         claimTableIds: (candidateIds) => tableManager.beginTableRetirement(candidateIds),
         releaseTableIds: (claimedIds) => tableManager.endTableRetirement(claimedIds)
       });
-    });
+    } catch (error) {
+      klogSafe("ws_closed_table_cleanup_failed", {
+        message: error?.message || "unknown"
+      });
+    }
+  }
+}
+
+if (actionHistoryCleanup || closedTableCleanup) {
+  const actionHistoryCleanupTimer = setInterval(() => {
+    void runRetentionCleanups();
   }, actionHistoryCleanupSweepMs);
   actionHistoryCleanupTimer.unref();
 }

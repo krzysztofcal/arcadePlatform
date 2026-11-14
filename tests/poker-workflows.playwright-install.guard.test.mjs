@@ -61,7 +61,7 @@ test('actionlint keeps its universal PR context and mutation workflow validation
   const ci = read('ci');
   assert.match(ci, /on:\n  pull_request:\n/);
   assert.match(ci, /actionlint:\n    name: actionlint\n    if: \$\{\{ github.event_name == 'pull_request' \}\}/);
-  assert.match(read('db-stage-apply-pr'), /node scripts\/check-db-migrations.mjs/);
+  assert.match(read('db-stage-apply-pr'), /node scripts\/stage-db-migrate.mjs --prepare/);
 });
 
 test('test-only WS changes validate without enabling Production deployment', () => {

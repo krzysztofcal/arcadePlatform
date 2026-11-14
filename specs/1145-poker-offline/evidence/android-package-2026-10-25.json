@@ -1,0 +1,19 @@
+{
+  "apk": "arcade-poker-stage-354af80c0a93d927fb8cf6f827fa77ffad81988c.apk",
+  "sha256": "cf45da83cf4a66dfd7c3902386a916e5c3b7ac6c56b2a93fe21a9ba743d2bc86",
+  "bytes": 10318137,
+  "bundledPublicBytes": 7474583,
+  "allPokerAssetsIncluded": true,
+  "pokerAssetCount": 99,
+  "isolatedFilesByteMatch": true,
+  "scriptIntegrity": "PASS",
+  "themeDirectories": [
+    "crimson-velvet",
+    "emerald-palace",
+    "midnight-sapphire",
+    "neon-vegas",
+    "royal-gold"
+  ],
+  "classic": "shared default art",
+  "physicalDevice": "PENDING OWNER"
+}

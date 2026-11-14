@@ -68,6 +68,7 @@ export function normalizePublicPokerIdentity(value, { storageBaseUrl = "" } = {}
 }
 
 export function projectPublicPokerIdentity(row, { storageBaseUrl = "" } = {}) {
+  if (row?.public_profile_blocked !== false) return null;
   const handle = normalizeHandle(row?.handle);
   const displayName = normalizeDisplayName(row?.display_name ?? row?.displayName);
   if (!handle || !displayName) {

@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createPokerTableWithState } from "../../../netlify/functions/_shared/poker-table-init.mjs";
 import { createContinuousBotTableRepository } from "./continuous-bot-table-repository.mjs";
+
+function enableAccountDeletion(t) {
+  const previous = process.env.ACCOUNT_DELETION_ENABLED;
+  process.env.ACCOUNT_DELETION_ENABLED = "1";
+  t.after(() => {
+    if (previous === undefined) delete process.env.ACCOUNT_DELETION_ENABLED;
+    else process.env.ACCOUNT_DELETION_ENABLED = previous;
+  });
+}
 
 const PROFILE = {
   profile_key: "CONTINUOUS_BOT_DEFAULT",
@@ -164,7 +174,8 @@ test("setDesiredState rejects a desired-count jump larger than the ramp-up step"
   assert.equal(updateCalled, false);
 });
 
-test("reconcile creates at most two missing tables per sweep", async () => {
+test("reconcile creates at most two missing tables per sweep with Account Deletion enabled", async (t) => {
+  enableAccountDeletion(t);
   const createdTableIds = [
     "00000000-0000-4000-8000-000000000821",
     "00000000-0000-4000-8000-000000000822"
@@ -657,4 +668,68 @@ test("reconcile treats an enabled profile with unprovisioned tier 100 as control
   assert.equal(result.controlledInactive, true);
   assert.equal(result.reason, "tier_unprovisioned");
   assert.deepEqual(result.createdTableIds, []);
+});
+
+
+test("table creation limits the system-owner exception and retains human lifecycle fencing", async (t) => {
+  enableAccountDeletion(t);
+  const human = "00000000-0000-4000-8000-000000000901";
+  const system = { userId: null, lifecycleKind: "CONTINUOUS_BOT", managedProfileKey: "CONTINUOUS_BOT_DEFAULT", isSinglePlayer: false };
+  const options = { maxPlayers: 6, stakesJson: '{"sb":1,"bb":2}', buyIn: 100 };
+  function fixture({ present = true, deleting = false } = {}) {
+    const calls = [];
+    const tx = { unsafe: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql.includes("to_regclass")) return [{ available: true }];
+      if (sql.includes("pending_tables")) return [{ count: 0 }];
+      if (sql.includes("from auth.users")) return [{ present, deleting }];
+      if (sql.includes("insert into public.poker_tables")) return [{ id: "00000000-0000-4000-8000-000000000902" }];
+      if (sql.includes("insert into public.chips_accounts")) return [{ id: "escrow" }];
+      return [];
+    } };
+    return { tx, calls };
+  }
+  await t.test("trusted managed system table creates only empty state and escrow, without a human lifecycle lookup", async () => {
+    const { tx, calls } = fixture();
+    await createPokerTableWithState(tx, { ...options, ...system });
+    assert.equal(calls.length, 3);
+    assert(calls[0].sql.includes("insert into public.poker_tables"));
+    assert.equal(calls[0].params[3], null);
+    assert.deepEqual(calls[1].params[1].stacks, {});
+    assert.equal(calls[1].params[1].pot, 0);
+    assert(calls[2].sql.includes("insert into public.chips_accounts"));
+    assert(calls.every(c => !c.sql.includes("chips_entries") && !c.sql.includes("chips_transactions")));
+  });
+  for (const [name, override] of [
+    ["STANDARD without owner", { lifecycleKind: "STANDARD" }],
+    ["missing managed profile", { managedProfileKey: null }],
+    ["unknown managed profile", { managedProfileKey: "OTHER" }],
+    ["Single Player", { isSinglePlayer: true }],
+    ["missing identity", { userId: undefined }],
+    ["invalid identity", { userId: "not-a-uuid" }]
+  ]) await t.test(name + " cannot bypass the human guard", async () => {
+    const { tx, calls } = fixture();
+    await assert.rejects(createPokerTableWithState(tx, { ...options, ...system, ...override }), { code: "invalid_identity" });
+    assert(!calls.some(c => /insert into/i.test(c.sql)));
+  });
+  for (const single of [false, true]) await t.test((single ? "Single Player" : "STANDARD") + " human keeps slot→lifecycle lock→active check→INSERT order", async () => {
+    const { tx, calls } = fixture();
+    await createPokerTableWithState(tx, { ...options, userId: human, isSinglePlayer: single });
+    const slot = calls.findIndex(c => c.params[0] === "poker-table-slots:v1:" + human);
+    const fence = calls.findIndex(c => c.params[0] === "account-lifecycle:" + human);
+    const check = calls.findIndex(c => c.sql.includes("from auth.users"));
+    const insert = calls.findIndex(c => c.sql.includes("insert into public.poker_tables"));
+    assert(slot >= 0 && slot < fence && fence < check && check < insert);
+  });
+  for (const [name, state, context] of [
+    ["deleting STANDARD human", { deleting: true }, {}],
+    ["deleting Single Player human", { deleting: true }, { isSinglePlayer: true }],
+    ["missing human account", { present: false }, {}],
+    ["managed metadata with a deleting human owner", { deleting: true }, system]
+  ]) await t.test(name + " remains rejected before writes", async () => {
+    const { tx, calls } = fixture(state);
+    await assert.rejects(createPokerTableWithState(tx, { ...options, ...context, userId: human }), { code: "account_not_active" });
+    assert(calls.some(c => c.params[0] === "account-lifecycle:" + human));
+    assert(!calls.some(c => /insert into/i.test(c.sql)));
+  });
 });

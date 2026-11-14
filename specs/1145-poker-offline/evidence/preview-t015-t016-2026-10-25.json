@@ -1,0 +1,77 @@
+{
+  "origin": "https://6ade792e895465f3e23b5e56--playkcswh.netlify.app",
+  "lobby": {
+    "offline": "OFFLINE\nYOUR TABLE. ANYWHERE.\nPoker Offline\n\nPlay with bots, even without internet.\n\n100\n500\n1000\nPLAY NOW\n5,000 Offline Chips\nDevice-local. Independent of online CH.\nFree refill\nReset Offline Progress\n\nClearing app data removes Offline progress.",
+    "radios": 0,
+    "tiers": [
+      {
+        "value": "100",
+        "class": "quick-tier"
+      },
+      {
+        "value": "500",
+        "class": "quick-tier"
+      },
+      {
+        "value": "1000",
+        "class": "quick-tier"
+      }
+    ],
+    "playClass": "tile-action"
+  },
+  "queue": {
+    "selectedWithoutExecution": true,
+    "executedFoldOnce": true,
+    "uniqueExecutions": 1,
+    "clearedOnBackResume": true
+  },
+  "resumed": {
+    "handId": "ws_hand_offline-7de8cffc-1462-4b53-8aeb-86dec9ac5468_2_5",
+    "folded": false,
+    "members": [
+      {
+        "userId": "offline-human",
+        "seat": 1
+      },
+      {
+        "userId": "bot-offline-1",
+        "seat": 2
+      },
+      {
+        "userId": "bot-offline-2",
+        "seat": 3
+      },
+      {
+        "userId": "bot-offline-3",
+        "seat": 4
+      },
+      {
+        "userId": "bot-offline-4",
+        "seat": 5
+      }
+    ],
+    "wallet": 4500
+  },
+  "final": {
+    "wallet": 4998,
+    "session": null
+  },
+  "reference": {
+    "scene": {
+      "x": 0,
+      "y": 0,
+      "width": 915,
+      "height": 412,
+      "top": 0,
+      "right": 915,
+      "bottom": 412,
+      "left": 0
+    },
+    "actionClass": "poker-action-btn poker-action-btn--fold",
+    "preactionClass": "poker-action-toggle poker-action-toggle--fold",
+    "mode": "unmodified Online renderer built-in demo, no tableId/login/JOIN"
+  },
+  "attempts": [],
+  "network": [],
+  "errors": []
+}

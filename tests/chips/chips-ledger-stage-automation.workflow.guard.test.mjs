@@ -278,7 +278,7 @@ assert.match(stageJobIf, /github\.ref == 'refs\/heads\/main'/);
 assert.match(stageJobIf, /github\.repository == 'krzysztofcal\/arcadePlatform'/);
 assert.match(
   stageJobIf,
-  /if: \$\{\{ \(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-selector-diagnostic' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner && github\.ref == 'refs\/heads\/main'\) \|\| \(vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' &&/,
+  /if: \$\{\{ github\.ref == 'refs\/heads\/main' && github\.triggering_actor == github\.repository_owner && \(github\.event_name == 'schedule' \|\| github\.actor == github\.repository_owner\) && \(\(github\.event_name == 'workflow_dispatch' && inputs\.mode == 'bot-only-7d-selector-diagnostic' && github\.repository == 'krzysztofcal\/arcadePlatform' && github\.event\.repository\.fork != true && github\.actor == github\.repository_owner && github\.ref == 'refs\/heads\/main'\) \|\| \(vars\.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED == '1' &&/,
 );
 assert.match(stageJobIf, /github\.event\.repository\.fork != true/);
 assert.match(stageJobIf, /github\.actor == github\.repository_owner/);
@@ -473,7 +473,7 @@ assert.deepEqual(Object.keys(parsedProductionWorkflow.on?.workflow_dispatch?.inp
 ].sort(), "Production dispatch input set");
 assert.deepEqual(
   parsedProductionWorkflow.on.workflow_dispatch.inputs.policy.options,
-  ["existing-30d", "bot-only-7d", "closed-human-30d", "escrow"],
+  ["existing-30d", "bot-only-7d", "closed-human-30d", "escrow", "retention-12m"],
   "Production must expose exactly one fixed policy choice per dispatch",
 );
 assert.deepEqual(
@@ -509,6 +509,8 @@ for (const character of productionJobIf) {
 assert.equal(productionJobIfParenthesisBalance, 0, "production-archive.if parentheses must balance");
 assert.match(productionJobIf, /inputs\.mode != 'automatic'/);
 assert.match(productionJobIf, /github\.actor == github\.repository_owner/);
+// #1159 T004: a re-run keeps github.actor, so the re-running actor must be the owner too.
+assert.match(productionJobIf, /github\.actor == github\.repository_owner && github\.triggering_actor == github\.repository_owner/);
 assert.match(productionWorkflow, /test "\$GITHUB_ACTOR" = "\$GITHUB_REPOSITORY_OWNER"/);
 assert.match(productionWorkflow, /node scripts\/ops\/chips-ledger-production-automation\.mjs/);
 assert.match(productionWorkflow, /--policy "\$PRODUCTION_POLICY"/);
@@ -519,6 +521,11 @@ assert.match(productionWorkflow, /test -z "\$PRODUCTION_CONFIRMATION"/);
 assert.match(productionWorkflow, /--table-id "\$PRODUCTION_TABLE_ID"/);
 assert.match(productionWorkflow, /--cutoff "\$PRODUCTION_CUTOFF"/);
 assert.match(productionWorkflow, /--completion-confirmation "\$PRODUCTION_COMPLETION_CONFIRMATION"/);
+// #1157: retention-12m runs only the settled retention script, never a cutoff override.
+assert.match(productionWorkflow, /test "\$PRODUCTION_MODE" = "diagnostic" \|\| test "\$PRODUCTION_MODE" = "canary" \|\| test "\$PRODUCTION_MODE" = "automatic"\n\s+test -z "\$CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256"\n\s+test -z "\$PRODUCTION_RECOVERY_OBJECT_PATH"/);
+assert.match(productionWorkflow, /exec node scripts\/ops\/chips-ledger-settled-retention\.mjs "\$\{args\[@\]\}"/);
+assert.match(productionWorkflow, /args=\(--target production --mode "\$PRODUCTION_MODE"\)/);
+assert.doesNotMatch(productionWorkflow, /chips-ledger-settled-retention\.mjs[^\n]*--cutoff/);
 const productionEnv = productionJob.env;
 assert.deepEqual(Object.keys(productionEnv).sort(), [
   "CHIPS_LEDGER_PRODUCTION_ACCOUNT_IDS_SHA256",
@@ -629,7 +636,7 @@ fi
     return { ...result, calls: fs.readFileSync(log, "utf8") };
   };
   assert.equal(run("02:09", { CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED: "0" }).calls, "");
-  for (const [slot, policy] of [["02:09", "existing-30d"], ["03:09", "bot-only-7d"], ["03:24", "closed-human-30d"], ["03:39", "escrow"]]) {
+  for (const [slot, policy] of [["02:09", "existing-30d"], ["03:09", "bot-only-7d"], ["03:24", "closed-human-30d"], ["03:39", "retention-12m"], ["04:39", "escrow"], ["02:39", "escrow"]]) {
     const result = run(slot);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.calls, new RegExp(`policy=${policy}`));
@@ -663,3 +670,93 @@ fi
     assert.doesNotMatch(fs.readFileSync(file, "utf8"), /production-retention\/|production-retention-dispatch/);
   }
 } finally { fs.rmSync(schedulerFixture, { recursive: true, force: true }); }
+
+// #1159 T004-3: evaluate the real owner-gated Stage job conditions. A re-run keeps
+// github.actor, so dispatch and re-run both require the owner and refs/heads/main.
+function evaluateStageCondition(condition, { event = "workflow_dispatch", ref = "refs/heads/main", actor = "krzysztofcal",
+  triggeringActor = actor, mode = "external-scheduled-automatic", enabled = "1" } = {}) {
+  const js = condition.replace(/^\$\{\{ | \}\}$/g, "")
+    .replaceAll("github.event.repository.fork", "false")
+    .replaceAll("github.event_name", JSON.stringify(event))
+    .replaceAll("github.ref", JSON.stringify(ref))
+    .replaceAll("github.triggering_actor", JSON.stringify(triggeringActor))
+    .replaceAll("github.actor", JSON.stringify(actor))
+    .replaceAll("github.repository_owner", JSON.stringify("krzysztofcal"))
+    .replaceAll("github.repository", JSON.stringify("krzysztofcal/arcadePlatform"))
+    .replaceAll("vars.CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED", JSON.stringify(enabled))
+    .replaceAll("inputs.mode", JSON.stringify(mode))
+    .replaceAll("'", "\"").replaceAll(" == ", " === ").replaceAll(" != ", " !== ");
+  assert.match(js, /^[\s"a-z0-9_\-/[\].()|&=!]+$/i, js);
+  return Function(`return (${js});`)();
+}
+const stageOwnerConditions = {
+  "stage-archive": stageJobIfExpression,
+  "stage-supabase-resource-health": YAML.parse(fs.readFileSync(".github/workflows/stage-supabase-resource-health.yml", "utf8")).jobs.monitor.if,
+  "stage-bonus-campaigns": YAML.parse(fs.readFileSync(".github/workflows/stage-bonus-campaigns.yml", "utf8")).jobs["stage-operator"].if,
+  "chips-ledger-stage-legacy-allowlist": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-legacy-allowlist.yml", "utf8")).jobs.prepare.if,
+  "chips-ledger-stage-legacy-allowlist-freeze": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-legacy-allowlist-freeze.yml", "utf8")).jobs.freeze.if,
+  "chips-ledger-stage-timeout-diagnostic": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-timeout-diagnostic.yml", "utf8")).jobs["stage-timeout-diagnostic"].if,
+  "chips-ledger-stage-settled-retention": YAML.parse(fs.readFileSync(".github/workflows/chips-ledger-stage-settled-retention.yml", "utf8")).jobs["stage-settled-retention"].if,
+};
+for (const [name, condition] of Object.entries(stageOwnerConditions)) {
+  assert.equal(evaluateStageCondition(condition), true, `${name}: owner main dispatch`);
+  assert.equal(evaluateStageCondition(condition, { ref: "refs/heads/feature" }), false, `${name}: other branch`);
+  assert.equal(evaluateStageCondition(condition, { triggeringActor: "release-agent[bot]" }), false, `${name}: foreign re-run of an owner run`);
+  assert.equal(evaluateStageCondition(condition, { actor: "release-agent[bot]" }), false, `${name}: foreign dispatch`);
+}
+for (const name of ["chips-ledger-stage-legacy-allowlist", "chips-ledger-stage-legacy-allowlist-freeze", "chips-ledger-stage-timeout-diagnostic", "chips-ledger-stage-settled-retention"]) {
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { enabled: "0", mode: "automatic" }), false, `${name}: automation switch still applies`);
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule" }), false, `${name}: only workflow_dispatch`);
+}
+for (const name of ["stage-archive", "stage-supabase-resource-health"]) {
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule" }), true, `${name}: schedule keeps running`);
+  assert.equal(evaluateStageCondition(stageOwnerConditions[name], { event: "schedule", triggeringActor: "release-agent[bot]" }), false, `${name}: foreign re-run of a schedule run`);
+}
+for (const mode of RETAINED_MODES) {
+  assert.equal(evaluateStageCondition(stageJobIfExpression, { mode, ref: "refs/heads/feature" }), false, `${mode}: other branch`);
+  assert.equal(evaluateStageCondition(stageJobIfExpression, { mode, triggeringActor: "release-agent[bot]" }), false, `${mode}: foreign re-run`);
+}
+assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "external-existing-30d" }), true, "VPS daily dispatch");
+assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "missing-table-bot-retirement-canary", enabled: "0" }), true, "owner canary without automation");
+assert.equal(evaluateStageCondition(stageJobIfExpression, { mode: "external-scheduled-automatic", enabled: "0" }), false, "automation switch still applies");
+
+const STAGE_ENVIRONMENT_JOBS = [
+  ["chips-ledger-stage-legacy-allowlist.yml", "prepare"],
+  ["chips-ledger-stage-legacy-allowlist-freeze.yml", "freeze"],
+  ["chips-ledger-stage-timeout-diagnostic.yml", "stage-timeout-diagnostic"],
+  ["chips-ledger-stage-scheduled-automation.yml", "stage-archive"],
+  ["chips-ledger-stage-settled-retention.yml", "stage-settled-retention"],
+  ["stage-bonus-campaigns.yml", "stage-operator"],
+  ["stage-supabase-resource-health.yml", "monitor"],
+  ["db-stage-apply-pr.yml", "apply-stage"],
+];
+for (const [file, job] of STAGE_ENVIRONMENT_JOBS) {
+  const stageWorkflow = YAML.parse(fs.readFileSync(`.github/workflows/${file}`, "utf8"));
+  assert.equal(stageWorkflow.jobs?.[job]?.environment, "stage-automation", `${file}: ${job} must use stage-automation`);
+}
+
+// #1157: the Stage settled retention workflow is owner-dispatch only and shares
+// the Stage automation concurrency group; diagnostic and canary need no switch.
+const settledWorkflowText = fs.readFileSync(".github/workflows/chips-ledger-stage-settled-retention.yml", "utf8");
+const settledWorkflow = YAML.parse(settledWorkflowText);
+assert.deepEqual(Object.keys(settledWorkflow.on), ["workflow_dispatch"]);
+assert.deepEqual(settledWorkflow.on.workflow_dispatch.inputs.mode.options, ["diagnostic", "canary", "automatic"]);
+assert.deepEqual(Object.keys(settledWorkflow.on.workflow_dispatch.inputs).sort(), ["batch_id", "confirmation", "cutoff", "mode"]);
+assert.equal(settledWorkflow.concurrency.group, "chips-ledger-stage-automation");
+assert.deepEqual(Object.keys(settledWorkflow.jobs), ["stage-settled-retention"]);
+const settledJobIf = settledWorkflow.jobs["stage-settled-retention"].if;
+for (const mode of ["diagnostic", "canary"]) {
+  assert.equal(evaluateStageCondition(settledJobIf, { mode, enabled: "0" }), true, `settled ${mode} without automation switch`);
+}
+assert.equal(evaluateStageCondition(settledJobIf, { mode: "automatic" }), true, "settled automatic with switch");
+assert.equal(evaluateStageCondition(settledJobIf, { mode: "diagnostic", event: "schedule" }), false, "settled: dispatch only");
+assert.deepEqual(Object.keys(settledWorkflow.jobs["stage-settled-retention"].env).sort(), [
+  "CHIPS_LEDGER_STAGE_AUTOMATION_ENABLED",
+  "DEPLOYED_COMMIT_SHA",
+  "EXPECTED_SUPABASE_STAGE_PROJECT_REF",
+  "SUPABASE_STAGE_DB_URL",
+  "SUPABASE_STAGE_SERVICE_ROLE_KEY",
+  "SUPABASE_STAGE_URL",
+]);
+assert.doesNotMatch(settledWorkflowText, /SUPABASE_PROD_|--target production/);
+assert.match(settledWorkflowText, /node scripts\/ops\/chips-ledger-settled-retention\.mjs "\$\{args\[@\]\}"/);

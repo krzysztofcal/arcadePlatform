@@ -1,0 +1,143 @@
+{
+  "origin": "https://6ade583710baf8078474cb5a--playkcswh.netlify.app",
+  "geometry": [
+    {
+      "viewport": {
+        "w": 412,
+        "h": 915
+      },
+      "screen": {
+        "x": 0,
+        "y": 0,
+        "w": 412,
+        "h": 915
+      },
+      "hero": {
+        "x": 116.9000015258789,
+        "y": 799.6875,
+        "w": 121.00000762939453,
+        "h": 88
+      },
+      "cards": 2,
+      "clock": 1
+    },
+    {
+      "viewport": {
+        "w": 915,
+        "h": 412
+      },
+      "screen": {
+        "x": 0,
+        "y": 0,
+        "w": 915,
+        "h": 412
+      },
+      "hero": {
+        "x": 442.9637756347656,
+        "y": 321.90216064453125,
+        "w": 94.05795288085938,
+        "h": 68.40582275390625
+      },
+      "cards": 2,
+      "clock": 1
+    }
+  ],
+  "timeout": {
+    "userId": "offline-human",
+    "type": "FOLD",
+    "source": "timeout",
+    "at": 1792956726394
+  },
+  "autoNextMs": 3003,
+  "botDelays": [
+    {
+      "scheduled": 1689,
+      "observed": 1695
+    },
+    {
+      "scheduled": 1877,
+      "observed": 1883
+    },
+    {
+      "scheduled": 1444,
+      "observed": 1447
+    },
+    {
+      "scheduled": 1105,
+      "observed": 1107
+    },
+    {
+      "scheduled": 1016,
+      "observed": 1019
+    },
+    {
+      "scheduled": 1593,
+      "observed": 1596
+    },
+    {
+      "scheduled": 1520,
+      "observed": 1534
+    },
+    {
+      "scheduled": 1025,
+      "observed": 1027
+    },
+    {
+      "scheduled": 1461,
+      "observed": 1463
+    },
+    {
+      "scheduled": 1590,
+      "observed": 1592
+    }
+  ],
+  "settled": {
+    "handId": "ws_hand_offline-7a59e17a-3187-4522-9fec-0e8cb565b1c1_1_3",
+    "stacks": {
+      "offline-human": 100,
+      "bot-offline-1": 104,
+      "bot-offline-2": 96
+    },
+    "pot": 0
+  },
+  "beforeRebuy": {
+    "wallet": 4900,
+    "stack": 98
+  },
+  "afterRebuy": {
+    "wallet": 4898,
+    "stack": 100
+  },
+  "afterRefill": 5000,
+  "parked": {
+    "wallet": 5000,
+    "clock": {
+      "paused": true,
+      "durationMs": 3000,
+      "remainingMs": 2796,
+      "dueAt": 1792956746983
+    }
+  },
+  "resumed": {
+    "wallet": 5000,
+    "clock": {
+      "paused": false,
+      "durationMs": 3000,
+      "remainingMs": 2796,
+      "dueAt": 1792956749572
+    }
+  },
+  "dialogs": {
+    "newGameCancel": "PASS",
+    "resetEscape": "PASS",
+    "leaveEscape": "PASS",
+    "leaveConfirm": "PASS"
+  },
+  "final": {
+    "wallet": 5100,
+    "session": null
+  },
+  "transports": [],
+  "network": [],
+  "errors": []
+}

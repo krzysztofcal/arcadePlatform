@@ -217,3 +217,20 @@ test("createTableSnapshotLoader collapses unknown typed fixture failures to snap
   const result = await loader({ tableId: "table_internal", userId: "u1" });
   assert.deepEqual(result, { ok: false, code: "snapshot_failed" });
 });
+
+
+test("missing deal key preserves persisted cards and rejects seed-only replay", async (t) => {
+  const previous = process.env.POKER_DEAL_SECRET;
+  delete process.env.POKER_DEAL_SECRET;
+  t.after(() => { if (previous === undefined) delete process.env.POKER_DEAL_SECRET; else process.env.POKER_DEAL_SECRET = previous; });
+  const community = [{ r: "2", s: "C" }, { r: "3", s: "D" }, { r: "4", s: "H" }];
+  const state = { phase: "HAND_DONE", handId: "h-existing", handSeed: "existing-seed", communityDealt: 3, community, seats: [{ userId: "u1", seatNo: 1 }], stacks: { u1: 100 }, pot: 0 };
+  const tx = makeTx({ seatRows: [{ user_id: "u1", seat_no: 1, status: "INACTIVE", is_bot: false }], stateRow: { version: 7, state }, holeCardRows: [{ user_id: "u1", cards: [{ r: "A", s: "S" }, { r: "K", s: "H" }] }] });
+  const result = await loadSnapshotInTx({ tx, tableId: "table_1", userId: "observer" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.snapshot.state.state.community, community);
+  assert.deepEqual(result.snapshot.state.state.stacks, { u1: 100 });
+  assert.equal(result.snapshot.state.version, 7);
+  const { replayFromLogs } = await import("../../../netlify/functions/_shared/poker-replay.mjs");
+  assert.throws(() => replayFromLogs({ startStatePrivate: { ...state, holeCardsByUserId: { u1: [{ r: "A", s: "S" }, { r: "K", s: "H" }] } }, actions: [] }), /deal_secret_missing/);
+});

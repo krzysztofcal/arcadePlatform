@@ -1,0 +1,339 @@
+{
+  "origin": "https://deploy-preview-1147--playkcswh.netlify.app",
+  "runtimeSha": "ddb21224d99e07dead0164bf14dcbfb52356dec4",
+  "startedAt": "2026-10-24T21:57:20.040Z",
+  "steps": [
+    {
+      "time": "2026-10-24T21:57:23.498Z",
+      "type": "login_lobby",
+      "url": "https://deploy-preview-1147--playkcswh.netlify.app/poker/",
+      "snapshot": null,
+      "buttons": [
+        {
+          "id": "sbToggle",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "avatarButton",
+          "text": "PL",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "PL",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "EN",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "‹",
+          "disabled": true
+        },
+        {
+          "id": "",
+          "text": "›",
+          "disabled": false
+        },
+        {
+          "id": "pokerQuickSeat",
+          "text": "PLAY NOW",
+          "disabled": true
+        },
+        {
+          "id": "pokerSinglePlay",
+          "text": "PLAY VS BOTS",
+          "disabled": true
+        },
+        {
+          "id": "",
+          "text": "MODE PREVIEW →",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "MODE PREVIEW →",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "MODE PREVIEW →",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "Online TablesCREATE · JOIN · REFRESH",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "ProgressionBANKROLL & TIERS",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "Daily BonusDAILY UTC REWARDS",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "I decline",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "That's ok",
+          "disabled": false
+        }
+      ],
+      "copy": [
+        "",
+        "Progression unavailable. Refresh to retry.",
+        "Progression unavailable. Refresh to retry."
+      ]
+    },
+    {
+      "time": "2026-10-24T21:57:32.795Z",
+      "type": "status",
+      "url": "https://deploy-preview-1147--playkcswh.netlify.app/poker/",
+      "snapshot": null,
+      "buttons": [
+        {
+          "id": "sbToggle",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "avatarButton",
+          "text": "BB",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "PL",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "EN",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "‹",
+          "disabled": true
+        },
+        {
+          "id": "",
+          "text": "›",
+          "disabled": false
+        },
+        {
+          "id": "pokerQuickSeat",
+          "text": "PLAY NOW",
+          "disabled": false
+        },
+        {
+          "id": "pokerSinglePlay",
+          "text": "PLAY VS BOTS",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "MODE PREVIEW →",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "MODE PREVIEW →",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "MODE PREVIEW →",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "Online TablesCREATE · JOIN · REFRESH",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "ProgressionBANKROLL & TIERS",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "Daily BonusDAILY UTC REWARDS",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "I decline",
+          "disabled": false
+        },
+        {
+          "id": "",
+          "text": "That's ok",
+          "disabled": false
+        }
+      ],
+      "copy": [
+        "",
+        "Auto-join · the hand starts when the table is ready.",
+        "Dedicated table · 1 human vs bots · max 1,000 CH buy-in."
+      ]
+    },
+    {
+      "time": "2026-10-24T21:58:16.156Z",
+      "type": "FAIL",
+      "command": "online",
+      "reason": "timeout_joined_snapshot",
+      "status": {
+        "url": "https://deploy-preview-1147--playkcswh.netlify.app/poker/table-v2.html?tableId=baae0c75-86b5-4ba1-8342-faee155d049b&seatNo=4&autoJoin=1",
+        "snapshot": {
+          "sequence": 9,
+          "version": 13,
+          "seat": null,
+          "hand": {
+            "handId": "ws_hand_baae0c75-86b5-4ba1-8342-faee155d049b_0_3",
+            "status": "TURN",
+            "round": "TURN",
+            "dealerSeatNo": 1
+          },
+          "turn": {
+            "userId": "030b26ff-a315-58eb-a2ae-1ac765541957",
+            "seat": 2,
+            "startedAt": 1792879094131,
+            "deadlineAt": 1792879114131
+          },
+          "pot": {
+            "total": 28,
+            "sidePots": []
+          },
+          "seats": [
+            {
+              "seatNo": 1,
+              "userId": "2d5955d2-6e5b-5f89-bea5-3309d8eb142c",
+              "isBot": true,
+              "status": "ACTIVE"
+            },
+            {
+              "seatNo": 2,
+              "userId": "030b26ff-a315-58eb-a2ae-1ac765541957",
+              "isBot": true,
+              "status": "ACTIVE"
+            },
+            {
+              "seatNo": 3,
+              "userId": "460d3a96-da87-5993-a075-dad865eed8f8",
+              "isBot": true,
+              "status": "ACTIVE"
+            }
+          ],
+          "stacks": {
+            "2d5955d2-6e5b-5f89-bea5-3309d8eb142c": 90,
+            "030b26ff-a315-58eb-a2ae-1ac765541957": 92,
+            "460d3a96-da87-5993-a075-dad865eed8f8": 90
+          },
+          "legal": {
+            "seat": null,
+            "actions": []
+          }
+        },
+        "buttons": [
+          {
+            "id": "pokerMenuToggle",
+            "text": "",
+            "disabled": false
+          },
+          {
+            "id": "pokerReactionHistoryToggle",
+            "text": "💬1",
+            "disabled": false
+          },
+          {
+            "id": "pokerHandInfoToggle",
+            "text": "🃏",
+            "disabled": false
+          }
+        ],
+        "copy": []
+      }
+    }
+  ],
+  "sockets": [
+    {
+      "url": "wss://ws-preview.kcswh.pl/ws",
+      "time": "2026-10-24T21:57:23.393Z"
+    },
+    {
+      "url": "wss://ws-preview.kcswh.pl/ws",
+      "time": "2026-10-24T21:57:47.845Z"
+    }
+  ],
+  "sent": [
+    {
+      "time": "2026-10-24T21:57:48.501Z",
+      "type": "join",
+      "tableId": "baae0c75-86b5-4ba1-8342-faee155d049b"
+    }
+  ],
+  "errors": [],
+  "finishedAt": "2026-10-24T21:58:16.370Z"
+}

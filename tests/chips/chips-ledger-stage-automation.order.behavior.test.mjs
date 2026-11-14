@@ -15,6 +15,11 @@ import {
   buildRecoveryManifestObjectPath,
 } from "../../scripts/ops/chips-ledger-archive-store.mjs";
 
+// Own only this process's synthetic fixtures; never scan existing /tmp or operational evidence.
+const testTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "arcade-test-ledger-order-"));
+// Normal completion and uncaught assertions run this; fatal signals cannot guarantee cleanup.
+process.once("exit", () => fs.rmSync(testTempRoot, { recursive: true, force: true }));
+
 const STAGE_URL = "https://krydukthwdvccggbyjfw.supabase.co";
 const ENV = {
   SUPABASE_STAGE_DB_URL: "postgresql://postgres.krydukthwdvccggbyjfw@db.krydukthwdvccggbyjfw.supabase.co:5432/postgres",
@@ -131,7 +136,7 @@ const result = await runStageAutomation({
     sql: cycleSql,
     fetch,
     storageTarget,
-    tempRoot: fs.mkdtempSync(path.join(os.tmpdir(), "chips-ledger-stage-order-")),
+    tempRoot: fs.mkdtempSync(path.join(testTempRoot, "chips-ledger-stage-order-")),
     verifyBucket: async () => events.push({ type: "bucket-verified" }),
     ensureArchiveBucket: async () => events.push({ type: "bucket-ensured" }),
     exportArchive: async ({ argv }) => {

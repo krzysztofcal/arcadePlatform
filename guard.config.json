@@ -12,6 +12,16 @@
       "landing/*.html",
       "landing/legal/*.html",
       "legal/*.html",
+      ":(exclude)legal/terms.2026-10-26-a1.pl.html",
+      ":(exclude)legal/terms.2026-10-26-a1.en.html",
+      ":(exclude)legal/privacy.2026-10-26-a1.pl.html",
+      ":(exclude)legal/privacy.2026-10-26-a1.en.html",
+      ":(exclude)legal/terms.2026-10-28-a2.pl.html",
+      ":(exclude)legal/terms.2026-10-28-a2.en.html",
+      ":(exclude)legal/privacy.2026-10-28-a2.pl.html",
+      ":(exclude)legal/privacy.2026-10-28-a2.en.html",
+      ":(exclude)legal/privacy.2026-11-12-a3.pl.html",
+      ":(exclude)legal/privacy.2026-11-12-a3.en.html",
       "tests/index.html"
     ]
   },

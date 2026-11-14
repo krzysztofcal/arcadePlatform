@@ -1,0 +1,39 @@
+{
+  "previewWorkflow": 40203427908,
+  "runtimeSha": "e3020b4f30cdb1cb0a3d13963da0a4a1e25588e5",
+  "onProcess": {
+    "pid": 316167,
+    "ACCOUNT_DELETION_ENABLED": "1",
+    "ownerRootProof": true
+  },
+  "offProcess": {
+    "pid": 316767,
+    "ACCOUNT_DELETION_ENABLED": "0",
+    "restarted": true,
+    "ownerRootProof": true,
+    "agentHealthz": "ok"
+  },
+  "creationWitness": "NOT VERIFIED; no new table in bounded window",
+  "onWindowFinance": {
+    "escrow": 1500,
+    "stacks": 1500,
+    "bankroll100Before": 17253,
+    "bankroll100After": 17253,
+    "newLedgerTransactions": 0
+  },
+  "acceptedRisk": "Owner explicitly waives positive Stage creation witness; existing RED-GREEN and CI PASS; never label absent smoke PASS",
+  "productionPreflight": {
+    "at": "2026-10-25T15:05:13.709629Z",
+    "humans": 0,
+    "pendingPoker": 0,
+    "pendingDeletions": 0,
+    "badEscrow": 0,
+    "openTables": 0,
+    "normalBankroll": 4760,
+    "slowBankroll": 2000,
+    "seedRequired": 600,
+    "desiredTables": 2,
+    "targetBots": 3
+  },
+  "scope": "Merge/deploy #1153 only; prepare but do not merge #1149/#1151; never merge #1152"
+}

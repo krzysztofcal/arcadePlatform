@@ -197,8 +197,11 @@ test('existing deploy-context generator bakes validated pins and refuses incompl
   const {mkdtemp,readFile,writeFile,rm,mkdir,copyFile}=await import('node:fs/promises');
   const {tmpdir}=await import('node:os');const {join,resolve}=await import('node:path');const {spawnSync}=await import('node:child_process');
   const cwd=await mkdtemp(join(tmpdir(),'xp-pin-'));const originalScript=resolve('scripts/generate-build-info.js');
-  const script=join(cwd,'generator-with-approved-stage-floor.cjs');
+  const script=join(cwd,'scripts','generator-with-approved-stage-floor.cjs');
   try{
+    await mkdir(join(cwd,'scripts'),{recursive:true});
+    await mkdir(join(cwd,'shared'),{recursive:true});
+    await copyFile(resolve('shared/netlify-stage-context.cjs'),join(cwd,'shared/netlify-stage-context.cjs'));
     const source=(await readFile(originalScript,'utf8')).replace("stage: '2', prod: '2'","stage: '3', prod: '2'");
     await writeFile(script,source);
     const base={...process.env,CONTEXT:'deploy-preview',XP_REDIS_VERSION:'3',XP_REDIS_ENV:'stage',XP_KEY_NS:namespace};

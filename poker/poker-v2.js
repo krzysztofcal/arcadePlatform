@@ -72,15 +72,7 @@
     QUADS: 8,
     STRAIGHT_FLUSH: 9
   };
-  var POKER_AVATAR_VARIANTS = {
-    'default': true,
-    'comet-blue': true,
-    'falcon-orange': true,
-    'fox-blue': true,
-    'nova-purple': true,
-    'orbit-green': true,
-    'panda-pink': true
-  };
+  var POKER_AVATAR_VARIANTS = Object.fromEntries((window.ArcadeAvatars ? window.ArcadeAvatars.variants : ['default']).concat(['default']).map(function(v){return [v,true];}));
   var BOT_AVATAR_BASE_PATH = '/poker/assets/avatars/bots/';
   var BOT_PRESENTATION_ENTRIES = [
     { key: 'viktor', displayName: 'Viktor', gender: 'male', file: 'bot-male-01-v1.webp' },
@@ -1190,7 +1182,7 @@
   function fetchTableAccess(token){
     if (!token || !tableId) return Promise.reject(new Error('table_access_unauthorized'));
     var url = PROGRESSION_URL + '?tableId=' + encodeURIComponent(tableId);
-    return fetch(url, {
+    return fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, {
       method: 'GET',
       headers: { Authorization: 'Bearer ' + token }
     }).then(function(response){
@@ -3360,6 +3352,11 @@
     if (els.reactionLayer) els.reactionLayer.innerHTML = '';
   }
 
+  // #1140: a block is this client's own filter (avatar, reactions, gifts); seats, turns and chips are untouched.
+  function ugcBlocked(userId){
+    return !!(userId && window.ArcadeUgc && typeof window.ArcadeUgc.isBlocked === 'function' && window.ArcadeUgc.isBlocked(userId));
+  }
+
   function currentSeatOwnerUserId(seatNo){
     for (var i = 0; i < state.seats.length; i++){
       var seat = state.seats[i];
@@ -3583,6 +3580,7 @@
     var entry = findReactionEntry(reactionKey);
     var ownerUserId = currentSeatOwnerUserId(seatNo);
     if (!Number.isInteger(seatNo) || seatNo < 1 || !entry || !ownerUserId) return;
+    if (ugcBlocked(ownerUserId)) return;
     var hasTargetSeatNo = Object.prototype.hasOwnProperty.call(payload, 'targetSeatNo');
     var targetSeatNo = null;
     var targetOwnerUserId = null;
@@ -3716,6 +3714,7 @@
   function seatAvatarSource(seat){
     if (!seat) return '';
     if (seat.isBot && seat.botPresentation) return seat.botPresentation.avatarPath || '';
+    if (ugcBlocked(seat.userId)) return 'blocked';
     var avatar = seat.profile && seat.profile.avatar;
     return avatar ? (avatar.type === 'uploaded' ? avatar.url : 'default:' + avatar.variant) : '';
   }
@@ -3733,11 +3732,11 @@
     avatar.appendChild(fallback);
 
     var imageUrl = seat.isBot && seat.botPresentation ? seat.botPresentation.avatarPath : '';
-    var profileAvatar = !seat.isBot && seat.profile && seat.profile.avatar;
+    var profileAvatar = !seat.isBot && !ugcBlocked(seat.userId) && seat.profile && seat.profile.avatar;
     if (!imageUrl && !profileAvatar) return;
     if (!imageUrl && profileAvatar.type === 'default'){
       avatar.dataset.avatarVariant = profileAvatar.variant;
-      return;
+      imageUrl=window.ArcadeAvatars ? window.ArcadeAvatars.url(profileAvatar.variant) : '';
     }
     if (!imageUrl && profileAvatar.type === 'uploaded') imageUrl = profileAvatar.url;
     if (!imageUrl) return;
@@ -4769,6 +4768,12 @@
     })[0] || null;
   }
   function clearHeroGiftDemo(){ heroGiftDemo = null; renderGiftBadges(); }
+  // #1140: gift badges of a blocked sender are hidden. Live gifts remember their sender; gifts restored from the
+  // server snapshot carry no sender and stay as they are.
+  function visibleGifts(gifts){
+    return gifts.filter(function(gift){ return !(gift && gift.senderUserId && ugcBlocked(gift.senderUserId)); });
+  }
+
   function renderGiftBadges(){
     var hero = giftDemoHeroSeat();
     if (heroGiftDemo && (!hero || heroGiftDemo.tableId !== state.tableId
@@ -4781,7 +4786,7 @@
       var hud = renderedSeatHud[seat.seatNo];
       if (!hud || !seat.userId) return;
       var demo = !!heroGiftDemo && seat.seatNo === heroGiftDemo.seatNo && seat.userId === heroGiftDemo.userId;
-      var gifts = demo ? [{giftKey:'beer'},{giftKey:'pizza'},{giftKey:'whisky'}] : giftsBySeat[seat.seatNo] || [];
+      var gifts = demo ? [{giftKey:'beer'},{giftKey:'pizza'},{giftKey:'whisky'}] : visibleGifts(giftsBySeat[seat.seatNo] || []);
       if (hud.nameNode){
         if (demo) hud.nameNode.dataset.giftDemo = 'true';
         else delete hud.nameNode.dataset.giftDemo;
@@ -4847,10 +4852,11 @@
         || !Number.isInteger(event.senderSeatNo) || !Number.isInteger(event.recipientSeatNo) || giftEventIds.has(event.eventId)) return;
     giftEventIds.add(event.eventId);
     if (giftEventIds.size > 256) giftEventIds.delete(giftEventIds.values().next().value);
+    if (ugcBlocked(currentSeatOwnerUserId(event.senderSeatNo))) return;
     syncGiftOwners();
     if (!giftOwners[event.recipientSeatNo]) return;
     var recent = giftsBySeat[event.recipientSeatNo] || [];
-    giftsBySeat[event.recipientSeatNo] = [{ eventId: event.eventId, giftKey: event.giftKey }].concat(recent).slice(0, 3);
+    giftsBySeat[event.recipientSeatNo] = [{ eventId: event.eventId, giftKey: event.giftKey, senderUserId: currentSeatOwnerUserId(event.senderSeatNo) || null }].concat(recent).slice(0, 3);
     renderGiftBadges();
     if (els.giftNotice) {
       els.giftNotice.textContent = gift.emoji + ' ' + t('pokerGiftSent', 'Gift sent') + ' · S' + event.recipientSeatNo;
@@ -5291,6 +5297,9 @@
     });
     renderGiftBadges();
     syncGiftShop();
+    if (window.ArcadeUgc) window.ArcadeUgc.tablePlayers(state.tableId, state.seats.filter(function(seat){
+      return seat && seat.userId && !seat.isBot && seat.userId !== state.currentUserId;
+    }).map(function(seat){ return { userId: seat.userId, displayName: getPublicDisplayName(seat), isBot: false }; }));
     if (quickFocus && giftOwners[quickFocus.seatNo] === quickFocus.userId){
       var hud = renderedSeatHud[quickFocus.seatNo];
       var picker = hud && hud.quickPicker;
@@ -6663,7 +6672,7 @@
   }
 
   function normalizeLeaveDestination(destination){
-    return '/poker/';
+    return window.MOBILE_POKER_CONFIG ? '/poker/index.html' : '/poker/';
   }
 
   function navigateToDestination(destination){
@@ -7036,6 +7045,7 @@
     els.menuSignIn = document.getElementById('pokerMenuSignIn');
     els.menuGuestInfo = document.getElementById('pokerMenuGuestInfo');
     bindGiftShop();
+    if (window.ArcadeUgc) window.ArcadeUgc.onChange(function(){ renderSeats(); });
     els.socialSettingsPanel = document.getElementById('pokerSocialSettingsPanel');
     els.socialSettingsClose = document.getElementById('pokerSocialSettingsClose');
     els.reactionBubblesPreference = document.getElementById('pokerReactionBubblesPreference');
@@ -7474,6 +7484,7 @@
           renderInfoPanel();
           renderControls();
         } else if (status === 'command_result') {
+          if(info && info.reason==='terms_required')document.dispatchEvent(new CustomEvent('profile:terms-required'));
           syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
         } else if (status === 'resync'){
           cancelSettlementAnimations();

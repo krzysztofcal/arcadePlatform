@@ -119,7 +119,7 @@ function persistedBootstrapFixturesEnv(fixtures) {
 }
 
 
-async function writePersistedStateFile(fixtures, { accounts = [], pokerTierPolicies, pokerAccessPolicy } = {}) {
+async function writePersistedStateFile(fixtures, { accounts = [], pokerTierPolicies, pokerAccessPolicy, profileTermsPolicy } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ws-protocol-persist-"));
   const filePath = path.join(dir, "persisted-state.json");
   const tables = {};
@@ -132,6 +132,7 @@ async function writePersistedStateFile(fixtures, { accounts = [], pokerTierPolic
   }
   await fs.writeFile(filePath, `${JSON.stringify({
     tables,
+    profileTermsPolicy,
     pokerTierPolicies,
     pokerAccessPolicy,
     ...(Array.isArray(accounts) && accounts.length > 0 ? { accounts } : {})
@@ -636,17 +637,21 @@ test("reaction_send broadcasts an ephemeral table event without stream replay", 
   const fixtures = {
     [tableId]: {
       tableRow: { id: tableId, max_players: 6, status: "active" },
-      seatRows: [{ user_id: "reaction_human", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }],
-      stateRow: { version: 1, state: { handId: null, phase: "LOBBY", stacks: { reaction_human: 100 } } }
+      seatRows: [{ user_id: "00000000-0000-4000-8000-000000000010", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 }],
+      stateRow: { version: 1, state: { handId: null, phase: "LOBBY", stacks: { "00000000-0000-4000-8000-000000000010": 100 } } }
     }
   };
+  const { dir, filePath } = await writePersistedStateFile(fixtures, {
+    profileTermsPolicy: { version: "2026-10-26-a1", active: false, variants_enabled: false }
+  });
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       ...observeOnlyJoinEnv(),
       WS_PRESENCE_TTL_MS: "0",
-      ...persistedBootstrapFixturesEnv(fixtures)
+      ...persistedBootstrapFixturesEnv(fixtures),
+      WS_PERSISTED_STATE_FILE: filePath
     }
   });
 
@@ -656,7 +661,7 @@ test("reaction_send broadcasts an ephemeral table event without stream replay", 
     const observer = await connectClient(port);
     await hello(sender, "req-hello-reaction-sender");
     await hello(observer, "req-hello-reaction-observer");
-    assert.equal((await auth(sender, secret, "reaction_human", "req-auth-reaction-sender")).type, "authOk");
+    assert.equal((await auth(sender, secret, "00000000-0000-4000-8000-000000000010", "req-auth-reaction-sender")).type, "authOk");
     assert.equal((await auth(observer, secret, "reaction_observer", "req-auth-reaction-observer")).type, "authOk");
 
     for (const [socket, suffix] of [[sender, "sender"], [observer, "observer"]]) {
@@ -709,6 +714,7 @@ test("reaction_send broadcasts an ephemeral table event without stream replay", 
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
   }
 }));
 
@@ -721,37 +727,41 @@ test("targeted nice_hand requires the matching settled hand and broadcasts the t
     [tableId]: {
       tableRow: { id: tableId, max_players: 6, status: "active" },
       seatRows: [
-        { user_id: "reaction_sender", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
-        { user_id: "reaction_winner", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 100 }
+        { user_id: "00000000-0000-4000-8000-000000000011", seat_no: 1, status: "ACTIVE", is_bot: false, stack: 100 },
+        { user_id: "00000000-0000-4000-8000-000000000012", seat_no: 2, status: "ACTIVE", is_bot: false, stack: 100 }
       ],
       stateRow: {
         version: 4,
         state: {
           handId,
           phase: "SETTLED",
-          stacks: { reaction_sender: 100, reaction_winner: 100 },
+          stacks: { "00000000-0000-4000-8000-000000000011": 100, "00000000-0000-4000-8000-000000000012": 100 },
           showdown: {
             handId,
             reason: "computed",
             potAwardedTotal: 100,
-            potsAwarded: [{ amount: 100, winners: ["reaction_winner"], eligibleUserIds: ["reaction_sender", "reaction_winner"] }]
+            potsAwarded: [{ amount: 100, winners: ["00000000-0000-4000-8000-000000000012"], eligibleUserIds: ["00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012"] }]
           },
           handSettlement: {
             handId,
             settledAt,
-            payouts: { reaction_winner: 100 }
+            payouts: { "00000000-0000-4000-8000-000000000012": 100 }
           }
         }
       }
     }
   };
+  const { dir, filePath } = await writePersistedStateFile(fixtures, {
+    profileTermsPolicy: { version: "2026-10-26-a1", active: false, variants_enabled: false }
+  });
   const { port, child } = await createServer({
     env: {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       ...observeOnlyJoinEnv(),
       WS_PRESENCE_TTL_MS: "0",
-      ...persistedBootstrapFixturesEnv(fixtures)
+      ...persistedBootstrapFixturesEnv(fixtures),
+      WS_PERSISTED_STATE_FILE: filePath
     }
   });
 
@@ -761,7 +771,7 @@ test("targeted nice_hand requires the matching settled hand and broadcasts the t
     const recipient = await connectClient(port);
     await hello(sender, "req-hello-targeted-sender");
     await hello(recipient, "req-hello-targeted-recipient");
-    assert.equal((await auth(sender, secret, "reaction_sender", "req-auth-targeted-sender")).type, "authOk");
+    assert.equal((await auth(sender, secret, "00000000-0000-4000-8000-000000000011", "req-auth-targeted-sender")).type, "authOk");
     assert.equal((await auth(recipient, secret, "reaction_recipient", "req-auth-targeted-recipient")).type, "authOk");
 
     for (const [socket, suffix] of [[sender, "sender"], [recipient, "recipient"]]) {
@@ -816,6 +826,7 @@ test("targeted nice_hand requires the matching settled hand and broadcasts the t
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
+    await fs.rm(dir, { recursive: true, force: true });
   }
 }));
 
@@ -1977,15 +1988,16 @@ test("real authoritative join with historical non-ACTIVE seat retries to the nex
   const fixtures = {
     [tableId]: {
       tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
-      seatRows: [{ user_id: "historical_proto_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
+      seatRows: [{ user_id: "00000000-0000-4000-8000-000000000013", seat_no: 1, status: "INACTIVE", is_bot: false }],
       stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
     }
   };
   const { dir, filePath } = await writePersistedStateFile(fixtures, {
+    profileTermsPolicy: { version: "2026-10-26-a1", active: false, variants_enabled: false },
     pokerTierPolicies: pokerTierPolicyRows([100]),
     pokerAccessPolicy: { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 },
     accounts: [
-      { user_id: "historical_proto_user", account_type: "USER", balance: 110, poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 },
+      { user_id: "00000000-0000-4000-8000-000000000013", account_type: "USER", balance: 110, poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1 },
       ...["NORMAL", "SLOW"].map((poolClass) => ({ account_type: "SYSTEM", status: "active", system_key: getBotFundingSystemKeyForBuyIn(100, { poolClass }) }))
     ]
   });
@@ -1997,7 +2009,7 @@ test("real authoritative join with historical non-ACTIVE seat retries to the nex
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws, "hello-real-auth-historical-seat");
-    await auth(ws, secret, "historical_proto_user", "auth-real-auth-historical-seat");
+    await auth(ws, secret, "00000000-0000-4000-8000-000000000013", "auth-real-auth-historical-seat");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "real-auth-historical-seat-join", ts: "2026-02-28T05:56:00Z", payload: { tableId, buyIn: 100 } });
     const ack = await nextMessageOfType(ws, "commandResult", 5000, "realAuthHistoricalSeatAck", ["table_state"]);
@@ -2010,7 +2022,7 @@ test("real authoritative join with historical non-ACTIVE seat retries to the nex
       payload: { tableId, view: "snapshot" }
     });
     const snapshot = await nextMessageOfType(ws, "stateSnapshot", 5000, "realAuthHistoricalSeatSnapshot");
-    assert.equal(snapshot.payload.you.userId, "historical_proto_user");
+    assert.equal(snapshot.payload.you.userId, "00000000-0000-4000-8000-000000000013");
     assert.equal(snapshot.payload.you.seat, 2);
 
     ws.close();

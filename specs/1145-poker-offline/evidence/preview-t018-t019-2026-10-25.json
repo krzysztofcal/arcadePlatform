@@ -1,0 +1,18 @@
+{
+  "runtime": "fc9e7cb726504f6f1211dd3231ab90fdb89ac979",
+  "origin": "https://6ade8c174872188a6acd41ab--playkcswh.netlify.app",
+  "launch": {
+    "background": "rgb(11, 16, 32)",
+    "overlay": "radial-gradient(at 50% 35%, rgb(32, 50, 88) 0%, rgb(16, 25, 47) 38%, rgb(11, 16, 32) 75%)",
+    "title": "ARCADE\nPOKER"
+  },
+  "art": {
+    "single": "/poker/assets/lobby/single-v2.webp",
+    "offline": "/poker/assets/lobby/offline-v1.webp",
+    "width": 768
+  },
+  "sourceLaunchRedirect": "PASS",
+  "rawLink": false,
+  "errors": [],
+  "nativeColdStart": "PENDING physical Android"
+}

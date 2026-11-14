@@ -645,6 +645,7 @@ async function settledRolloverRuntimeFixture(options = {}) {
     enqueueTableCommand: () => {},
     pokerLogRuntimeControl: { mayBuildDebugPayload: () => false },
     isGuestTableId: () => false,
+    isWsDrainActive: () => false,
     hasSupabaseDbUrl: true,
     reconcileInactivityEjections: async () => ({ ok: true }),
     loadDeferredLeaveFinalizer: async () => async () => options.finalizerResult || ({ ok: true, changed: false }),

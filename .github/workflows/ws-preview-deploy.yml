@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Git ref to deploy to the preview WS host
+        description: Exact approved 40-character commit SHA to deploy to the preview WS host
         required: true
         type: string
       xpRedisVersion:
@@ -21,6 +21,8 @@ concurrency:
 
 jobs:
   validate:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+    environment: ws-preview
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,15 +37,16 @@ jobs:
 
       - name: Validate preview dispatch inputs and secrets
         env:
+          PREVIEW_DEPLOY_SHA: ${{ inputs.ref }}
           PREVIEW_WS_HOST: ${{ secrets.WS_PREVIEW_HOST }}
           PREVIEW_WS_USER: ${{ secrets.WS_PREVIEW_USER }}
           PREVIEW_WS_SSH_KEY: ${{ secrets.WS_PREVIEW_SSH_KEY }}
         run: |
           set -euo pipefail
 
-          test -n "${{ inputs.ref }}"
+          [[ "$PREVIEW_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
           test -n "$PREVIEW_WS_HOST"
-          test -n "$PREVIEW_WS_USER"
+          test "$PREVIEW_WS_USER" = arcade-preview-deploy
           test -n "$PREVIEW_WS_SSH_KEY"
 
       - name: Run preview workflow guard tests
@@ -53,7 +56,9 @@ jobs:
           node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
 
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
     needs: validate
+    environment: ws-preview
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -98,7 +103,7 @@ jobs:
           if [[ "$XP_REDIS_VERSION" == "3" ]]; then
             export XP_REDIS_ENV=stage XP_KEY_NS=kcswh:stage:xp:v3
           fi
-          CONTEXT=deploy-preview node scripts/generate-build-info.js --server-context-only
+          CONTEXT=deploy-preview node scripts/generate-build-info.js --server-context-only --ws-preview-artifact
 
           rm -rf "$PREVIEW_ARTIFACT_DIR"
           mkdir -p "$PREVIEW_STAGE_WS_DIR"
@@ -219,6 +224,7 @@ jobs:
           envs: RELEASE_SHA,DEPLOY_REF,PREVIEW_BASE_DIR,PREVIEW_APP_DIR,PREVIEW_HOST,PREVIEW_LOCAL_HEALTHZ_URL,PREVIEW_PUBLIC_HEALTHZ_URL,PREVIEW_SERVICE_NAME,PREVIEW_REMOTE_TMP_DIR,PREVIEW_PORT,XP_REDIS_VERSION
           script: |
             set -eu
+            test "$(id -un)" = arcade-preview-deploy
             if ! command -v bash >/dev/null 2>&1; then
               echo "bash is required on preview VPS"
               exit 1
@@ -325,7 +331,9 @@ jobs:
                 node --input-type=module -e '
                   import { pathToFileURL } from "node:url";
                   const context = await import(pathToFileURL(process.argv[1]).href);
-                  if (context.BUILD_DEPLOY_CONTEXT !== "deploy-preview"
+                  if (context.BUILD_ARTIFACT_IDENTITY !== "ws-preview"
+                    || context.BUILD_DEPLOY_ORIGIN !== null
+                    || context.BUILD_DEPLOY_CONTEXT !== "deploy-preview"
                     || context.BUILD_XP_REDIS_VERSION !== "3"
                     || context.BUILD_XP_REDIS_ENV !== "stage") {
                     process.stderr.write("Preview generated V3 context mismatch\n");

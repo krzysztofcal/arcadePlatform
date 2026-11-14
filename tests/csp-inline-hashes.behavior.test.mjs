@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { hashInlineScript, verifyInlineScriptHashes } from "../scripts/check-csp-inline-hashes.mjs";
 
@@ -45,4 +46,17 @@ assert.throws(() => verifyInlineScriptHashes({
   headersText: headers([], { "/*": `script-src 'self' '${hashInlineScript(scoped.gameOpen)}'`, "/games-open/*": "script-src 'self'" }),
 }), /missing 'sha256-/);
 
+// Standalone landing publishes its own root and must not inherit portal routes.
+const landingFixture = {documents:[{path:"landing/index.html",content:`<script>${source}</script>`}],routes:["/*"]};
+const landingPolicy = `/*\n  Content-Security-Policy: script-src 'self' '${hashInlineScript(source)}'\n`;
+assert.equal(verifyInlineScriptHashes({...landingFixture,headersText:landingPolicy}),true);
+assert.throws(()=>verifyInlineScriptHashes({...landingFixture,headersText:""}),/missing CSP route/);
+assert.throws(()=>verifyInlineScriptHashes({...landingFixture,headersText:landingPolicy.replace(hashInlineScript(source),hashInlineScript("wrong()"))}),/missing 'sha256-/);
+assert.throws(()=>verifyInlineScriptHashes({...landingFixture,headersText:landingPolicy.replace("'self'","'self' 'unsafe-inline'")}),/unsafe-inline policy mismatch/);
+assert.throws(()=>verifyInlineScriptHashes({...landingFixture,documents:[{path:"landing/index.html",content:'<link onload="unsafe()">'}],headersText:landingPolicy}),/inline event handler/);
+const landingHeaders=readFileSync("landing/_headers","utf8");
+assert.equal([...landingHeaders.matchAll(/Content-Security-Policy:/g)].length,1);
+assert.doesNotMatch(landingHeaders,/googlesyndication|doubleclick|adtrafficquality|googleadservices/);
+assert.equal([...landingHeaders.matchAll(/'sha256-[^']+'/g)].length,1,'only the common year script hash is needed');
+for(const header of ["X-Frame-Options: DENY","X-Content-Type-Options: nosniff","Referrer-Policy: strict-origin-when-cross-origin","Permissions-Policy:"])assert.ok(landingHeaders.includes(header));
 process.stdout.write("csp-inline-hashes behavior tests passed\n");

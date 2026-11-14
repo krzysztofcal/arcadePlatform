@@ -189,7 +189,7 @@
     if (opts.body && !headers['Content-Type']){
       headers['Content-Type'] = 'application/json';
     }
-    return fetch(url, Object.assign({}, opts, { headers: headers }));
+    return fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, Object.assign({}, opts, { headers: headers }));
   }
 
   async function parseResponse(res){
@@ -577,7 +577,7 @@
 
   function navigateToPokerLobby(){
     if (!window || !window.location) return;
-    window.location.href = '/poker/';
+    window.location.href = window.MOBILE_POKER_CONFIG ? '/poker/index.html' : '/poker/';
   }
 
   function shouldShowTurnActions(params){
@@ -992,6 +992,14 @@
   function getUserIdFromToken(token){
     var payload = decodeJwtPayload(token);
     return payload && payload.sub ? payload.sub : null;
+  }
+
+  // #1140: a 409 terms_required opens the existing Terms dialog (js/profile-onboarding.js) instead of a raw code.
+  function handleTermsRequired(el, err){
+    if (!err || err.code !== 'terms_required') return false;
+    setError(el, t('pokerTermsRequired', 'Accept the current Terms to start a new game.'));
+    document.dispatchEvent(new CustomEvent('profile:terms-required'));
+    return true;
   }
 
   function setError(el, msg){
@@ -1693,6 +1701,7 @@
     if (createBtn) createBtn.disabled = true;
 
     var carousel = document.querySelector('.carousel');
+    // Offline card initializes independently of Auth/WS in its local bundle.
     var tiles = Array.prototype.slice.call(document.querySelectorAll('.tile'));
     var dots = Array.prototype.slice.call(document.querySelectorAll('.dot'));
     var current = 0;
@@ -1735,13 +1744,39 @@
     }); });
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
+      if (button.dataset.panel === 'daily') { openDailyBonus(); return; }
       if (dialog && !dialog.open) dialog.showModal();
-      if (button.dataset.panel === 'daily') claimDailyBonus();
     }); });
     document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){ button.closest('dialog').close(); }); });
     document.querySelectorAll('[data-view]').forEach(function(button){ button.addEventListener('click', function(){
       showLobbyView(button.dataset.view);
     }); });
+    var mobileLinkPending = true;
+    var mobileAuthReady = false;
+    function setMobileLobbyView(view){
+      if (!window.MOBILE_POKER_CONFIG) return;
+      if (view === 'modes' && dailyDialog && dailyDialog.open) view = 'bonus';
+      if (document.body.dataset.mobileLobbyView === view) return;
+      document.body.dataset.mobileLobbyView = view;
+      document.dispatchEvent(new CustomEvent('poker:lobby-view', {detail:{view:view}}));
+    }
+    function openDailyBonus(){
+      if (!dailyDialog) return;
+      if (window.MOBILE_POKER_CONFIG) showLobbyView('modes', false);
+      if (!dailyDialog.open) dailyDialog.showModal();
+      setMobileLobbyView('bonus');
+      refreshDailyBonus().catch(function(){ dailyLoadError = true; renderDailyBonus(); });
+    }
+    function applyMobileLobbyLink(){
+      if (!window.MOBILE_POKER_CONFIG || !mobileAuthReady || !mobileLinkPending) return;
+      mobileLinkPending = false;
+      var view = (window.location.hash || '').slice(1);
+      if (view === 'bonus') { openDailyBonus(); return; }
+      if (dailyDialog && dailyDialog.open) dailyDialog.close();
+      showLobbyView(['modes','tables','progression'].indexOf(view) !== -1 ? view : 'modes');
+    }
+    if (window.MOBILE_POKER_CONFIG) window.addEventListener('hashchange', function(){ mobileLinkPending = true; applyMobileLobbyLink(); }); // xp-lifecycle-allow:poker-mobile-nav(2027-01-01)
+    if (dailyDialog) dailyDialog.addEventListener('close', function(){ if (document.body.dataset.mobileLobbyView === 'bonus') setMobileLobbyView('modes'); });
     function showLobbyView(view, focusTarget){
       if (view !== 'modes' && !lobbyAuthenticated){
         view = 'modes';
@@ -1751,6 +1786,7 @@
         var node = document.getElementById('poker' + name.charAt(0).toUpperCase() + name.slice(1) + 'View');
         if (node) node.hidden = name !== view;
       });
+      setMobileLobbyView(view);
       var target = document.getElementById(view === 'modes' ? 'pokerQuickSeat' : view === 'tables' ? 'pokerTablesTitle' : 'pokerProgressTitle');
       if (view === 'modes' && !lobbyAuthenticated) target = guestPlayBtn;
       if (target && focusTarget !== false){
@@ -1837,7 +1873,7 @@
     function isLobbyPageActive(){
       var pathname = window && window.location && typeof window.location.pathname === 'string' ? window.location.pathname : '';
       if (!pathname) return true;
-      return pathname === '/poker/' || pathname === '/poker';
+      return pathname === '/poker/' || pathname === '/poker' || pathname === '/poker/index.html';
     }
 
     function canMaintainLobbyConnection(){
@@ -2374,6 +2410,7 @@
         if (singleLobbyContent) singleLobbyContent.hidden = true;
         if (tableList) tableList.innerHTML = '';
         startAuthWatch();
+        mobileAuthReady = true; applyMobileLobbyLink();
         return false;
       }
       // JWT subject is UI identity only; all authorization remains server-side.
@@ -2389,6 +2426,7 @@
       refreshWelcomeBonusBanner();
       refreshProgression();
       if (dailyDialog && dailyDialog.open) refreshDailyBonus();
+      mobileAuthReady = true; applyMobileLobbyLink();
       return true;
     }
 
@@ -2592,7 +2630,7 @@
       setError(errorEl, null);
       if (guestPlayBtn) setLoading(guestPlayBtn, true);
       try {
-        var res = await fetch(GUEST_SESSION_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        var res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(GUEST_SESSION_URL) : GUEST_SESSION_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
         var data = {};
         try { data = await res.json(); } catch (_err){}
         if (!res.ok || !data || data.ok !== true || !data.token || !data.tableId){
@@ -2645,6 +2683,7 @@
           });
           return;
         }
+        if (handleTermsRequired(errorEl, err)) return;
         klog('poker_quick_seat_error', { error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
       } finally {
@@ -2728,7 +2767,7 @@
           setError(errorEl, 'This start request has expired. Start a new game to continue.');
           singlePlayRequestId = null;
           refreshProgression();
-        } else {
+        } else if (!handleTermsRequired(errorEl, err)) {
           klog('poker_single_player_error', { error: err.message || err.code });
           setError(errorEl, err.message || t('pokerErrJoin', 'Failed to join table'));
         }
@@ -2836,6 +2875,7 @@
           });
           return;
         }
+        if (handleTermsRequired(errorEl, err)) return;
         klog('poker_create_error', { error: err.message || err.code });
         setError(errorEl, err.message || t('pokerErrCreateTable', 'Failed to create table'));
       } finally {

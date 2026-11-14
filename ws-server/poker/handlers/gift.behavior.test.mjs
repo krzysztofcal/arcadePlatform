@@ -20,7 +20,7 @@ test('file-backed adapter is unavailable with zero ledger/DB calls', async () =>
   assert.deepEqual(await adapter.loadActiveGiftSummary('table'), null);
 });
 test('adapter maps only known errors and never exposes DB internals', async () => {
-  for (const [error, code] of [[{ code: 'P0001', message: 'insufficient_funds' }, 'gift_insufficient_chips'], [{ code: '42P01' }, 'gift_shop_unavailable'], [{ code: 'secret_database_error' }, 'gift_purchase_failed']]) {
+  for (const [error, code] of [[{code:'terms_required'},'terms_required'],[{code:'terms_unavailable'},'terms_unavailable'],[{ code: 'P0001', message: 'insufficient_funds' }, 'gift_insufficient_chips'], [{ code: '42P01' }, 'gift_shop_unavailable'], [{ code: 'secret_database_error' }, 'gift_purchase_failed']]) {
     const adapter = createGiftAdapter({ env: { SUPABASE_DB_URL: 'test' }, postTransactionFn: async () => {}, beginSql: async () => { throw error; } });
     assert.deepEqual(await adapter.purchase({ tableId: '00000000-0000-4000-8000-000000000001', buyerUserId: '00000000-0000-4000-8000-000000000002', requestId: 'r1', giftKey: 'beer', recipientSeatNo: 2 }), { ok: false, code });
   }

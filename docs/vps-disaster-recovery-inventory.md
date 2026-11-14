@@ -20,14 +20,14 @@ runtime dumps.
 | Preview WS environment | `/opt/arcade-ws-preview/.env.preview` | Secret/private state; names only in repo | Encrypted off-host secret backup and the env schema example | Restore exact Stage-targeted values out-of-band; current target is a regular non-symlinked file with `root:root 0600`; Phase A observed `arcade:arcade 0664` as historical context |
 | Historical Preview env backups | `/opt/arcade-ws-preview/.env.preview.*` (excluding active `.env.preview`) | Legacy plaintext state; not a recovery source | None; recovery relies on the encrypted off-host artifact | Never restore; retain or remove only through a separate owner-approved operation after recovery verification |
 | Preview release layout | `/opt/arcade-ws-preview`, `/opt/arcade-ws-preview/ws-server` | Reconstructible application/runtime state | `WS Preview Deploy` workflow and unit contract | Create empty layout; deploy an approved ref through the existing manual workflow; exclude release/build/cache state |
-| Stage scheduler service | `/etc/systemd/system/arcade-chips-ledger-dispatch.service` | Configuration that should be versioned | `infra/vps/arcade-chips-ledger-dispatch.service` | Install as `copilot`, restore GitHub CLI auth externally, and enable only in an owner-approved recovery |
+| Stage scheduler service | `/etc/systemd/system/arcade-chips-ledger-dispatch.service` | Configuration that should be versioned | `infra/vps/arcade-chips-ledger-dispatch.service` | Install as `arcade-dispatch` with `ProtectHome=true`, provision its token file, and enable only in an owner-approved recovery |
 | Stage scheduler timer | `/etc/systemd/system/arcade-chips-ledger-dispatch.timer` | Configuration that should be versioned | `infra/vps/arcade-chips-ledger-dispatch.timer` | Install the 15-minute and `02:04 UTC` calendar; do not add the future Production retention scheduler from #891 |
 | Stage dispatcher | `/usr/local/bin/arcade-chips-ledger-dispatch.sh` | Configuration/script that should be versioned | `infra/vps/arcade-chips-ledger-dispatch.sh` | Install executable; it only wakes existing GitHub workflows, holds no Supabase credentials, and is not invoked during implementation |
-| GitHub CLI binary/config | `/home/copilot/.local/bin/gh`, `/home/copilot/.config/gh` | Binary is reproducible; auth config is private credential state | Ubuntu package plus external owner-managed GitHub CLI authentication | Install/re-authenticate with minimum workflow-dispatch/content-read capability; do not back up or commit token contents |
+| GitHub CLI binary and dispatcher tokens | `/usr/bin/gh`, `/etc/arcadeplatform/stage-retention-dispatch.env`, `/etc/arcadeplatform/production-retention-dispatch.env` | Binary is reproducible (Ubuntu package `gh`); token files are private credential state | Ubuntu package plus owner-created fine-grained tokens | Install the package; recreate each `root:root 0600` `GH_TOKEN` file with a new owner token (Stage: Actions read/write, Contents read, Metadata read; Production: Actions read/write, Metadata read); never back up or commit token contents |
 | Stage self-hosted runner | `/var/lib/arcade-stage-runner/actions-runner` | Reproducible installation with private registration state | Official GitHub Actions runner release and repository registration | Install under `arcade-stage-runner`, re-register with a fresh owner-provided token, use exact labels `self-hosted`, `Linux`, `X64`, `stage-db-ipv6`; Do not restore runner `.credentials` |
 | Runner service | `/etc/systemd/system/actions.runner.krzysztofcal-arcadePlatform.arcadePlatform-stage-db-ipv6-ubuntu-4gb-nbg1-2.service` | Generated/reproducible from runner registration; hardening contract must be retained | Runner `svc.sh` plus generated unit override | Re-register and reinstall the service; preserve private work directory, hardening flags, and inaccessible WS paths |
 | Runner work/diagnostics | `/var/lib/arcade-stage-runner/actions-runner/_work`, `/var/lib/arcade-stage-runner/actions-runner/_diag` | Disposable runtime/build state | Runner runtime | Recreate empty directories; do not back up; cleanup policy is outside Phase B/#996 |
-| Runtime users/groups | `arcade`, `copilot`, `arcade-stage-runner`, `wslogs` | Reproducible machine prerequisites | Unit/scheduler/runner contracts and bootstrap | Create accounts/groups and required ownership; do not alter current privileged `sudo`/`docker` membership or deploy grants under #994 |
+| Runtime users/groups | `arcade`, `copilot`, `arcade-dispatch`, `arcade-stage-runner`, `wslogs` | Reproducible machine prerequisites | Unit/scheduler/runner contracts and bootstrap | Create accounts/groups and required ownership; do not alter current privileged `sudo`/`docker` membership or deploy grants under #994 |
 | UFW/network baseline | UFW defaults plus TCP 22/80/443 and explicit deny TCP 3000, IPv4+IPv6 | Reproducible machine configuration | Phase A `ufw status verbose`, provider IPv6 route, bootstrap | Apply baseline on a fresh host; keep WS ports private and verify IPv6 route for Stage DB runner |
 | Stage DB network dependency | Provider IPv6 address/default route and direct Stage PostgreSQL reachability | External prerequisite, not a database backup | `DB Stage Apply PR` runner label/contract | Verify IPv6 before runner jobs; do not change Supabase or store Stage DB credentials in VPS recovery files |
 | Encrypted WS secret artifact contract | `infra/vps/vps-secrets-backup.sh`, `infra/vps/vps-secrets-restore.sh` | Versioned recovery tooling; no secret values | Repository scripts plus `age` package and manifest format | Backup only the two active env files with `tar → age`; restore only to a new isolated directory with streamed off-host identity and checksum/member verification; live restore is disabled |
@@ -72,17 +72,17 @@ No-argument and `--dry-run` invocations do not delete; only explicit
 
 On an existing host that predates the shared lock, the first Production deploy
 pre-stages `/opt/ws-server/.deploy-maintenance.lock` before artifact upload.
-This is a bounded, non-restarting operation performed by `copilot`: it creates
-only the regular lock when absent, verifies the writable Production paths, and
-normalizes the lock to the `arcade-deploy` group with mode `0660`. A failed
-pre-stage aborts before release or service mutation. Fresh-host bootstrap keeps
-the `root:arcade-deploy` lock ownership. The deploy waits up to 300 seconds
+This is a bounded, non-restarting operation performed by `arcade-release`: it
+creates only the regular lock when absent, verifies the writable Production
+paths, and normalizes the lock to the `arcade-release` group with mode `0660`.
+A failed pre-stage aborts before release or service mutation. Fresh-host
+bootstrap creates the lock as `arcade-release:arcade-release`. The deploy waits up to 300 seconds
 for the shared lock; maintenance remains non-blocking.
 
-The maintenance service runs as `copilot`: the `arcade-deploy` group is
-sufficient for release cleanup, and the automated `/tmp` path additionally
-requires the exact directory owner to be `copilot`. Existing legacy directories
-owned by `arcade` are deliberately not eligible for automation; after a fresh
+The maintenance service runs as `arcade-release` (#1159 T004): it owns the
+Production release tree, and the automated `/tmp` path additionally requires
+the exact directory owner to be `arcade-release`. Existing legacy directories
+owned by `arcade` or `copilot` are deliberately not eligible for automation; after a fresh
 owner-approved read-only inventory they may receive a separate one-time root
 cleanup. Maintenance does not restart Production, Preview, or Caddy.
 

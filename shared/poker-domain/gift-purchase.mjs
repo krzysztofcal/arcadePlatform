@@ -1,4 +1,5 @@
 import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle } from '../account-deletion.mjs';
+import { requireCurrentTerms } from '../profile-terms.mjs';
 import { createHash } from 'node:crypto';
 import { resolveGift } from './gift-catalog.mjs';
 
@@ -45,6 +46,8 @@ export async function executePokerGiftPurchase({ beginSql, postTransaction, tabl
       await lockAccountLifecycle(tx, ids);
       for (const id of ids) await assertAccountActive(tx, id);
     }
+    // Same transaction as the BURN; an existing paid receipt returned above needs no new consent.
+    await requireCurrentTerms(tx,{kind:'account',id:buyerUserId});
     // Bind SQL-formatted participation as text: the driver serializes timestamp parameters through JS Date.
     if (!sender.participation || !recipient.participation) fail('gift_purchase_failed');
     const ledger = await postTransaction({ tx, txType: 'BURN', userId: buyerUserId, createdBy: buyerUserId,

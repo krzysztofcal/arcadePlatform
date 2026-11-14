@@ -1,0 +1,10 @@
+{
+  "runtime": "fc9e7cb726504f6f1211dd3231ab90fdb89ac979",
+  "source": "actual hosted APK assets/public extracted without edits",
+  "entryNoRawLink": true,
+  "darkEntry": true,
+  "overlayPersistsThroughDelayedStylesAndArtwork": true,
+  "overlayHiddenAfterReady": true,
+  "errors": [],
+  "nativeColdStart": "PENDING physical owner"
+}

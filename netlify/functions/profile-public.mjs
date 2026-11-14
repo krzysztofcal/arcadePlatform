@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { xpStoreUnavailableResponse, atomicRateLimitIncr, getUserXpTotalStrict } from "./_shared/store-upstash.mjs";
-import { baseHeaders, corsHeaders, klog } from "./_shared/supabase-admin.mjs";
+import { baseHeaders, corsHeaders, extractBearerToken, verifySupabaseJwt, klog } from "./_shared/supabase-admin.mjs";
 import { findPublicProfile, publicProfile } from "./_shared/user-profile.mjs";
 import { computeXpLevel } from "./_shared/xp-level.mjs";
 
@@ -43,6 +43,7 @@ async function allowPublicRead(event) {
 
 function createProfilePublicHandler(deps = {}) {
   const env = deps.env || process.env;
+  const verifyJwt = deps.verifySupabaseJwt || verifySupabaseJwt;
   const findProfile = deps.findPublicProfile || findPublicProfile;
   const allowRead = deps.allowPublicRead || allowPublicRead;
   const getPublicXp = deps.getUserXpTotal || getUserXpTotalStrict;
@@ -51,24 +52,27 @@ function createProfilePublicHandler(deps = {}) {
     const cors = profileCors(origin);
     if (!cors) return json(403, baseHeaders(), { error: "forbidden_origin" });
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
-    const unavailable = xpStoreUnavailableResponse(cors);
-    if (unavailable) return unavailable;
     if (event.httpMethod !== "GET") return json(405, cors, { error: "method_not_allowed" });
-    if (!publicProfilesEnabled(env, event)) return json(404, cors, { error: "not_found" });
-    if (!await allowRead(event)) return json(429, cors, { error: "rate_limit_exceeded" });
-
     try {
+      const token = extractBearerToken(event.headers);
+      if (!token) return json(401, cors, { error: "unauthorized" });
+      const auth = await verifyJwt(token);
+      if (!auth.valid || !auth.userId) return json(401, cors, { error: "unauthorized" });
+      if (!publicProfilesEnabled(env, event)) return json(404, cors, { error: "not_found" });
+      const unavailable = xpStoreUnavailableResponse(cors);
+      if (unavailable) return unavailable;
+      if (!await allowRead(event)) return json(429, cors, { error: "rate_limit_exceeded" });
       const profile = await findProfile(event.queryStringParameters?.handle);
-      if (!profile) return json(404, cors, { error: "not_found" });
+      if (!profile || profile.publicProfileBlocked === true) return json(404, { ...cors, "cache-control": "no-store" }, { error: "not_found" });
       const xpResult = await getPublicXp(profile.userId);
       const xpValue = typeof xpResult === "object" ? xpResult?.totalXp : xpResult;
       const xp = Math.max(0, Math.floor(Number(xpValue) || 0));
-      return json(200, { ...cors, "cache-control": "public, max-age=30", Vary: "Origin" }, publicProfile(profile, {
+      return json(200, { ...cors, "cache-control": "no-store", Vary: "Origin" }, publicProfile(profile, {
         xp,
         level: computeXpLevel(xp),
       }));
     } catch (error) {
-      klog("profile_public_failed", { message: error?.message || "error" });
+      klog("profile_public_failed", { code: error?.code || "profile_unavailable" });
       return json(500, { ...cors, "cache-control": "no-store" }, { error: "server_error" });
     }
   };

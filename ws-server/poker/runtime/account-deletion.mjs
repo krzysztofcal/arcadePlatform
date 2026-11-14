@@ -210,6 +210,15 @@ export function createDeletionPokerCoordinator({enqueue,restore,block,unblock}) 
   }};
 }
 
+// Reuse the privacy coordinator's queue/fence/reload, including post-commit recovery.
+export function createDeletionPokerLeave({coordinate,executeLeave}) {
+  return ({tableId,userId,requestId}) => coordinate({userId,requestId},tableId,async()=>{
+    // Fresh attempts still reconcile deferred seats/all-in winnings through Leave.
+    const left=await executeLeave({tableId,userId,requestId:requestId+':'+Date.now()});
+    if(!left?.ok)throw new Error('deletion_leave_unconfirmed');
+  });
+}
+
 // Existing WS tick owns scheduling. No new worker/service or browser dependency.
 export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconnectUser, klog, env = process.env,
   blockIdentity = blockRedisIdentity, retireWallet = retireUserForDeletion,
@@ -237,6 +246,9 @@ export function createAccountDeletionRuntime({ beginSql, leaveFromTable, disconn
       return {done:true};
     },
     poker: async (context) => {
+      // A committed cashout may remove the SQL seat before its reload succeeds.
+      // Recover the fenced runtime before scanning or allowing the burn phase.
+      await resyncPokerPrivacy?.(context);
       const rows = await transactionFor(context,(tx) => tx.unsafe(`select p.table_id from public.poker_seats p where p.user_id=$1 and ${deletionPokerSeatPendingSql}
         union select distinct s.table_id from public.poker_state s
         where exists(select 1 from public.poker_seats p where p.table_id=s.table_id and p.user_id=$1 and ${deletionPokerSeatPendingSql})

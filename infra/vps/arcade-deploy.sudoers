@@ -1,11 +1,23 @@
-# Exact privileged operations for the copilot deployment account.
-# The deploy group owns only application state and the Caddyfile; it does not
+# Exact privileged operations for the deployment accounts.
+# The deploy groups own only application state and the Caddyfile; they do not
 # grant access to secrets, systemd units, sudoers, shells or interpreters.
+# copilot (the agent's account): WS Preview, Caddy and the read-only Production gate check.
 Cmnd_Alias ARCADE_DEPLOY_COMMANDS = \
-    /usr/bin/systemctl restart ws-server.service, \
     /usr/bin/systemctl restart ws-server-preview.service, \
     /usr/bin/systemctl reload caddy.service, \
     /usr/local/sbin/arcade-ws-preview-env-preflight "", \
-    /usr/local/sbin/arcade-ws-production-env-preflight ""
+    /usr/local/sbin/arcade-ws-restart-gate check
+
+# arcade-release: reachable only with the ws-production environment key after owner approval.
+# The gate helper accepts only a numeric run id and a 40-hex release SHA as arguments.
+Cmnd_Alias ARCADE_RELEASE_COMMANDS = \
+    /usr/local/sbin/arcade-ws-production-env-preflight "", \
+    /usr/local/sbin/arcade-ws-restart-gate check, \
+    /usr/local/sbin/arcade-ws-restart-gate restart, \
+    /usr/local/sbin/arcade-ws-restart-gate prepare *, \
+    /usr/local/sbin/arcade-ws-restart-gate switching *, \
+    /usr/local/sbin/arcade-ws-restart-gate resume *, \
+    /usr/local/sbin/arcade-ws-restart-gate abort *
 
 copilot ALL=(root) NOPASSWD: ARCADE_DEPLOY_COMMANDS
+arcade-release ALL=(root) NOPASSWD: ARCADE_RELEASE_COMMANDS

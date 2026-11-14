@@ -1116,6 +1116,18 @@ export async function readPrivateObjectIfExists(storageTarget, objectPath, deps 
   };
 }
 
+// #1157 expiry: one DELETE attempt, never a GET/list, so no object bytes leave
+// Storage. A missing object counts as already deleted (idempotent retry).
+export async function deletePrivateObjectIfExists(storageTarget, objectPath, deps = {}) {
+  const response = await storageRequest(storageTarget, objectRequestPath(objectPath, null), {
+    method: "DELETE",
+    storageOperation: "private object delete",
+  }, deps);
+  if (response.ok) return "deleted";
+  if (await isMissingStorageResponse(response)) return "missing";
+  storageFailure("private object delete", response);
+}
+
 function ambiguousStorageWriteError(objectPath, response, error = null) {
   const message = response
     ? `private recovery object upload returned an ambiguous HTTP ${response.status}: ${objectPath}`

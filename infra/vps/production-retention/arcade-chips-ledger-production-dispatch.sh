@@ -4,7 +4,7 @@ set -euo pipefail
 # Deployment/provisioning is owner-gated. Missing switch/token never falls back
 # to the Stage or an operator's ambient gh login. No DB/Storage credentials.
 [[ "${CHIPS_LEDGER_PRODUCTION_AUTOMATION_ENABLED:-0}" == "1" ]] || exit 0
-GH_BIN="${GH_BIN:-/home/copilot/.local/bin/gh}"
+GH_BIN="${GH_BIN:-/usr/bin/gh}"
 REPO="krzysztofcal/arcadePlatform"
 WORKFLOW="chips-ledger-production-scheduled-automation.yml"
 slot="$(date -u +%H:%M)"
@@ -12,6 +12,8 @@ case "$slot" in
   02:09) policy=existing-30d ;;
   ??:09) policy=bot-only-7d ;;
   ??:24) policy=closed-human-30d ;;
+  # Daily #1157 slot; escrow keeps its other 23 hourly runs.
+  03:39) policy=retention-12m ;;
   ??:39) policy=escrow ;;
   *) exit 0 ;;
 esac

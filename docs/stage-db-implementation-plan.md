@@ -1,3 +1,5 @@
+> Historical design, superseded for Stage execution by #1159 PR1 and [the current operator checklist](ai-agent-db-migration-checklist.md). The automatic PR apply and DB Stage Prepare commands below are historical evidence, not supported instructions or authorization. Do not execute them.
+
 # Stage Database Implementation Plan
 
 ## Goal

@@ -1,0 +1,18 @@
+{
+  "sha": "85f6c4cdf8f461fbfe44fa5875393122cb13eba5",
+  "mode": "Netlify Preview plus disconnected isolated table",
+  "origin": "https://6adeaa1c8d8778789ef413f2--playkcswh.netlify.app",
+  "legacyWallet": 99,
+  "refilledWallet": 5000,
+  "refillCommits": 1,
+  "revisionDelta": 1,
+  "heroStackUnchanged": true,
+  "legacyResume": true,
+  "lobbySimplified": true,
+  "manualRefillControls": 0,
+  "settingsDisclosures": true,
+  "resetCancelConfirm": "PASS",
+  "isolatedTableRequests": [],
+  "errors": [],
+  "physicalAndroid": "PENDING owner"
+}

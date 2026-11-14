@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="/js/api-url.js" defer></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#06080f">
@@ -19,11 +20,15 @@
   <script src="/js/i18n.js" defer></script>
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/profile-avatar-catalog.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/build-info.js" defer></script>
   <script src="/js/chips/client.js" defer></script>
   <script src="/poker/poker-ws-client.js" defer></script>
   <link rel="stylesheet" href="/poker/poker-v2.css">
+  <link rel="stylesheet" href="/css/ugc.css">
+  <script src="/js/ugc-client.js" defer></script>
   <script src="/poker/poker-v2.js" defer></script>
 </head>
 <body>
@@ -68,6 +73,7 @@
         </label>
         <p class="poker-social-settings__hint" id="pokerAutoRebuyPreferenceHint">Automatically uses the current table buy-in from your account each time you run out of chips.</p>
       </div>
+      <section class="ugc-table" id="pokerSafetyPlayers" hidden></section>
       <section class="poker-diagnostics" id="pokerDiagnostics" aria-labelledby="pokerDiagnosticsTitle">
         <h3 id="pokerDiagnosticsTitle">Diagnostics</h3>
         <div class="poker-live-meta">

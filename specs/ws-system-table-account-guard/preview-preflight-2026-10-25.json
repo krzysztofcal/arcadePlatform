@@ -1,0 +1,90 @@
+{
+  "verdict": "BLOCKED before deploy: required deletion-enabled runtime path not established",
+  "at": "2026-10-25T14:09:05.182896Z",
+  "approvedRuntimeSha": "e3020b4f30cdb1cb0a3d13963da0a4a1e25588e5",
+  "observedRuntimeSha": "33fbe284859884fd2538774ae756f11aee154a04",
+  "pid": 295769,
+  "restartAt": "2026-10-25T08:56:16Z",
+  "healthz": "ok",
+  "ci": "all applicable checks SUCCESS; required checks green",
+  "redisStagePreflight": "PASS LIVE Redis V3 stage; epochPresent=1; cutover NOT attested",
+  "flag": {
+    "required": "1",
+    "directRuntimeValue": "UNKNOWN: /proc/295769/environ is arcade-owned0400; root-owned0600 EnvironmentFile; no exposed inline value",
+    "approvedHelper": "accepts approved OFF or ON window but output does not distinguish flag; protected window manifest not readable",
+    "inference": "Legacy unpatched constructor successfully creates null-owner managed tables; evidence suggests guard is inactive. Do not call enabled branch verified."
+  },
+  "installedModuleSha256": "7a2940aae36bcde7134bf8db233426c96ce09cdf186190b6282c93ebfa952b34",
+  "approvedModuleSha256": "373b0b583fcaba07358c0ebdc44c63f554c9210b2002f6b3b11cd90a8683b29a",
+  "occupancy": {
+    "establishedConnections": 0,
+    "humanClaims": 0,
+    "pendingPoker": 0,
+    "pendingDeletions": 0
+  },
+  "profile": {
+    "key": "CONTINUOUS_BOT_DEFAULT",
+    "enabled": true,
+    "desired": 5,
+    "minBots": 2,
+    "targetBots": 3,
+    "maxBots": 3,
+    "rotationSeconds": 900
+  },
+  "openTables": [
+    {
+      "id": "1ad971bc-4554-4590-87f9-511389658dd3",
+      "createdAt": "2026-10-25T14:07:08.181623Z",
+      "bots": 3,
+      "stacks": 300,
+      "escrow": 300
+    },
+    {
+      "id": "89bceba3-4941-4d8c-8b53-7f9588278d56",
+      "createdAt": "2026-10-25T14:01:38.166146Z",
+      "bots": 3,
+      "stacks": 300,
+      "escrow": 300
+    },
+    {
+      "id": "d002daac-bb97-4230-afb6-d16d26270b85",
+      "createdAt": "2026-10-25T13:54:38.140889Z",
+      "bots": 3,
+      "stacks": 300,
+      "escrow": 300
+    },
+    {
+      "id": "de87b79a-6df4-4dc7-82f4-5a6cb7a7403c",
+      "createdAt": "2026-10-25T14:01:08.163141Z",
+      "bots": 3,
+      "stacks": 300,
+      "escrow": 300
+    },
+    {
+      "id": "fe8413bd-4ca3-4bb5-ba55-9e9bc63f3cd9",
+      "createdAt": "2026-10-25T14:06:38.181255Z",
+      "bots": 3,
+      "stacks": 300,
+      "escrow": 300
+    }
+  ],
+  "tableContext": {
+    "allOwnerless": true,
+    "allLifecycle": "CONTINUOUS_BOT",
+    "allProfile": "CONTINUOUS_BOT_DEFAULT",
+    "allBuyIn": 100,
+    "totalStacks": 1500,
+    "totalEscrow": 1500
+  },
+  "workflowDispatched": false,
+  "mutationCommandsSent": 0,
+  "accountDeletionPerformed": false,
+  "productionAccessOrChangesThisAttempt": false,
+  "scopeNotVerified": [
+    "new module runtime",
+    "natural creation with deletion flag1",
+    "new module seed transactions/idempotency",
+    "live human guard behavior"
+  ],
+  "retainedLocalEvidence": "repository30/30 incl flag1/human rejection/lock order; deletion35/35; npm147 groups; CI green"
+}

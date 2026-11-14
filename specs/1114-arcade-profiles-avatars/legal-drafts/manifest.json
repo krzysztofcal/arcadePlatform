@@ -1,0 +1,11 @@
+{
+  "candidateVersion": "2026-10-28-a2",
+  "status": "LOCAL_AUTHENTICATED_AUDIENCE_PROPOSAL_OWNER_REVIEW_LEGAL_OPEN_NOT_PUBLISHED",
+  "previousVersion": "2026-10-26-a1",
+  "files": {
+    "terms.pl.md": "59127cbdb196995b0e46220ca1b73b68ee9e1ff26ff85bc529bf1acf9716232c",
+    "terms.en.md": "93f1fcf81bea487adaf63a9ad14316866a7aed0906397838c859b06b9fb3bda2",
+    "privacy.pl.md": "d435b94b1af2ab90218f78aee7a42daa5932158d59001ea3c90ba077b0946c94",
+    "privacy.en.md": "08f6a1be3514b233be07310bff4026ec282ce6cd0400ce03d7615d3ef2e91ba5"
+  }
+}

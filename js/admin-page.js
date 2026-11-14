@@ -2353,6 +2353,7 @@
     if (tab === "ledger" && !state.ledger.loaded) loadLedger();
     if (tab === "bonusCampaigns" && !state.bonusCampaigns.loaded) loadBonusCampaigns();
     if (tab === "pokerAudit") renderPokerAudit();
+    if (tab === "ugcReports" && window.AdminUgcReports) window.AdminUgcReports.load();
     if (tab === "ops") loadOps();
   }
 
@@ -2364,6 +2365,10 @@
       state.maintenance = me.maintenance === true || me.chipsEnabled === false;
       showApp();
       setStatus("", "");
+      if (window.AdminUgcReports){
+        window.AdminUgcReports.attach({ apiFetch: apiFetch });
+        window.AdminUgcReports.refreshCount();
+      }
       if (state.maintenance){
         setActiveTab("ops");
       } else {
@@ -2372,6 +2377,7 @@
     } catch (err){
       state.adminUserId = null;
       state.maintenance = false;
+      if (window.AdminUgcReports) window.AdminUgcReports.reset();
       if (err && (err.status === 401 || (err.status === 403 && err.code === "admin_required"))){
         showUnauthorized(getUnauthorizedMessage(err));
       } else {

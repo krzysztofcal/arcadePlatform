@@ -16,7 +16,9 @@
   <script src="/js/auth/supabase-config.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
   <script src="/js/user-ui-state.js" defer></script>
+  <script src="/js/profile-avatar-catalog.js" defer></script>
   <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-onboarding.js" defer></script>
   <script src="/js/chips/client.js" defer></script>
   <script src="/js/core/number-format.js" defer></script>
   <script src="/js/topbar.js" defer></script>
@@ -84,69 +86,30 @@
     </aside>
 
     <main style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
-    <h1>Regulamin</h1>
-    <p>Data aktualizacji: 13-07-2026</p>
-
-    <h2>O usłudze</h2>
-    <p>Arcade Hub to przeglądarkowa kolekcja gier prowadzona przez KCSWH z systemem XP oraz opcjonalnym kontem użytkownika dla synchronizacji w chmurze opartej na Supabase. Możesz grać jako gość albo zalogować się, aby zapisać XP i postępy.</p>
-
-    <h2>Korzystanie z Arcade Hub</h2>
-    <ul>
-      <li>Jeśli zakładasz konto, podaj prawidłowy adres e-mail i chroń swoje dane logowania.</li>
-      <li>Tryb gościa jest dostępny, lecz nie synchronizuje XP między urządzeniami.</li>
-      <li>Konto jest opcjonalne; usunięcie konta wyłączy synchronizację w chmurze i spowoduje usunięcie danych zgodnie z Polityką prywatności.</li>
-    </ul>
-
-    <h2>XP i synchronizacja</h2>
-    <ul>
-      <li>XP zdobyte po zalogowaniu jest powiązane z Twoim identyfikatorem użytkownika i przechowywane w Supabase.</li>
-      <li>Możemy korygować XP w przypadku nadużyć, cheatów lub błędów technicznych.</li>
-      <li>Problemy z łącznością mogą opóźnić synchronizację; dążymy do ponawiania prób bez utraty postępów.</li>
-    </ul>
-
-    <h2>Obowiązki użytkownika</h2>
-    <ul>
-      <li>Nie manipuluj XP, nie używaj cheatów ani narzędzi do hakowania.</li>
-      <li>Nie ingeruj w zabezpieczenia, nie próbuj inżynierii wstecznej ani zakłócania innych graczy.</li>
-      <li>Korzystaj z serwisu zgodnie z prawem i poszanowaniem praw autorskich.</li>
-      <li>Nie używaj nazwy, opisu ani awatara profilu publicznego do podszywania się pod inne osoby ani publikowania treści niezgodnych z prawem, naruszających prawa, obraźliwych lub szkodliwych.</li>
-    </ul>
-
-    <h2>Publiczny profil gracza</h2>
-    <p>Każde uwierzytelnione konto otrzymuje publiczny profil gracza. Jego identyfikator, nazwa wyświetlana, opcjonalny opis, awatar, łączna liczba XP i poziom są widoczne dla każdej osoby znającej adres profilu. Nie umieszczaj w tych publicznych polach danych osobowych ani poufnych. E-mail, identyfikatory konta, żetony, ledger, dane pokera, dane sesji, szczegółowe rekordy XP oraz dzienne i tygodniowe przyrosty XP nie są tam wyświetlane.</p>
-
-    <h2>Publiczny ranking XP</h2>
-    <p>Uwierzytelnione konta domyślnie uczestniczą w publicznym rankingu XP. Ranking może pokazywać pozycję, identyfikator profilu, nazwę wyświetlaną, awatar, XP zdobyte dzisiaj, w tym tygodniu lub łącznie, poziom i link do profilu publicznego. Goście nie uczestniczą w rankingu. Możesz zrezygnować z udziału w Ustawieniach; spowoduje to usunięcie konta z wyników i obliczeń pozycji, ale nie ustawi jego profilu publicznego jako prywatnego.</p>
-
-    <h2>Konta i bezpieczeństwo</h2>
-    <ul>
-      <li>Chroń swoje dane logowania. Odpowiadasz za działania wykonywane na Twoim koncie.</li>
-      <li>Możemy zawiesić lub usunąć konta naruszające niniejszy regulamin, Politykę prywatności lub prawo.</li>
-      <li>Usunięcie konta obecnie wymaga wiadomości na <a class="ft-link" href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Automatyczne usuwanie jest planowane.</li>
-    </ul>
-
-    <h2>Treści i podmioty trzecie</h2>
-    <p>Część gier i usług pochodzi od dostawców zewnętrznych, którzy mogą mieć własne regulaminy i zasady prywatności. Zobowiązujesz się przestrzegać wymogów prezentowanych wraz z tymi grami.</p>
-
-    <h2>Zastrzeżenia i odpowiedzialność</h2>
-    <ul>
-      <li>Arcade Hub udostępniany jest „w stanie takim, w jakim jest”. Nie gwarantujemy nieprzerwanej dostępności ani braku błędów.</li>
-      <li>W najszerszym zakresie dozwolonym prawem nie ponosimy odpowiedzialności za szkody pośrednie lub wynikowe związane z korzystaniem z serwisu.</li>
-      <li>Postanowienia niniejsze nie ograniczają odpowiedzialności, której ograniczyć nie można.</li>
-    </ul>
-
-    <h2>Zmiany i dostępność</h2>
-    <p>Możemy aktualizować gry, zasady XP lub niniejszy regulamin. Istotne zmiany publikujemy z nową datą. Funkcje mogą być czasowo niedostępne z powodów serwisowych lub bezpieczeństwa.</p>
-
-    <h2>Rozstrzyganie sporów</h2>
-    <p>Regulamin podlega prawu polskiemu. Spory rozstrzygają właściwe sądy w Polsce.</p>
-
-    <h2>Powiązane dokumenty</h2>
-    <p>Zapoznaj się z <a class="ft-link" href="privacy.pl.html">Polityką prywatności</a> oraz <a class="ft-link" href="cookies-notice.pl.html">Notą o cookies</a>.</p>
-
-    <p style="margin-top:16px;"><a class="ft-link manage-cookies" id="manageCookies" data-i18n="manageCookies" href="#">Zarządzaj cookies</a></p>
-    <p><a class="ft-link" href="../index.html?lang=pl">Wróć do portalu</a></p>
-    </main>
+<h1>Regulamin Arcade Hub i Arcade Poker</h1>
+<p>Wersja: 2026-10-28-a2</p>
+<h2>1. Projekt i kontakt</h2>
+<p>Projekt hobbystyczny pod marką KCSWH prowadzi Krzysztof Cal. Arcade Hub i Arcade Poker to udostępniane w jego ramach bezpłatne usługi. Projekt ma charakter niekomercyjny. Kontakt: <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>.</p>
+<h2>2. Korzystanie z gier</h2>
+<p>Gry są udostępniane bez opłat. CH i Offline Chips są odrębnymi jednostkami gry. Nie mają wartości pieniężnej, nie podlegają wymianie na pieniądze i nie zapewniają nagród pieniężnych.</p>
+<p>Gra online i funkcje konta wymagają Internetu. Prywatna gra gościa z botami nie wymaga konta. Poker Offline działa na urządzeniu; jego postępy i Offline Chips nie są synchronizowane z grą online. Usunięcie danych aplikacji lub przeglądarki może usunąć lokalny zapis.</p>
+<p>Korzystanie ze strony wymaga przeglądarki obsługującej JavaScript, pliki cookie i zapisywanie danych na urządzeniu. Rejestracja przez e-mail wymaga dostępu do skrzynki oraz potwierdzenia adresu. Można też wybrać logowanie Google. Wymagania aplikacji Android są podawane przy jej udostępnieniu.</p>
+<h2>3. Konto, profil i akceptacja zasad</h2>
+<p>Rejestracja tworzy konto. Pierwsze logowanie Google również może utworzyć konto. Konto i automatycznie utworzony profil mogą powstać przed akceptacją regulaminu. Samo zalogowanie się nie oznacza jego akceptacji.</p>
+<p>Profil gracza jest domyślnie dostępny dla zalogowanych użytkowników. Po zalogowaniu mogą oni zobaczyć automatycznie nadaną nazwę i publiczny identyfikator gracza, avatar z katalogu, XP oraz poziom. E-mail i dane logowania nie należą do profilu publicznego. Dane rankingu są dostępne po zalogowaniu. Konto jest domyślnie widoczne w rankingu. Widoczność w rankingu można wyłączyć w ustawieniach Konta; nie ukrywa to publicznego profilu. Nazwa i avatar przy stole pozwalają rozpoznać uczestników gry.</p>
+<p>Gdy wymagana jest akceptacja aktualnego regulaminu, trzeba ją potwierdzić przed rozpoczęciem nowej gry po zalogowaniu, zmianą publicznego avatara, wysłaniem reakcji lub prezentu. Zapisujemy wersję i czas potwierdzenia. Akceptacja nie działa wstecz i nie jest zgodą na analitykę ani publikację zdjęcia Google. „Nie teraz” nie zapisuje akceptacji.</p>
+<p>Bez akceptacji nowej wersji nadal można przeczytać dokumenty, uzyskać pomoc, wylogować się, zażądać usunięcia konta i zmienić widoczność w rankingu. Można wznowić już rozpoczętą grę, opuścić stół i dokończyć jej rozliczenie. Prywatna gra gościa z botami oraz Offline nie wymagają potwierdzenia przed każdą grą.</p>
+<h2>4. Zasady zachowania</h2>
+<p>Nie podszywaj się pod innych, nie nękaj graczy, nie rozpowszechniaj treści bezprawnych, nie oszukuj i nie obchodź zabezpieczeń. Reakcje i prezenty są widoczne podczas gry. Nie udostępniaj danych logowania innym osobom.</p>
+<p>Avatar wybiera się z katalogu. Nie można samodzielnie zmieniać publicznej nazwy i identyfikatora gracza, dodawać opisu profilu ani przesyłać własnego zdjęcia. Nazwa i zdjęcie z konta Google nie są automatycznie publikowane w profilu gracza. Ewentualne przyszłe wykorzystanie zdjęcia wymaga osobnego świadomego zezwolenia.</p>
+<p>Problemy i niewłaściwe zachowanie zgłaszaj na <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>.</p>
+<h2>5. Zakończenie korzystania i reklamacje</h2>
+<p>Możesz przestać korzystać z projektu i wylogować się. Wylogowanie nie usuwa konta ani lokalnych zapisów gry. Usunięcie konta można zgłosić w Koncie, jeżeli funkcja jest dostępna, albo przez <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Procedura obejmuje zakończenie udziału w grze i obsługę wirtualnego salda; nie cofa zakończonych rozliczeń. Nie wymaga akceptacji nowej wersji regulaminu.</p>
+<p>Reklamację lub zgłoszenie błędu wyślij na <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Opisz problem, czas zdarzenia i sposób kontaktu. Nie przesyłaj haseł, tokenów ani kodów logowania. Zgłoszenia są rozpatrywane indywidualnie, a odpowiedź jest przekazywana e-mailem. Do żądań dotyczących danych osobowych stosujemy terminy wynikające z RODO.</p>
+<h2>6. Dostępność i zmiany</h2>
+<p>Projekt może zawierać błędy i być czasowo niedostępny. Nie gwarantujemy działania bez przerw. Nie ogranicza to praw ani odpowiedzialności, których nie można wyłączyć na mocy prawa.</p>
+<p>Istotne zmiany regulaminu otrzymują nową wersję. Nie zmieniamy treści zaakceptowanej wersji pod tym samym oznaczeniem. Gdy nowe operacje wymagają akceptacji nowej wersji, wyświetlamy ją przed potwierdzeniem. Zasady przetwarzania danych określa odrębna Polityka prywatności.</p>
+</main>
   </div>
 
   <footer class="site-footer" role="contentinfo">

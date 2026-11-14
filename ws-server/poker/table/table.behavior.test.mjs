@@ -537,7 +537,13 @@ test("table_leave without room/table id resolves to joined table", async () => {
       WS_AUTH_REQUIRED: "1",
       WS_AUTH_TEST_SECRET: secret,
       WS_PRESENCE_TTL_MS: "0",
-      WS_TEST_LEAVE_RESULT_JSON: override
+      WS_TEST_LEAVE_RESULT_JSON: override,
+      // The external Leave has committed; the WS handler now reloads persistence.
+      WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify({ table_leave_implicit: {
+        tableRow: { id: 'table_leave_implicit', status: 'OPEN', max_players: 6, buy_in: 100, is_single_player: false },
+        seatRows: [],
+        stateRow: { version: 5, state: { tableId: 'table_leave_implicit', phase: 'INIT', seats: [], stacks: {} } }
+      } })
     }
   });
 
@@ -564,8 +570,8 @@ test("table_leave without room/table id resolves to joined table", async () => {
       payload: {}
     });
     const observerInitial = await nextMessage(observer, 5000, "observerInitial");
-    assert.equal(observerInitial.type, "error");
-    assert.equal(observerInitial.payload.code, "TABLE_BOOTSTRAP_UNAVAILABLE");
+    assert.equal(observerInitial.type, "table_state");
+    assert.deepEqual(observerInitial.payload.members, []);
 
     sendFrame(leaver, {
       version: "1.0",

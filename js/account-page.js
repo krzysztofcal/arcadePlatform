@@ -9,6 +9,9 @@
   var welcomeBonusInFlight = null;
   var publicProfileInFlight = null;
   var publicProfile = null;
+  var avatarSelection = null;
+  var avatarSaving = null;
+  var avatarMessage = '';
   var publicProfileGeneration = 0;
   var publicProfileSaveResetTimer = null;
   var passwordRecoveryActive = false;
@@ -40,12 +43,14 @@
     nodes.userName = doc.getElementById('accountName');
     nodes.signOut = doc.getElementById('signOutButton');
     nodes.deleteBtn = doc.getElementById('deleteAccountButton');
+    nodes.deletionInfo = doc.getElementById('account-deletion');
     nodes.deleteNote = doc.getElementById('deleteAccountNote');
     nodes.deletionDialog = doc.getElementById('accountDeletionDialog');
     nodes.deletionCancel = doc.getElementById('accountDeletionCancel');
     nodes.deletionConfirm = doc.getElementById('accountDeletionConfirmButton');
     nodes.deletionClose = doc.getElementById('accountDeletionClose');
     nodes.googleSignIn = doc.getElementById('googleSignInButton');
+    nodes.googleProfileNotice = doc.getElementById('googleProfileNotice');
     nodes.googleDivider = doc.getElementById('googleSignInDivider');
     nodes.signInForm = doc.getElementById('signinForm');
     nodes.signUpForm = doc.getElementById('signupForm');
@@ -91,21 +96,16 @@
     nodes.publicProfileForm = doc.getElementById('publicProfileForm');
     nodes.publicProfileAvatar = doc.getElementById('publicProfileAvatar');
     nodes.publicProfileUrl = doc.getElementById('publicProfileUrl');
+    nodes.publicProfileBrowserHint = doc.getElementById('publicProfileBrowserHint');
     nodes.publicDisplayName = doc.getElementById('publicDisplayName');
     nodes.publicHandle = doc.getElementById('publicHandle');
-    nodes.publicBio = doc.getElementById('publicBio');
     nodes.hideFromLeaderboard = doc.getElementById('hideFromLeaderboard');
-    nodes.publicHandleHint = doc.getElementById('publicHandleHint');
     nodes.publicProfileSave = doc.getElementById('publicProfileSave');
     nodes.publicProfileSaveLabel = doc.getElementById('publicProfileSaveLabel');
     nodes.publicProfileSaveStatus = doc.getElementById('publicProfileSaveStatus');
-    nodes.publicAvatarInput = doc.getElementById('publicAvatarInput');
-    nodes.publicAvatarChoose = doc.getElementById('publicAvatarChoose');
-    nodes.publicAvatarRemove = doc.getElementById('publicAvatarRemove');
+    nodes.publicAvatarSave = doc.getElementById('publicAvatarSave');
+    nodes.publicAvatarSaveLabel = doc.getElementById('publicAvatarSaveLabel');
     nodes.publicAvatarStatus = doc.getElementById('publicAvatarStatus');
-    nodes.publicDisplayNameError = doc.getElementById('publicDisplayNameError');
-    nodes.publicHandleError = doc.getElementById('publicHandleError');
-    nodes.publicBioError = doc.getElementById('publicBioError');
   }
 
   function t(key, fallback){
@@ -136,6 +136,7 @@
     renderUser(user);
     loadChips();
     refreshWelcomeBonus(user);
+    if (!window.MOBILE_POKER_CONFIG && window.location.hash === '#account-deletion') return;
     if (window.location) window.location.hash = 'accountPanel';
     if (nodes.account && typeof nodes.account.scrollIntoView === 'function') nodes.account.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -230,6 +231,14 @@
     return normalized ? normalized : '';
   }
 
+  var deletionLinkFocused = false;
+  function focusDeletionLink(){
+    if (window.MOBILE_POKER_CONFIG || !currentUser || window.location.hash !== '#account-deletion' || deletionLinkFocused || !nodes.deleteBtn) return;
+    deletionLinkFocused = true;
+    if (nodes.deleteBtn.scrollIntoView) nodes.deleteBtn.scrollIntoView({block:'center'});
+    nodes.deleteBtn.focus({preventScroll:true});
+  }
+
   function renderUser(user){
     var incomingUserKey = getUserKey(user);
     if (incomingUserKey && deletionReceivedOwnerId === incomingUserKey) user = null;
@@ -244,6 +253,9 @@
     }
     if (previousUserKey !== nextUserKey){
       if (nextUserKey && deletionAttempt && nextUserKey !== deletionAttempt.ownerId) resetDeletionAttempt();
+      avatarSelection = null; avatarSaving = null; avatarMessage = '';
+      publicProfile = null;
+      renderAvatarGallery();
       publicProfileGeneration += 1;
       publicProfileInFlight = null;
       if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
@@ -252,6 +264,9 @@
     // Toggle panels
     setBlockVisibility(nodes.forms, !hasUser && !signupConfirmationPending);
     setBlockVisibility(nodes.account, hasUser);
+    setBlockVisibility(nodes.deletionInfo, !hasUser && !window.MOBILE_POKER_CONFIG);
+    if (!hasUser) deletionLinkFocused = false;
+    focusDeletionLink();
     setBlockVisibility(nodes.chipPanel, hasUser);
     if (!hasUser && signupConfirmationPending) setBlockVisibility(nodes.signupConfirmation, true);
     setWelcomeBonusVisibility(false);
@@ -275,24 +290,10 @@
   function setPublicProfileErrors(errors){
     if (nodes.publicDisplayNameError) nodes.publicDisplayNameError.textContent = errors && errors.displayName ? errors.displayName : '';
     if (nodes.publicHandleError) nodes.publicHandleError.textContent = errors && errors.handle ? errors.handle : '';
-    if (nodes.publicBioError) nodes.publicBioError.textContent = errors && errors.bio ? errors.bio : '';
   }
 
-  function publicProfileError(error){
-    var code = error && error.code ? error.code : 'request_failed';
-    var messages = {
-      invalid_handle: t('publicProfileInvalidHandle', 'Use 3-24 lowercase letters, digits, hyphens, or underscores.'),
-      handle_taken: t('publicProfileHandleTaken', 'This handle is already taken.'),
-      reserved_handle: t('publicProfileReservedHandle', 'This handle is reserved.'),
-      handle_locked: t('publicProfileHandleLocked', 'Your handle is permanent and cannot be changed again.'),
-      invalid_display_name: t('publicProfileInvalidDisplayName', 'Use 2-40 characters for your display name.'),
-      bio_too_long: t('publicProfileBioTooLong', 'Your bio can contain up to 160 characters.'),
-      invalid_leaderboard_visibility: t('leaderboardVisibilityInvalid', 'Choose a valid leaderboard visibility setting.')
-    };
-    return { code: code, message: messages[code] || t('publicProfileSaveError', 'Could not save your public profile.') };
-  }
 
-  function setPublicProfileSaveState(state, message){
+  function setPublicProfileSaveState(state, message, messageKey){
     if (publicProfileSaveResetTimer){ clearTimeout(publicProfileSaveResetTimer); publicProfileSaveResetTimer = null; }
     if (nodes.publicProfileSave){
       nodes.publicProfileSave.dataset.state = state;
@@ -302,9 +303,10 @@
     if (nodes.publicProfileSaveLabel){
       nodes.publicProfileSaveLabel.textContent = state === 'saving'
         ? t('savingPublicProfile', 'Saving...')
-        : state === 'saved' ? t('publicProfileSavedShort', 'Saved') : t('savePublicProfile', 'Save public profile');
+        : state === 'saved' ? t('publicProfileSavedShort', 'Saved') : t('profileSaveVisibility', 'Save visibility');
     }
-    if (nodes.publicProfileSaveStatus) nodes.publicProfileSaveStatus.textContent = message || '';
+    if(nodes.publicProfileSaveLabel)nodes.publicProfileSaveLabel.dataset.i18n=state==='saving'?'savingPublicProfile':state==='saved'?'publicProfileSavedShort':'profileSaveVisibility';
+    if (nodes.publicProfileSaveStatus){nodes.publicProfileSaveStatus.textContent = message || '';if(messageKey)nodes.publicProfileSaveStatus.dataset.i18n=messageKey;else delete nodes.publicProfileSaveStatus.dataset.i18n;}
     if (state === 'saved'){
       publicProfileSaveResetTimer = setTimeout(function(){ setPublicProfileSaveState('idle', ''); }, 1800);
     }
@@ -313,15 +315,14 @@
   function renderPublicProfile(profile){
     publicProfile = profile || null;
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
+    if (nodes.publicProfileBrowserHint) nodes.publicProfileBrowserHint.hidden = !window.MobilePoker;
     if (!profile) return;
     if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
-    if (nodes.publicAvatarRemove) nodes.publicAvatarRemove.hidden = !(profile.avatar && profile.avatar.type === 'uploaded');
-    if (nodes.publicDisplayName) nodes.publicDisplayName.value = profile.displayName || '';
-    if (nodes.publicHandle){ nodes.publicHandle.value = profile.handle || ''; nodes.publicHandle.disabled = !profile.handleCanBeCustomized; }
-    if (nodes.publicBio) nodes.publicBio.value = profile.bio || '';
+    if (nodes.publicDisplayName) nodes.publicDisplayName.textContent = profile.displayName || '';
+    if(nodes.publicHandle)nodes.publicHandle.textContent='@'+(profile.handle||'');
+    renderAvatarGallery();
     if (nodes.hideFromLeaderboard) nodes.hideFromLeaderboard.checked = profile.leaderboardVisible === false;
-    if (nodes.publicHandleHint) nodes.publicHandleHint.textContent = profile.handleCanBeCustomized ? t('publicHandleHint', 'You can change your generated handle once. It then becomes permanent.') : t('publicHandleLockedHint', 'This handle is permanent.');
-    if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
+    if (nodes.publicProfileUrl){ nodes.publicProfileUrl.href = window.MobilePoker ? window.MobilePoker.publicProfileUrl(profile.handle) : '/u/' + encodeURIComponent(profile.handle || ''); nodes.publicProfileUrl.textContent = '/u/' + (profile.handle || ''); }
     setPublicProfileErrors(null);
   }
 
@@ -404,65 +405,78 @@
     renderPokerState(accountPokerProjection);
   }
 
-  function setAvatarState(state, message, tone){
-    var busy = state === 'validating' || state === 'uploading' || state === 'processing' || state === 'removing';
-    if (nodes.publicAvatarChoose) nodes.publicAvatarChoose.disabled = !!busy;
-    if (nodes.publicAvatarRemove) nodes.publicAvatarRemove.disabled = !!busy;
-    if (nodes.publicAvatarInput) nodes.publicAvatarInput.disabled = !!busy;
-    if (nodes.publicAvatarStatus){
-      nodes.publicAvatarStatus.textContent = message || t('publicAvatarRequirements', 'JPEG, PNG or WebP, up to 1 MB.');
-      nodes.publicAvatarStatus.dataset.tone = tone || '';
-    }
-    if (nodes.publicProfileAvatar){
-      nodes.publicProfileAvatar.dataset.uploadState = state || 'idle';
-      nodes.publicProfileAvatar.setAttribute('aria-busy', busy ? 'true' : 'false');
-    }
+  function allowedAvatarVariants(){
+    return currentUser&&window.ArcadeTerms&&typeof window.ArcadeTerms.getAvatarVariants==='function'?window.ArcadeTerms.getAvatarVariants(getUserKey(currentUser)):[];
   }
 
-  function avatarErrorMessage(error){
-    var code = error && error.code ? error.code : 'avatar_upload_failed';
-    if (code === 'unsupported_avatar_type' || code === 'invalid_avatar_file') return t('publicAvatarInvalidType', 'Choose a valid JPEG, PNG or WebP image.');
-    if (code === 'avatar_too_large' || code === 'avatar_dimensions_too_large') return t('publicAvatarTooLarge', 'Use an image up to 1 MB and 1024 x 1024 pixels.');
-    return t('publicAvatarUploadError', 'Could not update your avatar. Please try again.');
+  function syncAvatarSelection(){
+    var gallery=doc.getElementById('arcadeAvatarGallery');
+    var saved=publicProfile&&publicProfile.avatarVariant;
+    var allowed=allowedAvatarVariants();
+    if(avatarMessage==='arcadeAvatarUnsaved'&&avatarSelection===saved)avatarMessage='';
+    if(gallery){
+      gallery.setAttribute('aria-busy',String(!!avatarSaving));
+      Array.prototype.forEach.call(gallery.children,function(button){
+        var variant=button.dataset.variant,selected=variant===avatarSelection,isSaved=variant===saved;
+        button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving;
+        button.setAttribute('aria-label',t('arcadeAvatarChoice','Choose avatar')+' '+variant+(isSaved?'. '+t('arcadeAvatarCurrent','Saved'):'')+(selected?'. '+t('arcadeAvatarSelected','Selected'):''));
+        button.lastChild.hidden=!isSaved;
+      });
+    }
+    if(nodes.publicAvatarSave){
+      nodes.publicAvatarSave.disabled=!!avatarSaving||!publicProfile||!avatarSelection||avatarSelection===saved||allowed.indexOf(avatarSelection)===-1;
+      nodes.publicAvatarSave.setAttribute('aria-busy',String(!!avatarSaving));
+    }
+    if(nodes.publicAvatarSaveLabel){var key=avatarSaving?'arcadeAvatarSaving':'arcadeAvatarSet';nodes.publicAvatarSaveLabel.dataset.i18n=key;nodes.publicAvatarSaveLabel.textContent=t(key,avatarSaving?'Saving…':'Set avatar');}
+    if(nodes.publicAvatarStatus){nodes.publicAvatarStatus.dataset.i18n=avatarMessage;nodes.publicAvatarStatus.textContent=avatarMessage?t(avatarMessage,'Could not save avatar. Try again.'):'';}
   }
 
-  function handleAvatarChoose(){ if (nodes.publicAvatarInput && !nodes.publicAvatarInput.disabled) nodes.publicAvatarInput.click(); }
-
-  function handleAvatarSelected(){
-    var file = nodes.publicAvatarInput && nodes.publicAvatarInput.files ? nodes.publicAvatarInput.files[0] : null;
-    if (!file || !window.ProfileClient || typeof window.ProfileClient.uploadAvatar !== 'function') return;
-    if (typeof window.FileReader === 'function' && nodes.publicProfileAvatar){
-      var previewReader = new window.FileReader();
-      previewReader.onload = function(){
-        nodes.publicProfileAvatar.textContent = '';
-        nodes.publicProfileAvatar.classList.add('profile-avatar--uploaded');
-        nodes.publicProfileAvatar.style.backgroundImage = 'url("' + String(previewReader.result || '').replace(/["\\]/g, '') + '")';
-      };
-      previewReader.readAsDataURL(file);
-    }
-    setAvatarState('validating', t('publicAvatarValidating', 'Checking image...'), 'info');
-    window.ProfileClient.uploadAvatar(file, function(stage){
-      if (stage === 'uploading') setAvatarState('uploading', t('publicAvatarUploading', 'Uploading avatar...'), 'info');
-      if (stage === 'processing') setAvatarState('processing', t('publicAvatarProcessing', 'Processing avatar...'), 'info');
-    }).then(function(profile){
-      renderPublicProfile(profile);
-      setAvatarState('success', t('publicAvatarUpdated', 'Avatar updated and visible on your profile.'), 'success');
-    }).catch(function(error){
-      renderPublicProfile(publicProfile);
-      setAvatarState('error', avatarErrorMessage(error), 'error');
-    }).finally(function(){
-      if (nodes.publicAvatarInput) nodes.publicAvatarInput.value = '';
+  function renderAvatarGallery(){
+    var gallery=doc.getElementById('arcadeAvatarGallery');
+    if(!gallery)return;
+    gallery.textContent='';
+    var allowed=allowedAvatarVariants();
+    if(!window.ArcadeAvatars||!publicProfile||!currentUser){syncAvatarSelection();return;}
+    if(avatarSelection===null)avatarSelection=publicProfile.avatarVariant;
+    if(allowed.length&&allowed.indexOf(avatarSelection)===-1){avatarSelection=allowed.indexOf(publicProfile.avatarVariant)!==-1?publicProfile.avatarVariant:null;avatarMessage='arcadeAvatarNotActive';}
+    window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;}).forEach(function(variant){
+      var button=doc.createElement('button'),img=doc.createElement('img'),check=doc.createElement('span'),saved=doc.createElement('span');
+      button.type='button';button.className='arcade-avatar-choice';button.title=variant;button.dataset.variant=variant;
+      img.src=window.ArcadeAvatars.url(variant);img.alt='';img.width=48;img.height=48;button.appendChild(img);
+      check.className='arcade-avatar-choice__check';check.textContent='✓';check.setAttribute('aria-hidden','true');button.appendChild(check);
+      saved.className='arcade-avatar-choice__saved';saved.textContent=t('arcadeAvatarCurrent','Saved');button.appendChild(saved);
+      button.addEventListener('click',function(){
+        if(avatarSaving||allowedAvatarVariants().indexOf(variant)===-1)return;
+        avatarSelection=variant;avatarMessage=variant===publicProfile.avatarVariant?'':'arcadeAvatarUnsaved';syncAvatarSelection();
+      });
+      gallery.appendChild(button);
     });
+    syncAvatarSelection();
   }
 
-  function handleAvatarRemove(){
-    if (!window.ProfileClient || typeof window.ProfileClient.removeAvatar !== 'function') return;
-    if (!window.confirm(t('publicAvatarRemoveConfirm', 'Remove your uploaded avatar and restore the default avatar?'))) return;
-    setAvatarState('removing', t('publicAvatarRemoving', 'Restoring default avatar...'), 'info');
-    window.ProfileClient.removeAvatar().then(function(profile){
-      renderPublicProfile(profile);
-      setAvatarState('success', t('publicAvatarRemoved', 'Default avatar restored.'), 'success');
-    }).catch(function(error){ setAvatarState('error', avatarErrorMessage(error), 'error'); });
+  function sameAvatarProfile(left,right){
+    return left&&right&&['avatarRevision','avatarVariant','leaderboardVisible','handle','displayName'].every(function(key){return left[key]===right[key];});
+  }
+
+  async function saveAvatar(){
+    if(avatarSaving||!publicProfile||!currentUser||!avatarSelection||avatarSelection===publicProfile.avatarVariant||allowedAvatarVariants().indexOf(avatarSelection)===-1)return;
+    var request={owner:getUserKey(currentUser),generation:publicProfileGeneration,profile:publicProfile,variant:avatarSelection};
+    avatarSaving=request;avatarMessage='';syncAvatarSelection();
+    function active(){return avatarSaving===request&&getUserKey(currentUser)===request.owner&&publicProfileGeneration===request.generation;}
+    try{
+      var profile=await window.ProfileClient.updateMe({avatarVariant:request.variant,expectedRevision:request.profile.avatarRevision},{userId:request.owner,isCurrent:function(){return active()&&sameAvatarProfile(publicProfile,request.profile)&&allowedAvatarVariants().indexOf(request.variant)!==-1;}});
+      if(!active())return;
+      if(!sameAvatarProfile(publicProfile,request.profile)&&!sameAvatarProfile(publicProfile,profile))throw {code:'stale_profile'};
+      renderPublicProfile(profile);avatarSelection=profile.avatarVariant;avatarMessage='arcadeAvatarSaved';
+    }catch(error){
+      if(!active())return;
+      var code=error&&error.code;
+      avatarMessage=code==='stale_avatar_revision'||code==='stale_profile'?'arcadeAvatarConflict':code==='terms_required'?'arcadeAvatarTermsRequired':code==='avatar_variants_not_active'?'arcadeAvatarNotActive':'arcadeAvatarSaveError';
+      klog('profile:avatar_save_failed',{code:code||'request_failed'});
+      if(code==='stale_avatar_revision'||code==='stale_profile')await loadPublicProfile(true);
+      if(code==='terms_required'&&window.ArcadeTerms)window.ArcadeTerms.open();
+      if(code==='avatar_variants_not_active'&&window.ArcadeTerms)window.ArcadeTerms.refresh(false);
+    }finally{if(active()){avatarSaving=null;renderAvatarGallery();}}
   }
 
   function loadPublicProfile(force){
@@ -490,38 +504,10 @@
 
   function handlePublicProfileSave(event){
     event.preventDefault();
-    if (!publicProfile || !window.ProfileClient || typeof window.ProfileClient.updateMe !== 'function') return;
-    setPublicProfileErrors(null);
-    var payload = {};
-    var displayName = nodes.publicDisplayName ? nodes.publicDisplayName.value.trim() : '';
-    var bio = nodes.publicBio ? nodes.publicBio.value.trim() : '';
-    var handle = nodes.publicHandle ? nodes.publicHandle.value.trim().toLowerCase() : '';
-    var leaderboardVisible = nodes.hideFromLeaderboard ? !nodes.hideFromLeaderboard.checked : publicProfile.leaderboardVisible !== false;
-    if (displayName !== publicProfile.displayName) payload.displayName = displayName;
-    if (bio !== publicProfile.bio) payload.bio = bio;
-    if (publicProfile.handleCanBeCustomized && handle && handle !== publicProfile.handle){
-      if (!window.confirm(t('publicHandleConfirm', 'Changing your handle is permanent. Continue?'))) return;
-      payload.handle = handle;
-    }
-    if (leaderboardVisible !== (publicProfile.leaderboardVisible !== false)) payload.leaderboardVisible = leaderboardVisible;
-    if (!Object.keys(payload).length){ setStatus(t('publicProfileNoChanges', 'No profile changes to save.'), 'info'); return; }
-    setPublicProfileSaveState('saving', t('savingPublicProfile', 'Saving...'));
-    var saveSucceeded = false;
-    window.ProfileClient.updateMe(payload).then(function(profile){
-      renderPublicProfile(profile);
-      saveSucceeded = true;
-      setPublicProfileSaveState('saved', t('publicProfileSaved', 'Public profile saved.'));
-      setStatus(t('publicProfileSaved', 'Public profile saved.'), 'success');
-    }).catch(function(error){
-      var result = publicProfileError(error);
-      var errors = {};
-      if (result.code.indexOf('handle') !== -1 || result.code === 'reserved_handle') errors.handle = result.message;
-      else if (result.code === 'bio_too_long') errors.bio = result.message;
-      else if (result.code === 'invalid_display_name') errors.displayName = result.message;
-      setPublicProfileErrors(errors);
-      setPublicProfileSaveState('idle', result.message);
-      setStatus(result.message, 'error');
-    }).finally(function(){ if (!saveSucceeded) setPublicProfileSaveState('idle', nodes.publicProfileSaveStatus ? nodes.publicProfileSaveStatus.textContent : ''); });
+    if(!publicProfile||!window.ProfileClient)return;
+    var visible=nodes.hideFromLeaderboard?!nodes.hideFromLeaderboard.checked:publicProfile.leaderboardVisible;
+    setPublicProfileSaveState('saving',t('savingPublicProfile','Saving...'),'savingPublicProfile');
+    window.ProfileClient.updateMe({leaderboardVisible:visible}).then(function(profile){renderPublicProfile(profile);setPublicProfileSaveState('saved',t('profileVisibilitySaved','Visibility saved.'),'profileVisibilitySaved');}).catch(function(){setPublicProfileSaveState('idle',t('profileVisibilityError','Could not save visibility.'),'profileVisibilityError');});
   }
 
   function clearChips(){
@@ -1318,8 +1304,10 @@
     setDeletionBusy(false);
     if (nodes.deleteNote) nodes.deleteNote.textContent = t('deleteAccountNote', 'Deleting your account permanently forfeits CH, XP, achievements and profile data.');
   }
-  function deletionRequest(token, method){
-    return window.fetch('/.netlify/functions/account-delete', {
+  function deletionRequest(token, method, attempt){
+    var url = window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/account-delete') : '/.netlify/functions/account-delete';
+    if (method === 'POST') attempt.postAttempted = true;
+    return window.fetch(url, {
       method: method, cache: 'no-store',
       headers: method === 'POST' ? { Authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { Authorization: 'Bearer ' + token },
       body: method === 'POST' ? JSON.stringify({confirmation:'DELETE_ACCOUNT',acknowledgeForfeiture:true}) : undefined
@@ -1378,7 +1366,7 @@
         attempt.confirmed = confirmed;
         if (!confirmed) return;
         setDeletionBusy(true, true);
-        return deletionRequest(token, 'POST').catch(function(){
+        return deletionRequest(token, 'POST', attempt).catch(function(){
           // A lost response is UNKNOWN. Reconcile once; do not start a timer or
           // ask for consent again. A later click may safely replay the same POST.
           return deletionRequest(token, 'GET').then(function(saved){
@@ -1389,7 +1377,9 @@
       });
     }).catch(function(){
       if (!isCurrent()) return;
-      var message = t('accountDeletionUnavailable', 'We could not confirm receipt of your request. Try again; any saved request continues automatically.');
+      var message = attempt.postAttempted
+        ? t('accountDeletionUnavailable', 'We could not confirm receipt of your request. Try again; any saved request continues automatically.')
+        : t('accountDeletionLookupFailed', 'Could not check your account deletion status. No deletion request was sent by this attempt.');
       if (nodes.deleteNote) nodes.deleteNote.textContent = message;
       setStatus(message, 'error');
     }).then(function(){
@@ -1403,6 +1393,7 @@
 
   function wireEvents(){
     var googleEnabled = !!(auth && auth.isGoogleEnabled && auth.isGoogleEnabled());
+    setBlockVisibility(nodes.googleProfileNotice, googleEnabled);
     setBlockVisibility(nodes.googleSignIn, googleEnabled);
     setBlockVisibility(nodes.googleDivider, googleEnabled);
     if (nodes.googleSignIn) nodes.googleSignIn.addEventListener('click', handleGoogleSignIn);
@@ -1417,9 +1408,7 @@
     if (nodes.bonusCampaignList){ nodes.bonusCampaignList.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.welcomeBonusClaimButton){ nodes.welcomeBonusClaimButton.addEventListener('click', handleWelcomeBonusClaim); }
     if (nodes.publicProfileForm){ nodes.publicProfileForm.addEventListener('submit', handlePublicProfileSave); }
-    if (nodes.publicAvatarChoose){ nodes.publicAvatarChoose.addEventListener('click', handleAvatarChoose); }
-    if (nodes.publicAvatarInput){ nodes.publicAvatarInput.addEventListener('change', handleAvatarSelected); }
-    if (nodes.publicAvatarRemove){ nodes.publicAvatarRemove.addEventListener('click', handleAvatarRemove); }
+    if (nodes.publicAvatarSave){ nodes.publicAvatarSave.addEventListener('click', saveAvatar); }
     if (nodes.deleteBtn && nodes.deleteNote){
       nodes.deleteBtn.addEventListener('click', handleDeleteAccount);
     }
@@ -1499,11 +1488,14 @@
     try { window.sessionStorage.removeItem('arcade:account-deletion-status'); } catch (_err){}
     setWelcomeBonusVisibility(false);
     wireEvents();
+    window.addEventListener('hashchange', function(){ deletionLinkFocused = false; focusDeletionLink(); });
     hydrateUser();
 
     doc.addEventListener('chips:tx-complete', loadChips);
+    doc.addEventListener('profile:terms-status', renderAvatarGallery);
     doc.addEventListener('profile:updated', function(event){ renderPublicProfile(event && event.detail ? event.detail : null); });
     doc.addEventListener('langchange', function(){
+      if(publicProfile)renderAvatarGallery();
       setWelcomeBonusVisibility(nodes.welcomeBonusPanel && !nodes.welcomeBonusPanel.hidden);
       if (currentUser){ refreshWelcomeBonus(currentUser); }
       if (accountPokerProjection !== undefined) renderPokerState(accountPokerProjection);

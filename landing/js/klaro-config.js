@@ -27,7 +27,7 @@
       en: {
         privacyPolicyUrl: '/legal/privacy.en',
         consentNotice: {
-          description: 'We use optional analytics and advertising services only with your consent.',
+          description: 'We use optional analytics services only with your consent.',
         },
         consentModal: {
           title: 'Cookie preferences',
@@ -36,21 +36,16 @@
         purposes: {
           necessary: { title: 'Necessary' },
           analytics: { title: 'Analytics' },
-          advertising: { title: 'Advertising' },
         },
         googleAnalytics: {
           title: 'Google Analytics',
           description: 'Helps us understand aggregate site usage and improve games and navigation.',
         },
-        googleAds: {
-          title: 'Google AdSense',
-          description: 'Allows advertising slots and ad measurement on pages that include ads.',
-        },
       },
       pl: {
         privacyPolicyUrl: '/legal/privacy.pl',
         consentNotice: {
-          description: 'Opcjonalne narzedzia analityczne i reklamowe uruchamiamy tylko za Twoja zgoda.',
+          description: 'Opcjonalne narzedzia analityczne uruchamiamy tylko za Twoja zgoda.',
         },
         consentModal: {
           title: 'Preferencje cookies',
@@ -59,15 +54,10 @@
         purposes: {
           necessary: { title: 'Niezbedne' },
           analytics: { title: 'Analityka' },
-          advertising: { title: 'Reklamy' },
         },
         googleAnalytics: {
           title: 'Google Analytics',
           description: 'Pomaga nam mierzyc zbiorcze uzycie serwisu i ulepszac gry oraz nawigacje.',
-        },
-        googleAds: {
-          title: 'Google AdSense',
-          description: 'Umozliwia wyswietlanie slotow reklamowych i pomiar reklam na stronach z reklamami.',
         },
       },
     },
@@ -79,20 +69,6 @@
           [/^_ga.*$/, '/', sharedDomain],
           ['_gid', '/', sharedDomain],
           ['_gat', '/', sharedDomain],
-        ],
-        callback: notify,
-        required: false,
-        optOut: false,
-        onlyOnce: true,
-      },
-      {
-        name: 'googleAds',
-        purposes: ['advertising'],
-        cookies: [
-          [/^_gcl_.*$/, '/', sharedDomain],
-          [/^__gads.*$/, '/', sharedDomain],
-          [/^__gpi.*$/, '/', sharedDomain],
-          [/^FCNEC$/, '/', sharedDomain],
         ],
         callback: notify,
         required: false,

@@ -774,3 +774,13 @@ test('poker ws client preview build overrides production globals when preview UR
   h.client.start();
   assert.equal(h.FakeWebSocket.instances[0].url, 'wss://ws-preview.kcswh.pl/ws');
 });
+
+
+test('approved native Stage parent selects Preview WS over Production globals without changing branch context', () => {
+  const h = loadClientHarness({
+    buildInfo: { context: 'branch-deploy', isPreview: false, isBranchDeploy: true, stageParent: true, pokerWsUrl: 'wss://ws-preview.kcswh.pl/ws', pokerWsPreviewUrl: 'wss://ws-preview.kcswh.pl/ws' },
+    pokerWsUrlOverride: 'wss://ws.override.prod/ws'
+  });
+  h.client.start();
+  assert.equal(h.FakeWebSocket.instances[0].url, 'wss://ws-preview.kcswh.pl/ws');
+});

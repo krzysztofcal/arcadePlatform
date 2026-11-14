@@ -1377,12 +1377,15 @@ test("internal poker log control requires auth and exposes bounded no-store enab
 
 test("internal poker maintenance route is token-protected and does not expose a public browser path", async () => {
   const token = "internal-maintenance-token";
+  const holdFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "ws-hold-")), "hold-new-hands");
+  await fs.writeFile(holdFile, "");
   const { port, child } = await createServer({
     env: {
       POKER_WS_INTERNAL_TOKEN: token,
       WS_DEPLOY_ENVIRONMENT: "preview",
       SUPABASE_DB_URL: "",
-      WS_POKER_LOG_LEVEL: "INFO"
+      WS_POKER_LOG_LEVEL: "INFO",
+      WS_POKER_NEW_HANDS_HOLD_FILE: holdFile
     }
   });
   const url = `http://127.0.0.1:${port}/internal/admin/poker-maintenance`;
@@ -1391,10 +1394,39 @@ test("internal poker maintenance route is token-protected and does not expose a 
     assert.equal((await fetch(url)).status, 401);
     const authorized = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     assert.equal(authorized.status, 503);
-    assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable" });
+    const newHandsHold = {
+      configured: true, active: true, drain: false, loadedHandsInProgress: 0, tableCommandsInFlight: 0, stateWritesInFlight: 0,
+      supervisorSweepInProgress: false, dbHandsInProgress: null, dbVersionMismatches: null, dbFinancialIssues: null, restartSafe: false
+    };
+    assert.deepEqual(await authorized.json(), { ok: false, error: "continuous_maintenance_unavailable", newHandsHold });
+    await fs.writeFile(holdFile, "drain\n");
+    const draining = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    // Without persisted state to compare, a restart is never reported safe.
+    assert.deepEqual((await draining.json()).newHandsHold, { ...newHandsHold, drain: true });
+    await fs.rm(holdFile);
+    const released = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    assert.deepEqual((await released.json()).newHandsHold, { ...newHandsHold, active: false });
   } finally {
     child.kill("SIGTERM");
     await waitForExit(child);
+  }
+});
+
+test("Production maintenance status retains its existing contract without Preview human counters", async () => {
+  const token = "production-status-fixture-token";
+  const { port, child } = await createServer({ env: {
+    POKER_WS_INTERNAL_TOKEN: token, WS_DEPLOY_ENVIRONMENT: "production", SUPABASE_DB_URL: "", WS_POKER_LOG_LEVEL: "INFO"
+  } });
+  try {
+    await waitForListening(child, 5000);
+    const response = await fetch(`http://127.0.0.1:${port}/internal/admin/poker-maintenance`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const { newHandsHold } = await response.json();
+    assert.equal(Object.hasOwn(newHandsHold, "humanMemberTables"), false);
+    assert.equal(Object.hasOwn(newHandsHold, "connectedHumanTables"), false);
+  } finally {
+    child.kill("SIGTERM"); await waitForExit(child);
   }
 });
 
@@ -1741,6 +1773,22 @@ function waitForExit(proc) {
 }
 
 function createServer({ env = {}, nodeArgs = [] } = {}) {
+  // Leave's public-result override models a committed external transaction.
+  // Supply its persisted counterpart for the production post-commit reload.
+  const left = env.WS_TEST_LEAVE_RESULT_JSON ? JSON.parse(env.WS_TEST_LEAVE_RESULT_JSON) : null;
+  const state = left?.state?.state;
+  if (left?.ok && state?.tableId === left.tableId && state?.stacks && Array.isArray(state.seats) && !env.WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON) {
+    const tableId = state.tableId;
+    env = { ...env, WS_PERSISTED_BOOTSTRAP_FIXTURES_JSON: JSON.stringify({ [tableId]: {
+      tableRow: { id: tableId, status: left.tableStatus || 'OPEN', max_players: 6, buy_in: 100, is_single_player: false },
+      seatRows: state.seats.filter(seat => !state.leftTableByUserId?.[seat.userId]).map(seat => ({
+        user_id: seat.userId, seat_no: seat.seatNo ?? seat.seat, status: 'ACTIVE',
+        is_bot: seat.isBot === true, stack: state.stacks?.[seat.userId] ?? 0
+      })),
+      stateRow: left.state
+    } }) };
+  }
+
   return getFreePort().then((port) => {
     const child = spawn(process.execPath, [...nodeArgs, "ws-server/server.mjs"], {
       env: {
@@ -5853,7 +5901,7 @@ test("active replacement: seated act accepted and observer act rejected under ob
 test("human hello gets one bot reply while preflop raise and duplicate request schedule no bluff accusation", async () => {
   const secret = "reaction-integration-secret";
   const tableId = "table_reaction_integration";
-  const humanUserId = "reaction_human";
+  const humanUserId = "00000000-0000-4000-8000-000000000007";
   const botSeat2 = makeBotUserId(tableId, 2);
   const botSeat3 = makeBotUserId(tableId, 3);
   const coreState = {
@@ -5891,6 +5939,7 @@ test("human hello gets one bot reply while preflop raise and duplicate request s
   };
   assert.equal(liveState.turnUserId, humanUserId);
   const { dir, filePath } = await writePersistedFile({
+    profileTermsPolicy: { version: "2026-10-26-a1", active: false, variants_enabled: false },
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}' },
@@ -8906,15 +8955,16 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
   const secret = "auth-join-historical-seat-secret";
   const tableId = "table_auth_join_historical_non_active";
   const store = {
-    accounts: [{ user_id: "historical_user", account_type: "USER", balance: 110 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000008", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", buy_in: 100 },
-        seatRows: [{ user_id: "historical_user", seat_no: 1, status: "INACTIVE", is_bot: false }],
+        seatRows: [{ user_id: "00000000-0000-4000-8000-000000000008", seat_no: 1, status: "INACTIVE", is_bot: false }],
         stateRow: { version: 1, state: { tableId, seats: [], stacks: {}, phase: "INIT", pot: 0 } }
       }
     }
   };
+  store.profileTermsPolicy = { version: "2026-10-26-a1", active: false, variants_enabled: false };
   store.pokerTierPolicies = pokerTierPolicyRows([100]);
   store.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
   store.accounts = store.accounts.map((account) => ({ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1, ...account }));
@@ -8933,7 +8983,7 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "historical_user" }), "auth-join-historical");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000008" }), "auth-join-historical");
 
     sendFrame(ws, { version: "1.0", type: "table_join", requestId: "join-historical", ts: "2026-02-28T05:50:00Z", payload: { tableId, buyIn: 100 } });
     const ack = await nextCommandResultForRequest(ws, "join-historical");
@@ -8947,7 +8997,7 @@ test("authoritative join with historical non-ACTIVE seat retries to the next sea
     });
     const state = await nextMessageOfType(ws, "table_state");
     assert.deepEqual(state.payload.seats, [
-      { userId: "historical_user", seatNo: 2, status: "ACTIVE" }
+      { userId: "00000000-0000-4000-8000-000000000008", seatNo: 2, status: "ACTIVE" }
     ]);
     ws.close();
   } finally {
@@ -8961,7 +9011,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
   const secret = "auth-join-bots-secret";
   const tableId = "table_auth_join_bots";
   const store = {
-    accounts: [{ user_id: "bot_seed_human", account_type: "USER", balance: 110 }],
+    accounts: [{ user_id: "00000000-0000-4000-8000-000000000009", account_type: "USER", balance: 110 }],
     tables: {
       [tableId]: {
         tableRow: { id: tableId, max_players: 6, status: "OPEN", stakes: '{"sb":1,"bb":2}', buy_in: 100 },
@@ -8970,6 +9020,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       }
     }
   };
+  store.profileTermsPolicy = { version: "2026-10-26-a1", active: false, variants_enabled: false };
   store.pokerTierPolicies = pokerTierPolicyRows([100]);
   store.pokerAccessPolicy = { slow_threshold_ch: 1_000_000_000, slow_hysteresis_bps: 500, slow_recovery_threshold_ch: 950_000_000, revision: 1 };
   store.accounts = store.accounts.map((account) => ({ poker_auto_class: "NORMAL", poker_access_override: "AUTO", poker_access_revision: 1, ...account }));
@@ -8993,7 +9044,7 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
     await waitForListening(child, 5000);
     const ws = await connectClient(port);
     await hello(ws);
-    await auth(ws, makeHs256Jwt({ secret, sub: "bot_seed_human" }), "auth-join-bots");
+    await auth(ws, makeHs256Jwt({ secret, sub: "00000000-0000-4000-8000-000000000009" }), "auth-join-bots");
 
     sendFrame(ws, {
       version: "1.0",
@@ -9015,14 +9066,14 @@ test("authoritative WS table_join seeds two bots once and returns authoritative 
       assert.fail(`first authoritative join ack payload: ${JSON.stringify(firstAck.payload)}`);
     }
     assert.deepEqual(firstState.payload.authoritativeMembers, [
-      { userId: "bot_seed_human", seat: 1 },
+      { userId: "00000000-0000-4000-8000-000000000009", seat: 1 },
       { userId: botSeat2, seat: 2 },
       { userId: botSeat3, seat: 3 }
     ]);
-    assert.equal(firstState.payload.members.some((entry) => entry.userId === "bot_seed_human"), true);
+    assert.equal(firstState.payload.members.some((entry) => entry.userId === "00000000-0000-4000-8000-000000000009"), true);
     assert.equal(firstState.payload.members.some((entry) => entry.userId === botSeat2), false);
     assert.deepEqual(firstState.payload.seats, [
-      { userId: "bot_seed_human", seatNo: 1, status: "ACTIVE" },
+      { userId: "00000000-0000-4000-8000-000000000009", seatNo: 1, status: "ACTIVE" },
       { userId: botSeat2, seatNo: 2, status: "ACTIVE", isBot: true, botProfile: "NORMAL" },
       { userId: botSeat3, seatNo: 3, status: "ACTIVE", isBot: true, botProfile: "NORMAL" }
     ]);

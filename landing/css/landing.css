@@ -422,17 +422,6 @@ h1 {
   text-decoration: none;
 }
 
-.ad-slot {
-  min-height: 92px;
-  margin: 18px 0 28px;
-  border-radius: var(--radius);
-  background: rgba(17, 23, 53, 0.42);
-  border: 1px solid var(--border-soft);
-  padding: 12px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
 
 .footer {
   width: min(1120px, calc(100% - 32px));

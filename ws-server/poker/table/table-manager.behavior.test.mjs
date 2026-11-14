@@ -1,7 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { decideSettledBotFunding, readSettledBotFundingSnapshot, resolveSettledBotFundingSystemKey } from "../runtime/settled-bot-funding.mjs";
 import { __testOnly, createTableManager as createRuntimeTableManager } from "./table-manager.mjs";
+import { isNewHandsHoldActive, isWsDrainActive, summarizeRestartFinancials } from "../runtime/new-hands-hold.mjs";
+
+function holdNewHands(t) {
+  const holdFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ws-hold-")), "hold-new-hands");
+  const previous = process.env.WS_POKER_NEW_HANDS_HOLD_FILE;
+  process.env.WS_POKER_NEW_HANDS_HOLD_FILE = holdFile;
+  fs.writeFileSync(holdFile, "");
+  t.after(() => { if (previous === undefined) delete process.env.WS_POKER_NEW_HANDS_HOLD_FILE; else process.env.WS_POKER_NEW_HANDS_HOLD_FILE = previous; });
+  return () => fs.rmSync(holdFile);
+}
 
 function createTableManager(options = {}) {
   const manager = createRuntimeTableManager({ defaultBuyIn: 100, ...options });
@@ -409,7 +422,7 @@ test("applyAction returns accepted action audit context without private cards", 
   assert.equal(serialized.includes("AD"), false);
 });
 
-test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", () => {
+test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", (t) => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_settled_rollover";
   const wsA = fakeWs("ws-rollover-a");
@@ -473,6 +486,11 @@ test("rolloverSettledHand delays next-hand bootstrap until explicitly invoked", 
   assert.equal(bootstrap.bootstrap, "settlement_pending");
   assert.equal(bootstrap.stateVersion, 7);
   assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+
+  const releaseHold = holdNewHands(t);
+  assert.deepEqual(tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 }), { ok: true, changed: false, reason: "new_hands_on_hold", stateVersion: 7 });
+  assert.equal(tableManager.persistedPokerState(tableId).phase, "SETTLED");
+  releaseHold();
 
   const rollover = tableManager.rolloverSettledHand({ tableId, nowMs: 5_000 });
 
@@ -801,7 +819,36 @@ test("authenticated resubscribe restores seated human presence so a fold settlem
   assert.equal(nextState.holeCardsByUserId[humanUserId].length, 2);
 });
 
-test("bootstrapHand excludes disconnected human ghost seats from the next hand", () => {
+test("new-hands hold and drain are off when unset or absent and fail closed on an unreadable path", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ws-hold-"));
+  fs.writeFileSync(path.join(dir, "file"), "");
+  assert.equal(isNewHandsHoldActive({}), false);
+  assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "absent") }), false);
+  assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), true);
+  assert.equal(isNewHandsHoldActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file", "hold") }), true);
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), false);
+  fs.writeFileSync(path.join(dir, "file"), "drain\n");
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file") }), true);
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "absent") }), false);
+  assert.equal(isWsDrainActive({ WS_POKER_NEW_HANDS_HOLD_FILE: path.join(dir, "file", "hold") }), true);
+});
+
+test("restart financial summary fails closed on missing, invalid or unbalanced money", () => {
+  const row = (overrides) => ({ has_state: true, stacks: { a: 60, b: 40 }, pot: 0, pot_total: null, escrow_status: "active", escrow_balance: "100", ...overrides });
+  const clean = { missingState: 0, missingEscrow: 0, invalidAmounts: 0, balanceMismatches: 0, unresolvedRequests: 0 };
+  assert.deepEqual(summarizeRestartFinancials([row({}), row({ stacks: {}, escrow_status: null, escrow_balance: null })], 0), clean);
+  assert.deepEqual(summarizeRestartFinancials([row({ has_state: false })], 0), { ...clean, missingState: 1 });
+  assert.deepEqual(summarizeRestartFinancials([row({ escrow_status: null, escrow_balance: null })], 0), { ...clean, missingEscrow: 1 });
+  assert.deepEqual(summarizeRestartFinancials([row({ escrow_status: "closed" })], 0), { ...clean, missingEscrow: 1 });
+  for (const invalid of [{ stacks: { a: -1 } }, { stacks: { a: 1.5 } }, { stacks: null }, { pot: 4 }, { pot_total: "x" }, { escrow_balance: "-3" }]) {
+    assert.deepEqual(summarizeRestartFinancials([row(invalid)], 0), { ...clean, invalidAmounts: 1 }, JSON.stringify(invalid));
+  }
+  assert.deepEqual(summarizeRestartFinancials([row({ escrow_balance: 101 })], 0), { ...clean, balanceMismatches: 1 });
+  assert.deepEqual(summarizeRestartFinancials([], 2), { ...clean, unresolvedRequests: 2 });
+  assert.deepEqual(summarizeRestartFinancials([], undefined), { ...clean, unresolvedRequests: null, invalidAmounts: 1 });
+});
+
+test("bootstrapHand excludes disconnected human ghost seats from the next hand", (t) => {
   const tableManager = createTableManager({ maxSeats: 6 });
   const tableId = "table_bootstrap_connected_human_only";
   const wsHuman = fakeWs("ws-bootstrap-human");
@@ -836,6 +883,11 @@ test("bootstrapHand excludes disconnected human ghost seats from the next hand",
   });
 
   assert.equal(restored.ok, true);
+
+  const releaseHold = holdNewHands(t);
+  assert.deepEqual(tableManager.bootstrapHand(tableId, { nowMs: 1_000 }), { ok: true, changed: false, bootstrap: "new_hands_on_hold", stateVersion: 9, handId: null });
+  assert.equal(tableManager.persistedPokerState(tableId), null);
+  releaseHold();
 
   const bootstrapped = tableManager.bootstrapHand(tableId, { nowMs: 1_000 });
 
@@ -1291,182 +1343,15 @@ test("table manager authoritative attach normalizes existing in-memory seat to a
 
 
 
-test("syncAuthoritativeLeave removes member in-memory without persistence side-effects and is idempotent", () => {
-  const tableId = "table_sync_leave";
-  const tableManager = createTableManager({ maxSeats: 4 });
-  const wsMember = fakeWs("ws-sync-member");
-  const wsOther = fakeWs("ws-sync-other");
-
-  const joinMember = tableManager.join({ ws: wsMember, userId: "user_leave", tableId, requestId: "join-sync-1", nowTs: 1 });
-  const joinOther = tableManager.join({ ws: wsOther, userId: "user_stay", tableId, requestId: "join-sync-2", nowTs: 2 });
-  assert.equal(joinMember.ok, true);
-  assert.equal(joinOther.ok, true);
-
-  const synced = tableManager.syncAuthoritativeLeave({
-    ws: wsMember,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 7,
-    pokerState: {
-      tableId,
-      seats: [{ seatNo: 2, userId: "user_stay" }],
-      stacks: { user_stay: 100 },
-      phase: "INIT"
-    }
-  });
-
-  assert.equal(synced.ok, true);
-  assert.equal(synced.changed, true);
-  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_stay", 2]]);
-
-  const replayed = tableManager.syncAuthoritativeLeave({
-    ws: wsMember,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 7,
-    pokerState: {
-      tableId,
-      seats: [{ seatNo: 2, userId: "user_stay" }],
-      stacks: { user_stay: 100 },
-      phase: "INIT"
-    }
-  });
-  assert.equal(replayed.ok, true);
-  assert.equal(replayed.changed, false);
-  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_stay", 2]]);
-});
 
 
 
-test("syncAuthoritativeLeave tolerates seat compatibility alias", () => {
-  const tableId = "table_sync_leave_alias";
-  const tableManager = createTableManager({ maxSeats: 4 });
-  const wsMember = fakeWs("ws-sync-alias-member");
-  const wsOther = fakeWs("ws-sync-alias-other");
-
-  tableManager.join({ ws: wsMember, userId: "user_leave", tableId, requestId: "join-sync-alias-1", nowTs: 1 });
-  tableManager.join({ ws: wsOther, userId: "user_stay", tableId, requestId: "join-sync-alias-2", nowTs: 2 });
-
-  const synced = tableManager.syncAuthoritativeLeave({
-    ws: wsMember,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 9,
-    pokerState: {
-      tableId,
-      seats: [{ seat: 2, userId: "user_stay" }],
-      stacks: { user_stay: 100 },
-      phase: "INIT"
-    }
-  });
-
-  assert.equal(synced.ok, true);
-  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_stay", 2]]);
-});
 
 
 
-test("syncAuthoritativeLeave changed=true when authoritative version/state changes with stable members", () => {
-  const tableId = "table_sync_leave_version";
-  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
-  const wsA = fakeWs("ws-sync-version-a");
-  const wsB = fakeWs("ws-sync-version-b");
 
-  tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-version-a", nowTs: 1 });
-  tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-version-b", nowTs: 2 });
 
-  const synced = tableManager.syncAuthoritativeLeave({
-    ws: wsA,
-    userId: "user_a",
-    tableId,
-    stateVersion: 9,
-    pokerState: {
-      tableId,
-      seats: [{ seatNo: 2, userId: "user_b" }],
-      phase: "PREFLOP",
-      handId: "h-9"
-    }
-  });
 
-  assert.equal(synced.ok, true);
-  assert.equal(synced.changed, true);
-  assert.equal(tableManager.__debugCore(tableId).version, 9);
-});
-
-test("syncAuthoritativeLeave replay remains changed=false for identical authoritative state", () => {
-  const tableId = "table_sync_leave_replay_identical";
-  const tableManager = createTableManager({ maxSeats: 4 });
-  const wsA = fakeWs("ws-sync-replay-a");
-  const wsB = fakeWs("ws-sync-replay-b");
-
-  tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-replay-a", nowTs: 1 });
-  tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-replay-b", nowTs: 2 });
-
-  const state = {
-    tableId,
-    seats: [{ seatNo: 2, userId: "user_b" }],
-    phase: "INIT"
-  };
-
-  const first = tableManager.syncAuthoritativeLeave({ ws: wsA, userId: "user_a", tableId, stateVersion: 4, pokerState: state });
-  const replay = tableManager.syncAuthoritativeLeave({ ws: wsA, userId: "user_a", tableId, stateVersion: 4, pokerState: state });
-
-  assert.equal(first.changed, true);
-  assert.equal(replay.changed, false);
-});
-
-test("syncAuthoritativeLeave applies authoritative closed table status", () => {
-  const tableId = "table_sync_leave_closed_status";
-  const tableManager = createTableManager({ maxSeats: 4 });
-  const wsA = fakeWs("ws-sync-closed-a");
-  const wsB = fakeWs("ws-sync-closed-b");
-
-  tableManager.join({ ws: wsA, userId: "user_a", tableId, requestId: "join-closed-a", nowTs: 1 });
-  tableManager.join({ ws: wsB, userId: "user_b", tableId, requestId: "join-closed-b", nowTs: 2 });
-
-  const synced = tableManager.syncAuthoritativeLeave({
-    ws: wsA,
-    userId: "user_a",
-    tableId,
-    stateVersion: 4,
-    tableStatus: "CLOSED",
-    pokerState: {
-      tableId,
-      seats: [{ seatNo: 2, userId: "user_b" }],
-      phase: "HAND_DONE"
-    }
-  });
-
-  assert.equal(synced.ok, true);
-  assert.equal(synced.changed, true);
-  assert.equal(tableManager.isTableClosed(tableId), true);
-});
-
-test("syncAuthoritativeLeave intentionally drops caller subscription while preserving non-leaving observer", () => {
-  const tableId = "table_sync_leave_subscription_policy";
-  const tableManager = createTableManager({ maxSeats: 4 });
-  const wsLeave = fakeWs("ws-sync-leaver");
-  const wsObserver = fakeWs("ws-sync-observer");
-
-  tableManager.join({ ws: wsLeave, userId: "user_leave", tableId, requestId: "join-sub-leaver", nowTs: 1 });
-  tableManager.join({ ws: wsObserver, userId: "user_keep", tableId, requestId: "join-sub-observer", nowTs: 2 });
-
-  tableManager.syncAuthoritativeLeave({
-    ws: wsLeave,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 5,
-    pokerState: {
-      tableId,
-      seats: [{ seatNo: 2, userId: "user_keep" }],
-      phase: "INIT"
-    }
-  });
-
-  const connections = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || "");
-  assert.deepEqual(connections, [wsObserver]);
-  assert.deepEqual(memberPairs(tableManager.tableState(tableId).members), [["user_keep", 2]]);
-});
 
 
 
@@ -1540,129 +1425,9 @@ test("observer disconnect from settled table emits update so rollover can re-eva
   assert.equal(tableManager.hasConnectedHumanPresence(tableId), false);
 });
 
-test("syncAuthoritativeLeave rejects mismatched authoritative tableId without mutating state", () => {
-  const tableId = "table_sync_leave_mismatch";
-  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
-  const wsLeave = fakeWs("ws-sync-mismatch-leave");
-  const wsKeep = fakeWs("ws-sync-mismatch-keep");
 
-  tableManager.join({ ws: wsLeave, userId: "user_leave", tableId, requestId: "join-mismatch-leave", nowTs: 1 });
-  tableManager.join({ ws: wsKeep, userId: "user_keep", tableId, requestId: "join-mismatch-keep", nowTs: 2 });
 
-  const before = tableManager.__debugCore(tableId);
-  const result = tableManager.syncAuthoritativeLeave({
-    ws: wsLeave,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 99,
-    pokerState: {
-      tableId: "table_other",
-      seats: [{ seatNo: 2, userId: "user_keep" }],
-      phase: "INIT"
-    }
-  });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.code, "authoritative_state_invalid");
-  assert.equal(result.changed, false);
-  assert.deepEqual(tableManager.__debugCore(tableId), before);
-});
-
-test("syncAuthoritativeLeave rejects malformed seats payload without mutating state", () => {
-  const tableId = "table_sync_leave_bad_seats";
-  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
-  const wsLeave = fakeWs("ws-sync-bad-seats-leave");
-  const wsKeep = fakeWs("ws-sync-bad-seats-keep");
-
-  tableManager.join({ ws: wsLeave, userId: "user_leave", tableId, requestId: "join-bad-seats-leave", nowTs: 1 });
-  tableManager.join({ ws: wsKeep, userId: "user_keep", tableId, requestId: "join-bad-seats-keep", nowTs: 2 });
-
-  const before = tableManager.__debugCore(tableId);
-  const beforeConnections = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || "");
-
-  const result = tableManager.syncAuthoritativeLeave({
-    ws: wsLeave,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 7,
-    pokerState: {
-      tableId,
-      seats: null,
-      phase: "INIT"
-    }
-  });
-
-  assert.equal(result.ok, false);
-  assert.equal(result.code, "authoritative_state_invalid");
-  assert.equal(result.changed, false);
-  assert.deepEqual(tableManager.__debugCore(tableId), before);
-  assert.deepEqual(tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || ""), beforeConnections);
-});
-
-test("syncAuthoritativeLeave rejects invalid seat entries without mutating state", () => {
-  const tableId = "table_sync_leave_bad_entries";
-  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
-  const wsLeave = fakeWs("ws-sync-bad-entry-leave");
-  const wsKeep = fakeWs("ws-sync-bad-entry-keep");
-
-  tableManager.join({ ws: wsLeave, userId: "user_leave", tableId, requestId: "join-bad-entry-leave", nowTs: 1 });
-  tableManager.join({ ws: wsKeep, userId: "user_keep", tableId, requestId: "join-bad-entry-keep", nowTs: 2 });
-
-  const before = tableManager.__debugCore(tableId);
-
-  const result = tableManager.syncAuthoritativeLeave({
-    ws: wsLeave,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 8,
-    pokerState: {
-      tableId,
-      seats: [{ seatNo: "not-an-int", userId: "user_keep" }, { seatNo: 2, userId: "" }],
-      phase: "INIT"
-    }
-  });
-
-  assert.equal(result.ok, false);
-  assert.equal(result.code, "authoritative_state_invalid");
-  assert.equal(result.changed, false);
-  assert.deepEqual(tableManager.__debugCore(tableId), before);
-});
-
-test("syncAuthoritativeLeave rejects seats that still contain leaving user without mutating state", () => {
-  const tableId = "table_sync_leave_still_present";
-  const tableManager = createTableManager({ maxSeats: 4, enableDebugCore: true, nodeEnv: "test" });
-  const wsLeave = fakeWs("ws-sync-still-present-leave");
-  const wsKeep = fakeWs("ws-sync-still-present-keep");
-
-  tableManager.join({ ws: wsLeave, userId: "user_leave", tableId, requestId: "join-still-present-leave", nowTs: 1 });
-  tableManager.join({ ws: wsKeep, userId: "user_keep", tableId, requestId: "join-still-present-keep", nowTs: 2 });
-
-  const beforeCore = tableManager.__debugCore(tableId);
-  const beforeConnections = tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || "");
-  const beforeMembers = tableManager.tableState(tableId).members;
-
-  const result = tableManager.syncAuthoritativeLeave({
-    ws: wsLeave,
-    userId: "user_leave",
-    tableId,
-    stateVersion: 9,
-    pokerState: {
-      tableId,
-      seats: [
-        { seatNo: 1, userId: "user_leave" },
-        { seatNo: 2, userId: "user_keep" }
-      ],
-      phase: "INIT"
-    }
-  });
-
-  assert.equal(result.ok, false);
-  assert.equal(result.code, "authoritative_state_invalid");
-  assert.equal(result.changed, false);
-  assert.deepEqual(tableManager.__debugCore(tableId), beforeCore);
-  assert.deepEqual(tableManager.orderedConnectionsForTable(tableId, (socket) => socket.id || ""), beforeConnections);
-  assert.deepEqual(tableManager.tableState(tableId).members, beforeMembers);
-});
 
 test("observeOnlyJoin rejects second different table on same socket and keeps original subscription", async () => {
   const tableManager = createTableManager({ maxSeats: 4, observeOnlyJoin: true });
@@ -3405,8 +3170,9 @@ test("public profile hydration queries only current UUID human seats and reuses 
     }
   });
 
-  const first = await tableManager.refreshPublicProfiles(tableId, { force: true, nowMs: 1_000 });
-  const cached = await tableManager.refreshPublicProfiles(tableId, { nowMs: 1_001 });
+  const nowMs = Date.now();
+  const first = await tableManager.refreshPublicProfiles(tableId, { force: true, nowMs });
+  const cached = await tableManager.refreshPublicProfiles(tableId, { nowMs: nowMs + 1 });
   const snapshot = tableManager.tableSnapshot(tableId, humanId);
 
   assert.equal(first.ok, true);
@@ -3419,6 +3185,12 @@ test("public profile hydration queries only current UUID human seats and reuses 
   });
   assert.equal("profile" in snapshot.seats.find((seat) => seat.userId === botId), false);
   assert.equal("profile" in snapshot.seats.find((seat) => seat.userId === "guest_user_3"), false);
+  const realNow = Date.now;
+  try {
+    Date.now = () => nowMs + 60_001;
+    assert.equal("profile" in tableManager.tableSnapshot(tableId, humanId).seats.find((seat) => seat.userId === humanId), false);
+  } finally { Date.now = realNow; }
+
 });
 
 test("public profile hydration deduplicates refreshes and ignores results for an old seat fingerprint", async () => {
@@ -3525,10 +3297,14 @@ test("a stale profile failure cannot clear a newer seat fingerprint result", asy
 test("public profile failure and timeout return initials fallback without rejecting table state", async () => {
   const userId = "00000000-0000-4000-8000-000000000301";
   const tableId = "table_public_profile_failure";
+  let loaded=false;
   const tableManager = createTableManager({
     maxSeats: 2,
     publicProfileTimeoutMs: 5,
-    publicProfileLoader: async () => new Promise(() => {})
+    publicProfileLoader: async () => {
+      if (!loaded) { loaded=true;return {[userId]:{handle:"safe-user-301",displayName:"Safe User",avatar:{type:"default",variant:"fox-blue"}}}; }
+      return new Promise(() => {});
+    }
   });
   tableManager.restoreTableFromPersisted(tableId, {
     coreState: {
@@ -3543,6 +3319,8 @@ test("public profile failure and timeout return initials fallback without reject
     }
   });
 
+  assert.equal((await tableManager.refreshPublicProfiles(tableId,{force:true})).ok,true);
+  assert.equal(tableManager.tableSnapshot(tableId,userId).seats[0].profile.handle,"safe-user-301");
   const result = await tableManager.refreshPublicProfiles(tableId, { force: true });
   const snapshot = tableManager.tableSnapshot(tableId, userId);
 
@@ -3661,13 +3439,14 @@ test("projects a deferred leave while its authoritative seat and stack await cas
     stacks: { [userId]: 100, "other-user": 700 },
     leftTableByUserId: { [userId]: true }
   };
-  tableManager.syncAuthoritativeLeave({
-    ws: fakeWs("deferred-leave-socket"),
-    userId,
-    tableId,
-    stateVersion: 43,
-    pokerState: deferredState
+  const reload = (pokerState, version) => tableManager.restoreTableFromPersisted(tableId, {
+    tableStatus: "OPEN", tableMeta: { maxPlayers: 6, buyIn: 100, stakes: { sb: 1, bb: 2 } },
+    coreState: { version, roomId: tableId, maxSeats: 6,
+      members: [{ userId: "other-user", seat: 3 }], seats: { "other-user": 3 },
+      seatDetailsByUserId: { "other-user": { isBot: false } },
+      publicStacks: pokerState.stacks, pokerState }
   });
+  reload(deferredState, 43);
 
   assert.deepEqual(tableManager.projectUserTables(userId), {
     inPoker: true,
@@ -3685,19 +3464,9 @@ test("projects a deferred leave while its authoritative seat and stack await cas
     }]
   });
 
-  tableManager.syncAuthoritativeLeave({
-    ws: fakeWs("deferred-leave-socket"),
-    userId,
-    tableId,
-    stateVersion: 44,
-    pokerState: {
-      tableId,
-      phase: "HAND_DONE",
-      seats: [{ userId: "other-user", seatNo: 3, status: "ACTIVE", isBot: false }],
-      stacks: { "other-user": 700 },
-      leftTableByUserId: { [userId]: true }
-    }
-  });
+  reload({ tableId, phase: "HAND_DONE",
+    seats: [{ userId: "other-user", seatNo: 3, status: "ACTIVE", isBot: false }],
+    stacks: { "other-user": 700 }, leftTableByUserId: { [userId]: true } }, 44);
 
   assert.deepEqual(tableManager.projectUserTables(userId), {
     inPoker: false,

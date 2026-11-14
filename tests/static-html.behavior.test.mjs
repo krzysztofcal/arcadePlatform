@@ -5,6 +5,7 @@ import os from 'node:os';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { createHmac } from 'node:crypto';
 
 const root = process.cwd();
 const portalIndexHtml = await readFile(path.join(root, 'index.html'), 'utf8');
@@ -15,11 +16,9 @@ const consentManagerJs = await readFile(path.join(root, 'js', 'consent-manager.j
 const debugJs = await readFile(path.join(root, 'js', 'debug.js'), 'utf8');
 const consentServicesJs = await readFile(path.join(root, 'js', 'consent-services.js'), 'utf8');
 const klaroConfigJs = await readFile(path.join(root, 'js', 'klaro-config.js'), 'utf8');
-const adsenseInitJs = await readFile(path.join(root, 'js', 'adsense-init.js'), 'utf8');
 const landingConsentManagerJs = await readFile(path.join(root, 'landing', 'js', 'consent-manager.js'), 'utf8');
 const landingConsentServicesJs = await readFile(path.join(root, 'landing', 'js', 'consent-services.js'), 'utf8');
 const landingKlaroConfigJs = await readFile(path.join(root, 'landing', 'js', 'klaro-config.js'), 'utf8');
-const landingAdsenseInitJs = await readFile(path.join(root, 'landing', 'js', 'adsense-init.js'), 'utf8');
 const landingIndexHtml = await readFile(path.join(root, 'landing', 'index.html'), 'utf8');
 const landingAboutHtml = await readFile(path.join(root, 'landing', 'about.html'), 'utf8');
 const landingPrivacyEnHtml = await readFile(path.join(root, 'landing', 'legal', 'privacy.en.html'), 'utf8');
@@ -80,14 +79,44 @@ assert.match(tableV2Css, /\.poker-action-reaction \.poker-reaction-menu\{[^}]*bo
 assert.match(consentManagerJs, /#manageCookies, \.manage-cookies, \[data-manage-cookies\]/, 'consent manager should delegate clicks from all manage cookies links');
 assert.match(consentManagerJs, /window\.klaro\.show\(window\.klaroConfig, true\)/, 'manage cookies should open the Klaro preference modal');
 assert.match(consentManagerJs, /netlify-drawer-active/, 'consent runtime should expose the active Netlify drawer state to responsive UI');
-assert.match(consentServicesJs, /arcadeConsentChanged/, 'consent services should emit consent updates for AdSense slot initialization');
+assert.match(consentServicesJs, /arcadeConsentChanged/, 'consent services should preserve consent update notifications');
 assert.match(klaroConfigJs, /cookieDomain: sharedDomain/, 'Klaro should share consent across matching kcswh.pl subdomains');
 assert.match(indexHtml, /js\/vendor\/klaro\/klaro\.js/, 'portal pages should load Klaro');
 assert.doesNotMatch(indexHtml, /Cookiebot|data-cookieconsent/, 'portal index should no longer load Cookiebot-managed scripts');
 assert.equal(landingConsentManagerJs, consentManagerJs, 'landing deploy should publish the shared consent manager at /js/consent-manager.js');
 assert.equal(landingConsentServicesJs, consentServicesJs, 'landing deploy should publish the shared consent services helper at /js/consent-services.js');
 assert.equal(landingKlaroConfigJs, klaroConfigJs, 'landing deploy should publish the shared Klaro config at /js/klaro-config.js');
-assert.equal(landingAdsenseInitJs, adsenseInitJs, 'landing deploy should publish the AdSense init helper at /js/adsense-init.js');
+// Legacy ad consent must be inert while Analytics keeps its existing opt-in path.
+assert.equal(existsSync(path.join(root, 'js/adsense-init.js')), false);
+assert.equal(existsSync(path.join(root, 'landing/js/adsense-init.js')), false);
+for (const file of execFileSync('git', ['ls-files', '*.html'], {encoding:'utf8'}).trim().split('\n')) {
+  const html = await readFile(path.join(root,file),'utf8');
+  assert.doesNotMatch(html, /adsense-init\.js|adsbygoogle|ca-pub-|google-adsense-account|googlesyndication|doubleclick/, file + ' must not load or declare AdSense');
+}
+{
+  const scripts=[], events={}, stored={googleAnalytics:false,googleAds:true};
+  let watcher=null, shown=0;
+  const manager={getConsent:function(name){return stored[name];},watch:function(value){watcher=value;}};
+  const window={location:{hostname:'play.kcswh.pl'},dispatchEvent:function(){},
+    klaro:{getManager:function(){return manager;},show:function(){shown++;}}};
+  const document={addEventListener:function(name,fn){events[name]=fn;},getElementById:function(id){return scripts.find(function(s){return s.id===id;});},
+    createElement:function(){return {};},head:{appendChild:function(script){scripts.push(script);if(script.onload)script.onload();}}};
+  const context={window,document,CustomEvent:function(name,data){this.type=name;this.detail=data;}};
+  vm.createContext(context);vm.runInContext(klaroConfigJs,context);
+  assert.deepEqual(Array.from(window.klaroConfig.services,function(s){return s.name;}),['googleAnalytics']);
+  vm.runInContext(consentServicesJs,context);events.DOMContentLoaded();
+  window.ArcadeConsent.handleConsent('googleAds',true);
+  watcher.update(null,'consents',stored);
+  assert.equal(scripts.length,0,'old ad consent and denied Analytics must load nothing');
+  watcher.update(null,'consents',{googleAnalytics:true,googleAds:true});
+  assert.equal(scripts.length,1,'Analytics should load once after explicit consent');
+  assert.match(scripts[0].src,/^https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=G-/);
+  assert.equal(window.dataLayer.length,2,'Analytics should receive js and config commands');
+  window.ArcadeConsent.syncFromKlaro();
+  watcher.update(null,'consents',{googleAnalytics:true,googleAds:true});
+  assert.equal(scripts.length,1,'repeated consent must not duplicate Analytics');
+  assert.equal(window.ArcadeConsent.showManager(),true);assert.equal(shown,1);
+}
 assert.match(landingIndexHtml, /data-landing-game/, 'landing page should render the mini game surface');
 assert.match(landingIndexHtml, /\.\/js\/landing-game\.js/, 'landing page should load the mini game controller');
 assert.match(landingGameJs, /landingPixelBest/, 'landing mini game should persist the best score locally');
@@ -141,12 +170,9 @@ assert.match(headersFile, /\/\*\s+[\s\S]*?frame-ancestors 'none'[\s\S]*?X-Frame-
 const cspBlocks = [...headersFile.matchAll(/Content-Security-Policy:\s*([^\n]+)/g)].map((match) => match[1]);
 assert.equal(cspBlocks.length > 0, true, 'canonical headers should define CSP blocks');
 cspBlocks.forEach((csp) => {
+  assert.doesNotMatch(csp, /googlesyndication|doubleclick|adtrafficquality|googleadservices/, 'CSP should not authorize AdSense hosts');
   assert.match(csp, /frame-src[^;]*https:\/\/app\.netlify\.com/, 'every CSP variant should allow the Netlify Deploy Preview toolbar frame');
   assert.match(csp, /connect-src[^;]*https:\/\/region1\.google-analytics\.com/, 'every CSP variant should allow the active GA collection endpoint');
-  assert.match(csp, /connect-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality connections');
-  assert.match(csp, /script-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality runtime scripts');
-  assert.match(csp, /frame-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality frames');
-  assert.match(csp, /img-src[^;]*https:\/\/\*\.adtrafficquality\.google/, 'every CSP variant should allow Google Ads quality pixels');
 });
 for (const route of ['/games-open/*', '/game*.html', '/poker/*', '/games-open/freedoom/*']) {
   const routeStart = headersFile.indexOf(`\n${route}\n`);
@@ -243,6 +269,12 @@ const supabaseClientSource = await readFile(path.join(root, "js", "auth", "supab
   assert.equal(signUpPayload.options.emailRedirectTo, "https://deploy-preview-656--playkcswh.netlify.app/account.html", "signup confirmation should redirect back to the current deploy origin");
 }
 
+const fixtureStageRef = 'krydukthwdvccggbyjfw';
+const fixtureStageSecret = 'synthetic-build-test-secret';
+function stageBuildJwt(role) {
+  const input = Buffer.from(JSON.stringify({alg:'HS256'})).toString('base64url')+'.'+Buffer.from(JSON.stringify({ref:fixtureStageRef,role})).toString('base64url');
+  return input+'.'+createHmac('sha256',fixtureStageSecret).update(input).digest('base64url');
+}
 const buildTmpDir = await mkdtemp(path.join(os.tmpdir(), "arcade-build-config-"));
 try {
   execFileSync(process.execPath, [path.join(root, "scripts", "generate-build-info.js")], {
@@ -250,20 +282,25 @@ try {
     env: {
       ...process.env,
       CONTEXT: "deploy-preview",
+      POKER_DEAL_SECRET: "",
       XP_REDIS_VERSION: "3", XP_REDIS_ENV: "stage", XP_KEY_NS: "kcswh:stage:xp:v3",
-      DEPLOY_PRIME_URL: "https://deploy-preview-388--arcade.netlify.app/build/path",
-      SUPABASE_URL: "https://stageabc.supabase.co",
-      SUPABASE_ANON_KEY: "stage-anon-key",
+      DEPLOY_PRIME_URL: "https://deploy-preview-388--playkcswh.netlify.app",
+      SUPABASE_URL: `https://${fixtureStageRef}.supabase.co`,
+      SUPABASE_DB_URL: `postgresql://postgres:synthetic@db.${fixtureStageRef}.supabase.co/postgres`,
+      SUPABASE_JWT_SECRET: fixtureStageSecret,
+      SUPABASE_SERVICE_ROLE_KEY: stageBuildJwt('service_role'),
+      ARCADE_STAGE_REDIS_TOKEN: 'synthetic-stage-alias',
+      SUPABASE_ANON_KEY: stageBuildJwt('anon'),
     },
     stdio: "pipe",
   });
   const generatedSupabaseConfig = await readFile(path.join(buildTmpDir, "js", "auth", "supabase-config.js"), "utf8");
   const generatedDeployContext = await readFile(path.join(buildTmpDir, "netlify", "functions", "_generated", "deploy-context.mjs"), "utf8");
-  assert.match(generatedSupabaseConfig, /https:\/\/stageabc\.supabase\.co/, "build should publish the deploy context Supabase URL to the browser config");
-  assert.match(generatedSupabaseConfig, /stage-anon-key/, "build should publish the deploy context Supabase anon key to the browser config");
+  assert.match(generatedSupabaseConfig, /https:\/\/krydukthwdvccggbyjfw\.supabase\.co/, "build should publish the deploy context Supabase URL to the browser config");
+  assert.ok(generatedSupabaseConfig.includes(stageBuildJwt('anon')), "build should publish the deploy context Supabase anon key to the browser config");
   assert.doesNotMatch(generatedSupabaseConfig, /otbqfijerkieoxwpxjnm/, "deploy-preview browser config should not retain the production project ref");
   assert.match(generatedDeployContext, /BUILD_DEPLOY_CONTEXT = "deploy-preview"/, "build should embed the Netlify context for server functions");
-  assert.match(generatedDeployContext, /BUILD_DEPLOY_ORIGIN = "https:\/\/deploy-preview-388--arcade\.netlify\.app"/, "build should embed only the exact deploy origin for server functions");
+  assert.match(generatedDeployContext, /BUILD_DEPLOY_ORIGIN = "https:\/\/deploy-preview-388--playkcswh\.netlify\.app"/, "build should embed only the exact deploy origin for server functions");
 } finally {
   await rm(buildTmpDir, { recursive: true, force: true });
 }

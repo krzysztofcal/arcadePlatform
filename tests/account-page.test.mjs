@@ -1166,13 +1166,20 @@ test("chip history pagination shows total pages and jumps to the last page", asy
 });
 
 
-async function deletionHarness(replies) {
+async function deletionHarness(replies, options = {}) {
  const user={id:'00000000-0000-4000-8000-000000000111',user_metadata:{},email:'fixture@example.test'};
  const calls=[];let signedOut=0;
  const client={auth:{getSession:async()=>({data:{session:{access_token:'fixture-token',user}}}),signOut:async()=>{signedOut++;}}};
- const auth={getCurrentUser:async()=>user,onAuthChange(){},getClient:()=>client};
+ let authChanged;
+ const auth={getCurrentUser:async()=>options.signedOut?null:user,onAuthChange:fn=>{authChanged=fn;},getClient:()=>client};
  const chips={fetchBalance:async()=>({balance:0}),fetchLedger:async()=>({items:[]}),fetchBonusCampaigns:async()=>({items:[]})};
- const h=buildContext(chips,{auth});const dialog=h.document.getElementById('accountDeletionDialog');
+ const h=buildContext(chips,{auth});
+ const info=createElement('section','account-deletion');h.document.__nodes.set('account-deletion',info);
+ if(options.mobile)h.windowObj.MOBILE_POKER_CONFIG={};
+ h.windowObj.location.hash=options.hash||'';
+ const events={};h.windowObj.addEventListener=(name,fn)=>{events[name]=fn;};
+ const button=h.document.getElementById('deleteAccountButton');let scrolled=0;button.scrollIntoView=()=>{scrolled++;};
+ const dialog=h.document.getElementById('accountDeletionDialog');
  dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;};
  h.windowObj.confirm=()=>{throw Error('native confirm must not be called');};
  h.windowObj.fetch=async(url,options)=>{
@@ -1184,7 +1191,7 @@ async function deletionHarness(replies) {
  vm.runInContext(source,vm.createContext({window:h.windowObj,document:h.document,CustomEvent:function(){}}));
  await flush();await flush();
  const click=id=>h.document.getElementById(id).dispatchEvent({type:'click',preventDefault(){}});
- return {...h,dialog,calls,click,signedOut:()=>signedOut};
+ return {...h,dialog,calls,click,info,scrolled:()=>scrolled,changeUser:value=>authChanged('SIGNED_IN',value?user:null),hashChange:()=>events.hashchange(),signedOut:()=>signedOut};
 }
 
 test('deletion modal cancels without POST, traps keyboard and restores safe focus',async()=>{
@@ -1221,4 +1228,88 @@ test('uncertain deletion retry retains consent without reopening modal',async()=
  h.click('deleteAccountButton');await flush();await flush();h.click('accountDeletionConfirmButton');await flush();await flush();
  assert.equal(h.signedOut(),0);h.dialog.showModal=()=>{throw Error('must not ask again');};h.click('deleteAccountButton');await flush();await flush();
  assert.deepEqual(h.calls.map(x=>x.method),['GET','POST','GET','GET','POST']);assert.equal(h.signedOut(),1);
+});
+
+async function avatarPickerHarness(){
+ const {PUBLIC_AVATAR_VARIANTS}=await import('../shared/profile-avatar-projection.mjs');
+ let user={id:'00000000-0000-4000-8000-000000000111'},authChanged,allowed=PUBLIC_AVATAR_VARIANTS.slice(0,6),profile={handle:'fixture',displayName:'Fixture',avatarVariant:PUBLIC_AVATAR_VARIANTS[0],avatarRevision:1};
+ const auth={getCurrentUser:async()=>user,onAuthChange:fn=>{authChanged=fn;}};
+ const h=buildContext(null,{auth});const events=new Map(),writes=[];
+ h.document.addEventListener=(type,fn)=>{const list=events.get(type)||[];list.push(fn);events.set(type,list);};
+ h.document.dispatchEvent=event=>{for(const fn of events.get(event.type)||[])fn(event);};
+ const originalCreate=h.document.createElement;
+ h.document.createElement=tag=>{const node=originalCreate(tag);Object.defineProperty(node,'lastChild',{get(){return node.children.at(-1);}});return node;};
+ for(const id of ['arcadeAvatarGallery','publicAvatarSave','publicAvatarSaveLabel','publicAvatarStatus','publicProfileEditor','publicDisplayName','publicHandle','publicProfileUrl'])h.document.__nodes.set(id,createElement('div',id));
+ const gallery=h.document.getElementById('arcadeAvatarGallery');Object.defineProperty(gallery,'textContent',{get(){return '';},set(){gallery.children.length=0;}});
+ h.windowObj.I18N={t:key=>key};h.windowObj.ArcadeAvatars={variants:PUBLIC_AVATAR_VARIANTS,url:v=>'/avatars/'+v};
+ h.windowObj.ArcadeTerms={getAvatarVariants:owner=>user&&owner===user.id?allowed:[],refresh(){},open(){}};
+ h.windowObj.ProfileClient={getMe:async()=>profile,clear(){},applyAvatar(){},updateMe:(payload,guard)=>new Promise((resolve,reject)=>{writes.push({payload,guard,resolve:result=>{if(!guard.isCurrent())return reject({code:'stale_profile'});profile=result;h.document.dispatchEvent({type:'profile:updated',detail:result});resolve(result);},reject});})};
+ vm.runInContext(source,vm.createContext({window:h.windowObj,document:h.document,requestAnimationFrame:h.windowObj.requestAnimationFrame,setTimeout,clearTimeout,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options&&options.detail;}}}));await flush();await flush();
+ const get=id=>h.document.getElementById(id),click=variant=>gallery.children.find(b=>b.title===variant).dispatchEvent({type:'click'});
+ return {...h,writes,variants:PUBLIC_AVATAR_VARIANTS,get,click,save:()=>get('publicAvatarSave').dispatchEvent({type:'click'}),selected:()=>gallery.children.find(b=>b.attributes['aria-pressed']==='true')?.title,
+  setPolicy:count=>{allowed=PUBLIC_AVATAR_VARIANTS.slice(0,count);h.document.dispatchEvent({type:'profile:terms-status'});},
+  setProfile:value=>{profile=value;h.document.dispatchEvent({type:'profile:updated',detail:value});},
+  switchUser:()=>{user={id:'00000000-0000-4000-8000-000000000222'};profile={handle:'second',avatarVariant:PUBLIC_AVATAR_VARIANTS[0],avatarRevision:5};authChanged('SIGNED_IN',user);},
+  logout:()=>{user=null;authChanged('SIGNED_OUT',null);}};
+}
+
+test('avatar picker selects locally, preserves draft across language/policy refresh and respects OFF/ON',async()=>{
+ const h=await avatarPickerHarness();assert.equal(h.get('arcadeAvatarGallery').children.length,6);assert.equal(h.get('publicAvatarSave').disabled,true);
+ h.click(h.variants[1]);h.click(h.variants[2]);assert.equal(h.writes.length,0);assert.equal(h.selected(),h.variants[2]);assert.equal(h.get('publicAvatarSave').disabled,false);
+ h.document.dispatchEvent({type:'langchange'});assert.equal(h.selected(),h.variants[2]);
+ h.setPolicy(0);assert.equal(h.get('publicAvatarSave').disabled,true);h.setPolicy(6);assert.equal(h.selected(),h.variants[2]);
+ h.setPolicy(16);assert.equal(h.get('arcadeAvatarGallery').children.length,16);h.click(h.variants[10]);h.setPolicy(6);assert.equal(h.selected(),h.variants[0]);assert.equal(h.get('publicAvatarSave').disabled,true);assert.equal(h.writes.length,0);
+});
+test('avatar picker sends one explicit save and commits only after success',async()=>{
+ const h=await avatarPickerHarness();h.click(h.variants[1]);h.save();h.save();assert.equal(h.writes.length,1);assert.deepEqual(JSON.parse(JSON.stringify(h.writes[0].payload)),{avatarVariant:h.variants[1],expectedRevision:1});assert.equal(h.get('publicAvatarSave').disabled,true);assert.equal(h.get('publicAvatarSaveLabel').textContent,'arcadeAvatarSaving');
+ h.writes[0].resolve({handle:'fixture',avatarVariant:h.variants[1],avatarRevision:2});await flush();await flush();assert.equal(h.get('publicAvatarSave').disabled,true);assert.equal(h.get('publicAvatarStatus').textContent,'arcadeAvatarSaved');assert.equal(h.selected(),h.variants[1]);
+});
+test('avatar picker keeps the selection after failure and retries only on confirmation',async()=>{
+ const h=await avatarPickerHarness();h.click(h.variants[1]);h.save();h.writes[0].reject({code:'network_error'});await flush();assert.equal(h.selected(),h.variants[1]);assert.equal(h.get('publicAvatarSave').disabled,false);assert.equal(h.get('publicAvatarStatus').textContent,'arcadeAvatarSaveError');assert.equal(h.writes.length,1);h.save();assert.equal(h.writes.length,2);
+ h.writes[1].resolve({avatarVariant:h.variants[1],avatarRevision:2});await flush();
+});
+test('avatar picker ignores a response after account switch or logout',async()=>{
+ for(const action of ['switchUser','logout']){const h=await avatarPickerHarness();h.click(h.variants[1]);h.save();h[action]();await flush();h.writes[0].resolve({avatarVariant:h.variants[1],avatarRevision:2});await flush();assert.equal(h.get('publicAvatarSave').disabled,true);assert.notEqual(h.selected(),h.variants[1]);}
+});
+test('avatar picker preserves intent but refreshes revision after conflict or a profile change in flight',async()=>{
+ for(const reason of ['stale_avatar_revision','profile_changed']){const h=await avatarPickerHarness();h.click(h.variants[1]);h.save();h.setProfile({avatarVariant:h.variants[2],avatarRevision:3});if(reason==='stale_avatar_revision')h.writes[0].reject({code:reason});else h.writes[0].resolve({avatarVariant:h.variants[1],avatarRevision:2});await flush();await flush();assert.equal(h.selected(),h.variants[1]);assert.equal(h.get('publicAvatarStatus').textContent,'arcadeAvatarConflict');h.save();assert.equal(h.writes[1].payload.expectedRevision,3);h.writes[1].resolve({avatarVariant:h.variants[1],avatarRevision:4});await flush();}
+});
+test('avatar write binds the token before HTTP and suppresses obsolete profile publication',async()=>{
+ const clientSource=await readFile(path.join(repoRoot,'js/profile-client.js'),'utf8');
+ for(const race of ['token','response']){
+  let user='account-a',release,valid=true,requests=0,published=0;
+  const window={SupabaseAuth:{getCurrentUser:async()=>({id:user})},SupabaseAuthBridge:{getAccessToken:()=>race==='token'?new Promise(resolve=>{release=resolve;}):Promise.resolve('e30.'+Buffer.from(JSON.stringify({sub:'account-a'})).toString('base64url')+'.sig')}};
+  vm.runInNewContext(clientSource,{window,document:{dispatchEvent(){published++;}},atob:globalThis.atob,CustomEvent:class{},fetch:async()=>{requests++;if(race==='token')return {ok:true,json:async()=>({avatarVariant:'fox-blue',avatarRevision:2})};return new Promise(resolve=>{release=()=>resolve({ok:true,json:async()=>({avatarVariant:'fox-blue',avatarRevision:2})});});}});
+  const saving=window.ProfileClient.updateMe({avatarVariant:'fox-blue',expectedRevision:1},{userId:'account-a',isCurrent:()=>valid});await flush();
+  if(race==='token'){user='account-b';release('e30.'+Buffer.from(JSON.stringify({sub:'account-b'})).toString('base64url')+'.sig');}else{valid=false;release();}
+  await assert.rejects(()=>saving);assert.equal(requests,race==='token'?0:1);assert.equal(published,0);
+ }
+});
+
+
+test('initial deletion GET failure never implies a submitted request',async()=>{
+ for(const reply of [{status:503},new Error('offline'),{status:200,body:{}}]){
+  const h=await deletionHarness([reply]);h.click('deleteAccountButton');await flush();await flush();
+  assert.deepEqual(h.calls.map(x=>x.method),['GET']);assert.equal(h.signedOut(),0);assert.ok(!h.dialog.open);
+  assert.match(h.document.getElementById('deleteAccountNote').textContent,/No deletion request was sent by this attempt/);
+ }
+});
+test('uncertain POST remains uncertain even when a later status lookup fails',async()=>{
+ const h=await deletionHarness([{status:404},new Error('lost'),{status:404},{status:503}]);
+ h.click('deleteAccountButton');await flush();await flush();h.click('accountDeletionConfirmButton');await flush();await flush();
+ h.click('deleteAccountButton');await flush();await flush();
+ assert.deepEqual(h.calls.map(x=>x.method),['GET','POST','GET','GET']);
+ assert.match(h.document.getElementById('deleteAccountNote').textContent,/could not confirm receipt/);
+ assert.equal(h.signedOut(),0);
+});
+test('external deletion entry is signed-out WWW only and signed-in hash focuses the sole action without requests',async()=>{
+ for(const mobile of [false,true]){
+  const h=await deletionHarness([],{signedOut:true,mobile,hash:'#account-deletion'});
+  assert.equal(h.info.hidden,mobile);h.changeUser(true);await flush();assert.equal(h.info.hidden,true);
+  assert.equal(h.scrolled(),mobile?0:1);assert.deepEqual(h.calls,[]);
+  if(!mobile){assert.equal(h.document.activeElement.id,'deleteAccountButton');assert.equal(h.windowObj.location.hash,'#account-deletion');}
+  h.changeUser(false);await flush();assert.equal(h.info.hidden,mobile);
+ }
+ const h=await deletionHarness([],{hash:'#account-deletion'});assert.equal(h.info.hidden,true);assert.equal(h.scrolled(),1);
+ h.windowObj.location.hash='';h.hashChange();h.windowObj.location.hash='#account-deletion';h.hashChange();assert.equal(h.scrolled(),2);assert.deepEqual(h.calls,[]);
 });

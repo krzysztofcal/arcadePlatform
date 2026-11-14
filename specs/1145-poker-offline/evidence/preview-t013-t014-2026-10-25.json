@@ -1,0 +1,284 @@
+{
+  "origin": "https://6ade67d9f2cddc8fd73253f2--playkcswh.netlify.app",
+  "start": {
+    "wallet": 4900,
+    "tableId": "offline-e47bf67f-7896-465e-ae5c-21fcca8a9785",
+    "members": [
+      {
+        "userId": "offline-human",
+        "seat": 1
+      },
+      {
+        "userId": "bot-offline-1",
+        "seat": 2
+      },
+      {
+        "userId": "bot-offline-2",
+        "seat": 3
+      },
+      {
+        "userId": "bot-offline-3",
+        "seat": 4
+      },
+      {
+        "userId": "bot-offline-4",
+        "seat": 5
+      },
+      {
+        "userId": "bot-offline-5",
+        "seat": 6
+      }
+    ],
+    "theme": "classic-casino"
+  },
+  "botClock": {
+    "actor": "bot-offline-4",
+    "limit": 20000,
+    "remaining": 19870,
+    "progress": "0.99975",
+    "clockPresent": true
+  },
+  "timing": [
+    {
+      "actor": "bot-offline-3",
+      "limit": 20000,
+      "decisionDelay": 1180,
+      "remainingAtDecision": 18820,
+      "scheduled": 1174
+    },
+    {
+      "actor": "bot-offline-4",
+      "limit": 20000,
+      "decisionDelay": 1359,
+      "remainingAtDecision": 18641,
+      "scheduled": 1356
+    },
+    {
+      "actor": "bot-offline-5",
+      "limit": 20000,
+      "decisionDelay": 1789,
+      "remainingAtDecision": 18211,
+      "scheduled": 1783
+    },
+    {
+      "actor": "bot-offline-1",
+      "limit": 20000,
+      "decisionDelay": 1444,
+      "remainingAtDecision": 18556,
+      "scheduled": 1441
+    },
+    {
+      "actor": "bot-offline-2",
+      "limit": 20000,
+      "decisionDelay": 1642,
+      "remainingAtDecision": 18358,
+      "scheduled": 1640
+    },
+    {
+      "actor": "bot-offline-1",
+      "limit": 20000,
+      "decisionDelay": 1911,
+      "remainingAtDecision": 18089,
+      "scheduled": 1909
+    },
+    {
+      "actor": "bot-offline-2",
+      "limit": 20000,
+      "decisionDelay": 1818,
+      "remainingAtDecision": 18182,
+      "scheduled": 1816
+    },
+    {
+      "actor": "bot-offline-3",
+      "limit": 20000,
+      "decisionDelay": 1555,
+      "remainingAtDecision": 18445,
+      "scheduled": 1553
+    },
+    {
+      "actor": "bot-offline-4",
+      "limit": 20000,
+      "decisionDelay": 1535,
+      "remainingAtDecision": 18465,
+      "scheduled": 1533
+    },
+    {
+      "actor": "bot-offline-5",
+      "limit": 20000,
+      "decisionDelay": 1281,
+      "remainingAtDecision": 18719,
+      "scheduled": 1279
+    },
+    {
+      "actor": "bot-offline-1",
+      "limit": 20000,
+      "decisionDelay": 1042,
+      "remainingAtDecision": 18958,
+      "scheduled": 1040
+    },
+    {
+      "actor": "bot-offline-2",
+      "limit": 20000,
+      "decisionDelay": 1524,
+      "remainingAtDecision": 18476,
+      "scheduled": 1521
+    },
+    {
+      "actor": "bot-offline-3",
+      "limit": 20000,
+      "decisionDelay": 1037,
+      "remainingAtDecision": 18963,
+      "scheduled": 1035
+    },
+    {
+      "actor": "bot-offline-4",
+      "limit": 20000,
+      "decisionDelay": 1825,
+      "remainingAtDecision": 18175,
+      "scheduled": 1823
+    },
+    {
+      "actor": "bot-offline-5",
+      "limit": 20000,
+      "decisionDelay": 1388,
+      "remainingAtDecision": 18612,
+      "scheduled": 1387
+    },
+    {
+      "actor": "bot-offline-1",
+      "limit": 20000,
+      "decisionDelay": 1011,
+      "remainingAtDecision": 18989,
+      "scheduled": 1010
+    },
+    {
+      "actor": "bot-offline-2",
+      "limit": 20000,
+      "decisionDelay": 1448,
+      "remainingAtDecision": 18552,
+      "scheduled": 1446
+    },
+    {
+      "actor": "bot-offline-3",
+      "limit": 20000,
+      "decisionDelay": 1751,
+      "remainingAtDecision": 18249,
+      "scheduled": 1749
+    },
+    {
+      "actor": "bot-offline-1",
+      "limit": 20000,
+      "decisionDelay": 1559,
+      "remainingAtDecision": 18441,
+      "scheduled": 1557
+    },
+    {
+      "actor": "bot-offline-2",
+      "limit": 20000,
+      "decisionDelay": 1275,
+      "remainingAtDecision": 18725,
+      "scheduled": 1274
+    },
+    {
+      "actor": "bot-offline-4",
+      "limit": 20000,
+      "decisionDelay": 1667,
+      "remainingAtDecision": 18333,
+      "scheduled": 1666
+    },
+    {
+      "actor": "bot-offline-5",
+      "limit": 20000,
+      "decisionDelay": 1135,
+      "remainingAtDecision": 18865,
+      "scheduled": 1133
+    },
+    {
+      "actor": "bot-offline-1",
+      "limit": 20000,
+      "decisionDelay": 1531,
+      "remainingAtDecision": 18469,
+      "scheduled": 1529
+    },
+    {
+      "actor": "bot-offline-2",
+      "limit": 20000,
+      "decisionDelay": 1736,
+      "remainingAtDecision": 18264,
+      "scheduled": 1734
+    },
+    {
+      "actor": "bot-offline-4",
+      "limit": 20000,
+      "decisionDelay": 1838,
+      "remainingAtDecision": 18162,
+      "scheduled": 1821
+    }
+  ],
+  "autoNextMs": 3004,
+  "settled": {
+    "handId": "ws_hand_offline-e47bf67f-7896-465e-ae5c-21fcca8a9785_1_6",
+    "board": [
+      "9S",
+      "AH",
+      "4S",
+      "JC",
+      "8H"
+    ],
+    "stacks": {
+      "offline-human": 92,
+      "bot-offline-1": 92,
+      "bot-offline-2": 92,
+      "bot-offline-3": 96,
+      "bot-offline-4": 92,
+      "bot-offline-5": 136
+    },
+    "total": 600
+  },
+  "resumed": {
+    "wallet": 4900,
+    "tableId": "offline-e47bf67f-7896-465e-ae5c-21fcca8a9785",
+    "members": [
+      {
+        "userId": "offline-human",
+        "seat": 1
+      },
+      {
+        "userId": "bot-offline-1",
+        "seat": 2
+      },
+      {
+        "userId": "bot-offline-2",
+        "seat": 3
+      },
+      {
+        "userId": "bot-offline-3",
+        "seat": 4
+      },
+      {
+        "userId": "bot-offline-4",
+        "seat": 5
+      },
+      {
+        "userId": "bot-offline-5",
+        "seat": 6
+      }
+    ],
+    "stacks": {
+      "offline-human": 92,
+      "bot-offline-1": 92,
+      "bot-offline-2": 91,
+      "bot-offline-3": 94,
+      "bot-offline-4": 92,
+      "bot-offline-5": 136
+    },
+    "theme": "classic-casino"
+  },
+  "final": {
+    "wallet": 4992,
+    "session": null
+  },
+  "requests": [],
+  "attempts": [],
+  "errors": []
+}

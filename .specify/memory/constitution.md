@@ -70,18 +70,53 @@ matching arcadePlatform-repomix*.txt is needed, agents MAY use it as historical
 or offline fallback context. The live GitHub repository MUST remain the primary
 source of truth for current code; a conflicting snapshot MUST NOT override it.
 
+### VI. Verified Volume for New VPS Agent Checkouts
+
+Claude Code, Codex and Antigravity MUST create every new VPS checkout/worktree
+on the verified Hetzner Volume, using the placement policy and existing
+preflight in AGENTS.md, Task workspace lifecycle. Missing or unverifiable
+Volume, or any preflight failure, MUST mean STOP without fallback to the
+system disk. Existing task checkouts MUST remain at their original locations
+and be reused; this rule authorizes no migration or cleanup. See
+docs/agent-work-directories.md for the explicit Git destination and launcher
+limitations.
+
 ## Deployment and Safety Gates
 
-Same-repository pull requests changing supabase/migrations/** can automatically
-trigger DB Stage Apply PR and apply migrations to the shared Stage database.
-This is a shared-environment mutation, NOT a read-only CI check. Agents MAY
-deliberately use this mechanism to apply Stage migrations; ordinary Stage
-migrations do not require a separate manual GO. Before push/PR, the current
-specification, plan, and tasks MUST explicitly record that automatic Stage
-apply is an intended effect. Agents MUST NOT accidentally include migrations
-without accounting for their shared Stage impact. Once applied to shared Stage,
-corrections MUST be forward-only in new migrations; applied migrations MUST
-NOT be edited.
+### Authorized Deployment and Administrative Procedures
+
+Wszystkie wdrożenia i operacje administracyjne Arcade Hub muszą korzystać wyłącznie z zatwierdzonych dla danego komponentu procedur. Dostęp agenta do GitHub nie stanowi autoryzacji do deploymentu Production. Każde wymagane OWNER GO pozostaje obowiązkowe. Zabronione jest obchodzenie procedur przez agentów przez ręczne SSH, sudo, root, bezpośredni restart, publikację lub alternatywne skrypty (co nie wyklucza istniejącej awaryjnej procedury odzyskiwania przez OWNERA — C7 w `docs/ws-production-restart-gate.md`).
+
+All Arcade Hub deployments and administrative operations must strictly use the approved procedures for the respective component. Agent access to GitHub does not constitute authorization for Production deployment. Every required OWNER GO remains strictly mandatory. Bypassing procedures by agents via manual SSH, sudo, root, direct restart, publication, or alternative scripts is prohibited (this does not preclude the existing OWNER emergency recovery procedure — C7 in `docs/ws-production-restart-gate.md`).
+
+Official approved operational paths:
+- **WS Server Deploy**: Exact-SHA deployment workflow (`.github/workflows/ws-server-deploy.yml`) dispatched via GitHub App (`arcade-code-agent[bot]`), with human seat/financial preflight gates, restart gate, rollback receipts, and requiring explicit OWNER approval in the `ws-production` GitHub Environment.
+- **WWW Production Release**: Netlify production release procedure executed strictly via `scripts/www-production-release.mjs` (OWNER-run only).
+- **VPS Admin Operation**: Root-on-demand administrative helper catalog (`.github/workflows/vps-admin-operation.yml`), requiring explicit OWNER approval in the `vps-admin` GitHub Environment.
+- **DB Stage Apply PR**: Shared Stage database schema migrations executed only via explicit `workflow_dispatch` from `main` (`.github/workflows/db-stage-apply-pr.yml`), where `apply` is owner-dispatched for the exact approved `sourceSha` and migration set in `stage-automation`.
+- **Release Record**: Audited immutable version provenance registry (`.github/workflows/release-record.yml`), documenting component SHAs and manifests (`publish=true` is owner-dispatched). Release Record is an audited version registry and does NOT perform deployment or mutate environments.
+- **Android / Google Play**: Separate publishing track with independent review, signing, and explicit release gates.
+
+Stage/WS Preview accepts hard-kick deployment restarts, including occupied tables; no manual Leave,
+empty-table requirement, Preview presence counters or safe-stop receipt is required. This is not a
+chip-settlement guarantee: interrupted hands may need existing Stage recovery and OWNER intervention.
+Provisioning completes read-only preflight, stops only Preview and proves its process group empty
+before changing files/accounts; rollback requires stopped Preview and never starts it. Production
+restart gate, HOLD/DRAIN, escrow/recovery and OWNER approvals remain unchanged. A deployment or DRAIN
+change always needs its own GO; health alone does not prove playable status.
+
+
+Pull request creation, Draft/Ready and synchronize events never apply
+supabase/migrations/** to the shared Stage database. Shared Stage SQL is
+applied only by an explicitly authorized DB Stage Apply PR workflow_dispatch
+from main, in the stage-automation environment, for the exact approved source
+SHA, file and hash set; apply is owner-dispatched (see AGENTS.md "Explicit
+Stage migrations" and docs/operations.md "Stage DB migrations"). This is a
+shared-environment mutation, NOT a read-only CI check, and needs its own
+explicit scope. The specification, plan, and tasks MUST record which
+migrations need a Stage apply and that the apply is a separate owner step.
+Once applied to shared Stage, corrections MUST be forward-only in new
+migrations; applied migrations MUST NOT be edited.
 
 Definition of Done is target-aware. Green CI, mocks, and unit tests do not prove
 runtime configuration or integration. For WS-affecting changes, Codex MUST
@@ -162,7 +197,7 @@ feature artifacts means no generic setup changes.
 
 ## Governance
 
-This constitution formalizes the project rules in agents.md and skills.md and
+This constitution formalizes the project rules in AGENTS.md and skills.md and
 governs all Arcade Platform changes, including documentation, configuration,
 automation, frontend, backend, database, and WebSocket work. Where guidance
 conflicts, the stricter safety rule applies. Each feature specification, plan,
@@ -176,10 +211,10 @@ backward-incompatible governance or principle removal or redefinition, MINOR
 denotes a new principle, section, or materially expanded guidance, and PATCH
 denotes clarification, wording, or other non-semantic refinement.
 
-The constitution is reviewed whenever agents.md, skills.md, deployment policy,
+The constitution is reviewed whenever AGENTS.md, skills.md, deployment policy,
 runtime ownership, or safety boundaries change. Compliance findings MUST be
 resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.1.1 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-09-13
+**Version**: 1.3.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-14

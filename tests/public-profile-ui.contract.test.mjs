@@ -27,23 +27,10 @@ test("public profile route, editor, and legal release gate are present", async (
   ]);
   assert.match(account, /id="publicProfileEditor"/);
   assert.match(account, /id="publicProfileForm"/);
-  assert.match(account, /id="publicProfileSave"[^>]*data-state="idle"/);
-  assert.match(account, /id="publicAvatarInput"[^>]*accept="image\/jpeg,image\/png,image\/webp"/);
-  assert.match(account, /id="publicAvatarChoose"/);
-  assert.match(account, /id="publicAvatarRemove"/);
-  assert.match(account, /public-profile-save__spinner/);
-  assert.match(accountJs, /setPublicProfileSaveState\('saving'/);
-  assert.match(accountJs, /setPublicProfileSaveState\('saved'/);
-  assert.match(accountJs, /ProfileClient\.uploadAvatar/);
-  assert.match(accountJs, /publicAvatarValidating/);
-  assert.match(accountJs, /publicAvatarProcessing/);
-  assert.match(accountJs, /confirm\(t\('publicAvatarRemoveConfirm'/);
-  assert.match(account, /data-upload-state="idle"/);
-  assert.match(account, /@keyframes public-avatar-spin/);
-  assert.match(accountJs, /readAsDataURL\(file\)/);
-  assert.match(profileClient, /readAsDataURL\(file\)/);
-  assert.doesNotMatch(accountJs + profileClient, /createObjectURL\(file\)/, "avatar validation and preview must not depend on CSP-blocked blob URLs");
-  assert.match(accountJs, /ProfileClient\.removeAvatar/);
+  assert.match(account, /id="publicProfileSave"/);
+  assert.match(account, /id="arcadeAvatarGallery"/);
+  assert.doesNotMatch(account, /id="publicAvatarInput"|id="publicBio"|id="publicAvatarRemove"/);
+  assert.doesNotMatch(profileClient, /uploadAvatar|removeAvatar/);
   assert.match(portalCss, /\.avatar-menu__user\{[^}]*background:transparent/);
   assert.match(page, /id="publicProfileCard"/);
   assert.match(page, /id="sbToggle"/);
@@ -135,9 +122,7 @@ test("topbar derives its visible signed-in identity from the public profile", as
   assert.match(source, /name = profile && profile\.displayName \? profile\.displayName : t\('player'/);
   assert.match(source, /email = t\('profileAccountSynced'/);
   assert.match(source, /refreshProfile\(user, hydrated\.generation/);
-  assert.match(source, /avatar\.type === 'uploaded'/);
-  assert.match(source, /classList\.toggle\('profile-avatar--uploaded', !!uploaded\)/);
-  assert.match(source, /style\.backgroundImage = uploaded/);
+  assert.match(source, /ArcadeAvatars\.apply/);
   assert.match(accountSource, /publicProfileGeneration \+= 1/);
   assert.match(accountSource, /requestedUserKey !== getUserKey\(currentUser\)/);
 });
@@ -160,4 +145,41 @@ test("every HTML page with a topbar loads the shared auth avatar bridge first", 
     assert.ok(chipsIndex > authIndex, `${file} must load the chips client after auth`);
     assert.ok(topbarIndex > chipsIndex, `${file} must load the chips client before topbar`);
   }
+});
+
+
+test("public profile reads require viewer auth, never put token in URL and discard stale sessions", async()=>{
+ let userId=null,requests=0;
+ const anon=await loadProfileClient(async()=>{requests++;},()=>userId);
+ await assert.rejects(anon.getPublic('target'),{code:'not_authenticated'});assert.equal(requests,0);
+ for(const next of [null,'user-b','user-a']){
+  userId='user-a';let release;let request;
+  const client=await loadProfileClient((url,options)=>{request={url,options};return new Promise(resolve=>{release=resolve;});},()=>userId);
+  const pending=client.getPublic('target');await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(request.options.headers.Authorization,'Bearer token-user-a');assert.equal(request.options.cache,'no-store');assert.equal(request.url.includes('token-user-a'),false);
+  userId=next;client.clear();release({ok:true,json:async()=>({handle:'target'})});await assert.rejects(pending,{code:'stale_identity'});
+ }
+});
+
+test("profile page clears on logout, account switch and hiding; visibility return rechecks session", async()=>{
+ const source=await read('js/public-profile-page.js');
+ for(const mode of ['logout','switch','hidden-return']){
+  const nodes=new Map(),listeners={};let authChange,release,user={id:'viewer-a'},reads=0;
+  function node(){return {hidden:false,textContent:'',dataset:{},setAttribute(){},removeAttribute(){},classList:{remove(){}}};}
+  const document={hidden:false,readyState:'complete',getElementById:id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);},addEventListener:(name,fn)=>{listeners[name]=fn;}};
+  const window={location:{pathname:'/u/target'},SupabaseAuth:{getCurrentUser:async()=>user,onAuthChange:fn=>{authChange=fn;}},ProfileClient:{applyAvatar(){},getPublic:()=>{reads++;return reads===1?new Promise(resolve=>{release=resolve;}):Promise.resolve({handle:'target',displayName:'Fresh identity',xp:2,level:1});}}};
+  vm.runInNewContext(source,{window,document,Intl,setTimeout,clearTimeout});await new Promise(resolve=>setTimeout(resolve,0));
+  nodes.get('publicProfileName').textContent='old identity';
+  if(mode==='hidden-return'){document.hidden=true;listeners.visibilitychange();}
+  user=mode==='logout'?null:{id:'viewer-b'};authChange('SIGNED_OUT',null);
+  assert.equal(nodes.get('publicProfileCard').hidden,true);assert.equal(nodes.get('publicProfileName').textContent,'');
+  release({handle:'target',displayName:'must not reappear',xp:1,level:1});await new Promise(resolve=>setTimeout(resolve,0));
+  assert.notEqual(nodes.get('publicProfileName').textContent,'must not reappear');
+  if(mode==='logout'){assert.equal(nodes.get('publicProfileCard').hidden,true);assert.equal(nodes.get('publicProfileSignIn').hidden,false);}
+  if(mode==='hidden-return'){
+   assert.equal(reads,1,'no auth-triggered read or rendering while hidden');assert.equal(nodes.get('publicProfileCard').hidden,true);
+   document.hidden=false;listeners.visibilitychange();await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  if(mode!=='logout'){assert.equal(reads,2);assert.equal(nodes.get('publicProfileName').textContent,'Fresh identity');}
+ }
 });

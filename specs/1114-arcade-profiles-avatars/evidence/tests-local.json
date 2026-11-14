@@ -1,0 +1,55 @@
+{
+  "baselineMain": "a63e44b0d9a1d3625956ed98b75c1242989efdd3",
+  "environment": "local in-memory SQL / mocks only; no Stage or Production",
+  "suite": {
+    "passed": 379,
+    "failed": 0,
+    "skipped": 0,
+    "fileSuites": 17
+  },
+  "finalProfileRerun": {
+    "passed": 10,
+    "failed": 0
+  },
+  "cspDocuments": 58,
+  "migrationSourceFiles": 119,
+  "productionReplacementFiles": 11,
+  "githubCI": "NOT RUN \u2014 no push or PR",
+  "realAndroid": "NOT RUN \u2014 no APK publication",
+  "vitestLegacy": "tests/auth-identity.test.mjs not run; baseline Vitest dependency unavailable; no dependency added",
+  "reviewImportantFindings": {
+    "count": 5,
+    "resolved": "fundamental RED\u2192GREEN"
+  },
+  "logs": [
+    "/tmp/phase-a-final-tests.log",
+    "/tmp/phase-a-final-profile.log",
+    "/tmp/phase-a-review-red1.log",
+    "/tmp/phase-a-review-red-consent.log",
+    "/tmp/phase-a-review-green2.log"
+  ],
+  "followup": {
+    "passed": 212,
+    "failed": 0,
+    "skipped": 0,
+    "fileSuites": 13,
+    "log": "/tmp/phase-a-followup-final-tests.log",
+    "giftRED": "/tmp/phase-a-gift-red.log",
+    "scope": "targeted Terms/admission/gift/reaction + profile/i18n + Account Deletion/storage",
+    "legalAndOperationalGates": "OPEN; no PR/Stage/deploy",
+    "cspDocuments": 58,
+    "syntaxFiles": 235,
+    "localizationSmoke": "local packaged assets; mocked Auth/API; PL PASS; zero external requests"
+  },
+  "legalFinal": {
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/tmp/phase-a-legal-final-tests.log",
+    "missingPolicyWhileOFF": "PASS",
+    "missingPolicyRowWhileOFF": "PASS",
+    "canonicalVersionedDateAndLinks": "PASS PL/EN",
+    "runtimeAndSqlChangesSince7840": "none",
+    "productionReadOnlyProof": "legal-final-readonly.json"
+  }
+}

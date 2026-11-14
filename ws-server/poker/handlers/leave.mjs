@@ -5,6 +5,7 @@ export async function handleLeaveCommand({
   tableId,
   tableManager,
   loadAuthoritativeLeaveExecutor,
+  restoreTableFromPersisted,
   sendCommandResult,
   broadcastStateSnapshots,
   broadcastTableState,
@@ -39,16 +40,10 @@ export async function handleLeaveCommand({
       return;
     }
 
-    const restored = typeof tableManager?.buildAuthoritativeLeaveRestore === "function"
-      ? tableManager.buildAuthoritativeLeaveRestore({
-          tableId,
-          userId: connState.session.userId,
-          stateVersion: left?.state?.version ?? null,
-          pokerState: left?.state?.state ?? null,
-          tableStatus: left?.tableStatus ?? null
-        })
-      : { ok: false, code: "authoritative_state_invalid" };
-    if (!restored?.ok || !restored?.restoredTable) {
+    // Leave returns a public projection. Reload full committed state rather than
+    // replacing private audit metadata (or replaying an old idempotent response).
+    const restored = await restoreTableFromPersisted(tableId);
+    if (!restored?.ok) {
       klog("ws_leave_restore_rejected", {
         tableId,
         requestId: frame.requestId ?? null,
@@ -59,19 +54,6 @@ export async function handleLeaveCommand({
         tableId,
         status: "rejected",
         reason: restored?.code || restored?.reason || "authoritative_state_invalid"
-      });
-      return;
-    }
-
-    const applied = typeof tableManager?.restoreTableFromPersisted === "function"
-      ? tableManager.restoreTableFromPersisted(tableId, restored.restoredTable)
-      : { ok: false, reason: "authoritative_state_invalid" };
-    if (!applied?.ok) {
-      sendCommandResult(ws, connState, {
-        requestId: frame.requestId ?? null,
-        tableId,
-        status: "rejected",
-        reason: applied?.code || applied?.reason || "authoritative_state_invalid"
       });
       return;
     }

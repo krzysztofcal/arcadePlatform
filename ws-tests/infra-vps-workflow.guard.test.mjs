@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,12 +24,12 @@ function remoteBash(text) {
   return text.slice(start, end);
 }
 
-test("infra routes validation conservatively while retaining the Caddy-only push apply surface", () => {
+test("infra retains PR/main validation while Caddy apply has no push-change gate", () => {
   const text = workflowText();
   assert.match(text, /needs\.impact\.outputs\.infra == 'true'/);
-  assert.match(text, /git diff --name-only "\$BEFORE_SHA" "\$GITHUB_SHA" -- infra\/vps\/Caddyfile/);
+  assert.match(text, /pull_request:\n  push:\n    branches: \[ main \]/);
   assert.match(text, /apply:\n    needs: validate/);
-  assert.match(text, /needs\.validate\.outputs\.caddy == 'true'/);
+  assert.doesNotMatch(text, /needs\.validate\.outputs\.caddy|Detect existing Caddy deploy surface/);
 });
 
 test("infra VPS owns the unified Caddy contract test", () => {
@@ -170,7 +171,10 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(bootstrap, /gpasswd --delete arcade arcade-deploy/);
   assert.doesNotMatch(bootstrap, /usermod --append --groups (?:sudo|docker|arcade-deploy) arcade/);
   assert.doesNotMatch(bootstrap, /arcade ALL=/);
-  assert.match(bootstrap, /install -d -o root -g arcade-deploy -m 2775 \/opt\/ws-server \/opt\/ws-server\/releases/);
+  // #1159 T004: the Production release tree belongs to arcade-release; copilot is never in its group.
+  assert.match(bootstrap, /install -d -o root -g arcade-release -m 2775 \/opt\/ws-server \/opt\/ws-server\/releases/);
+  assert.match(bootstrap, /gpasswd --delete copilot arcade-release/);
+  assert.doesNotMatch(bootstrap, /usermod --append --groups [^\n]*arcade-release/);
   assert.match(bootstrap, /install -d -o arcade -g arcade -m 0755 \/opt\/arcade-ws-preview/);
   assert.match(bootstrap, /\/opt\/arcade-ws-preview\/(?:ws-server|shared|netlify|node_modules)/);
   assert.match(bootstrap, /-g arcade-deploy -m 2775/);
@@ -182,7 +186,9 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(bootstrap, /visudo -cf/);
   assert.match(bootstrap, /arcade-deploy\.sudoers/);
   assert.match(sudoers, /copilot ALL=\(root\) NOPASSWD:/);
-  assert.match(sudoers, /restart ws-server\.service/);
+  assert.doesNotMatch(sudoers, /systemctl restart ws-server\.service/);
+  assert.match(sudoers, /arcade-release ALL=\(root\) NOPASSWD: ARCADE_RELEASE_COMMANDS/);
+  assert.match(sudoers, /\/usr\/local\/sbin\/arcade-ws-restart-gate restart, \\\n/);
   assert.match(sudoers, /restart ws-server-preview\.service/);
   assert.match(sudoers, /reload caddy\.service/);
   assert.match(sudoers, /arcade-ws-preview-env-preflight ""/);
@@ -234,17 +240,24 @@ test("infra VPS repository versions the audited production WS and Stage schedule
 
   const override = fileText("infra/vps/ws-server.service.d/override.conf");
   assert.match(override, /^EnvironmentFile=\/etc\/arcadeplatform\/ws-server\.env$/m);
+  assert.equal(
+    fileText("infra/vps/ws-server.service.d/50-new-hands-hold.conf"),
+    "[Service]\nEnvironment=WS_POKER_NEW_HANDS_HOLD_FILE=/etc/arcadeplatform/ws-hold/new-hands\n"
+  );
 
   const schedulerService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
   for (const line of [
     "Type=oneshot",
-    "User=copilot",
-    "Environment=HOME=/home/copilot",
-    "Environment=GH_CONFIG_DIR=/home/copilot/.config/gh",
-    "Environment=PATH=/home/copilot/.local/bin:/usr/local/bin:/usr/bin:/bin",
+    "User=arcade-dispatch",
+    "Group=arcade-dispatch",
+    "EnvironmentFile=/etc/arcadeplatform/stage-retention-dispatch.env",
+    "Environment=HOME=/run/arcade-chips-ledger-dispatch",
+    "Environment=PATH=/usr/local/bin:/usr/bin:/bin",
+    "RuntimeDirectoryMode=0700",
     "ExecStart=/usr/local/bin/arcade-chips-ledger-dispatch.sh",
     "NoNewPrivileges=true",
-    "PrivateTmp=true"
+    "PrivateTmp=true",
+    "ProtectHome=true"
   ]) {
     assert.match(schedulerService, new RegExp(`^${line.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}$`, "m"));
   }
@@ -279,7 +292,7 @@ test("retired poker refill scheduler is absent and chips cleanup credentials sta
   assert.doesNotMatch(bootstrap, /arcade-poker-pool-dispatch|poker-bot-pool-refill|arcade-poker-refill/i);
 
   const chipsService = fileText("infra/vps/arcade-chips-ledger-dispatch.service");
-  assert.match(chipsService, /^Environment=GH_CONFIG_DIR=\/home\/copilot\/\.config\/gh$/m);
+  assert.match(chipsService, /^User=arcade-dispatch$/m);
   assert.doesNotMatch(chipsService, /poker-refill|arcade-poker/);
   const dispatcher = fileText("infra/vps/arcade-chips-ledger-dispatch.sh");
   assert.match(dispatcher, /^REPO="krzysztofcal\/arcadePlatform"$/m);
@@ -346,6 +359,8 @@ test("infra VPS environment examples expose only the audited variable names with
     assert.doesNotMatch(text, /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|-----BEGIN|eyJ[A-Za-z0-9_-]{20,}/);
     if (path === "infra/vps/ws-production.env.example") {
       assert.match(text, /^WS_POKER_CLOSED_TABLE_RETENTION_MS=0$/m);
+      // The attested env never carries the hold path; the ws-server.service drop-in does.
+      assert.doesNotMatch(text, /WS_POKER_NEW_HANDS_HOLD_FILE/);
     }
   }
 });
@@ -534,5 +549,1057 @@ test("infra VPS recovery docs retain the mutation boundaries and runner contract
     "disposable"
   ]) {
     assert.ok(inventory.includes(phrase), `inventory must include ${phrase}`);
+  }
+});
+
+test("VPS SSH apply requires owner main dispatch, never push, PR, foreign actor or foreign re-run (#1159)", () => {
+  const condition = workflowText().match(/\n  apply:\n    needs: validate\n    if: (.+)\n/)[1];
+  const evaluate = ({ event = "workflow_dispatch", ref = "refs/heads/main", actor = "krzysztofcal", triggeringActor = actor, caddy = "true" } = {}) => {
+    const js = condition
+      .replaceAll("needs.validate.outputs.caddy", JSON.stringify(caddy))
+      .replaceAll("github.event_name", JSON.stringify(event))
+      .replaceAll("github.ref", JSON.stringify(ref))
+      .replaceAll("github.triggering_actor", JSON.stringify(triggeringActor))
+      .replaceAll("github.actor", JSON.stringify(actor))
+      .replaceAll("github.repository_owner", JSON.stringify("krzysztofcal"))
+      .replaceAll("'", "\"")
+      .replaceAll(" == ", " === ")
+      .replaceAll(" != ", " !== ");
+    assert.match(js, /^[\s"a-z0-9_\-/[\].()|&=!]+$/i, js);
+    return Function(`return (${js});`)();
+  };
+  assert.equal(evaluate(), true, "owner main dispatch");
+  assert.equal(evaluate({ ref: "refs/heads/feature" }), false, "dispatch from another branch");
+  assert.equal(evaluate({ ref: "refs/tags/main" }), false, "a main-named tag is not the main branch");
+  assert.equal(evaluate({ caddy: "false" }), true, "explicit owner dispatch is independent of a previous push diff");
+  assert.equal(evaluate({ triggeringActor: "release-agent[bot]" }), false, "foreign re-run of an owner dispatch");
+  assert.equal(evaluate({ actor: "release-agent[bot]" }), false, "foreign dispatch");
+  assert.equal(evaluate({ actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner rerun cannot authorize a foreign dispatch");
+  assert.equal(evaluate({ event: "push" }), false, "owner Caddy push to main never applies");
+  assert.equal(evaluate({ event: "push", caddy: "false" }), false, "push without Caddy change");
+  assert.equal(evaluate({ event: "push", triggeringActor: "release-agent[bot]" }), false, "foreign re-run of a Caddy push");
+  assert.equal(evaluate({ event: "push", actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner re-run of a foreign push");
+  assert.equal(evaluate({ event: "pull_request" }), false, "pull requests never reach the VPS");
+});
+
+test("ledger dispatchers never use copilot's home, gh or token and fail closed without their own token (#1159 T004-3)", () => {
+  for (const [unit, script] of [
+    ["infra/vps/arcade-chips-ledger-dispatch.service", "infra/vps/arcade-chips-ledger-dispatch.sh"],
+    ["infra/vps/production-retention/arcade-chips-ledger-production-dispatch.service", "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+  ]) {
+    const unitText = fileText(unit);
+    assert.match(unitText, /^User=arcade-dispatch$/m, unit);
+    assert.match(unitText, /^ProtectHome=true$/m, unit);
+    assert.match(unitText, /^EnvironmentFile=-?\/etc\/arcadeplatform\/(?:stage|production)-retention-dispatch\.env$/m, unit);
+    assert.doesNotMatch(unitText, /copilot|GH_CONFIG_DIR|GH_TOKEN/, unit);
+    assert.match(fileText(script), /^GH_BIN="\$\{GH_BIN:-\/usr\/bin\/gh\}"$/m, script);
+    assert.doesNotMatch(fileText(script), /copilot/, script);
+  }
+  const bootstrap = fileText("infra/vps/bootstrap.sh");
+  assert.match(bootstrap, /useradd --system --no-create-home --home-dir \/nonexistent --shell \/usr\/sbin\/nologin --gid arcade-dispatch arcade-dispatch/);
+  assert.match(bootstrap, /gpasswd --delete copilot arcade-dispatch/);
+
+  // An ambient gh login must never authenticate the Stage dispatcher.
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "stage-dispatch-test-"));
+  try {
+    const gh = path.join(fixture, "gh");
+    const log = path.join(fixture, "calls");
+    fs.writeFileSync(gh, `#!/bin/bash\nprintf '%s\\n' "$*" >> "${log}"\necho '[]'\n`, { mode: 0o700 });
+    fs.writeFileSync(path.join(fixture, "date"), "#!/bin/bash\necho 10\n", { mode: 0o700 });
+    const run = (extra) => {
+      fs.writeFileSync(log, "");
+      const result = spawnSync("bash", ["infra/vps/arcade-chips-ledger-dispatch.sh"], { encoding: "utf8",
+        env: { PATH: `${fixture}:${process.env.PATH}`, GH_BIN: gh, RUNTIME_DIRECTORY: fixture, ...extra } });
+      return { ...result, calls: fs.readFileSync(log, "utf8") };
+    };
+    const missing = run({});
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /dedicated Stage GH_TOKEN is required/);
+    assert.equal(missing.calls, "", "no GitHub call without the dedicated token");
+    const withToken = run({ GH_TOKEN: "fake-test-only" });
+    assert.equal(withToken.status, 0, withToken.stderr);
+    assert.match(withToken.stdout, /skip: outside dispatch schedule/);
+    assert.equal(fs.statSync(path.join(fixture, "gh-stage")).mode & 0o777, 0o700);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+// #1159 root on demand: a fake host records every command; nothing touches systemd or the journal. The lock is real
+// flock(1) on a temporary file.
+function fakeAdminHost(state = {}, extra = {}) {
+  const lockFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vps-admin-")), "lock");
+  const calls = [];
+  const audits = [];
+  const loggerStatus = [...(extra.loggerStatus || [])];
+  const clock = { t: 0 };
+  const host = {
+    lockFile, requester: "arcade-admin", now: () => clock.t, sleep: (ms) => { clock.t += ms; },
+    run(argv) {
+      clock.t += extra.callMs || 0;
+      if (argv[0] === "/usr/bin/logger") {
+        audits.push(argv.at(-1));
+        return { status: loggerStatus.length ? loggerStatus.shift() : 0, stdout: "" };
+      }
+      calls.push(argv.slice(1).join(" "));
+      if (argv[1] === "show") {
+        const key = `${argv[4]}:${argv[3]}`;
+        if (state[`fail:${key}`]) return { status: 1, stdout: "" };
+        const value = state[key];
+        const out = typeof value === "function" ? value(clock.t) : Array.isArray(value) ? (value.length > 1 ? value.shift() : value[0]) : value;
+        return { status: 0, stdout: out ?? ({ User: "arcade-dispatch", ActiveState: "inactive", NeedDaemonReload: "no" })[argv[3]] };
+      }
+      if (extra.onRun) extra.onRun(argv);
+      return { status: state[`exit:${argv.slice(1).join(" ")}`] ?? 0, stdout: "" };
+    },
+  };
+  return { host, calls, audits, clock };
+}
+
+test("VPS admin helper runs only its catalog, refuses unverifiable reads and unaudited work, and serializes requests", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const [operation, runId] of [["rm -rf /", "1"], ["bash", "1"], ["ledger-dispatchers-pause", "0"], ["ledger-dispatchers-pause", "1;id"], ["toString", "1"]]) {
+    const { host, calls, audits } = fakeAdminHost();
+    const result = runOperation(operation, runId, host);
+    assert.equal(result.ok, false);
+    assert.match(result.line, /^ADMIN_BLOCKED [a-z0-9-]+ unexpected_arguments$/);
+    assert.deepEqual(calls, [], "a refused request runs no command");
+    assert.match(audits[0], /result=blocked reason=unexpected_arguments/);
+  }
+
+  const status = fakeAdminHost();
+  assert.equal(runOperation("ledger-dispatchers-status", "7", status.host).line, "ADMIN_OK ledger-dispatchers-status arcade-chips-ledger-dispatch=arcade-dispatch/inactive/timer:inactive/reload:no arcade-chips-ledger-production-dispatch=arcade-dispatch/inactive/timer:inactive/reload:no");
+  for (const state of [{ "fail:arcade-chips-ledger-production-dispatch.timer:ActiveState": true }, { "arcade-chips-ledger-dispatch.service:User": "" }, { "arcade-chips-ledger-dispatch.service:NeedDaemonReload": "maybe" }]) {
+    const bad = fakeAdminHost(state);
+    const result = runOperation("ledger-dispatchers-status", "8", bad.host);
+    assert.match(result.line, /^ADMIN_BLOCKED ledger-dispatchers-status unverifiable_arcade-chips-ledger-[a-z-]+\.(service|timer)_[A-Za-z]+$/, "a failed or unexpected read is never a status");
+    assert.match(bad.audits[1], /result=blocked/);
+  }
+
+  const idle = { "arcade-chips-ledger-dispatch.service:ActiveState": ["activating", "activating", "inactive"] };
+  const pause = fakeAdminHost(idle);
+  const paused = runOperation("ledger-dispatchers-pause", "41700000001", pause.host);
+  assert.equal(paused.line, "ADMIN_OK ledger-dispatchers-pause timers_stopped dispatchers_idle");
+  assert.deepEqual(pause.calls.filter((c) => !c.startsWith("show")), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"]);
+  assert.match(pause.audits[0], /^op=ledger-dispatchers-pause run=41700000001 by=arcade-admin phase=start$/);
+  assert.match(pause.audits[1], /result=ok/);
+
+  // One 5-minute deadline for both dispatchers, including systemctl time; on timeout the timers stay stopped.
+  const busyUntil = (ms) => (t) => (t < ms ? "activating" : "inactive");
+  const sequential = fakeAdminHost({ "arcade-chips-ledger-dispatch.service:ActiveState": busyUntil(200000),
+    "arcade-chips-ledger-production-dispatch.service:ActiveState": (t) => (t < 200000 ? "inactive" : t < 400000 ? "activating" : "inactive") });
+  assert.equal(runOperation("ledger-dispatchers-pause", "2", sequential.host).line,
+    "ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped arcade-chips-ledger-dispatch.service=inactive arcade-chips-ledger-production-dispatch.service=activating");
+  assert.ok(sequential.clock.t <= 300000 + 2 * 30000, "the deadline is shared, not 5 minutes per dispatcher");
+  assert.equal(sequential.calls.some((c) => c.startsWith("start")), false, "no timer is resumed automatically");
+  // Slow systemctl calls (100 s each) use up the deadline: one status round, no waiting, then STOP.
+  const slowCalls = fakeAdminHost({ "arcade-chips-ledger-dispatch.service:ActiveState": "activating" }, { callMs: 100000 });
+  assert.match(runOperation("ledger-dispatchers-pause", "14", slowCalls.host).line, /^ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped /);
+  assert.equal(slowCalls.calls.filter((c) => c.startsWith("show")).length, 2, "systemctl time counts against the deadline");
+
+  // Idle dispatchers read only after the deadline (slow systemctl) are still a timeout, never ADMIN_OK.
+  const lateIdle = fakeAdminHost({}, { callMs: 160000 });
+  assert.equal(runOperation("ledger-dispatchers-pause", "15", lateIdle.host).line,
+    "ADMIN_BLOCKED ledger-dispatchers-pause timeout_timers_left_stopped arcade-chips-ledger-dispatch.service=inactive arcade-chips-ledger-production-dispatch.service=inactive");
+
+  for (const unit of ["arcade-chips-ledger-dispatch.service", "arcade-chips-ledger-production-dispatch.timer"]) {
+    const reload = fakeAdminHost({ [`${unit}:NeedDaemonReload`]: "yes" });
+    assert.equal(runOperation("ledger-dispatchers-resume", "3", reload.host).line, `ADMIN_BLOCKED ledger-dispatchers-resume ${unit}_needs_daemon_reload`);
+    assert.equal(reload.calls.some((c) => c.startsWith("start")), false, "no timer starts before daemon-reload");
+  }
+
+  const failed = fakeAdminHost({ "exit:daemon-reload": 1 });
+  assert.equal(runOperation("systemd-daemon-reload", "4", failed.host).line, "ADMIN_FAILED systemd-daemon-reload daemon-reload");
+  assert.match(failed.audits[1], /result=failed detail=daemon-reload/);
+
+  // Audit: no start entry, no work; no end entry, no success (and no retry).
+  const noStart = fakeAdminHost({}, { loggerStatus: [1] });
+  assert.equal(runOperation("ledger-dispatchers-pause", "9", noStart.host).line, "ADMIN_BLOCKED ledger-dispatchers-pause audit_unavailable");
+  assert.deepEqual(noStart.calls, [], "nothing runs without a recorded start");
+  const noEnd = fakeAdminHost({}, { loggerStatus: [0, 1] });
+  assert.equal(runOperation("systemd-daemon-reload", "10", noEnd.host).line, "ADMIN_FAILED systemd-daemon-reload audit_end_after_ok");
+  assert.deepEqual(noEnd.calls, ["daemon-reload"], "the operation ran exactly once");
+
+  // Lock: a second request while one runs is busy; the lock is released afterwards.
+  let nested;
+  const outer = fakeAdminHost({}, { onRun: () => { nested = runOperation("ledger-dispatchers-status", "12", { ...outer.host, run: fakeAdminHost().host.run }); } });
+  assert.equal(runOperation("systemd-daemon-reload", "11", outer.host).line, "ADMIN_OK systemd-daemon-reload reloaded");
+  assert.equal(nested.line, "ADMIN_BLOCKED ledger-dispatchers-status busy");
+  assert.equal(runOperation("ledger-dispatchers-status", "13", { ...outer.host, run: fakeAdminHost().host.run }).ok, true, "the lock is released");
+  const helper = fileText("infra/vps/vps-admin.mjs");
+  assert.match(helper, /spawnSync\("\/usr\/bin\/flock", \["-n", "3"\]/);
+  assert.doesNotMatch(helper.slice(helper.indexOf("function acquireLock("), helper.indexOf("export function runOperation(")), /mkdirSync|process\.pid|isAlive/, "no PID-file lock to go stale");
+
+  const cli = spawnSync(process.execPath, ["infra/vps/vps-admin.mjs", "ledger-dispatchers-status"], { encoding: "utf8" });
+  assert.equal(cli.status, 1);
+  assert.equal(cli.stdout, "ADMIN_BLOCKED invalid unexpected_arguments\n");
+});
+
+// Real temporary directories and the real install(1); the current user stands for both copilot and root, and a fake
+// /proc tree lists the processes. Nothing outside the fixture is touched.
+function quarantineFixture() {
+  const top = fs.mkdtempSync(path.join(os.tmpdir(), "vps-quarantine-"));
+  const home = path.join(top, "home");
+  const files = [".config/netlify/config.json", ".config/arcadeplatform/window/env.json"];
+  for (const [i, rel] of files.entries()) {
+    fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+    fs.writeFileSync(path.join(home, rel), `SECRET-MARKER-${i}`, { mode: 0o600 });
+  }
+  fs.writeFileSync(path.join(home, ".config/arcadeplatform/window/browser-profile"), "kept"); // not in the list
+  const proc = path.join(top, "proc");
+  const addProcess = (pid, fd, maps = "") => {
+    fs.mkdirSync(path.join(proc, pid, "fd"), { recursive: true });
+    for (const link of ["cwd", "root"]) fs.symlinkSync("/", path.join(proc, pid, link));
+    if (fd) fs.symlinkSync(fd, path.join(proc, pid, "fd", "3"));
+    fs.writeFileSync(path.join(proc, pid, "maps"), maps);
+  };
+  addProcess("1");
+  const base = path.join(top, "var/arcade-admin/quarantine");
+  const admin = fakeAdminHost();
+  const host = {
+    ...admin.host,
+    rename: (from, to) => fs.renameSync(from, to),
+    quarantine: { user: "copilot", home, base, proc, files, rootUid: process.getuid(), rootGid: process.getgid() },
+    run(argv) {
+      if (argv[0] === "/usr/bin/logger") return admin.host.run(argv);
+      if (argv[0] === "/usr/bin/id") return { status: 0, stdout: String(process.getuid()) };
+      if (argv[0] === "/usr/bin/install") return { status: spawnSync(argv[0], argv.slice(1)).status, stdout: "" };
+      return { status: 1, stdout: "" };
+    },
+  };
+  return { top, home, proc, base, host, admin, files, addProcess };
+}
+
+test("VPS admin quarantine keeps listed credential files in root-only custody and never reports partial custody as success", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "copilot-secret-snapshots-quarantine";
+  const fixtures = [];
+  const fixture = () => { const fx = quarantineFixture(); fixtures.push(fx); return fx; };
+  try {
+    const fx = fixture();
+    const inode = fs.statSync(path.join(fx.home, fx.files[0])).ino;
+    const ok = runOperation(op, "41700000002", fx.host);
+    const runDir = path.join(fx.base, "41700000002");
+    assert.equal(ok.line, `ADMIN_OK ${op} custody=complete moved=2 quarantine=${runDir}`);
+    assert.doesNotMatch(ok.line + fx.admin.audits.join("\n"), /SECRET-MARKER/, "no content reaches the result or the journal");
+    for (const dir of [path.dirname(fx.base), fx.base, runDir]) assert.equal(fs.statSync(dir).mode & 0o7777, 0o700, dir);
+    assert.equal(fs.statSync(path.join(runDir, "0-config.json")).ino, inode, "rename keeps the inode");
+    assert.equal(fs.readFileSync(path.join(runDir, "1-env.json"), "utf8"), "SECRET-MARKER-1", "kept for recovery");
+    assert.equal(fs.existsSync(path.join(fx.home, fx.files[0])), false);
+    assert.equal(fs.readFileSync(path.join(fx.home, ".config/arcadeplatform/window/browser-profile"), "utf8"), "kept", "unlisted files stay");
+    assert.match(fs.readFileSync(path.join(runDir, "MANIFEST"), "utf8"),
+      /^planned 2 .*\nfile 0 \.config\/netlify\/config\.json -> 0-config\.json dev=\d+ ino=\d+ size=\d+\nfile 1 .*\nmoving 0\nmoved 0\nmoving 1\nmoved 1\ncomplete 2\n$/);
+
+    // A missing file is never success, also after a complete earlier run; the run directory is not created.
+    assert.equal(runOperation(op, "41700000003", fx.host).line, `ADMIN_BLOCKED ${op} file_0_missing`);
+    assert.equal(fs.existsSync(path.join(fx.base, "41700000003")), false);
+
+    const open = fixture();
+    open.addProcess("42", path.join(open.home, open.files[1]));
+    assert.equal(runOperation(op, "5", open.host).line, `ADMIN_BLOCKED ${op} file_in_use`);
+    assert.equal(fs.existsSync(open.base), false, "nothing is created or moved while a file is open");
+
+    // A memory mapping keeps the content readable after the descriptor is closed.
+    const mapped = fixture();
+    const target = fs.statSync(path.join(mapped.home, mapped.files[0]));
+    const dev = (d) => `${(((d >> 8) & 0xfff)).toString(16).padStart(2, "0")}:${((d & 0xff) | ((d >> 12) & ~0xff)).toString(16).padStart(2, "0")}`;
+    mapped.addProcess("43", undefined, `7f00-7f01 r--s 00000000 ${dev(target.dev)} ${target.ino}    /gone\n`);
+    assert.equal(runOperation(op, "10", mapped.host).line, `ADMIN_BLOCKED ${op} file_in_use`);
+
+    // Swapping a parent directory for a symlink after the check does not redirect the move: the pinned
+    // directory's own file moves, the decoy stays.
+    const swapped = fixture();
+    const decoy = path.join(swapped.top, "decoy");
+    fs.mkdirSync(decoy);
+    fs.writeFileSync(path.join(decoy, "config.json"), "decoy");
+    swapped.host.rename = (from, to) => {
+      if (from.endsWith("/config.json")) {
+        fs.renameSync(path.join(swapped.home, ".config/netlify"), path.join(swapped.home, ".config/moved"));
+        fs.symlinkSync(decoy, path.join(swapped.home, ".config/netlify"));
+      }
+      fs.renameSync(from, to);
+    };
+    assert.match(runOperation(op, "11", swapped.host).line, /^ADMIN_OK /);
+    assert.equal(fs.readFileSync(path.join(swapped.base, "11", "0-config.json"), "utf8"), "SECRET-MARKER-0");
+    assert.equal(fs.readFileSync(path.join(decoy, "config.json"), "utf8"), "decoy");
+
+    const linked = fixture();
+    fs.linkSync(path.join(linked.home, linked.files[0]), path.join(linked.home, "copy"));
+    assert.equal(runOperation(op, "6", linked.host).line, `ADMIN_BLOCKED ${op} file_0_not_owned_single_link_file`);
+
+    const symlinked = fixture();
+    fs.renameSync(path.join(symlinked.home, ".config/netlify"), path.join(symlinked.top, "elsewhere"));
+    fs.symlinkSync(path.join(symlinked.top, "elsewhere"), path.join(symlinked.home, ".config/netlify"));
+    assert.equal(runOperation(op, "7", symlinked.host).line, `ADMIN_BLOCKED ${op} file_0_parent_not_owned_directory`);
+
+    // An existing quarantine directory is verified, never re-moded by install(1).
+    const loose = fixture();
+    fs.mkdirSync(loose.base, { recursive: true, mode: 0o755 });
+    fs.chmodSync(loose.base, 0o755);
+    assert.equal(runOperation(op, "8", loose.host).line, `ADMIN_BLOCKED ${op} quarantine_dir_unsafe`);
+    assert.equal(fs.statSync(loose.base).mode & 0o7777, 0o755);
+
+    // A file changed between the check and its move, or a failed move: partial custody, recorded, not success.
+    const changed = fixture();
+    changed.host.rename = (from, to) => {
+      if (from.endsWith("env.json")) throw new Error("EIO");
+      fs.writeFileSync(path.join(changed.home, changed.files[1]), "SECRET-MARKER-x");
+      fs.renameSync(from, to);
+    };
+    const partial = runOperation(op, "9", changed.host);
+    assert.match(partial.line, new RegExp(`^ADMIN_FAILED ${op} file_1_changed custody=partial moved=1/2 manifest=`));
+    assert.match(fs.readFileSync(path.join(changed.base, "9", "MANIFEST"), "utf8"), /moving 0\nmoved 0\n$/, "no complete line");
+
+    // A failed rename leaves the state uncertain: the intent line exists without its moved line.
+    const failing = fixture();
+    failing.host.rename = () => { throw new Error("EIO"); };
+    assert.match(runOperation(op, "12", failing.host).line, new RegExp(`^ADMIN_FAILED ${op} file_0_move custody=uncertain moved=0/2 `));
+    assert.match(fs.readFileSync(path.join(failing.base, "12", "MANIFEST"), "utf8"), /moving 0\n$/);
+
+    // An error after a move (here the final /proc scan) still reports the custody state, never a bare exception.
+    const late = fixture();
+    late.host.rename = (from, to) => {
+      fs.renameSync(from, to);
+      if (to.endsWith("1-env.json")) { fs.rmSync(path.join(late.proc, "1", "maps")); fs.mkdirSync(path.join(late.proc, "1", "maps")); }
+    };
+    assert.match(runOperation(op, "13", late.host).line, new RegExp(`^ADMIN_FAILED ${op} error_during_move custody=uncertain moved=2/2 `));
+    assert.match(changed.admin.audits[1], /result=failed/);
+  } finally {
+    for (const fx of fixtures) fs.rmSync(fx.top, { recursive: true, force: true });
+  }
+});
+
+// GitHub answers come from a fake curl; the script is written to a temporary destination owned by the current user.
+const NEW_SCRIPT = "#!/usr/bin/env bash\nset -euo pipefail\necho new\n";
+function dispatcherInstallFixture({ run = {}, main, script = NEW_SCRIPT, published = NEW_SCRIPT, downloadExit = 0, state = {}, extra = {} } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-dispatcher-"));
+  const dest = path.join(dir, "arcade-chips-ledger-production-dispatch.sh");
+  fs.writeFileSync(dest, "#!/usr/bin/env bash\necho old\n", { mode: 0o755 });
+  const commit = "a".repeat(40);
+  const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
+  const urls = [];
+  const admin = fakeAdminHost(state, extra);
+  const source = "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh";
+  const blob = crypto.createHash("sha1").update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest("hex");
+  const host = {
+    ...admin.host,
+    dispatcher: { source, dest, uid: process.getuid(), gid: process.getgid() },
+    run(argv) {
+      if (argv[0] !== "/usr/bin/curl") return admin.host.run(argv);
+      const url = argv.at(-1);
+      urls.push(url);
+      if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
+      if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+      if (url.endsWith(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: "file", path: source, sha: blob }) };
+      if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
+        if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
+        return { status: downloadExit, stdout: "" };
+      }
+      return { status: 22, stdout: "" };
+    },
+  };
+  return { dir, dest, commit, host, urls, admin };
+}
+
+test("VPS admin installs the Production dispatcher only from the approved run's current main commit and leaves the timers stopped", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "ledger-production-dispatcher-install";
+  const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const stopped = (fx) => fx.admin.calls.filter((c) => c.startsWith("stop") || c.startsWith("start"));
+  const ok = dispatcherInstallFixture();
+  try {
+    const result = runOperation(op, "41700000020", ok.host);
+    const installed = fs.readFileSync(ok.dest, "utf8");
+    assert.equal(installed, "#!/usr/bin/env bash\nset -euo pipefail\necho new\n");
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${ok.commit} sha256=${hash(installed)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_stopped reload:no`);
+    assert.equal(fs.statSync(ok.dest).mode & 0o777, 0o755);
+    assert.deepEqual(stopped(ok), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"], "paused, never resumed");
+    assert.deepEqual(fs.readdirSync(ok.dir), [path.basename(ok.dest)], "no temporary file is left");
+    assert.match(ok.admin.audits[1], new RegExp(`result=ok detail=installed commit=${ok.commit} sha256=`));
+  } finally {
+    fs.rmSync(ok.dir, { recursive: true, force: true });
+  }
+
+  // Refused before anything changes: no timer stopped, no download, old script kept.
+  for (const [label, options, line] of [
+    ["main advanced", { main: "b".repeat(40) }, "main_advanced"],
+    ["feature branch", { run: { head_branch: "feature" } }, "run_not_main_vps_admin_dispatch"],
+    ["other workflow", { run: { path: ".github/workflows/infra-vps.yml" } }, "run_not_main_vps_admin_dispatch"],
+    ["finished run", { run: { status: "completed" } }, "run_not_main_vps_admin_dispatch"],
+    ["other run id", { run: { id: 1 } }, "run_not_main_vps_admin_dispatch"],
+    ["unreadable main", { main: "not-a-sha" }, "unverifiable_github_main"],
+  ]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, `ADMIN_BLOCKED ${op} ${line}`, label);
+      assert.deepEqual(stopped(fx), [], label);
+      assert.equal(fx.urls.some((u) => u.startsWith("https://raw.githubusercontent.com/")), false, label);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", label);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  const unknownRun = dispatcherInstallFixture();
+  try {
+    assert.equal(runOperation(op, "41700000021", unknownRun.host).line, `ADMIN_BLOCKED ${op} unverifiable_github_run`);
+  } finally {
+    fs.rmSync(unknownRun.dir, { recursive: true, force: true });
+  }
+
+  // After the pause: a failed or unexpected download keeps the old script and the timers stopped.
+  for (const [options, line] of [[{ downloadExit: 22 }, `ADMIN_FAILED ${op} download timers_left_stopped`],
+    [{ script: "<html>rate limited</html>" }, `ADMIN_BLOCKED ${op} unexpected_script timers_left_stopped`],
+    [{ script: "#!/usr/bin/env bash\necho tampered\n" }, `ADMIN_BLOCKED ${op} content_mismatch timers_left_stopped`]]) {
+    const fx = dispatcherInstallFixture(options);
+    try {
+      assert.equal(runOperation(op, "41700000020", fx.host).line, line);
+      assert.equal(fs.readFileSync(fx.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+      assert.equal(stopped(fx).length, 2);
+      assert.deepEqual(fs.readdirSync(fx.dir), [path.basename(fx.dest)]);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+  // An error after the rename is reported with the ids and the read-back state, never as a bare failure.
+  const late = dispatcherInstallFixture();
+  try {
+    late.host.rename = (from, to) => { fs.renameSync(from, to); throw new Error("after rename"); };
+    const line = runOperation(op, "41700000020", late.host).line;
+    assert.equal(line, `ADMIN_FAILED ${op} install replaced=yes commit=${late.commit} sha256=${hash(NEW_SCRIPT)} previous=${hash("#!/usr/bin/env bash\necho old\n")} timers_left_stopped`);
+    assert.match(late.admin.audits[1], /result=failed detail=install replaced=yes commit=/);
+  } finally {
+    fs.rmSync(late.dir, { recursive: true, force: true });
+  }
+  const early = dispatcherInstallFixture();
+  try {
+    early.host.rename = () => { throw new Error("rename failed"); };
+    assert.match(runOperation(op, "41700000020", early.host).line, new RegExp(`^ADMIN_FAILED ${op} install replaced=no commit=${early.commit} sha256=`));
+    assert.equal(fs.readFileSync(early.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(early.dir, { recursive: true, force: true });
+  }
+  // A failed stop of the first timer still stops the second, and nothing is installed.
+  const stopFails = dispatcherInstallFixture({ state: { "exit:stop arcade-chips-ledger-dispatch.timer": 1 } });
+  try {
+    assert.equal(runOperation(op, "41700000020", stopFails.host).line, `ADMIN_FAILED ${op} stop_arcade-chips-ledger-dispatch.timer`);
+    assert.deepEqual(stopped(stopFails), ["stop arcade-chips-ledger-dispatch.timer", "stop arcade-chips-ledger-production-dispatch.timer"]);
+    assert.equal(fs.readFileSync(stopFails.dest, "utf8"), "#!/usr/bin/env bash\necho old\n");
+  } finally {
+    fs.rmSync(stopFails.dir, { recursive: true, force: true });
+  }
+  const busy = dispatcherInstallFixture({ state: { "arcade-chips-ledger-production-dispatch.service:ActiveState": "activating" } });
+  try {
+    assert.match(runOperation(op, "41700000020", busy.host).line, new RegExp(`^ADMIN_BLOCKED ${op} timeout_timers_left_stopped `));
+    assert.equal(fs.readFileSync(busy.dest, "utf8"), "#!/usr/bin/env bash\necho old\n", "a running dispatcher is never replaced");
+  } finally {
+    fs.rmSync(busy.dir, { recursive: true, force: true });
+  }
+});
+
+const NEW_RESTART_GATE = `#!/usr/bin/node
+// Valid restart gate mock
+import fs from "node:fs";
+const modes = ["check", "restart", "prepare", "switching", "resume", "abort"];
+const action = process.argv[2];
+if (action === "check") {
+  process.stdout.write("RESTART_SAFE all_clear\\n");
+  process.exit(0);
+}
+`;
+
+function restartGateInstallFixture({ run = {}, main, script = NEW_RESTART_GATE, published = NEW_RESTART_GATE, downloadExit = 0, checkStatus = 0, checkStdout = "RESTART_SAFE all_clear", state = {}, extra = {} } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vps-restart-gate-"));
+  const dest = path.join(dir, "arcade-ws-restart-gate");
+  fs.writeFileSync(dest, `#!/usr/bin/node\n// old gate\nconst modes = ["check", "restart"];\n`, { mode: 0o755 });
+  const commit = "a".repeat(40);
+  const runJson = { id: 41700000020, path: ".github/workflows/vps-admin-operation.yml", event: "workflow_dispatch", head_branch: "main", status: "in_progress", head_sha: commit, ...run };
+  const urls = [];
+  const admin = fakeAdminHost(state, extra);
+  const source = "infra/vps/ws-restart-gate.mjs";
+  const blob = crypto.createHash("sha1").update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest("hex");
+  const host = {
+    ...admin.host,
+    restartGate: { source, dest, uid: process.getuid(), gid: process.getgid() },
+    run(argv) {
+      if (argv[0] === "/usr/bin/curl") {
+        const url = argv.at(-1);
+        urls.push(url);
+        if (url.endsWith("/actions/runs/41700000020")) return { status: 0, stdout: JSON.stringify(runJson) };
+        if (url.endsWith("/commits/main")) return { status: 0, stdout: main ?? commit };
+        if (url.endsWith(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: "file", path: source, sha: blob }) };
+        if (url.startsWith(`https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/`)) {
+          if (downloadExit === 0) fs.writeFileSync(argv[argv.indexOf("-o") + 1], script);
+          return { status: downloadExit, stdout: "" };
+        }
+        return { status: 22, stdout: "" };
+      }
+      if (argv[0] === "/usr/bin/node" && argv[1] === "--check") {
+        const res = spawnSync(process.execPath, argv.slice(1), { encoding: "utf8" });
+        return { status: res.status ?? 1, stdout: res.stdout || res.stderr || "" };
+      }
+      if (argv[0] === dest && argv[1] === "check") {
+        return { status: checkStatus, stdout: checkStdout };
+      }
+      return admin.host.run(argv);
+    },
+  };
+  return { dir, dest, commit, host, urls, admin };
+}
+
+test("VPS admin installs the WS restart gate helper only from the approved run's current main commit and runs check", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const op = "ws-restart-gate-install";
+  const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const oldScript = `#!/usr/bin/node\n// old gate\nconst modes = ["check", "restart"];\n`;
+
+  // Safe check exit 0
+  const okSafe = restartGateInstallFixture();
+  try {
+    const result = runOperation(op, "41700000020", okSafe.host);
+    const installed = fs.readFileSync(okSafe.dest, "utf8");
+    assert.equal(installed, NEW_RESTART_GATE);
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${okSafe.commit} sha256=${hash(installed)} previous=${hash(oldScript)} gate:safe`);
+    assert.equal(fs.statSync(okSafe.dest).mode & 0o777, 0o755);
+    assert.deepEqual(fs.readdirSync(okSafe.dir), [path.basename(okSafe.dest)], "no temporary file is left");
+    assert.match(okSafe.admin.audits[1], new RegExp(`result=ok detail=installed commit=${okSafe.commit} sha256=`));
+  } finally {
+    fs.rmSync(okSafe.dir, { recursive: true, force: true });
+  }
+
+  // Blocked check exit 1 with expected reason
+  const okBlocked = restartGateInstallFixture({ checkStatus: 1, checkStdout: "RESTART_BLOCKED humanSeatsOpen=1" });
+  try {
+    const result = runOperation(op, "41700000020", okBlocked.host);
+    assert.equal(result.line, `ADMIN_OK ${op} installed commit=${okBlocked.commit} sha256=${hash(NEW_RESTART_GATE)} previous=${hash(oldScript)} gate:blocked`);
+    assert.equal(fs.readFileSync(okBlocked.dest, "utf8"), NEW_RESTART_GATE);
+  } finally {
+    fs.rmSync(okBlocked.dir, { recursive: true, force: true });
+  }
+
+  // Technical gate_error is NOT accepted: triggers recovery to previous
+  const gateError = restartGateInstallFixture({ checkStatus: 1, checkStdout: "RESTART_BLOCKED gate_error" });
+  try {
+    const result = runOperation(op, "41700000020", gateError.host);
+    assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:gate_error recovery:restored_previous`);
+    assert.equal(fs.readFileSync(gateError.dest, "utf8"), oldScript, "recovered to old script");
+    const restored = fs.statSync(gateError.dest);
+    assert.equal(restored.mode & 0o7777, 0o755, "restored mode is 0755");
+    assert.equal(restored.uid, gateError.host.restartGate.uid, "restored uid matches");
+    assert.equal(restored.gid, gateError.host.restartGate.gid, "restored gid matches");
+    assert.equal(hash(fs.readFileSync(gateError.dest)), hash(oldScript), "restored sha256 matches");
+  } finally {
+    fs.rmSync(gateError.dir, { recursive: true, force: true });
+  }
+
+  // Crash or unrecognized exit triggers recovery to previous
+  const gateCrash = restartGateInstallFixture({ checkStatus: 2, checkStdout: "usage: arcade-ws-restart-gate <mode>" });
+  try {
+    const result = runOperation(op, "41700000020", gateCrash.host);
+    assert.equal(result.line, `ADMIN_FAILED ${op} verification_failed reason:status_2 recovery:restored_previous`);
+    assert.equal(fs.readFileSync(gateCrash.dest, "utf8"), oldScript, "recovered to old script");
+    const restored = fs.statSync(gateCrash.dest);
+    assert.equal(restored.mode & 0o7777, 0o755, "restored mode is 0755");
+    assert.equal(restored.uid, gateCrash.host.restartGate.uid, "restored uid matches");
+    assert.equal(restored.gid, gateCrash.host.restartGate.gid, "restored gid matches");
+    assert.equal(hash(fs.readFileSync(gateCrash.dest)), hash(oldScript), "restored sha256 matches");
+  } finally {
+    fs.rmSync(gateCrash.dir, { recursive: true, force: true });
+  }
+
+  // Syntax error refused before replace
+  const badSyntax = `#!/usr/bin/node\nimport { bad syntax`;
+  const syntaxErr = restartGateInstallFixture({ script: badSyntax, published: badSyntax });
+  try {
+    const result = runOperation(op, "41700000020", syntaxErr.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} syntax_error`);
+    assert.equal(fs.readFileSync(syntaxErr.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(syntaxErr.dir, { recursive: true, force: true });
+  }
+
+  // Missing modes refused before replace
+  const missingCode = `#!/usr/bin/node\n// only check\nconst x = ["check"];\n`;
+  const missingModes = restartGateInstallFixture({ script: missingCode, published: missingCode });
+  try {
+    const result = runOperation(op, "41700000020", missingModes.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} missing_modes`);
+    assert.equal(fs.readFileSync(missingModes.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(missingModes.dir, { recursive: true, force: true });
+  }
+
+  // Content mismatch refused before replace
+  const mismatch = restartGateInstallFixture({ script: NEW_RESTART_GATE + "\n// extra" });
+  try {
+    const result = runOperation(op, "41700000020", mismatch.host);
+    assert.equal(result.line, `ADMIN_BLOCKED ${op} content_mismatch`);
+    assert.equal(fs.readFileSync(mismatch.dest, "utf8"), oldScript);
+  } finally {
+    fs.rmSync(mismatch.dir, { recursive: true, force: true });
+  }
+
+  // Late failure reporting read-back state
+  const late = restartGateInstallFixture();
+  try {
+    late.host.rename = (from, to) => { fs.renameSync(from, to); throw new Error("after rename"); };
+    const line = runOperation(op, "41700000020", late.host).line;
+    assert.equal(line, `ADMIN_FAILED ${op} install replaced=yes commit=${late.commit} sha256=${hash(NEW_RESTART_GATE)} previous=${hash(oldScript)}`);
+  } finally {
+    fs.rmSync(late.dir, { recursive: true, force: true });
+  }
+});
+
+test("VPS admin approval summary describes every catalog operation from reviewed code, never from the reason", async () => {
+  const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
+  const { APPROVAL, checkCatalog, approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
+  checkCatalog();
+  assert.deepEqual(Object.keys(APPROVAL), Object.keys(OPERATIONS), "one description per helper operation, same order");
+  assert.throws(() => checkCatalog({ ...OPERATIONS, "new-operation": () => ({}) }), /approval_catalog_mismatch/);
+  const { "ledger-dispatchers-status": _status, ...missing } = APPROVAL;
+  assert.throws(() => checkCatalog(OPERATIONS, missing), /approval_catalog_mismatch/);
+  assert.throws(() => checkCatalog(OPERATIONS, { ...APPROVAL, "systemd-daemon-reload": { ...APPROVAL["systemd-daemon-reload"], risk: "see `x`" } }), /approval_description_invalid/);
+  assert.deepEqual(Object.keys(APPROVAL).filter((name) => APPROVAL[name].readOnly), ["ledger-dispatchers-status", "npm-cache-1240-check"], "only catalogued status/check operations are read-only");
+  assert.match(APPROVAL["ledger-production-dispatcher-install"].risk, /stay stopped/);
+  assert.match(APPROVAL["ledger-dispatchers-pause"].risk, /not replayed/);
+
+  const request = { operation: "ledger-dispatchers-pause", reason: "Pause dispatchers for the T004-3 cutover (step 4)", sha: "a".repeat(40),
+    actor: "arcade-code-agent[bot]", triggeringActor: "arcade-code-agent[bot]", runId: "42223180928", attempt: "1" };
+  const text = approvalSummary(request);
+  for (const part of ["## Approve only if expected: ledger-dispatchers-pause", "CHANGES THE VPS", `| Revision | \`${"a".repeat(40)}\` (main) |`,
+    "| Requested by | `arcade-code-agent[bot]`, triggered by `arcade-code-agent[bot]` |", APPROVAL["ledger-dispatchers-pause"].risk,
+    APPROVAL["ledger-dispatchers-pause"].rollback, "environment vps-admin", "Nothing has run on the VPS yet"]) assert.ok(text.includes(part), part);
+  assert.match(text, /Requester's reason \(free text, not part of the reviewed description\): `Pause dispatchers/);
+  assert.doesNotMatch(text, /ADMIN_OK ledger|PASS/);
+  for (const operation of Object.keys(APPROVAL)) {
+    const summary = approvalSummary({ ...request, operation });
+    assert.ok(summary.includes("### Review implementation"));
+    assert.ok(summary.includes("These links show repository code at this run's SHA."));
+    assert.ok(summary.includes("They do not confirm the version of `/usr/local/sbin/arcade-vps-admin` or its supporting files installed on the VPS."));
+    assert.ok(summary.includes("Matching the installed helper to this source requires separate verification before approval."));
+    for (const file of ["infra/vps/vps-admin.mjs", ".github/workflows/vps-admin-operation.yml"]) {
+      assert.ok(summary.includes(`https://github.com/krzysztofcal/arcadePlatform/blob/${request.sha}/${file}`));
+    }
+    assert.doesNotMatch(summary, /\/blob\/main\//);
+  }
+  for (const [operation, file] of [
+    ["ledger-production-dispatcher-install", "infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
+    ["ws-restart-gate-install", "infra/vps/ws-restart-gate.mjs"],
+    ["github-app-token-prepare", "infra/vps/github-app-token.py"],
+    ["github-app-key-quarantine", "infra/vps/github-app-token.py"],
+    ["ws-preview-isolation-provision", "infra/vps/ws-preview-isolation.py"],
+    ["ws-preview-isolation-rollback", "infra/vps/ws-preview-isolation.py"],
+  ]) assert.ok(approvalSummary({ ...request, operation }).includes(`/blob/${request.sha}/${file}`));
+  for (const [field, value] of [["operation", "rm-rf"], ["reason", "ok\n## Approved"], ["reason", "see `x` now ok"], ["sha", "abc"], ["actor", "a b"], ["runId", "0"]]) {
+    assert.throws(() => approvalSummary({ ...request, [field]: value }), Error, field);
+  }
+});
+
+test("Preview approval descriptions retain the stopped-service and recovery limits", async () => {
+  const { approvalSummary } = await import("../infra/vps/vps-admin-approval.mjs");
+  const request = { reason: "Inspect reviewed Preview isolation request", sha: "b".repeat(40),
+    actor: "release-agent[bot]", triggeringActor: "release-agent[bot]", runId: "42223180929", attempt: "1" };
+  for (const operation of ["ws-preview-isolation-provision", "ws-preview-isolation-rollback"]) {
+    const text = approvalSummary({ ...request, operation });
+    assert.ok(text.includes(`## Approve only if expected: ${operation}`));
+    assert.match(text, /CHANGES THE VPS/);
+    assert.match(text, /Nothing has run on the VPS yet/);
+    assert.match(text, /stopped|stopping/);
+    assert.match(text, /separate/i);
+  }
+  const provision = approvalSummary({ ...request, operation: "ws-preview-isolation-provision" });
+  assert.match(provision, /daemon-reload re-reads all changed VPS unit files/);
+  assert.match(provision, /hard kick does not guarantee chip settlement/);
+  assert.match(provision, /read-only preflight, stops only ws-server-preview.service/);
+});
+
+test("VPS admin workflow shows the request before approval and reaches arcade-admin only after vps-admin approval", async () => {
+  const { OPERATIONS } = await import("../infra/vps/vps-admin.mjs");
+  const catalog = Object.keys(OPERATIONS);
+  const workflow = fileText(".github/workflows/vps-admin-operation.yml");
+  const choices = workflow.match(/options:\n((?:\s+- [a-z0-9-]+\n)+)/)[1].trim().split(/\n\s*/).map((line) => line.replace("- ", ""));
+  assert.deepEqual(choices, catalog, "workflow choices equal the helper catalog");
+  const sudoers = fileText("infra/vps/arcade-admin.sudoers");
+  assert.deepEqual([...sudoers.matchAll(/\/usr\/local\/sbin\/arcade-vps-admin ([a-z0-9-]+) \*/g)].map((m) => m[1]), catalog, "sudoers grants exactly the catalog");
+  assert.match(sudoers, /^arcade-admin ALL=\(root\) NOPASSWD: ARCADE_ADMIN_COMMANDS$/m);
+  // No rule for or as copilot (the quarantine operation only names copilot's directories).
+  assert.doesNotMatch(sudoers.replaceAll("arcade-vps-admin copilot-secret-snapshots-quarantine *", ""), /copilot|ALL$|\/bin\/(ba)?sh|node |systemctl/m);
+  assert.doesNotMatch(fileText("infra/vps/arcade-deploy.sudoers"), /arcade-vps-admin|arcade-admin/);
+  assert.doesNotMatch(fileText("infra/vps/vps-admin.mjs"), /shell: *true|execSync|exec\(|"\/bin\/(ba)?sh"|bash -c|eval\(/);
+
+  assert.match(workflow, /^on:\n  workflow_dispatch:\n/m);
+  assert.doesNotMatch(workflow, /^  (push|pull_request|pull_request_target|schedule|workflow_run):/m);
+  assert.match(workflow, /group: vps-admin\n  cancel-in-progress: false/);
+  assert.doesNotMatch(workflow, /always\(\)|continue-on-error/);
+  const request = workflow.slice(workflow.indexOf("\n  request:\n"), workflow.indexOf("\n  operate:\n"));
+  const operate = workflow.slice(workflow.indexOf("\n  operate:\n"));
+  assert.doesNotMatch(request, /environment:|secrets\./, "the summary job has no environment and no secret");
+  // The reviewed description is rendered only after the inputs passed the bash checks, from main's own code.
+  assert.ok(request.indexOf("[[ \"$REASON\" =~ $REASON_RE ]]") < request.indexOf("node infra/vps/vps-admin-approval.mjs"));
+  assert.match(request, /uses: actions\/checkout@v4\n        with:\n          persist-credentials: false\n/);
+  assert.match(workflow, /^run-name: "VPS Admin: \$\{\{ inputs\.operation \}\} \(requested by \$\{\{ github\.triggering_actor \}\}\)"$/m);
+  assert.match(request, /\n    name: "1\. Review request: \$\{\{ inputs\.operation \}\}"\n/);
+  assert.match(operate, /\n    name: "2\. Run on the VPS after approval: \$\{\{ inputs\.operation \}\}"\n/);
+  assert.match(operate, /\n    needs: request\n/);
+  assert.match(operate, /\n    environment: vps-admin\n/);
+  assert.doesNotMatch(operate, /GITHUB_STEP_SUMMARY/);
+  assert.equal((operate.match(/secrets\./g) || []).length, 3, "only the three vps-admin secrets");
+  assert.match(operate, /\[ "\$\(id -un\)" = "arcade-admin" \]/);
+  assert.match(operate, /"ADMIN_OK \$OPERATION "\*\) ;;/);
+  assert.match(request, /\[\[ "\$CONFIRMATION" == "RUN \$OPERATION" \]\]/);
+
+  const reasonPattern = request.match(/REASON_RE='([^']+)'/)[1];
+  const accepts = (reason) => spawnSync("bash", ["-c", 're="$1"; [[ "$2" =~ $re ]]', "_", reasonPattern, reason]).status === 0;
+  assert.equal(accepts("Pause dispatchers for the T004-3 cutover (step 4)"), true);
+  for (const forged of ["ok line\n### Approved by owner", "see `ADMIN_OK`", "<b>approved</b>", "| fake | table |", "short", "x".repeat(201)]) {
+    assert.equal(accepts(forged), false, `reason must stay one plain line: ${JSON.stringify(forged.slice(0, 30))}`);
+  }
+
+  const conditions = [request, operate].map((job) => job.match(/\n    if: \$\{\{ (.+) \}\}\n/)[1]);
+  assert.equal(conditions[0], conditions[1], "both jobs use the same identity condition");
+  const evaluate = ({ actor, triggeringActor = actor, agent = "release-agent[bot]", event = "workflow_dispatch", ref = "refs/heads/main" }) => {
+    const js = conditions[1]
+      .replaceAll("github.event_name", JSON.stringify(event))
+      .replaceAll("github.ref", JSON.stringify(ref))
+      .replaceAll("github.triggering_actor", JSON.stringify(triggeringActor))
+      .replaceAll("github.actor", JSON.stringify(actor))
+      .replaceAll("github.repository_owner", JSON.stringify("krzysztofcal"))
+      .replaceAll("vars.WS_RELEASE_AGENT", JSON.stringify(agent))
+      .replaceAll("'", "\"").replaceAll(" == ", " === ").replaceAll(" != ", " !== ");
+    assert.match(js, /^[\s"a-z0-9_\-/[\].()|&=!]+$/i, js);
+    return Function(`return (${js});`)();
+  };
+  assert.equal(evaluate({ actor: "krzysztofcal" }), true);
+  assert.equal(evaluate({ actor: "release-agent[bot]" }), true);
+  assert.equal(evaluate({ actor: "krzysztofcal", triggeringActor: "release-agent[bot]" }), false, "agent re-run of an owner run");
+  assert.equal(evaluate({ actor: "release-agent[bot]", triggeringActor: "krzysztofcal" }), false, "owner re-run of an agent run");
+  assert.equal(evaluate({ actor: "", agent: "" }), false, "an unset agent variable never matches");
+  assert.equal(evaluate({ actor: "someone" }), false);
+  assert.equal(evaluate({ actor: "krzysztofcal", ref: "refs/heads/feature" }), false);
+  assert.equal(evaluate({ actor: "krzysztofcal", event: "push" }), false);
+
+  // The staging script checks the existing account itself, not only copilot's groups.
+  const stage = fileText("infra/vps/stage-vps-admin.sh");
+  for (const check of ['[[ "$(id -nG arcade-admin)" == "arcade-admin" ]]', '(( "$(id -u arcade-admin)" < 1000 ))', 'getent group arcade-admin | cut -d: -f4', "/home/arcade-admin/.ssh/authorized_keys", "verify_admin_sudo || refuse"]) {
+    assert.ok(stage.includes(check), check);
+  }
+  assert.doesNotMatch(stage, /EXTRA_SUDO|sudo -l -U arcade-admin \|/, "no fail-open sudo -l pipeline");
+
+  // verify_admin_sudo: the real function from the script against a fake sudo. Errors and unknown output are STOP.
+  const verify = stage.match(/\nverify_admin_sudo\(\) \{\n[\s\S]*?\n\}\n/)[0];
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-sudo-"));
+  fs.writeFileSync(path.join(bin, "sudo"), '#!/bin/bash\nprintf "%s" "$FAKE_SUDO_OUT"\nexit "${FAKE_SUDO_EXIT:-0}"\n', { mode: 0o700 });
+  const header = "Matching Defaults entries for arcade-admin on h:\n    env_reset, secure_path=/usr/local/sbin\\:/usr/bin\n\nUser arcade-admin may run the following commands on h:\n";
+  const helperLine = (ops) => `    (root) NOPASSWD: ${ops.map((op) => `/usr/local/sbin/arcade-vps-admin ${op} *`).join(", ")}\n`;
+  const verifies = (out, exit = 0) => spawnSync("bash", ["-c", `${verify}verify_admin_sudo`], { env: { PATH: `${bin}:${process.env.PATH}`, FAKE_SUDO_OUT: out, FAKE_SUDO_EXIT: String(exit) } }).status === 0;
+  assert.equal(verifies(header + helperLine(["ledger-dispatchers-status", "ledger-dispatchers-pause"]) + "        /usr/local/sbin/arcade-vps-admin systemd-daemon-reload *\n"), true);
+  for (const [label, out, exit] of [
+    ["sudo read error", header + helperLine(["ledger-dispatchers-status"]), 1],
+    ["empty output", "", 0],
+    ["no may-run section", "Sorry, user arcade-admin may not run sudo on h.\n", 0],
+    ["section without entries", header, 0],
+    ["second section", header + helperLine(["ledger-dispatchers-status"]) + "User arcade-admin may run the following commands on h:\n" + helperLine(["x"]), 0],
+    ["ALL rule", header + helperLine(["ledger-dispatchers-status"]) + "    (ALL : ALL) ALL\n", 0],
+    ["extra command", header + "    (root) NOPASSWD: /usr/local/sbin/arcade-vps-admin ledger-dispatchers-status *, /usr/bin/systemctl\n", 0],
+    ["helper wildcard", header + "    (root) NOPASSWD: /usr/local/sbin/arcade-vps-admin *\n", 0],
+    ["password rule", header + "    (root) /usr/local/sbin/arcade-vps-admin ledger-dispatchers-status *\n", 0],
+    ["other run-as user", header + "    (arcade-release) NOPASSWD: /usr/local/sbin/arcade-vps-admin ledger-dispatchers-status *\n", 0],
+    ["unindented garbage", header + helperLine(["ledger-dispatchers-status"]) + "unexpected\n", 0],
+  ]) assert.equal(verifies(out, exit), false, label);
+  fs.rmSync(bin, { recursive: true, force: true });
+});
+
+
+test("Preview isolation catalog uses fixed actions and unprivileged fundamental fixtures", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const action of ["provision", "rollback"]) {
+    const fx = fakeAdminHost();
+    const originalRun = fx.host.run;
+    fx.host.run = (argv, ...args) => {
+      if (argv[0] === "/usr/bin/python3") {
+        assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/ws-preview-isolation.py", action, "123"]);
+        return { status: 1, stdout: "PREVIEW_BLOCKED owner_public_key_missing_or_invalid" };
+      }
+      return originalRun(argv, ...args);
+    };
+    assert.match(runOperation(`ws-preview-isolation-${action}`, "123", fx.host).line, /ADMIN_BLOCKED .* owner_public_key_missing_or_invalid$/);
+  }
+  const result = spawnSync("python3", ["tests/ws-preview-config.test.py", "PreviewIsolation"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+
+test("removed Preview operations fail closed and partial provisioning is FAILED", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const operation of ["ws-preview-safe-stop", "ws-preview-isolation-preflight"]) {
+    const fx = fakeAdminHost();
+    assert.match(runOperation(operation, "123", fx.host).line, /ADMIN_BLOCKED .* unexpected_arguments$/);
+  }
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  fx.host.run = (argv, ...args) => argv[0] === "/usr/bin/python3"
+    ? { status: 1, stdout: "PREVIEW_FAILED preview_processes_still_running" } : original(argv, ...args);
+  assert.match(runOperation("ws-preview-isolation-provision", "123", fx.host).line, /^ADMIN_FAILED /);
+});
+
+test("GitHub App signer preparation is fixed and quarantine refuses an unavailable replacement", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const fx = fakeAdminHost();
+  const original = fx.host.run;
+  const calls = [];
+  fx.host.run = (argv, ...args) => {
+    calls.push(argv);
+    if (argv[0] === "/usr/bin/python3") {
+      assert.deepEqual(argv, ["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", "123"]);
+      return { status: 0, stdout: "GITHUB_TOKEN_OK prepared_no_key_no_client_switch" };
+    }
+    if (argv[0] === "/usr/sbin/runuser") {
+      assert.deepEqual(argv, ["/usr/sbin/runuser", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", "--info"]);
+      return { status: 1, stdout: "" };
+    }
+    return original(argv, ...args);
+  };
+  assert.equal(runOperation("github-app-token-prepare", "123", fx.host).ok, true);
+  calls.length = 0;
+  assert.match(runOperation("github-app-key-quarantine", "123", fx.host).line, /ADMIN_BLOCKED .* replacement_signer_not_verified$/);
+  assert.equal(calls.filter(a => a[0] === "/usr/sbin/runuser").length, 1);
+  assert.equal(calls.filter(a => a[0] === "/usr/bin/id").length, 0, "no old-key quarantine begins without replacement proof");
+});
+
+test("GitHub gh and Git wrappers preserve interfaces without OWNER or old-key fallback", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "github-client-"));
+  try {
+    const provider = path.join(dir, "provider");
+    const gh = path.join(dir, "gh-real");
+    const marker = path.join(dir, "called");
+    fs.writeFileSync(provider, `#!/bin/sh\nprintf called >> '${marker}'\nprintf fixture-short-lived\n`, { mode: 0o700 });
+    fs.writeFileSync(gh, '#!/bin/sh\n[ "$GH_TOKEN" = fixture-short-lived ] || exit 9\n[ -z "${GITHUB_TOKEN:-}${GH_HOST:-}${GH_ENTERPRISE_TOKEN:-}" ] || exit 10\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
+    const wrapper = path.join(dir, "ghx");
+    fs.writeFileSync(wrapper, fileText("infra/vps/github-app-client/ghx")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider)
+      .replaceAll("/home/copilot/.local/bin/gh", gh), { mode: 0o700 });
+    const run = spawnSync(wrapper, ["workflow", "run", "vps-admin-operation.yml", "--ref", "main"], {
+      encoding: "utf8", env: { PATH: process.env.PATH, GITHUB_TOKEN: "unrelated-fixture", GH_HOST: "foreign.invalid", GH_ENTERPRISE_TOKEN: "unrelated-fixture" }
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout, "workflow\nrun\nvps-admin-operation.yml\n--ref\nmain\n");
+    assert.equal(fs.readFileSync(marker, "utf8"), "called");
+    assert.equal(spawnSync(wrapper, ["auth", "token"]).status, 2);
+    assert.equal(fs.readFileSync(marker, "utf8"), "called", "gh auth must not mint or print a token");
+    const helper = path.join(dir, "credential");
+    fs.writeFileSync(helper, fileText("infra/vps/github-app-client/git-credential-arcade-agent")
+      .replaceAll("/home/copilot/.arcade-code-agent/arcade-agent-token.mjs", provider), { mode: 0o700 });
+    assert.equal(spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" }).stdout,
+      "username=x-access-token\npassword=fixture-short-lived\n");
+    const before = fs.readFileSync(marker, "utf8");
+    for (const [action, input] of [["store", ""], ["erase", ""], ["get", "protocol=https\nhost=foreign.invalid\n\n"], ["get", "protocol=http\nhost=github.com\n\n"]]) {
+      assert.equal(spawnSync(helper, [action], { input, encoding: "utf8" }).stdout, "");
+    }
+    assert.equal(fs.readFileSync(marker, "utf8"), before);
+    fs.writeFileSync(provider, "#!/bin/sh\nexit 1\n");
+    assert.equal(spawnSync(wrapper, ["issue", "list"]).status, 1, "no OWNER fallback on issuer failure");
+    const refused = spawnSync(helper, ["get"], { input: "protocol=https\nhost=github.com\n\n", encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, "quit=1\n", "stop Git credential fallback and prompting after issuer failure");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("compatibility provider invokes only the fixed non-root isolated issuer", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const source = fileText("infra/vps/github-app-client/arcade-agent-token.mjs").replace(/^#!.*\n/, "")
+    .replace('import { spawnSync } from "node:child_process";', "");
+  for (const args of [[], ["--info"], ["--permissions=administration:write"], ["--info", "extra"]]) {
+    const calls = []; let code;
+    const process = { argv: ["node", "provider", ...args], stderr: { write() {} }, exit(value) { code = value; throw new Error("exit"); } };
+    assert.throws(() => runInNewContext(source, { process, spawnSync(...argv) { calls.push(argv); return { status: 0 }; } }), /exit/);
+    const allowed = args.length <= 1 && (args.length === 0 || args[0] === "--info");
+    assert.equal(code, allowed ? 0 : 1);
+    assert.equal(calls.length, allowed ? 1 : 0);
+    if (allowed) {
+      assert.equal(calls[0][0], "/usr/bin/sudo");
+      assert.deepEqual(Array.from(calls[0][1]), ["-n", "-u", "arcade-github-token", "--", "/usr/local/sbin/arcade-github-app-token", ...args]);
+      assert.equal(calls[0][2].env.PATH, "/usr/bin:/bin");
+      assert.deepEqual(Array.from(calls[0][2].stdio), ["ignore", "inherit", "inherit"]);
+    }
+  }
+});
+
+
+function npmCacheFixture() {
+  const fx = quarantineFixture();
+  const blobs = ["public-package-a", "public-package-b", "public-package-c"].map((text) => {
+    const digest = crypto.createHash("sha512").update(text).digest("hex");
+    const rel = `.npm/_cacache/content-v2/sha512/${digest.slice(0, 2)}/${digest.slice(2, 4)}/${digest.slice(4)}`;
+    const file = path.join(fx.home, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text, { mode: 0o444 });
+    fs.utimesSync(file, new Date(0), new Date(Date.now() - 72 * 3600000));
+    return { digest, size: Buffer.byteLength(text), rel, file };
+  });
+  fx.host.npmCache1240 = { blobs, base: fx.base, rootDevice: fs.statSync(fx.top).dev };
+  fx.host.now = () => Date.now();
+  return { ...fx, blobs };
+}
+
+test("VPS admin npm cache #1240 checks and deletes only the three verified public blobs through protected custody", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const fx = npmCacheFixture();
+  const evidence = path.join(fx.home, "ledger-evidence.json");
+  fs.writeFileSync(evidence, "untouched-evidence");
+  try {
+    const check = runOperation("npm-cache-1240-check", "1240", fx.host);
+    assert.equal(check.ok, true, check.line);
+    assert.match(check.line, /dry_run=yes files=3 .*deleted=0/);
+    assert.equal(fs.existsSync(fx.base), false, "check never creates staging or moves files");
+    assert.ok(fx.blobs.every((b) => fs.existsSync(b.file)));
+    const clean = runOperation("npm-cache-1240-cleanup", "1241", fx.host);
+    assert.equal(clean.ok, true, clean.line);
+    assert.match(clean.line, /deleted=3 .*df_verification=required/);
+    assert.ok(fx.blobs.every((b) => !fs.existsSync(b.file)));
+    const manifest = fs.readFileSync(path.join(fx.base, "1241/MANIFEST"), "utf8");
+    assert.match(manifest, /delete_complete 3/);
+    assert.equal(fs.readFileSync(evidence, "utf8"), "untouched-evidence");
+    assert.equal(runOperation("npm-cache-1240-cleanup", "1242", fx.host).ok, false, "missing/repeated targets never widen scope");
+  } finally { fs.rmSync(fx.top, { recursive: true, force: true }); }
+});
+
+test("VPS admin npm cache #1240 fails closed before mutation on changed, young, linked or in-use targets", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const problem of ["digest", "young", "hardlink", "symlink", "parent", "fd", "mmap", "proc", "device", "owner", "age_changed"]) {
+    const fx = npmCacheFixture(); const first = fx.blobs[0];
+    try {
+      if (problem === "digest") { fs.chmodSync(first.file, 0o644); fs.writeFileSync(first.file, "secret-evidence!"); }
+      if (problem === "young") fs.utimesSync(first.file, new Date(), new Date());
+      if (problem === "hardlink") fs.linkSync(first.file, path.join(fx.home, "other"));
+      if (problem === "symlink") { fs.unlinkSync(first.file); fs.symlinkSync(path.join(fx.home, "ledger-evidence"), first.file); }
+      if (problem === "parent") { const cache = path.join(fx.home, ".npm"); fs.renameSync(cache, cache + "-saved"); fs.symlinkSync(cache + "-saved", cache); }
+      if (problem === "fd") fx.addProcess("2", first.file);
+      if (problem === "mmap") { const st = fs.statSync(first.file); const d = BigInt(st.dev); const major = ((d >> 8n) & 0xfffn) | ((d >> 32n) & ~0xfffn); const minor = (d & 0xffn) | ((d >> 12n) & ~0xffn); fx.addProcess("2", null, `0-1 r--p 00000000 ${major.toString(16).padStart(2,"0")}:${minor.toString(16).padStart(2,"0")} ${st.ino} ${first.file}\n`); }
+      if (problem === "proc") fx.host.quarantine.proc = path.join(fx.top, "missing-proc");
+      if (problem === "device") fx.host.npmCache1240.rootDevice = -1;
+      if (problem === "owner") { const run = fx.host.run; fx.host.run = (a) => a[0] === "/usr/bin/id" ? { status: 0, stdout: String(process.getuid()+1) } : run(a); }
+      if (problem === "age_changed") { let calls=0; fx.host.now=()=> calls++ ? 0 : Date.now(); }
+      const result = runOperation("npm-cache-1240-cleanup", "1243", fx.host);
+      assert.equal(result.ok, false, `${problem}: ${result.line}`);
+      assert.equal(fs.existsSync(fx.base), false, `${problem}: no custody/mutation before all checks pass`);
+    } finally { fs.rmSync(fx.top, { recursive: true, force: true }); }
+  }
+});
+
+test("VPS admin npm cache #1240 never deletes changed custody and reports partial deletion without retry", async () => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  for (const problem of ["changed_move", "changed_move_preserve_time", "open_after_move", "partial_delete", "audit_start", "audit_end"]) {
+    const fx = npmCacheFixture();
+    try {
+      if (problem === "changed_move") { const rename=fx.host.rename; fx.host.rename=(a,b)=> { rename(a,b); fs.chmodSync(b,0o644); fs.writeFileSync(b,"different-bytes!"); }; }
+      if (problem === "changed_move_preserve_time") { const rename=fx.host.rename; fx.host.rename=(a,b)=> { const st=fs.statSync(a); rename(a,b); fs.chmodSync(b,0o644); fs.writeFileSync(b,"different-bytes!"); fs.utimesSync(b,st.atime,st.mtime); }; }
+      if (problem === "open_after_move") { const rename=fx.host.rename; fx.host.rename=(a,b)=> { rename(a,b); fx.addProcess("9",b); }; }
+      if (problem === "partial_delete") { let n=0; fx.host.npmCacheUnlink=(p)=> { if (n++===1) throw new Error("simulated I/O failure"); fs.unlinkSync(p); }; }
+      if (problem.startsWith("audit_")) { let n=0; const run=fx.host.run; fx.host.run=(a)=> { if(a[0]==="/usr/bin/logger" && ++n===(problem==="audit_start"?1:2))return {status:1,stdout:""}; return run(a); }; }
+      const result=runOperation("npm-cache-1240-cleanup","1244",fx.host);
+      assert.equal(result.ok,false,`${problem}: ${result.line}`);
+      if (problem==="partial_delete") {
+        assert.match(result.line,/deleted=1\/3/);
+        assert.equal(fs.readdirSync(path.join(fx.base,"1244")).length,3,"two blobs plus manifest remain");
+      } else if(problem==="audit_end") assert.match(result.line,/audit_end_after_ok/);
+      else assert.ok(fx.blobs.every((b,i)=>fs.existsSync(b.file)||fs.existsSync(path.join(fx.base,"1244",`${i}-${path.basename(b.file)}`))),"no blob deleted");
+    } finally { fs.rmSync(fx.top,{recursive:true,force:true}); }
+  }
+});
+
+test("volume workdir creates only on the verified mount and refuses conflicting destinations", async (t) => {
+  const { runOperation } = await import("../infra/vps/vps-admin.mjs");
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "volume-workdir-"));
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  fs.chmodSync(parent, 0o755);
+  const mount = path.join(parent, "HC_Volume_107462648");
+  fs.mkdirSync(mount, { mode: 0o755 });
+  const dest = path.join(mount, "copilot-work");
+  const device = BigInt(fs.statSync(mount).dev);
+  const major = ((device >> 8n) & 0xfffn) | ((device >> 32n) & ~0xfffn);
+  const minor = (device & 0xffn) | ((device >> 12n) & ~0xffn);
+  const dev = `${major}:${minor}`;
+  let mountInfo = `${mount} /dev/sdb ext4 rw,relatime ${dev}`;
+  let resolved = "/dev/sdb";
+  const fx = fakeAdminHost();
+  t.after(() => fs.rmSync(path.dirname(fx.host.lockFile), { recursive: true, force: true }));
+  const run = fx.host.run;
+  const host = { ...fx.host, volumeWorkdir: { parent, rootUid: process.getuid(), rootGid: process.getgid() },
+    run(argv) {
+      if (argv[0] === "/usr/bin/findmnt") return { status: 0, stdout: mountInfo };
+      if (argv[0] === "/usr/bin/readlink") return { status: 0, stdout: resolved };
+      if (argv[0] === "/usr/bin/lsblk") return { status: 0, stdout: `${dev} disk ext4` };
+      if (argv[0] === "/usr/bin/id") return { status: 0, stdout: String(process.getuid()) };
+      if (argv[0] === "/usr/bin/getent") return { status: 0, stdout: `copilot:x:${process.getgid()}:` };
+      return run(argv);
+    } };
+  for (const info of ["", `${mount} /dev/sdb xfs rw ${dev}`, `${mount} /dev/sdb ext4 ro ${dev}`, `${mount} /dev/sdb ext4 rw 8:99`]) {
+    mountInfo = info;
+    assert.equal(runOperation("volume-workdir-prepare", "1245", host).ok, false);
+    assert.equal(fs.existsSync(dest), false);
+  }
+  mountInfo = `${mount} /dev/sdb ext4 rw,relatime ${dev}`;
+  resolved = "/dev/sdc";
+  assert.equal(runOperation("volume-workdir-prepare", "1245", host).ok, false);
+  assert.equal(fs.existsSync(dest), false);
+  resolved = "/dev/sdb";
+  const result = runOperation("volume-workdir-prepare", "1245", host);
+  assert.equal(result.ok, true, result.line);
+  const s = fs.lstatSync(dest);
+  assert.equal(s.uid, process.getuid()); assert.equal(s.gid, process.getgid()); assert.equal(s.mode & 0o7777, 0o750);
+  assert.equal(runOperation("volume-workdir-prepare", "1246", host).ok, true);
+  assert.equal(fs.lstatSync(dest).ino, s.ino);
+  fs.chmodSync(dest, 0o755);
+  assert.equal(runOperation("volume-workdir-prepare", "1247", host).ok, false);
+  assert.equal(fs.lstatSync(dest).mode & 0o7777, 0o755);
+  fs.rmdirSync(dest);
+  fs.symlinkSync(parent, dest);
+  assert.equal(runOperation("volume-workdir-prepare", "1248", host).ok, false);
+  assert.equal(fs.lstatSync(dest).isSymbolicLink(), true);
+  fs.unlinkSync(dest);
+  fs.chmodSync(mount, 0o777);
+  assert.equal(runOperation("volume-workdir-prepare", "1249", host).ok, false);
+  assert.equal(fs.existsSync(dest), false);
+});
+
+test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe destinations", async () => {
+  const { newAgentWorkdir } = await import("../scripts/ops/agent-workdir-preflight.mjs");
+  const mount = "/mnt/HC_Volume_107462648";
+  const root = `${mount}/copilot-work`;
+  let mountOutput = `${mount} /dev/sdb ext4 rw,relatime,discard`;
+  let mountStatus = 0, rootDevice = 16, rootMode = 0o750, rootUid = 1000, rootGid = 1000;
+  let canonical = root, exists = false, device = "/dev/sdb", canWrite = true;
+  const directory = (dev, uid = 0, gid = 0, mode = 0o755) => ({ dev, uid, gid, mode, isDirectory: () => true });
+  const io = {
+    uid: 1000, gid: 1000,
+    run: () => ({ status: mountStatus, stdout: mountOutput }),
+    fs: {
+      realpathSync: (p) => p.endsWith("scsi-0HC_Volume_107462648") ? device : canonical,
+      statSync: (p) => p === "/dev/sdb" ? { isBlockDevice: () => true, rdev: 16 } : directory(16),
+      lstatSync: (p) => {
+        if (p === root) return directory(rootDevice, rootUid, rootGid, rootMode);
+        if (exists) return directory(16);
+        throw Object.assign(new Error("absent"), { code: "ENOENT" });
+      },
+      accessSync: () => { if (!canWrite) throw new Error("read only"); },
+    },
+  };
+  assert.equal(newAgentWorkdir("task-1246", io), `${root}/task-1246`);
+  for (const output of ["", `/ /dev/sda1 ext4 rw`, `${mount} /dev/sdc ext4 rw`, `${mount} /dev/sdb xfs rw`, `${mount} /dev/sdb ext4 ro`, `${mount} /dev/sdb ext4 rw\n${mount} /dev/sdb ext4 rw`]) {
+    mountOutput = output;
+    assert.throws(() => newAgentWorkdir("task-1246", io), /STOP/);
+  }
+  mountOutput = `${mount} /dev/sdb ext4 rw`;
+  mountStatus = 1; assert.throws(() => newAgentWorkdir("task-1246", io), /STOP/); mountStatus = 0;
+  for (const change of [
+    () => { rootDevice = 1; }, () => { rootMode = 0o777; }, () => { rootUid = 0; },
+    () => { rootGid = 0; }, () => { canonical = "/home/copilot/work"; },
+    () => { device = "/dev/sdc"; }, () => { canWrite = false; }, () => { exists = true; },
+  ]) {
+    change(); assert.throws(() => newAgentWorkdir("task-1246", io), /STOP/);
+    rootDevice = 16; rootMode = 0o750; rootUid = 1000; rootGid = 1000;
+    canonical = root; device = "/dev/sdb"; canWrite = true; exists = false;
+  }
+  for (const slug of ["", ".", "..", "../escape", "/tmp/task", "a/b", "task name", "a".repeat(81)]) {
+    assert.throws(() => newAgentWorkdir(slug, io), /STOP/);
   }
 });

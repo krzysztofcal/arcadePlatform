@@ -284,6 +284,7 @@ register("ERROR", "http", [
 
 register("ERROR", "admin", [
   "ws_admin_poker_maintenance_failed",
+  "ws_restart_preflight_db_failed",
   "ws_poker_log_config_invalid",
   "ws_preview_bot_reaction_failed",
   "ws_vps_metrics_collection_failed",
