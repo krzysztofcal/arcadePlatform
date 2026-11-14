@@ -3,7 +3,7 @@
 **Linked Issue:** [#1140](https://github.com/krzysztofcal/arcadePlatform/issues/1140) / P05  
 **Strategic Roadmap:** [#1138](https://github.com/krzysztofcal/arcadePlatform/issues/1138) (Milestone M1)  
 **Deliverables Directory:** `docs/play-store-listing/assets/`  
-**Status:** Working Draft — Proposals Ready for Owner Review  
+**Status:** Proposal 2 (Emerald Palace) accepted by the OWNER; PNG files unchanged  
 
 ---
 
@@ -14,7 +14,7 @@ Oba pliki zostały zweryfikowane na poziomie nagłówków IHDR pod kątem wymog�
 - **Format:** rzeczywisty **24-bit Truecolor RGB PNG** (`bitDepth: 8`, `colorType: 2`, 3 kanały barwne: R, G, B).
 - **Kanał alfa / Przezroczystość:** **Brak** (`hasAlpha: false`, brak przezroczystości, brak palety indeksowanej PLTE).
 - **Przestrzeń barw:** sRGB.
-- **Strefa bezpieczeństwa (Safe Zone):** elementy skupione w centralnych 70% kadru, bezpieczne marginesy od krawędzi (≥ 15%), optymalne pod kątem nakładek systemowych Google Play (np. przycisk play wideo).
+- **Strefa bezpieczeństwa (Safe Zone):** kluczowe elementy skupione w centrum kadru, z dala od krawędzi, które mogą zostać przycięte, i z wolnym środkiem na ewentualny przycisk wideo. To wytyczne kompozycji Google Play, a nie twardy wymóg liczbowy.
 
 ```text
 Weryfikacja nagłówka IHDR (Node.js buffer inspection):
@@ -48,4 +48,4 @@ feature-graphic-proposal-2.png: width=1024, height=500, colorType=2 (Truecolor R
 
 ## 3. Podsumowanie do ostatecznej akceptacji
 
-Zgodnie z decyzją review, **Propozycja 2 (Emerald Palace)** została uproszczona, pozbawiona sloganów i wyeksportowana jako prawdziwy 24-bitowy plik RGB PNG (Color Type 2). Przedstawiona do ostatecznej oceny estetycznej przed zakończeniem prac nad banerem promocyjnym.
+**Propozycja 2 (Emerald Palace)** została uproszczona, pozbawiona sloganów, wyeksportowana jako prawdziwy 24-bitowy plik RGB PNG (Color Type 2) i zaakceptowana przez właściciela jako baner promocyjny. Propozycja 1 pozostaje alternatywą.

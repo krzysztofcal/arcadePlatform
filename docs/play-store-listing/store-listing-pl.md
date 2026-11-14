@@ -3,8 +3,8 @@
 **Pakiet wydawniczy Google Play dla Arcade Poker**  
 **Dokumentacja powiązana z:** [#1140](https://github.com/krzysztofcal/arcadePlatform/issues/1140) / P05  
 **Nadrzędna roadmapa:** [#1138](https://github.com/krzysztofcal/arcadePlatform/issues/1138) (Milestone M1)  
-**Data przygotowania:** 2026-10-23  
-**Status dokumentu:** Status roboczy — wersja do weryfikacji właściciela (Draft)  
+**Data przygotowania:** 2026-10-23 · **Aktualizacja:** 2026-11-14 (Poker Offline, usuwanie konta, otwarte bramki)  
+**Status dokumentu:** Status roboczy — wersja do weryfikacji właściciela (Draft), nieopublikowana  
 
 ---
 
@@ -28,44 +28,47 @@ Arcade Poker - Texas Hold'em
 
 ### Krótki opis (Short Description)
 > **Maksymalny limit Google Play:** 80 znaków  
-> **Dokładna długość:** **77 znaków**  
+> **Dokładna długość:** **80 znaków**  
 > **Status:** ZGODNE (PASS)
 
 ```text
-Elegancki poker Texas Hold'em online i z botami. Graj za wirtualne żetony CH.
+Poker Texas Hold'em online i offline. Graj z ludźmi i botami o wirtualne żetony.
 ```
 
 ---
 
 ### Pełny opis (Full Description)
 > **Maksymalny limit Google Play:** 4000 znaków  
-> **Dokładna długość tekstu:** **3419 znaków** (ze spacjami)  
+> **Dokładna długość tekstu:** **3707 znaków** (ze spacjami)  
 > **Status:** ZGODNE (PASS)
 
 ```text
 Witamy w Arcade Poker – eleganckim wirtualnym pokoju karcianym stworzonym z myślą o pasjonatach klasycznego No-Limit Texas Hold'em. Usiądź przy stole, sprawdź swoje umiejętności taktyczne i ciesz się czystą dynamiką pokera bez ryzyka finansowego!
 
-Arcade Poker to gra społecznościowa (social casino) oparta w 100% na wirtualnych żetonach Arcade Chips (CH). Poczuj atmosferę luksusowego kasyna, blefuj, podbijaj i buduj swój wirtualny bankroll w grze z graczami z całego świata lub trenuj w trybie solo z botami. Gra wymaga aktywnego połączenia z Internetem.
+Arcade Poker to gra społecznościowa (social casino) oparta wyłącznie na wirtualnych żetonach. Poczuj atmosferę luksusowego kasyna, blefuj, podbijaj i buduj swój wirtualny bankroll w grze z innymi graczami albo trenuj z botami. Do wyboru są trzy tryby: Poker Online i Single Player wymagają połączenia z Internetem, a Poker Offline działa na urządzeniu bez sieci.
 
 KLUCZOWE CECHY GRY:
 
 • KLASYCZNY NO-LIMIT TEXAS HOLD'EM
-Prawdziwe zasady najpopularniejszej odmiany pokera. Pre-flop, flop, turn, river, licytacja bez limitu oraz czytelny interfejs podejmowania decyzji (Fold, Check, Call, Bet, Raise, All-in) z obsługą przydatnego kolejkowania akcji.
+Pre-flop, flop, turn, river, licytacja bez limitu oraz czytelne przyciski (Fold, Check, Call, Bet, Raise, All-in) z kolejkowaniem akcji.
 
 • POKER ONLINE W CZASIE RZECZYWISTYM
-Zasiądź przy stołach wieloosobowych (od 2 do 6 miejsc). Autorytatywny silnik czasu rzeczywistego (WebSocket) zapewnia natychmiastową synchronizację stanu stołu, płynne rozdania i stabilne wznawianie sesji po chwilowej utracie łączności.
+Stoły od 2 do 6 miejsc. Silnik czasu rzeczywistego zapewnia płynne rozdania i wznowienie gry po chwilowej utracie łączności.
 
 • TRYB SINGLE PLAYER – TRENING Z BOTAMI POKEROWYMI
-Chcesz zagrać od razu bez oczekiwania na wolne miejsce przy stole? Wybierz Single Player i zmierz się z autonomicznymi botami pokerowymi na serwerze. Gra zachowuje dynamiczny timer rundy, oferując doskonały trening kalkulacji pozycji i pot odds.
+Zagraj od razu z botami działającymi na serwerze, bez czekania na wolne miejsce. Tryb wymaga Internetu i korzysta z żetonów CH konta; timer rundy pozostaje aktywny.
+
+• POKER OFFLINE – GRA BEZ INTERNETU
+Zagraj z botami bez połączenia z siecią, także w trybie samolotowym. Rozgrywka działa w całości na urządzeniu i nie wymaga logowania. Poker Offline używa osobnych żetonów treningowych Offline Chips (start 5 000, bezpłatne doładowanie), które nie są synchronizowane z kontem, CH ani XP. Usunięcie danych aplikacji lub przeglądarki usuwa lokalny zapis gry offline.
 
 • ZRÓŻNICOWANE POZIOMY STAWEK (TIERS)
 Dobierz stół do wielkości swojego wirtualnego bankrolla. Od niskich stawek rekreacyjnych po wysokie progi dla wirtualnych high-rollerów.
 
 • INTERAKCJA PRZY STOLE I GIFT SHOP
-Poker to gra relacji! Korzystaj z dymków reakcji i emotikonów przy stole, a także wysyłaj wirtualne upominki i napoje innym graczom za pośrednictwem wbudowanego Gift Shopu.
+Reaguj dymkami i emotikonami oraz wysyłaj wirtualne upominki innym graczom w Gift Shopie.
 
 • WBUDOWANY PRZEWODNIK UKŁADÓW KART
-Nie jesteś pewien, czy strit bije kolor? W każdej chwili możesz otworzyć podręczny, czytelny przewodnik starszeństwa układów pokerowych – idealny dla graczy chcących odświeżyć zasady.
+Nie wiesz, czy strit bije kolor? Przewodnik starszeństwa układów jest zawsze pod ręką.
 
 • BONUS POWITALNY I CODZIENNE NAGRODY UTC
 Zarejestrowani gracze mogą odebrać jednorazowy bonus powitalny wirtualnych żetonów CH bezpośrednio w lobby gry. Loguj się codziennie, aby utrzymywać passę (daily streak) i odbierać odnawialne pakiety żetonów.
@@ -73,15 +76,15 @@ Zarejestrowani gracze mogą odebrać jednorazowy bonus powitalny wirtualnych że
 • GRAJ JAKO GOŚĆ LUB ZAPISZ POSTĘPY
 Możesz rozpocząć grę od razu w trybie gościa z pulą tymczasowych żetonów lub zalogować się kontem Arcade, aby zachować stały stan konta CH i osiągnięcia XP.
 
-• PEŁNA KONTROLA NAD KONTEM I PRYWATNOŚĆ
-Szanujemy Twoją prywatność. Masz pełną możliwość trwałego usunięcia swojego konta i danych bezpośrednio w menu profilu aplikacji lub poprzez formularz na stronie WWW.
+• KONTO I PRYWATNOŚĆ
+Usunięcie konta możesz zgłosić w aplikacji (Konto) lub w przeglądarce, także po odinstalowaniu aplikacji: https://play.kcswh.pl/account.html#account-deletion. Proces usuwa profil i dane logowania po bezpiecznym zakończeniu udziału w grze i obsłudze wirtualnego salda. Niektóre zapisy przechowujemy dłużej, zgodnie z Polityką prywatności, np. historię rozliczeń jako zapis finansowy bez profilu, identyfikator usuniętego konta oraz kopie zapasowe do czasu ich rotacji.
 
 ────────────────────────────────────────
 WAŻNA INFORMACJA DLA GRACZY (INFORMACJA PRAWNA):
 
 • Gra Arcade Poker jest przeznaczona wyłącznie dla osób dorosłych (18+) w celach rozrywkowych.
 • Gra jest symulatorem pokera społecznościowego (social poker) i NIE oferuje gier hazardowych na prawdziwe pieniądze ani możliwości wygrania prawdziwych pieniędzy, nagród rzeczowych czy ekwiwalentów finansowych.
-• Wirtualne żetony (Arcade Chips / CH) są walutą wyłącznie fikcyjną. Nie posiadają wartości materialnej i w żadnym wypadku nie mogą być wymieniane na gotówkę, wypłacane, sprzedawane ani przenoszone poza grę.
+• Wirtualne żetony (Arcade Chips / CH oraz Offline Chips) są walutą wyłącznie fikcyjną. Nie posiadają wartości materialnej i w żadnym wypadku nie mogą być wymieniane na gotówkę, wypłacane, sprzedawane ani przenoszone poza grę.
 • Praktyka lub sukces w społecznościowych grach kasynowych nie oznacza przyszłego sukcesu w grach hazardowych na prawdziwe pieniądze.
 ```
 
@@ -91,9 +94,10 @@ WAŻNA INFORMACJA DLA GRACZY (INFORMACJA PRAWNA):
 
 - **Typ aplikacji:** Gra (Game)
 - **Kategoria podstawowa:** Gry karciane (Card) / Kasyno społecznościowe (Casino)
-- **Tagi:** Poker, Texas Hold'em, Karciane, Gra wieloosobowa, Symulator kasyna, Boty pokerowe
-- **Uwaga dotycząca tagów:** Usunięto tagi sugerujące grę offline – boty są hostowane na serwerze i wymagają połączenia sieciowego.
-- **Klasyfikacja wiekowa IARC:** Wypełnienie oficjalnego kwestionariusza IARC z zaznaczeniem symulowanego hazardu (Simulated Gambling) – kategoria 18+ (Dorośli) do formalnego zatwierdzenia.
+- **Tagi:** Poker, Texas Hold'em, Karciane, Gra wieloosobowa, Symulator kasyna, Boty pokerowe, Gra offline
+- **Uwaga dotycząca tagów:** Tag offline dotyczy wyłącznie trybu Poker Offline; Poker Online i Single Player (boty na serwerze) wymagają połączenia sieciowego.
+- **Grupa docelowa:** dorośli (18+) – to deklarowana grupa odbiorców, a nie klasyfikacja.
+- **Klasyfikacja wiekowa IARC:** OTWARTE – kwestionariusz IARC (w tym symulowany hazard) nie został jeszcze wypełniony; oficjalny wynik jest nieznany.
 
 ---
 
@@ -105,4 +109,6 @@ WAŻNA INFORMACJA DLA GRACZY (INFORMACJA PRAWNA):
 - **Szyfrowanie w transporcie:** Tak (HTTPS / Secure WebSockets TLS).
 - **Konto użytkownika:** Opcjonalne (możliwa gra w trybie gościa z tymczasowymi żetonami bez rejestracji).
 - **Status formularza Data Safety i udostępniania:** Do audytu (ostateczne deklaracje podlegają formalnemu przeglądowi prawnemu).
-- **Zewnętrzny adres usuwania konta (Production):** `https://play.kcswh.pl/account.html` (funkcja wdrożona w aplikacji webowej; adres przewidziany do zgłoszenia w konsoli Google Play podczas submission, status zgłoszenia w Play Console: Oczekuje na rejestrację konta wydawcy).
+- **Zewnętrzny adres usuwania konta (Production):** `https://play.kcswh.pl/account.html#account-deletion` – sprawdzono 2026-11-14: strona odpowiada, sekcja `account-deletion` wyjaśnia usunięcie w przeglądarce (logowanie → Usuń konto) i podaje kontakt. Zgłoszenie adresu w Play Console: OTWARTE (konto wydawcy niezarejestrowane).
+- **Retencja po usunięciu konta:** zgodnie z Polityką prywatności 2026-11-12-a3 (wyjątki: rozliczenia jako zapis finansowy bez profilu, identyfikator usuniętego konta, kopie zapasowe do rotacji). Odpowiedzi Data Safety muszą być z nią zgodne – OTWARTE.
+- **Poker Offline:** dane gry offline pozostają lokalnie na urządzeniu i nie są wysyłane na serwer.
