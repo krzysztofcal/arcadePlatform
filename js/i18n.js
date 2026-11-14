@@ -101,6 +101,8 @@
     cookiesNotice: { en: 'Cookies', pl: 'Cookies' },
     cancel: { en: 'Cancel', pl: 'Anuluj' },
     more: { en: 'More', pl: 'Więcej' },
+    adminPanel: { en: 'Admin panel', pl: 'Panel administratora' },
+    accountShortcuts: { en: 'Shortcuts', pl: 'Skróty' },
     less: { en: 'Less', pl: 'Mniej' },
     createTableBtn: { en: '＋ Create table', pl: '＋ Utwórz stół' },
     createTableTierHelp: { en: 'List contains only unlocked tiers.', pl: 'Lista zawiera tylko odblokowane progi.' },

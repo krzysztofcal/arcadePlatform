@@ -145,6 +145,7 @@
   }
 
   function render(){
+    doc.querySelectorAll('[data-admin-only]').forEach(function(node){ node.hidden = !state.isAdmin; });
     const list = ensureList();
     const items = getItems();
     const groups = [
@@ -422,6 +423,7 @@
   window.SidebarApp = { playRandomGame: handleRandomGameClick };
   if (window.MOBILE_POKER_CONFIG) doc.addEventListener('poker:lobby-view', function(){ renderBottomNav(getBottomItems()); });
   render();
+  doc.querySelectorAll('[data-random-game]').forEach(function(node){ node.addEventListener('click', handleRandomGameClick); });
   btn.addEventListener('click', toggle);
   doc.addEventListener('click', handleDocumentClick);
   doc.addEventListener('keydown', handleKeydown);

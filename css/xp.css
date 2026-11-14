@@ -1,4 +1,4 @@
-.xp-page{ max-width:960px; margin:0 auto; padding:24px 16px 80px; display:flex; flex-direction:column; gap:20px; }
+.xp-page{ width:100%; min-width:0; max-width:960px; margin:0 auto; padding:24px 16px 80px; display:flex; flex-direction:column; gap:20px; }
 .xp-header{ display:flex; flex-direction:column; gap:6px; }
 .xp-header h1{ margin:0; font:800 26px/1.15 Poppins, sans-serif; color:var(--tx); letter-spacing:-.02em; }
 .xp-subtitle{ margin:0; color:var(--mu); font-size:14px; line-height:1.5; }

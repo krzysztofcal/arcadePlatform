@@ -13,8 +13,11 @@ body{ margin:0; background:var(--bg); color:var(--tx); font-family:Poppins, syst
 .brand{ display:flex; align-items:center; gap:10px; text-decoration:none; cursor:pointer; color:inherit; }
 .logo{ width:34px; height:34px; border-radius:11px; background:linear-gradient(135deg, var(--ac), var(--ac2)); color:var(--ink); display:grid; place-items:center; font:900 17px/1 Poppins, sans-serif; flex:0 0 34px; border:0; }
 .logo::before{ content:"A"; font:900 17px/1 Poppins, sans-serif; color:var(--ink); }
-.brand h1{ margin:0; font:800 17px/1 Poppins, sans-serif; letter-spacing:-0.01em; color:var(--tx); }
+.brand{ min-width:0; }
+.brand h1{ margin:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:800 17px/1 Poppins, sans-serif; letter-spacing:-0.01em; color:var(--tx); }
 @media (max-width: 480px){ .brand h1{ font-size:15px; } }
+@media (max-width: 480px){ .topbar[data-user-ui-chips-state="signed_in"] .brand h1{ display:none; } }
+@media (max-width: 480px){ .topbar .welcome-bonus-badge{ display:none; } }
 @media (max-width: 1023px){ .topbar .search-box{ display:none !important; } }
 @media (min-width: 1024px){ .topbar .search-box{ display:flex; flex:0 1 420px; } }
 .search-box{ display:flex; align-items:center; gap:8px; background:var(--sf2); border:1px solid var(--bd); padding:0 14px; height:40px; border-radius:12px; transition:border-color .18s ease; position:relative; color:var(--mu); }
@@ -367,9 +370,9 @@ html.netlify-drawer-active .site-footer{ padding-bottom:calc(24px + var(--netlif
 html.netlify-drawer-active .mobile-bottom-nav{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 html.netlify-drawer-active #klaro .cookie-notice{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 
-.shell main:is([style],.about-page,:has(> .license-section)){ max-width:760px; margin:0 auto; width:100%; background:var(--bg) !important; color:var(--tx) !important; }
-.shell main:is([style],.about-page,:has(> .license-section)) h1{ font-size:28px; font-weight:800; color:var(--tx) !important; margin:24px 0 12px; letter-spacing:-0.01em; }
-.shell main:is([style],.about-page,:has(> .license-section)) h2{ font-size:20px; font-weight:800; color:var(--tx) !important; margin:24px 0 8px; }
-.shell main:is([style],.about-page,:has(> .license-section)) h3{ font-size:16px; font-weight:700; color:var(--tx) !important; margin:18px 0 6px; }
-.shell main:is([style],.about-page,:has(> .license-section)) p,.shell main:is([style],.about-page,:has(> .license-section)) li{ font-size:15px; line-height:1.7; color:var(--tx); margin:0 0 12px; letter-spacing:normal; word-spacing:normal; }
-.shell main:is([style],.about-page,:has(> .license-section)) a{ color:var(--ac); }
+.shell main:is([style],.about-page,:has(> .page),:has(> .license-section)){ max-width:760px; margin:0 auto; width:100%; overflow-wrap:anywhere; background:var(--bg) !important; color:var(--tx) !important; }
+.shell main:is([style],.about-page,:has(> .page),:has(> .license-section)) h1{ font-size:28px; font-weight:800; color:var(--tx) !important; margin:24px 0 12px; letter-spacing:-0.01em; }
+.shell main:is([style],.about-page,:has(> .page),:has(> .license-section)) h2{ font-size:20px; font-weight:800; color:var(--tx) !important; margin:24px 0 8px; }
+.shell main:is([style],.about-page,:has(> .page),:has(> .license-section)) h3{ font-size:16px; font-weight:700; color:var(--tx) !important; margin:18px 0 6px; }
+.shell main:is([style],.about-page,:has(> .page),:has(> .license-section)) p,.shell main:is([style],.about-page,:has(> .page),:has(> .license-section)) li{ font-size:15px; line-height:1.7; color:var(--tx); margin:0 0 12px; letter-spacing:normal; word-spacing:normal; }
+.shell main:is([style],.about-page,:has(> .page),:has(> .license-section)) a{ color:var(--ac); overflow-wrap:anywhere; }

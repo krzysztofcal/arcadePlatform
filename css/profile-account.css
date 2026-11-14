@@ -22,11 +22,12 @@
 .arcade-avatar-save{margin-top:2px;}
 .arcade-avatar-save:disabled{opacity:.6;cursor:default;}
 .arcade-avatar-save[aria-busy="true"]{cursor:wait;}
-.account-desktop-grid{display:grid;grid-template-columns:1fr;gap:20px;align-items:start;margin-bottom:24px;}
+.account-desktop-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start;margin-bottom:24px;}
 @media(min-width:880px){
-.account-desktop-grid{grid-template-columns:1fr 1fr;}
+.account-desktop-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
 }
-.account-col-left,.account-col-right{display:flex;flex-direction:column;gap:18px;}
+.account-col-left,.account-col-right{display:flex;flex-direction:column;gap:18px;min-width:0;}
+#accountName,#accountEmail,#publicHandle,#publicDisplayName,.public-profile-editor__url{overflow-wrap:anywhere;}
 .account-auth-tabs{display:flex;max-width:440px;margin:0 0 20px;}
 .account-auth-tab{flex:1;text-align:center;padding:10px 4px;border-radius:9px;font-size:14px;font-weight:700;color:var(--mu);background:transparent;border:0;cursor:pointer;white-space:nowrap;}
 .account-auth-tab.on{background:var(--sf2);color:var(--tx);box-shadow:inset 0 0 0 1px var(--bd);}
@@ -99,3 +100,9 @@ dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 .account-links{display:flex;flex-wrap:wrap;gap:8px 20px;}
 .account-links a{min-height:44px;display:inline-flex;align-items:center;}
 .chip-balance-grid{grid-template-columns:1fr;}
+#accountPanel[hidden] ~ .account-bottom-actions{display:none!important;}
+.account-more{display:flex;flex-direction:column;gap:4px;}
+.account-more .li{padding:10px 0;}
+.chip-ledger__type{overflow:hidden;text-overflow:ellipsis;}
+.chip-ledger li,.chip-ledger__item{padding:10px 12px;}
+[data-admin-only][hidden],.account-links a[hidden]{display:none!important;}

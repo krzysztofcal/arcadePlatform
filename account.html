@@ -206,11 +206,6 @@
           </div>
         </section>
 
-        <section class="card" id="account-deletion" tabindex="-1" hidden aria-labelledby="accountDeletionWebTitle">
-          <h2 class="h2" id="accountDeletionWebTitle" data-i18n="accountDeletionWebTitle" style="font-size:16px;">Delete your Arcade Poker account</h2>
-          <p class="account-note sub" data-i18n="accountDeletionWebSteps">You can request deletion here in your browser, even after uninstalling the app. Sign in, then choose Delete account in Account and confirm. This deletes your shared game account, not just the app on your device.</p>
-          <p class="account-note sub"><a href="#signinForm" data-i18n="signIn" class="lk">Sign in</a> · <span data-i18n="accountDeletionWebHelp">Cannot sign in or need help? Contact</span> <a href="mailto:contact@kcswh.pl" class="lk">contact@kcswh.pl</a>.</p>
-        </section>
 
         <section class="card account-confirmation" id="signupConfirmation" role="status" aria-live="polite" hidden>
           <div class="account-confirmation__icon" aria-hidden="true" style="font-size:24px;color:var(--gold);">✦</div>
@@ -254,33 +249,10 @@
                 </form>
               </section>
 
-              <div class="card account-settings-card">
-                <section class="ugc-blocked li" data-ugc-section hidden aria-labelledby="ugcBlockedTitle">
-                  <div style="flex:1;">
-                    <div class="t" id="ugcBlockedTitle" data-i18n="ugcBlockedListTitle">Blocked players</div>
-                    <div id="ugcBlockedList" class="d"></div>
-                  </div>
-                  <span class="sub">›</span>
-                </section>
-                <div class="li account-links">
-                  <a class="lk ft-link" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html" href="/legal/terms.en.html">Terms</a>
-                  <a class="lk ft-link" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html" href="/legal/privacy.en.html">Privacy</a>
-                  <a class="lk ft-link" data-i18n="cookiesNotice" data-href-en="/legal/cookies-notice.en.html" data-href-pl="/legal/cookies-notice.pl.html" href="/legal/cookies-notice.en.html">Cookies</a>
-                </div>
-                <div class="li">
-                  <div style="flex:1;">
-                    <div class="t" data-i18n="language">Language</div>
-                  </div>
-                  <div class="seg lang-switch" style="width:110px;" aria-label="Language">
-                    <button type="button" class="lang-btn on" data-lang="pl" aria-pressed="false" style="flex:1;border:0;background:transparent;cursor:pointer;font-weight:700;">PL</button>
-                    <button type="button" class="lang-btn" data-lang="en" aria-pressed="false" style="flex:1;border:0;background:transparent;cursor:pointer;font-weight:700;">EN</button>
-                  </div>
-                </div>
-                <div class="li account-links">
-                  <a class="lk ft-link" data-i18n="about" data-href-en="/about.en.html" data-href-pl="/about.pl.html" href="/about.en.html">About</a>
-                  <a class="lk ft-link" data-i18n="licenses" href="/about/licenses.html">Licenses</a>
-                </div>
-              </div>
+              <section class="card ugc-blocked" data-ugc-section hidden aria-labelledby="ugcBlockedTitle">
+                <div class="t" id="ugcBlockedTitle" data-i18n="ugcBlockedListTitle">Blocked players</div>
+                <div id="ugcBlockedList" class="d"></div>
+              </section>
             </div>
 
             <div class="account-col-right">
@@ -327,15 +299,46 @@
             </div>
           </div>
 
-          <div class="account-bottom-actions" style="display:flex;flex-direction:column;gap:16px;">
-            <button type="button" class="btn gh" id="signOutButton" data-i18n="signOut" style="align-self:flex-start;">Sign out</button>
-            <section class="card account-danger-zone" aria-labelledby="accountDangerZoneTitle">
-              <h3 class="h2" style="color:var(--red);margin:0 0 6px;" id="accountDangerZoneTitle" data-i18n="accountDangerZone">Danger Zone</h3>
-              <p class="account-note sub" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">Deleting your account permanently forfeits CH, XP, achievements and profile data.</p>
-              <button type="button" class="btn sm dg" id="deleteAccountButton" aria-haspopup="dialog" aria-controls="accountDeletionDialog" aria-busy="false" data-i18n="deleteAccount" style="width:max-content;margin-top:12px;">Delete account</button>
-            </section>
+        </section>
+
+        <section class="card account-more" id="accountMore" aria-labelledby="accountMoreTitle">
+          <h2 class="h2" id="accountMoreTitle" data-i18n="more">More</h2>
+          <nav class="li account-links" data-i18n-aria="accountShortcuts" aria-label="Shortcuts">
+            <a class="lk" data-i18n="recentlyPlayed" href="/recently-played.html">Recently played</a>
+            <a class="lk" data-i18n="navXp" href="/xp.html">XP</a>
+            <a class="lk" data-i18n="playRandomGame" data-random-game href="/index.html">Random game</a>
+            <a class="lk" data-i18n="adminPanel" data-admin-only hidden href="/admin.html">Admin panel</a>
+          </nav>
+          <div class="li account-links">
+            <a class="lk ft-link" data-i18n="terms" data-href-en="/legal/terms.en.html" data-href-pl="/legal/terms.pl.html" href="/legal/terms.en.html">Terms</a>
+            <a class="lk ft-link" data-i18n="privacy" data-href-en="/legal/privacy.en.html" data-href-pl="/legal/privacy.pl.html" href="/legal/privacy.en.html">Privacy</a>
+            <a class="lk ft-link" data-i18n="cookiesNotice" data-href-en="/legal/cookies-notice.en.html" data-href-pl="/legal/cookies-notice.pl.html" href="/legal/cookies-notice.en.html">Cookies</a>
+            <a class="lk ft-link" data-i18n="about" data-href-en="/about.en.html" data-href-pl="/about.pl.html" href="/about.en.html">About</a>
+            <a class="lk ft-link" data-i18n="licenses" href="/about/licenses.html">Licenses</a>
+          </div>
+          <div class="li">
+            <div class="t" style="flex:1;" id="accountLanguageLabel" data-i18n="menuLanguage">Language</div>
+            <div class="seg lang-switch" style="width:110px;" role="group" aria-labelledby="accountLanguageLabel">
+              <button type="button" class="lang-btn on" data-lang="pl" aria-pressed="false" style="flex:1;border:0;background:transparent;cursor:pointer;font-weight:700;">PL</button>
+              <button type="button" class="lang-btn" data-lang="en" aria-pressed="false" style="flex:1;border:0;background:transparent;cursor:pointer;font-weight:700;">EN</button>
+            </div>
           </div>
         </section>
+
+        <section class="card" id="account-deletion" tabindex="-1" hidden aria-labelledby="accountDeletionWebTitle">
+          <h2 class="h2" id="accountDeletionWebTitle" data-i18n="accountDeletionWebTitle" style="font-size:16px;">Delete your Arcade Poker account</h2>
+          <p class="account-note sub" data-i18n="accountDeletionWebSteps">You can request deletion here in your browser, even after uninstalling the app. Sign in, then choose Delete account in Account and confirm. This deletes your shared game account, not just the app on your device.</p>
+          <p class="account-note sub"><a href="#signinForm" data-i18n="signIn" class="lk">Sign in</a> · <span data-i18n="accountDeletionWebHelp">Cannot sign in or need help? Contact</span> <a href="mailto:contact@kcswh.pl" class="lk">contact@kcswh.pl</a>.</p>
+        </section>
+
+        <div class="account-bottom-actions" style="display:flex;flex-direction:column;gap:16px;">
+          <button type="button" class="btn gh" id="signOutButton" data-i18n="signOut" style="align-self:flex-start;">Sign out</button>
+          <section class="card account-danger-zone" aria-labelledby="accountDangerZoneTitle">
+            <h3 class="h2" style="color:var(--red);margin:0 0 6px;" id="accountDangerZoneTitle" data-i18n="accountDangerZone">Danger Zone</h3>
+            <p class="account-note sub" id="deleteAccountNote" data-i18n="deleteAccountNote" tabindex="-1">Deleting your account permanently forfeits CH, XP, achievements and profile data.</p>
+            <button type="button" class="btn sm dg" id="deleteAccountButton" aria-haspopup="dialog" aria-controls="accountDeletionDialog" aria-busy="false" data-i18n="deleteAccount" style="width:max-content;margin-top:12px;">Delete account</button>
+          </section>
+        </div>
       </article>
     </main>
   </div>
