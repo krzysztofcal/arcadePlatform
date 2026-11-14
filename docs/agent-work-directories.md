@@ -29,6 +29,27 @@ launcher to use an explicit prepared checkout, or STOP that launch path. A stale
 checkout or installed skill does not automatically receive new instructions;
 coordinators must supply this current rule before starting a new task/worker.
 
+## Local Antigravity skill update (separate GO required)
+
+Read-only inspection on 2026-11-14 confirmed that the installed
+`~/.claude/skills/agy-implement/SKILL.md` still uses
+`/home/copilot/work/agy-<slug>` in steps 2 and 3. This documentation does not
+update that local skill or authorize local launcher/configuration changes.
+
+After a separate explicit GO, minimally update those two examples: run the
+existing preflight from a trusted current checkout immediately before
+`git worktree add`, stop on any failure, use its stdout as the explicit
+destination, and pass that same path to `agy-implement.sh --worktree`.
+State that existing task checkouts are reused in place and reference AGENTS.md
+as the policy source. Review the local diff for stale root-disk allocation
+examples; no wrapper changes, new manager or migration are needed.
+
+Codex automatic `create_worktree` and Claude Code automatic `--worktree`
+launch paths still require separate operator configuration to open an
+explicitly prepared Volume checkout (or must remain unused). Updating the
+Antigravity skill examples is also a separate local step; repository policy
+does not configure these launchers automatically.
+
 ## Allocate with the existing Git mechanism
 
 Run from a trusted checkout containing the reviewed preflight script, after

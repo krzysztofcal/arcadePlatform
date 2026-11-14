@@ -70,6 +70,17 @@ matching arcadePlatform-repomix*.txt is needed, agents MAY use it as historical
 or offline fallback context. The live GitHub repository MUST remain the primary
 source of truth for current code; a conflicting snapshot MUST NOT override it.
 
+### VI. Verified Volume for New VPS Agent Checkouts
+
+Claude Code, Codex and Antigravity MUST create every new VPS checkout/worktree
+on the verified Hetzner Volume, using the placement policy and existing
+preflight in AGENTS.md, Task workspace lifecycle. Missing or unverifiable
+Volume, or any preflight failure, MUST mean STOP without fallback to the
+system disk. Existing task checkouts MUST remain at their original locations
+and be reused; this rule authorizes no migration or cleanup. See
+docs/agent-work-directories.md for the explicit Git destination and launcher
+limitations.
+
 ## Deployment and Safety Gates
 
 ### Authorized Deployment and Administrative Procedures
@@ -206,4 +217,4 @@ resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.2.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-10
+**Version**: 1.3.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-14
