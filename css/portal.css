@@ -124,7 +124,10 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 @media (min-width: 1024px){ .grid{ grid-template-columns:repeat(6, minmax(0, 1fr)); gap:14px; } }
 @media (max-width: 520px){ .grid{ grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; } }
 .card{ background:var(--sf); border:1px solid var(--bd); border-radius:18px; overflow:hidden; position:relative; display:flex; flex-direction:column; text-decoration:none; color:inherit; cursor:pointer; min-height:auto; transition:transform .18s ease, border-color .18s ease; }
-.card:hover{ border-color:var(--ac); transform:translateY(-2px); }
+a.card:hover{ border-color:var(--ac); transform:translateY(-2px); }
+.card:not(a):not(.mc){ padding:16px 18px; cursor:default; overflow:visible; }
+.card.mc{ cursor:default; }
+.card.mc:hover{ transform:none; }
 .card:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
 .card .thumb{ width:100%; aspect-ratio:1; border:0; border-bottom:1px solid var(--bd); background-size:cover; background-position:center; background-repeat:no-repeat; border-radius:0; position:relative; opacity:1; background-image:var(--thumb-image); }
 .thumb{ background-image:var(--thumb-image); background-size:cover; background-position:center; }
