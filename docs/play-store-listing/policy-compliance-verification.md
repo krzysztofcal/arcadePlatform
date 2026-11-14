@@ -82,7 +82,7 @@ Zgodnie z zasadami projektu, repozytorium **nie może zawierać syntetycznych an
 1. **Zrzuty ekranu prawdziwej aplikacji (Screenshots):**
    - Wykonanie 4–8 autentycznych screenshotów z działającego builda Android na fizycznym urządzeniu (lub przez zweryfikowany BrowserStack).
    - Wymagania techniczne platformy Google Play: format JPEG lub 24-bit PNG bez kanału alfa, min. 320 px, max. 3840 px, proporcje boków od 1:2 do 2:1 (typowo 16:9 lub 9:16).
-   - Wewnętrzny cel jakościowy dla Arcade Poker: min. 1080 px krótszy bok (np. 1080 × 1920 / 1080 × 2400 FHD) — uwaga: 1080 px to zalecany cel jakościowy (quality target) dla zachowania ostrości detali stołu, a **nie** bezwzględny wymóg techniczny Google Play.
+   - Wewnętrzny cel jakościowy dla Arcade Poker: min. 1080 px krótszy bok (np. 1080 × 1920; zrzuty z wyższych ekranów, np. 1080 × 2400, trzeba przyciąć do proporcji najwyżej 2:1) — uwaga: 1080 px to zalecany cel jakościowy (quality target) dla zachowania ostrości detali stołu, a **nie** bezwzględny wymóg techniczny Google Play.
 2. **Ikona aplikacji w Google Play (App Icon):**
    - Dokładny wymiar: **512 × 512 px**, 32-bit PNG z kanałem alfa, max 1024 KB.
    - Do wygenerowania po ostatecznym zatwierdzeniu stylistyki marki Arcade Poker.
