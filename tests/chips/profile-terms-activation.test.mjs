@@ -6,7 +6,7 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import postgres from 'postgres';
 const url=process.env.PROFILE_TERMS_ACTIVATION_TEST_DB_URL;
-test('guarded Stage Terms activation: fail closed, exact history, receipts, one update and rollback',{skip:!url},async()=>{
+test('guarded Stage Terms activation and deactivation: fail closed, exact history, pins, receipts, one update and rollback',{skip:!url},async()=>{
  const target=new URL(url);
  assert.ok(['127.0.0.1','localhost','[::1]'].includes(target.hostname));
  assert.match(target.pathname,/\/[^/]+_test$/);
@@ -26,20 +26,32 @@ test('guarded Stage Terms activation: fail closed, exact history, receipts, one 
    insert into public.user_profiles values('00000000-0000-4000-8000-000000000001',now(),'comet-blue',7,false);
    insert into private.profile_terms_receipts values('account','synthetic','old-version',now(),'old-receipt');`);
   const lines=[];
-  for(let i=0;i<120;i++){
+  for(let i=0;i<125;i++){
    const version=String(20260000000000+i),name='fixture_'+i,file=version+'_'+name+'.sql',hash=createHash('sha256').update(file).digest('hex');
    await sql`insert into supabase_migrations.schema_migrations values(${version},${name})`;
    await sql`insert into supabase_migrations.schema_migration_files values(${version},${name},${file},${hash})`;
    lines.push(version+':'+file+':'+hash);
   }
   const original=await readFile(new URL('../../specs/1114-arcade-profiles-avatars/operations/enable-terms.sql',import.meta.url),'utf8');
+  const disable=await readFile(new URL('../../specs/1114-arcade-profiles-avatars/operations/disable-terms.sql',import.meta.url),'utf8');
+  // Approved pins live in the operation itself; the literal sentinel guards must stay for every pin.
+  const pinOf=key=>original.match(new RegExp("readers->>'"+key+"' IS DISTINCT FROM '([^']+)'"))[1];
+  const real={apiSha:pinOf('apiSha'),wsSha:pinOf('wsSha'),apkSha:pinOf('apkSha'),documentsSha256:pinOf('documentsSha256')};
+  for(const value of Object.values(real))assert.match(value,/^[0-9a-f]{40,64}$/,'approved API/WS/APK/documents pins');
+  // OWNER-approved Stage-only debug APK from #1244 (workflow 43525617080); not a Google Play AAB.
+  assert.equal(real.apkSha,'a9eb1151c11813fb245866b1cc331636c275a3cf8a3ac3f87ae2d731cc1d1982','approved Stage APK pin');
+  // The API reader is the Stage API serving the trial (Deploy Preview #1244), not a WWW Production SHA.
+  assert.equal(real.apiSha,'736eb01dc860b895b63167f63b1b809f2d5c266f','Stage API reader pin');
+  for(const sentinel of ['API_SHA_NOT_APPROVED','WS_SHA_NOT_APPROVED','APK_SHA_NOT_APPROVED','DOCUMENTS_HASH_NOT_APPROVED'])assert.ok(original.includes("='"+sentinel+"'"),'sentinel guard kept: '+sentinel);
+  assert.ok(original.includes("approved_version='OWNER_LEGAL_VERSION_NOT_APPROVED'"),'version sentinel guard kept');
+  const readersWith=over=>JSON.stringify({version:'2026-10-28-a2',...real,...over});
   const system=(await sql`select system_identifier::text id from pg_control_system()`)[0].id;
   assert.notEqual(system,'7656985631720456337','never use Stage');
   const set=async(k,v)=>sql`select set_config(${k},${v},false)`;
   await set('arcade.terms_project','krydukthwdvccggbyjfw');
   await set('arcade.terms_confirmation','ENABLE TERMS krydukthwdvccggbyjfw');
-  await set('arcade.terms_legal_version','2026-10-28-a2');
-  await set('arcade.terms_readers',JSON.stringify({version:'2026-10-28-a2',apiSha:'fixture-api',wsSha:'fixture-ws',apkSha:'fixture-apk',documentsSha256:'fixture-docs'}));
+  await set('arcade.terms_legal_version','2026-10-26-a1');
+  await set('arcade.terms_readers',readersWith({}));
   const fingerprints=await sql.unsafe(`select
    (select md5(jsonb_agg(to_jsonb(r) order by subject_kind,subject_id,terms_version)::text) from private.profile_terms_receipts r) receipts,
    (select md5(jsonb_agg(to_jsonb(p) order by user_id)::text) from public.user_profiles p) profiles`);
@@ -54,29 +66,21 @@ test('guarded Stage Terms activation: fail closed, exact history, receipts, one 
   await denied(original,/identity\/operator/);
   const local=original.replaceAll('7656985631720456337',system);
   await denied(local,/version not approved/);
-  // Replace only the declaration; the literal sentinel guard must remain intact.
-  let ready=local.replace("constant text := 'OWNER_LEGAL_VERSION_NOT_APPROVED'","constant text := '2026-10-28-a2'");
-  await denied(ready,/readers preflight not approved/);
-  const pins={'API_SHA_NOT_APPROVED':'fixture-api','WS_SHA_NOT_APPROVED':'fixture-ws','APK_SHA_NOT_APPROVED':'fixture-apk','DOCUMENTS_HASH_NOT_APPROVED':'fixture-docs'};
-  const keys={API_SHA_NOT_APPROVED:'apiSha',WS_SHA_NOT_APPROVED:'wsSha',APK_SHA_NOT_APPROVED:'apkSha',DOCUMENTS_HASH_NOT_APPROVED:'documentsSha256'};
-  const pinned=(source,missing)=>{
-   for(const [sentinel,value] of Object.entries(pins))if(sentinel!==missing){
-    source=source.replaceAll(sentinel,value).replace("readers->>'"+keys[sentinel]+"'='"+value+"'","readers->>'"+keys[sentinel]+"'='"+sentinel+"'");
-   }
-   return source;
-  };
-  for(const missing of Object.keys(pins)){
-   const readers={version:'2026-10-28-a2',apiSha:'fixture-api',wsSha:'fixture-ws',apkSha:'fixture-apk',documentsSha256:'fixture-docs'};
-   readers[keys[missing]]=missing;await set('arcade.terms_readers',JSON.stringify(readers));
-   await denied(pinned(ready,missing),/readers preflight not approved/);
+  await set('arcade.terms_legal_version','2026-10-28-a2');
+  // Every pin must match exactly; a sentinel value is refused even if supplied by the operator.
+  for(const [key,wrong] of [['version','2026-10-26-a1'],['apiSha','0'.repeat(40)],['wsSha','0'.repeat(40)],['apkSha','0'.repeat(64)],['apkSha','APK_SHA_NOT_APPROVED'],['documentsSha256','0'.repeat(64)]]){
+   await set('arcade.terms_readers',readersWith({[key]:wrong}));
+   await denied(local,/readers preflight not approved/);
   }
-  await set('arcade.terms_readers',JSON.stringify({version:'2026-10-28-a2',apiSha:'fixture-api',wsSha:'fixture-ws',apkSha:'fixture-apk',documentsSha256:'fixture-docs'}));
-  ready=pinned(ready);
-  await denied(ready,/migration\/hash history/);
-  ready=ready.replace('aee0fb222b7040de6b851b258800ecee43aa060db4a6a4a281040777d1f29484',createHash('sha256').update(lines.join('\n')).digest('hex'));
-  await set('arcade.terms_readers',JSON.stringify({version:'2026-10-28-a2',apiSha:'wrong-api',wsSha:'fixture-ws',apkSha:'fixture-apk',documentsSha256:'fixture-docs'}));
-  await denied(ready,/readers preflight not approved/);
-  await set('arcade.terms_readers',JSON.stringify({version:'2026-10-28-a2',apiSha:'fixture-api',wsSha:'fixture-ws',apkSha:'fixture-apk',documentsSha256:'fixture-docs'}));
+  // A committed sentinel comparison keeps the operation refused even when the operator supplies the sentinel.
+  const sentinelApk=local.replace("readers->>'apkSha' IS DISTINCT FROM '"+real.apkSha+"'","readers->>'apkSha' IS DISTINCT FROM 'APK_SHA_NOT_APPROVED'");
+  assert.notEqual(sentinelApk,local);
+  await set('arcade.terms_readers',readersWith({apkSha:'APK_SHA_NOT_APPROVED'}));
+  await denied(sentinelApk,/readers preflight not approved/);
+  await set('arcade.terms_readers',readersWith({}));
+  await denied(local,/migration\/hash history/);
+  const ready=local.replace(/manifest_hash constant text := '[0-9a-f]{64}'/,"manifest_hash constant text := '"+createHash('sha256').update(lines.join('\n')).digest('hex')+"'");
+  assert.notEqual(ready,local);
   await sql.unsafe("update private.profile_terms_receipts set request_id='changed-receipt'");
   await denied(ready,/inventory drift/,await state());
   await sql.unsafe("update private.profile_terms_receipts set request_id='old-receipt'");
@@ -106,5 +110,20 @@ test('guarded Stage Terms activation: fail closed, exact history, receipts, one 
   assert.equal(after.policy.version,'2026-10-28-a2');
   after.policy.active=false;after.policy.version=expected.policy.version;assert.deepEqual(after,expected);
   await assert.rejects(sql.unsafe(ready),/Terms OFF policy/);await sql.unsafe('rollback');
+  // Deactivation: identity and phrase, only active=false, version a2 and receipts kept, side writes abort.
+  const activeState=await state();
+  const off=disable.replaceAll('7656985631720456337',system);
+  await denied(disable,/identity\/operator/,activeState);
+  await denied(off,/identity\/operator/,activeState);
+  await set('arcade.terms_confirmation','DISABLE TERMS krydukthwdvccggbyjfw');
+  await sql.unsafe(`create function private.unexpected_off() returns trigger language plpgsql as $$begin update public.protected_fixture set value='bad' where kind='XP';return new;end$$;
+   create trigger unexpected_off after update on private.profile_terms_policy for each row execute function private.unexpected_off();`);
+  await denied(off,/Unexpected transaction data write/,activeState);
+  await sql.unsafe('drop trigger unexpected_off on private.profile_terms_policy');
+  await sql.unsafe(off);
+  const disabled=(await state())[0].state,activeBefore=activeState[0].state;
+  assert.equal(disabled.policy.active,false);assert.equal(disabled.policy.version,'2026-10-28-a2');
+  disabled.policy.active=true;assert.deepEqual(disabled,activeBefore);
+  await assert.rejects(sql.unsafe(off),/Expected active Terms a2 policy/);await sql.unsafe('rollback');
  }finally{await sql.end();}
 });

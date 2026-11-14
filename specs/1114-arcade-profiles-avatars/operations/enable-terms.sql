@@ -1,6 +1,7 @@
--- PREPARED ONLY: not a migration, not authorized to execute.
--- Draft candidate 2026-10-28-a2; legal approval and reader pins remain unapproved.
--- One future approved activation advances the version and active flag on the same row; no receipt conversion.
+-- PREPARED ONLY: not a migration, not authorized to execute. Stage only (#1140); Production needs its own operation.
+-- Target: published Terms 2026-10-28-a2 with Privacy 2026-11-12-a3 (see terms-activation.md for pins and evidence).
+-- APK pin: OWNER-approved Stage-only debug APK from #1244 (not a Google Play AAB); valid until 2026-11-20.
+-- One approved activation advances the version and active flag on the same row; no receipt conversion.
 -- Operator must use one connection, stop on first error, ROLLBACK, never retry.
 BEGIN ISOLATION LEVEL REPEATABLE READ;
 SET LOCAL lock_timeout='2s';
@@ -9,9 +10,9 @@ SET LOCAL transaction_timeout='30s';
 SET LOCAL idle_in_transaction_session_timeout='15s';
 DO $activation$
 DECLARE
- approved_version constant text := 'OWNER_LEGAL_VERSION_NOT_APPROVED';
+ approved_version constant text := '2026-10-28-a2';
  previous_version constant text := '2026-10-26-a1';
- manifest_hash constant text := 'aee0fb222b7040de6b851b258800ecee43aa060db4a6a4a281040777d1f29484';
+ manifest_hash constant text := '7d3283aeccea4778ebff47c639dd03c3f935cea06b0277dcfc7d7465280e50b8';
  policy_before jsonb; receipts_before text; profiles_before text;
  stats_before jsonb; stat record; changed integer; readers jsonb;
 BEGIN
@@ -23,13 +24,14 @@ BEGIN
   OR current_setting('arcade.terms_legal_version',true) IS DISTINCT FROM approved_version
  THEN RAISE EXCEPTION 'OWNER/LEGAL version not approved'; END IF;
  -- Reader compatibility is an external preflight attestation, not discoverable by SQL.
- -- A later reviewed revision must pin the actual approved legal/doc/runtime tuple.
+ -- Pins: API = Stage API Deploy Preview #1244 (736eb01d), WS = Stage WS release 227fef03 (same WS surface as main),
+ -- documents = sha256 of the sorted '<path>:<sha256>' lines of Terms a2 and Privacy a3 PL/EN, APK = Stage debug APK sha256.
  readers:=nullif(current_setting('arcade.terms_readers',true),'')::jsonb;
  IF readers IS NULL OR readers->>'version' IS DISTINCT FROM approved_version
-  OR readers->>'apiSha' IS DISTINCT FROM 'API_SHA_NOT_APPROVED'
-  OR readers->>'wsSha' IS DISTINCT FROM 'WS_SHA_NOT_APPROVED'
-  OR readers->>'apkSha' IS DISTINCT FROM 'APK_SHA_NOT_APPROVED'
-  OR readers->>'documentsSha256' IS DISTINCT FROM 'DOCUMENTS_HASH_NOT_APPROVED'
+  OR readers->>'apiSha' IS DISTINCT FROM '736eb01dc860b895b63167f63b1b809f2d5c266f'
+  OR readers->>'wsSha' IS DISTINCT FROM '227fef03d187c3b8802ee7422991bbe566f472e2'
+  OR readers->>'apkSha' IS DISTINCT FROM 'a9eb1151c11813fb245866b1cc331636c275a3cf8a3ac3f87ae2d731cc1d1982'
+  OR readers->>'documentsSha256' IS DISTINCT FROM 'a9fea5a27e8a59e521132c6f08a64ad58f8a577f5406330c7692320632b7a44f'
   OR readers->>'apiSha'='API_SHA_NOT_APPROVED'
   OR readers->>'wsSha'='WS_SHA_NOT_APPROVED'
   OR readers->>'apkSha'='APK_SHA_NOT_APPROVED'
@@ -38,14 +40,14 @@ BEGIN
  IF NOT pg_try_advisory_xact_lock(hashtextextended('profile-terms-stage-activation',0))
  THEN RAISE EXCEPTION 'Concurrent Terms activation'; END IF;
  LOCK TABLE supabase_migrations.schema_migrations, supabase_migrations.schema_migration_files IN SHARE MODE;
- IF (SELECT count(*) FROM supabase_migrations.schema_migrations)<>120
-  OR (SELECT count(*) FROM supabase_migrations.schema_migration_files)<>120
+ IF (SELECT count(*) FROM supabase_migrations.schema_migrations)<>125
+  OR (SELECT count(*) FROM supabase_migrations.schema_migration_files)<>125
   OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations h FULL JOIN supabase_migrations.schema_migration_files f USING(version)
    WHERE h.version IS NULL OR f.version IS NULL OR h.name IS DISTINCT FROM f.name
     OR f.file IS DISTINCT FROM f.version||'_'||f.name||'.sql')
   OR (SELECT encode(sha256(convert_to(string_agg(version||':'||file||':'||sha256,E'\n' ORDER BY version),'UTF8')),'hex')
    FROM supabase_migrations.schema_migration_files) IS DISTINCT FROM manifest_hash
- THEN RAISE EXCEPTION 'Expected exact repository migration/hash history120/120'; END IF;
+ THEN RAISE EXCEPTION 'Expected exact repository migration/hash history 125/125'; END IF;
  IF EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND datname=current_database() AND state='active'
   AND query ~* '(alter[[:space:]]+table|drop[[:space:]]+column|profile-terms-stage-activation)')
  THEN RAISE EXCEPTION 'Concurrent DDL/policy operation'; END IF;
