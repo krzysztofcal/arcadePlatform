@@ -40,6 +40,8 @@ test('guarded Stage Terms activation and deactivation: fail closed, exact histor
   for(const value of Object.values(real))assert.match(value,/^[0-9a-f]{40,64}$/,'approved API/WS/APK/documents pins');
   // OWNER-approved Stage-only debug APK from #1244 (workflow 43525617080); not a Google Play AAB.
   assert.equal(real.apkSha,'a9eb1151c11813fb245866b1cc331636c275a3cf8a3ac3f87ae2d731cc1d1982','approved Stage APK pin');
+  // The API reader is the Stage API serving the trial (Deploy Preview #1244), not a WWW Production SHA.
+  assert.equal(real.apiSha,'736eb01dc860b895b63167f63b1b809f2d5c266f','Stage API reader pin');
   for(const sentinel of ['API_SHA_NOT_APPROVED','WS_SHA_NOT_APPROVED','APK_SHA_NOT_APPROVED','DOCUMENTS_HASH_NOT_APPROVED'])assert.ok(original.includes("='"+sentinel+"'"),'sentinel guard kept: '+sentinel);
   assert.ok(original.includes("approved_version='OWNER_LEGAL_VERSION_NOT_APPROVED'"),'version sentinel guard kept');
   const readersWith=over=>JSON.stringify({version:'2026-10-28-a2',...real,...over});

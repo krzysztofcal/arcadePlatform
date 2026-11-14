@@ -10,13 +10,13 @@ SQL is authorized by this file; each execution needs a separate OWNER GO after t
 | Legal version | `2026-10-28-a2` | Published as the active Terms alias on WWW Production (#1244) |
 | Stage identity | system `7656985631720456337`, project `krydukthwdvccggbyjfw` | Stage catalog read |
 | Migration history | 125/125, fingerprint `7d3283ae…50b8` | Stage `schema_migration_files` equals `supabase/migrations` byte for byte |
-| API/WWW reader | `34a6c3ea96bdce39736b68e6f3ab8fb5c3e5ff82` | `main` with the Terms dialog fixes (#1244) |
+| API reader | `736eb01dc860b895b63167f63b1b809f2d5c266f` | Stage API actually serving the trial: Deploy Preview #1244 (`build-info.js` commit `736eb01d`, context `deploy-preview`), which includes the Terms dialog fixes and is the approved APK's API origin. The WWW Production SHA is not a Stage reader |
 | WS reader | `227fef03d187c3b8802ee7422991bbe566f472e2` | Running Stage WS release; same WS surface as `main` and as WS Production `49e785b7` |
 | Documents | `a9fea5a27e8a59e521132c6f08a64ad58f8a577f5406330c7692320632b7a44f` | SHA-256 of the sorted `<path>:<sha256>` lines for `legal/terms.2026-10-28-a2.{pl,en}.html` and `legal/privacy.2026-11-12-a3.{pl,en}.html` |
 | APK reader | `a9eb1151c11813fb245866b1cc331636c275a3cf8a3ac3f87ae2d731cc1d1982` | OWNER-approved for **Stage only**: debug APK from #1244, workflow `43525617080`, artifact `14084224474`, source `736eb01d`, application ID `pl.kcswh.arcadepoker.stage`, API origin `https://deploy-preview-1244--playkcswh.netlify.app`, Supabase Stage, WS Preview, Android Debug signature, artifact valid until 2026-11-20. Not a Google Play AAB and never a Production pin |
 
-The sentinel guards stay for every pin, so an operator-supplied sentinel is always refused. `34a6c3ea` and
-`736eb01d` differ only in VPS admin operation files and their workflow and guard test, so the APK's Deploy Preview #1244 serves the same web runtime.
+The sentinel guards stay for every pin, so an operator-supplied sentinel is always refused. The API and APK pins
+name the same Stage source (`736eb01d`), so the WWW and the APK readers of the trial are one build.
 
 ## Stage preconditions (why they differ from Production)
 
