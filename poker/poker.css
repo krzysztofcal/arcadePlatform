@@ -368,10 +368,15 @@ body.poker-lobby .poker-page{flex:1;min-width:0;max-width:1400px;margin:0 auto;w
 @media(max-width:600px){
 body.poker-lobby .poker-page{padding:14px max(14px,env(safe-area-inset-right)) 80px max(14px,env(safe-area-inset-left));}
 }
-body.poker-lobby .poker-tabs{display:flex;max-width:480px;margin-bottom:18px;}
-body.poker-lobby .poker-tab{flex:1;text-align:center;padding:10px 6px;border-radius:9px;font-size:14px;font-weight:700;color:var(--mu);background:transparent;border:0;cursor:pointer;white-space:nowrap;position:relative;}
+body.poker-lobby .poker-tabs{display:flex;width:100%;max-width:480px;margin-bottom:18px;gap:4px;padding:4px;box-sizing:border-box;}
+body.poker-lobby .poker-tab{flex:1 1 0;min-width:0;text-align:center;padding:8px 2px;border-radius:9px;font-size:13px;font-weight:700;color:var(--mu);background:transparent;border:0;cursor:pointer;white-space:nowrap;position:relative;}
+body.poker-lobby .poker-tab span{flex:none;padding:0;margin:0;font:inherit;color:inherit;background:transparent;border:0;box-shadow:none;display:inline;}
 body.poker-lobby .poker-tab.on{background:var(--sf2);color:var(--tx);box-shadow:inset 0 0 0 1px var(--bd);}
-body.poker-lobby .poker-tab-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--gold);margin-left:6px;vertical-align:1px;}
+body.poker-lobby .poker-tab-dot{position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--gold);}
+@media(max-width:400px){
+body.poker-lobby .poker-tabs{gap:2px;padding:3px;}
+body.poker-lobby .poker-tab{font-size:12px;padding:8px 1px;}
+}
 body.poker-lobby .poker-modes-grid{display:grid;grid-template-columns:1fr;gap:18px;align-items:start;}
 @media(min-width:840px){
 body.poker-lobby .poker-modes-grid{grid-template-columns:repeat(3,1fr);}
@@ -431,42 +436,29 @@ body.poker-lobby .quick-resume-select{width:100%;min-height:44px;padding:4px 8px
 body.poker-lobby .poker-input,body.poker-lobby .poker-btn{min-height:44px;}
 
 /* Restore approved V3 illustrative bonus; no claim or account state. */
-body.poker-lobby .concept-tag{display:inline-block;border:1px solid #dfa4ff88;border-radius:8px;padding:7px 10px;background:#090c3699;color:#f1c9ff;font-size:9px;letter-spacing:.6px;font-weight:800;}
-body.poker-lobby .bonus-days{list-style:none;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:0;margin:16px 0;}
-body.poker-lobby .bonus-day{position:relative;text-align:center;padding:16px 10px 12px;border:2px solid #9179d1;border-radius:16px;background:linear-gradient(180deg,#443575,#181646);box-shadow:inset 0 2px #e7d4ff55,0 6px #090b2d;}
-body.poker-lobby .bonus-day--current{border-color:#8d81b8;background:linear-gradient(180deg,#34254c,#18203f);}
-body.poker-lobby .bonus-day strong{display:block;font:900 italic 20px/1 Arial,sans-serif;}
-body.poker-lobby .day-illustration{height:115px;position:relative;margin:10px 0;display:grid;place-items:center;}
-body.poker-lobby .day-illustration img{position:absolute;inset:0;height:100%;width:100%;object-fit:contain;filter:drop-shadow(0 4px 7px #090c3a);}
-body.poker-lobby .day-check{position:absolute;right:8%;bottom:8%;width:30px;height:30px;border-radius:50%;border:2px solid #a5ffe5;display:grid;place-items:center;background:#138568;color:#fff;font-size:20px;font-weight:900;box-shadow:0 0 12px #29d79377;}
-body.poker-lobby .bonus-day--upcoming .day-illustration{opacity:.7;}
-body.poker-lobby .day-state{font-size:10px;font-weight:900;letter-spacing:.4px;color:#dbd7ff;}
-body.poker-lobby .bonus-day--current .day-state{color:#ffe9a8;}
-body.poker-lobby .day-concept{font-size:8px;letter-spacing:1px;display:block;color:#d0c1ee;margin-top:6px;}
-body.poker-lobby .reward-space{font-size:10px;color:#d4cee8;border-top:1px solid #c2b7ef33;padding-top:10px;margin-top:12px;}
-body.poker-lobby .bonus-footer{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:20px;}
-body.poker-lobby .claim-concept{min-height:48px;min-width:245px;padding:14px 20px;border:2px solid #ffeaaa;border-radius:12px;background:linear-gradient(180deg,#ffe991,#eaae3d 70%,#bf7a20);box-shadow:inset 0 2px #fff6,0 4px #6a3522;color:#56320c;font-size:13px;font-weight:900;}
-body.poker-lobby .availability{font-size:11px;color:#d7ccea;line-height:1.6;}
-body.poker-lobby .availability strong{display:block;color:#fff2ae;font-size:12px;}
-body.poker-lobby .bonus-disclaimer{font-size:10px!important;line-height:1.5!important;color:#c9c3e9!important;margin:16px 0 0;}
-@media(max-width:600px){
-body.poker-lobby .bonus-days{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
-body.poker-lobby .bonus-day{padding:12px 8px;}
-body.poker-lobby .day-illustration{height:75px;}
-body.poker-lobby .bonus-footer{flex-direction:column;gap:16px;margin-top:20px;}
-body.poker-lobby .claim-concept{width:100%;min-width:0;}
-body.poker-lobby .availability{text-align:center;}
-}
-@media(orientation:landscape) and (max-height:550px) and (min-width:601px){
-body.poker-lobby #dailyDialog .bonus-days{margin:10px 0;}
-body.poker-lobby #dailyDialog .bonus-day{padding:8px;}
-body.poker-lobby #dailyDialog .day-illustration{height:42px;margin:5px 0;}
-body.poker-lobby #dailyDialog .day-state{font-size:9px;}
-body.poker-lobby #dailyDialog .day-concept{margin-top:4px;font-size:8px;}
-body.poker-lobby #dailyDialog .reward-space{margin-top:6px;padding-top:6px;font-size:9px;}
-body.poker-lobby #dailyDialog .bonus-footer{margin-top:12px;}
-body.poker-lobby #dailyDialog .bonus-disclaimer{font-size:9px!important;margin-top:10px;}
-}
+body.poker-lobby .concept-tag{display:inline-block;border:1px solid var(--bd);border-radius:8px;padding:6px 10px;background:var(--bg2);color:var(--mu);font-size:11px;font-weight:700;}
+body.poker-lobby .bonus-days{list-style:none;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0;margin:12px 0;}
+body.poker-lobby .bonus-day{position:relative;border-radius:14px;border:1px solid var(--bd);background:var(--bg2);padding:10px 4px;text-align:center;font-size:12px;font-weight:800;color:var(--mu);box-shadow:none;}
+body.poker-lobby .bonus-day strong{display:block;font-size:12px;font-weight:800;font-style:normal;color:var(--mu);font-family:inherit;margin-bottom:4px;}
+body.poker-lobby .day-illustration{height:auto;margin:4px 0;display:flex;justify-content:center;align-items:center;position:static;}
+body.poker-lobby .day-illustration img{width:44px;height:44px;object-fit:contain;filter:none;position:static;}
+body.poker-lobby .day-state{display:none;}
+body.poker-lobby .reward-space{font-size:13px;font-weight:800;color:var(--tx);border:0;padding:0;margin-top:4px;}
+body.poker-lobby .bonus-day--completed,body.poker-lobby .bonus-day--claimed{border-color:var(--bd);background:var(--bg2);box-shadow:none;opacity:.65;}
+body.poker-lobby .bonus-day--completed img,body.poker-lobby .bonus-day--claimed img{opacity:.45;}
+body.poker-lobby .bonus-day--completed .reward-space::before,body.poker-lobby .bonus-day--claimed .reward-space::before{content:"✓ ";color:var(--ac);}
+body.poker-lobby .bonus-day--current{border-color:var(--gold)!important;background:rgba(242,195,91,.1)!important;color:var(--gold);}
+body.poker-lobby .bonus-day--current strong{color:var(--gold);}
+body.poker-lobby .bonus-day--current .reward-space{color:var(--gold);}
+body.poker-lobby .bonus-footer{display:flex;flex-direction:column;gap:10px;margin-top:14px;}
+body.poker-lobby .claim-concept,body.poker-lobby #dailyClaim{min-height:46px;border-radius:12px;font-family:inherit;font-size:14px;font-weight:800;cursor:pointer;border:0;box-shadow:none;}
+body.poker-lobby #dailyClaim.btn.gold{background:var(--gold);color:#04130d;border:1px solid var(--gold);box-shadow:none;text-shadow:none;}
+body.poker-lobby #dailyClaim:disabled{background:var(--sf2);color:var(--mu);border:1px solid var(--bd);opacity:.6;cursor:not-allowed;box-shadow:none;text-shadow:none;}
+html[data-auth="out"] body.poker-lobby #dailyClaim:disabled{display:none!important;}
+body.poker-lobby #dailySignIn{min-height:46px;border-radius:12px;background:var(--ac);color:#04130d;border:1px solid var(--ac);font-family:inherit;font-size:14px;font-weight:800;cursor:pointer;box-shadow:none;}
+body.poker-lobby .availability{font-size:12px;color:var(--mu);line-height:1.5;}
+body.poker-lobby .availability strong{color:var(--tx);font-weight:700;}
+body.poker-lobby .bonus-disclaimer{font-size:13px!important;line-height:1.5!important;color:var(--mu)!important;margin:0;}
 /* Keep Online text off bright artwork and below its status in short landscape. */
 @media(orientation:landscape) and (max-height:550px){
 body.poker-lobby .tile--online::after{background:linear-gradient(180deg,#06082533,#0b1040ed 25%,#070e37 100%);}
@@ -526,36 +518,10 @@ to{opacity:1;transform:translateY(0);}
 6.5%{transform:scale(1.01) rotate(-.5deg);}
 }
 
-body.poker-lobby #dailyClaim:disabled{opacity:.6;cursor:not-allowed;}
-
-/* Daily reward receipt: gold celebration within the existing purple casino palette. */
-body.poker-lobby #dailyDialog.daily-success{border-color:#fff0ad;box-shadow:0 0 36px #ffcd5866,0 22px 70px #05051b;}
-body.poker-lobby .bonus-success{position:relative;overflow:hidden;text-align:center;margin-top:12px;padding:14px;border:2px solid #ffe9a0;border-radius:14px;background:linear-gradient(120deg,#53306e,#79512c,#3f285f);box-shadow:0 0 24px #ffbd4b55,inset 0 0 18px #ffd97322;}
-body.poker-lobby .bonus-success strong{display:block;font:900 italic clamp(30px,6vw,46px)/1.1 Arial,sans-serif;color:#ffec9f;text-shadow:0 2px #814216,0 0 18px #ffc44e;}
-body.poker-lobby .bonus-success span{display:block;margin-top:7px;color:#fff5cf;font-size:11px;font-weight:900;letter-spacing:1px;}
-body.poker-lobby .bonus-day--completed,body.poker-lobby .bonus-day--claimed{border-color:#ffedaa;background:linear-gradient(145deg,#876032,#51376b 55%,#261b4c);box-shadow:0 0 24px #ffc85888,inset 0 0 16px #ffe29133,0 6px #372031;}
-body.poker-lobby .bonus-day--completed .reward-space,body.poker-lobby .bonus-day--claimed .reward-space{color:#fff0a6;font-size:14px;font-weight:900;text-shadow:0 0 12px #ffbc4f;}
-body.poker-lobby .bonus-day--completed .day-state,body.poker-lobby .bonus-day--claimed .day-state{color:#fff1b6;}
-body.poker-lobby .daily-success .bonus-day--claimed .day-illustration img{filter:drop-shadow(0 0 12px #ffd75b);animation:pokerDailyRewardPop .65s ease-out;}
-body.poker-lobby .bonus-success::after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent 35%,#fff7 50%,transparent 65%);transform:translateX(-120%);pointer-events:none;animation:pokerDailyRewardShine 1.2s ease-out;}
-@keyframes pokerDailyRewardPop{
-0%{transform:scale(.85);}
-55%{transform:scale(1.15);}
-100%{transform:scale(1);}
-}
-@keyframes pokerDailyRewardShine{
-0%{transform:translateX(-120%);}
-100%{transform:translateX(120%);}
-}
-@media(prefers-reduced-motion:reduce){
-body.poker-lobby .daily-success .bonus-day--claimed .day-illustration img,body.poker-lobby .bonus-success::after{animation:none;}
-}
-
-@media(orientation:landscape) and (max-height:550px) and (min-width:601px){
-body.poker-lobby #dailyDialog .bonus-success:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;margin-top:8px;}
-body.poker-lobby #dailyDialog .bonus-success strong{font-size:28px;}
-body.poker-lobby #dailyDialog .bonus-success span{margin-top:0;font-size:9px;}
-}
+/* Daily reward receipt: accent-outlined card with clean typography */
+body.poker-lobby .bonus-success{position:relative;text-align:center;padding:14px;border:1px solid var(--ac);border-radius:14px;background:rgba(47,224,160,.08);box-shadow:none;}
+body.poker-lobby .bonus-success strong{display:block;font-size:20px;font-weight:800;font-style:normal;color:var(--ac);font-family:inherit;text-shadow:none;}
+body.poker-lobby .bonus-success span{display:block;margin-top:4px;color:var(--mu);font-size:13px;font-weight:600;letter-spacing:normal;}
 
 /* Short table-style hero celebration, above the modal in its existing top layer. */
 body.poker-lobby .daily-flyin{position:fixed;inset:0;z-index:10;display:grid;place-items:center;overflow:hidden;pointer-events:none;isolation:isolate;background:radial-gradient(ellipse,#261037ed,#080820df 65%,#050518bf);animation:pokerDailyFlyinBackdrop 1800ms ease-out both;}
