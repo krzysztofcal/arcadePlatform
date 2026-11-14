@@ -235,3 +235,277 @@ with its own `vps-admin` OWNER approval. This task authorizes neither step.
 
 A failure is never retried automatically. Inspect any partial directory before
 requesting recovery; there is no recursive chown/chmod, repair or deletion path.
+
+## Codex CLI bubblewrap AppArmor repair (preparation only)
+
+The three fixed catalog operations below implement the Ubuntu 24.04 profile path
+recommended by [OpenAI](https://learn.chatgpt.com/docs/sandboxing#prerequisites).
+They preserve `kernel.apparmor_restrict_unprivileged_userns=1`, existing Codex
+configuration and services. No operation installs packages, enables networking,
+changes `sandbox_mode`, restarts a service, signals an agent or runs a CLI smoke.
+
+| Operation | Effect and separate approval |
+|---|---|
+| `codex-bwrap-apparmor-check` | Read-only kernel policy/attachment/hash, source and process inspection. Reports conflicts, unknown or incomplete policy as BLOCKED. Only the standard admin lock/audit writes occur. |
+| `codex-bwrap-apparmor-install` | Repeats the check, verifies the trusted staged profile and offline compilation, uses parser ADD from protected custody, verifies loaded policy, then publishes only an absent policy file, never replace. Keeps protected evidence. Requires its own OWNER approval. |
+| `codex-bwrap-apparmor-rollback` | Only a complete, unchanged own install with no active dependents may return to the recorded absent baseline. Retains the file in custody and removes only the two owned kernel profiles. Requires its own OWNER approval. |
+
+### Pinned source and installation scope
+
+`infra/vps/bwrap-userns-restrict` is an unmodified profile extracted from Ubuntu
+`noble-updates/main`, package `apparmor-profiles`, version
+`4.0.1really4.0.1-0ubuntu0.24.04.9`. The package SHA-256 is
+`90b02aa006eea7702cd4e851343e469e41365dda42145a3cb035de1d6c773b8c`;
+the profile SHA-256 is
+`11d39094f044f0cda0febb3ad517b830301da6b2ce929664af09ee9e4dd264f9`.
+The download URL and upstream copyright/license accompany the asset in
+`infra/vps/bwrap-userns-restrict.LICENSE`. Preparation verified the existing Ubuntu InRelease signature with the distro
+archive keyring, its SHA-256 for the local Packages index, the package record and
+.deb digest, and the extracted member bytes; the signed snapshot is dated
+2026-11-13. No apt update or package installation was used. This is provenance
+for the pinned version, not a claim of current repository freshness. It also
+compiled the profile with AppArmor
+4.0.1 using `-Q -K` without loading it. Trusted OWNER preparation must verify
+Ubuntu signed repository metadata and the package/profile digests before staging
+from the reviewed merged source; the root helper never trusts a file in an
+agent-writable checkout or a caller-provided download/path.
+
+OWNER staging installs only two new inert support files under
+`/usr/local/libexec/arcade-vps-admin/`: `codex-bwrap-apparmor.py` and the pinned
+profile, both `root:root 0644`. It refuses non-root-owned, writable or symlinked source paths/ancestors (including
+the running stager, even when it is outside the selected checkout) before
+any account/file change, verifies the profile digest and compares installed support bytes. It does not copy the profile into
+`/etc/apparmor.d` or load it. No new package dependency is installed; the host
+must already have `/usr/sbin/apparmor_parser` and bubblewrap. Existing staging
+and sudoers verification remain mandatory. Use an OWNER-controlled trusted
+checkout, never run the root stager against a copilot-owned working tree.
+
+### Conflict and dependency gates
+
+The check requires Ubuntu 24.04, active AppArmor, restriction value 1, an
+unconfined caller in PID 1's user/mount/PID namespaces, AppArmor namespace level
+zero without stacking, and complete access to:
+
+- the kernel's `policy/profiles` tree, including child profiles, `name`, `attach`,
+  `mode` and SHA-256, with an exact match to the flat kernel `profiles` list;
+- the `policy/namespaces` directory; any nested policy namespace blocks;
+- root-owned, non-writable, non-symlink AppArmor source paths and includes;
+- all visible process/thread AppArmor labels, executable names and identities.
+
+Another profile name `bwrap` or `unpriv_bwrap`, or any attachment that can match
+`/usr/bin/bwrap`, blocks install. Brace patterns are expanded; glob/class
+matching deliberately overapproximates and may produce a safe false positive.
+Unknown attachments, unsupported syntax, missing hashes, unreadable processes,
+source mentions of dormant vendor bubblewrap policy or local overrides block.
+No other vendor's profile is disabled, removed or replaced. This avoids the
+attachment collision described in [Codex #38715](https://github.com/openai/codex/issues/38715).
+
+Existing `/etc/apparmor.d/bwrap-userns-restrict`, state directory, local includes,
+disable/complain overrides or inspection races block instead of being repaired.
+The install's state parent and target must be on the same filesystem. Kernel
+introspection unsupported by the host is a STOP, not an invitation to weaken
+inspection or turn off AppArmor.
+
+Active `bwrap` processes or threads using either owned profile block mutation.
+No process is stopped. OWNER must arrange a quiet launch window: the admin lock
+serializes catalog operations but cannot prevent independent sandbox launches
+or root policy edits. Pre/post checks reduce this race; they do not eliminate
+it. The new profile affects future `/usr/bin/bwrap` users beyond Codex and its
+child capability restrictions can affect nested sandbox consumers.
+
+### Installation evidence and rollback limits
+
+The one-shot state directory is
+`/var/lib/arcade-admin/codex-bwrap-apparmor` (`root:root 0700`). An append-only,
+fsynced `manifest.jsonl` records the absent baseline, source/kernel snapshots,
+publication/loading phases, target inode/hash and verified post-install policy
+hashes. The target is `root:root 0644`. Atomic no-clobber publication uses a
+hardlink to the protected profile copy; both links are retained, so the expected
+link count is two. Parser `-a -K -I /etc/apparmor.d` loads the protected custody copy before
+publication and verifies both profiles without replacing an existing one. Only
+then is the persistent file linked into `/etc/apparmor.d`. A failed ADD leaves no
+persistent policy file for a later boot/reload to activate. No automatic retry,
+recovery or broad AppArmor reload occurs. Post-mutation verification reads policy,
+source and identity; it does not reject success because a new process started.
+Process dependency gates remain mandatory immediately before mutation. Every
+live thread is inspected even if its group leader is a zombie; only individual
+dead threads and confirmed exited tasks are skipped.
+
+A failed load may have changed only part of the kernel policy. FAILED never
+means unchanged. Any manifest without a complete successful install blocks the
+rollback operation and needs OWNER inspection and a separately reviewed recovery
+path. The helper does not guess whether a concurrently present profile is ours.
+
+Rollback rechecks the exact target/protected-copy identity, source baseline,
+kernel policy hashes and all process dependencies. Even an unrelated policy or
+source update after install blocks rollback. Drift or incomplete inspection
+means STOP. It moves only its verified target into `retired-profile` custody,
+then removes its two kernel profiles using the retained source. It keeps all
+bytes and phase evidence. Failure during rollback leaves explicit incomplete
+state and is not retried. A completed rollback restores the original missing
+profile and the original sandbox limitation; it does not make Codex work.
+The retained state deliberately blocks automatic reinstallation.
+
+### Partial installation: OWNER recovery decision procedure
+
+This is a recovery runbook, not a fourth operation and not permission to run
+root commands. A failed parser ADD can leave zero, one or both new profiles in
+memory. The normal rollback intentionally accepts **only** the complete
+five-event successful-install manifest. Do not edit that manifest, invent an
+`installed` event, rerun install, invoke parser REMOVE on the whole source, or
+infer ownership from profile names or the absence of the `/etc` file.
+
+The existing synthetic guard covers each failed-ADD outcome: no new profile,
+only `bwrap`, and both profiles. In all three cases it verifies the durable
+`prepared, loading` prefix, original baseline, pinned custody bytes and link
+count one; the persistent target is absent. An attempted normal rollback must
+return `manifest_incomplete`, leave the kernel snapshot and manifest byte-for-byte
+unchanged, retain custody, and never call parser REMOVE. These are synthetic
+proofs of refusal and evidence retention, not a real kernel recovery test.
+
+**Immediate response:** treat ADMIN_FAILED, a timeout or a missing audit end as
+potential partial mutation. Preserve the workflow/run SHA, stdout, journal time
+range and the complete root-only state directory. Report STOP for further new
+sandbox launches using this repair; do not terminate existing work, reload
+AppArmor, reboot, change sysctl or delete/move custody. Do not repeat the failed
+operation. Installation never creates an automatic recovery timer/hook.
+
+Before any recovery GO, the coordinator prepares the following read-only
+incident record through the approved protected administrative path. OWNER
+approves that access; OWNER is not asked to write diagnostic/recovery code or
+interpret missing evidence. This PR does not authorize a free-form root shell,
+SSH session, `cat` command or arbitrary path through the catalog. The current
+`check` may itself report the new profile-name conflict; that is expected and is
+not a complete recovery evidence export.
+
+| Required evidence | Acceptance condition before a recovery decision |
+|---|---|
+| Run/source identity | Exact approved install run, commit, installed helper/stager/support hashes, parser version, start/end journal entries and parser outcome. A timeout never proves no load. |
+| Protected custody | Root-owned non-writable ancestors, state directory mode 0700, original manifest bytes and SHA-256, every complete event in order, and any truncated tail retained verbatim. No rewritten or synthesized events. |
+| Baseline | The `prepared` event proves both owned names were absent, foreign kernel profile hashes/attachments/modes, source digest and profile source SHA-256. Missing or inconsistent baseline means STOP. |
+| Source and persistence | Pinned staged asset and custody `profile` bytes match the reviewed SHA-256; capture inode/device/link count/mode/owner of custody, target and any retired file. Read local includes and disable/complain overrides. Missing/extra/changed paths are drift, not cleanup candidates. |
+| Current kernel policy | Full tree/flat-list agreement in the root policy namespace, attachment/mode/hash for every profile, children and namespace visibility. Compare foreign policy with the recorded baseline; an unknown attachment/hash or unrelated change blocks mutation. |
+| Ownership of remaining new policy | Compare current policy with a durable verified `loaded`/`installed` snapshot if one exists, plus audit chronology and exact source. A kernel profile hash is **not** the source-file SHA-256. When failure happened at `loading`, this helper has no verified per-profile post-load hashes: names plus source hash alone cannot establish custody of the live policy. |
+| Dependencies and policy settings | Complete process and live-thread labels/executables, including live threads of zombie leaders; no dependent task or bwrap launcher. Confirm restriction still 1 and unchanged security settings. No stop/kill is allowed to satisfy this condition. |
+
+The incident record must classify the last durable phase before choosing a path:
+
+| Last evidence | Safe next step |
+|---|---|
+| No manifest, truncated/unreadable baseline, unknown policy or drift | Preserve everything; no standard rollback or removal. Obtain complete read-only evidence or leave recovery blocked. |
+| `prepared` without `loading` | Still inspect the kernel; absence of the marker alone does not prove no external change. If baseline is unchanged, report that observation and retain one-shot state. It does not authorize deleting state or reinstalling. |
+| `loading` after failed ADD | Target should be absent; zero/one/both profiles may exist. Keep them untouched. Establish exact provenance before considering any mutation. Never REMOVE both names merely because the source contains them. |
+| `loaded` or `publishing`, without complete `installed` | Verified post-load hashes may exist. Compare them with the live kernel and inspect whether the target link exists. Normal rollback still refuses; no manual manifest completion or promotion to success. |
+| Complete `installed` | Use the existing rollback only if all its current hash/identity/source/dependency gates pass; its separate approval remains required. |
+| `retiring`/`removing` without `rolled_back` | Preserve all links and phase evidence. Inspect what remains before any subsequent request; never retry the normal rollback. |
+
+If complete evidence proves a specific recovery is safe, the coordinator prepares
+an **incident-specific closed catalog change** through the existing VPS Admin
+mechanism: fixed names, fixed expected kernel hashes and source/manifest/file
+identities, no path/hash/command input, complete foreign-policy/dependency gates,
+no overwrites and retained custody. The proposed diff, read-only preflight,
+fundamental fixture results and explicit before/after outcome are supplied for
+review before OWNER approves anything. Its publication/staging and its later
+execution each need separate OWNER GO. If custody of even one remaining profile
+cannot be proven, no removal operation is prepared from assumptions.
+
+This per-incident preparation is deliberately separate from this PR: there is
+currently no real failed install or live recovery snapshot to pin. A reusable
+arbitrary root recovery interface would weaken the closed catalog. Before
+approving the initial install, OWNER must accept this STOP-and-preserve route,
+including that a failure may remain blocked while the coordinator prepares the
+necessary read-only inspection and narrowly pinned recovery stage. No automatic
+or immediate rollback of an incomplete install is promised.
+
+### Trusted catalog staging: compatibility and executor procedure
+
+The root-owned-source requirement is a deliberate breaking change to staging:
+`stage-vps-admin.sh` now rejects a checkout under `/home/copilot` or the agent's
+Volume workspace, even if its contents match Git. It also rejects a copilot-owned
+copy of the running stager when `ARCADEPLATFORM_REPO_ROOT` points elsewhere.
+Do not weaken this check, chown an existing agent tree or execute an agent copy
+as root to reach the check.
+
+After merge and a **separate staging GO**, the trusted maintenance executor uses
+this prepared sequence. The coordinator supplies exact commit/path/checksum
+values after merge; OWNER approves the ready request rather than manually editing
+code or running tests:
+
+1. Pin the reviewed **merged main commit**, confirm its source tree contains the
+   companion workflow choices and the formal review decision, and obtain a fresh
+   minimal source checkout from the fixed GitHub repository at that commit into
+   a new private path such as `/root/arcade-admin-source/<merged-sha>`. Obtain it
+   independently of the copilot working tree. The root source-acquisition step
+   is part of the separately authorized maintenance preparation, not an agent
+   action or an invented catalog command. No package install or build is needed.
+2. Verify root:root ownership and no group/other writes for **every** ancestor,
+   the checkout, `infra`, `infra/vps`, its preview service directory, the running
+   stager and each source inode listed in the stager's `PY_TRUST` preflight.
+   Reject symlinks and existing conflicting paths. Use a root-owned, clean
+   checkout with the expected commit; do not copy mutable Git/config/hooks from
+   HOME, preserve agent ownership into it or relax permissions on agent data.
+3. Verify every staged source blob/digest against that exact approved commit and
+   the pinned Ubuntu profile digest. The coordinator's checksum list is a
+   comparison aid, not an independent trust anchor. The profile provenance can
+   be verified through Ubuntu's signed InRelease → Packages → package SHA-256 →
+   extracted member chain; the preparation evidence retains that chain on Volume.
+4. Invoke the stager **from the same verified root-controlled snapshot**, with
+   `ARCADEPLATFORM_REPO_ROOT` set to that exact checkout. It stages the helper,
+   sudoers and fixed support files as already documented, verifies sudoers and
+   runs only the existing read-only dispatcher status check. This GO does not
+   authorize an AppArmor check/install/rollback, package upgrade or service action.
+5. Compare installed bytes, owner/mode and the restricted `arcade-admin` sudoers
+   listing with the approved source; retain the staging receipt. The two new
+   support files are inert data under `/usr/local/libexec/arcade-vps-admin`, never
+   `/etc/apparmor.d`. If staging fails after any change, inspect its partial state;
+   do not retry automatically or treat failure as proof of unchanged state.
+6. Only then request the three catalog operations individually, with their own
+   OWNER approval and the required quiet launch window for mutations. Read-only
+   check is not an installation receipt; successful installation is not smoke.
+
+No new self-update/root-source-fetch endpoint is added to the catalog. The
+existing trusted OWNER maintenance/staging boundary stays in place. This PR and
+its local tests execute none of the above privileged steps.
+
+### Publication and OWNER GO order
+
+1. Review this PR and its independent Claude Code review; OWNER decides merge.
+   Merge alone performs no VPS catalog installation or AppArmor activation.
+2. Separate OWNER GO: trusted installation of the merged catalog/support files
+   and sudoers via `infra/vps/stage-vps-admin.sh`. Verify installed bytes and the
+   existing restricted `arcade-admin` contract. No AppArmor operation is run by
+   staging, and no workflow is dispatched as part of this PR.
+3. Separate `VPS Admin Operation` dispatch from `main` for
+   `codex-bwrap-apparmor-check`, confirmation
+   `RUN codex-bwrap-apparmor-check`, with its own `vps-admin` approval. Inspect
+   the successful evidence; BLOCKED/FAILED stops this sequence.
+4. Separate OWNER GO and `vps-admin` approval for
+   `codex-bwrap-apparmor-install`, confirmation
+   `RUN codex-bwrap-apparmor-install`, in the quiet window. Installation repeats
+   every check; a previous successful check does not authorize a stale mutation.
+5. Only a further explicit GO permits the previously blocked non-root Codex CLI
+   smoke, using its retained Volume checkout/runtime and the sandbox. Neither
+   successful profile installation nor synthetic tests prove that smoke passes.
+6. If needed, rollback is an alternative later request, not a mandatory step:
+   `codex-bwrap-apparmor-rollback`, confirmation
+   `RUN codex-bwrap-apparmor-rollback`, with separate OWNER approval and all gates.
+
+Fundamental verification (synthetic files and mocked parser only, no root):
+`node --test --test-name-pattern='VPS admin' ws-tests/infra-vps-workflow.guard.test.mjs`.
+The guard suite verifies catalog/workflow/sudoers parity and exercises policy
+conflicts, incomplete inspection, pinned data, no-clobber publication, drift,
+process dependencies, partial load and rollback. Preserve the incident's Volume
+smoke artifacts and preparation package; this change authorizes no cleanup.
+
+If the App cannot publish workflow changes, do not expand its permissions or use
+OWNER credentials. Keep the PR Draft and blocked. OWNER must publish the three
+choices below immediately after `volume-workdir-prepare` in the existing workflow
+before merge; catalog-parity checks must stay failing until that companion change
+is present. A Draft containing only the publishable files is not a complete or
+merge-ready catalog update.
+
+```yaml
+          - codex-bwrap-apparmor-check
+          - codex-bwrap-apparmor-install
+          - codex-bwrap-apparmor-rollback
+```
