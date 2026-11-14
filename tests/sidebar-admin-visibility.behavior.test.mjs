@@ -175,6 +175,7 @@ async function renderSidebarAs(statusCode, mobilePath) {
   }
   const authListeners = [];
   const fetchCalls = [];
+  const control = { status: statusCode, gate: null };
   const windowObj = {
     document,
     location: { pathname: "/index.html" },
@@ -195,7 +196,8 @@ async function renderSidebarAs(statusCode, mobilePath) {
     document,
     fetch: async (url, options) => {
       fetchCalls.push({ url, options });
-      return { status: statusCode };
+      if (control.gate) await control.gate;
+      return { status: control.status };
     },
     matchMedia: () => ({ matches: false }),
     setTimeout,
@@ -207,7 +209,7 @@ async function renderSidebarAs(statusCode, mobilePath) {
   await flush();
   await flush();
 
-  return { authListeners, fetchCalls, hrefs: collectHrefs(sidebar), document, sidebar, toggle, adminLink };
+  return { authListeners, fetchCalls, hrefs: collectHrefs(sidebar), document, sidebar, toggle, adminLink, control };
 }
 
 test("sidebar shows Admin entry for verified admins", async () => {
@@ -227,6 +229,26 @@ test("sidebar hides Admin entry for non-admins", async () => {
   assert.equal(result.fetchCalls.length >= 1, true);
   assert.equal(result.hrefs.includes("/admin.html"), false);
   assert.equal(result.adminLink.hidden, true);
+});
+
+test("admin entries are revoked immediately when the session changes", async () => {
+  const result = await renderSidebarAs(200);
+  assert.equal(result.adminLink.hidden, false);
+
+  let release;
+  result.control.status = 403;
+  result.control.gate = new Promise((resolve) => { release = resolve; });
+  result.authListeners[0]();
+  await flush();
+
+  assert.equal(result.adminLink.hidden, true);
+  assert.equal(collectHrefs(result.sidebar).includes("/admin.html"), false);
+
+  release();
+  await flush();
+  await flush();
+  assert.equal(result.adminLink.hidden, true);
+  assert.equal(collectHrefs(result.sidebar).includes("/admin.html"), false);
 });
 
 test("sidebar closes when clicking outside the expanded panel", async () => {

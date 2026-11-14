@@ -56,6 +56,11 @@
   async function refreshAdminVisibility(){
     if (window.MOBILE_POKER_CONFIG) return;
     const requestId = ++state.adminRequestId;
+    // A session change revokes admin visibility before any await; it returns only after a fresh admin-me check.
+    if (state.isAdmin){
+      state.isAdmin = false;
+      render();
+    }
     const token = await getAccessToken();
     if (requestId !== state.adminRequestId) return;
     if (!token){
