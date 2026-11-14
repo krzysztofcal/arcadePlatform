@@ -1723,15 +1723,6 @@
     var pokerProgressionContent = document.getElementById('pokerProgressionContent');
     var createDialog = document.getElementById('pokerCreateDialog');
 
-    document.querySelectorAll('[data-mode]').forEach(function(button){ button.addEventListener('click', function(){
-      var description = descriptions[button.dataset.mode];
-      if (description){
-        document.getElementById('infoTitle').textContent = description[0];
-        document.getElementById('infoCopy').textContent = description[1];
-        var info = document.getElementById('infoDialog');
-        if (info && info.showModal) info.showModal();
-      }
-    }); });
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
       if (button.dataset.panel === 'daily') { openDailyBonus(); return; }

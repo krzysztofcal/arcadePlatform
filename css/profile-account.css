@@ -96,3 +96,6 @@ dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 .account-status[data-tone="info"]{color:#7dd3fc;background:rgba(14,165,233,.12);border-color:rgba(14,165,233,.3);}
 .account-confirmation{display:flex;align-items:center;gap:16px;padding:20px;}
 .account-confirmation[hidden]{display:none!important;}
+.account-links{display:flex;flex-wrap:wrap;gap:8px 20px;}
+.account-links a{min-height:44px;display:inline-flex;align-items:center;}
+.chip-balance-grid{grid-template-columns:1fr;}

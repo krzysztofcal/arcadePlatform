@@ -26,6 +26,7 @@
 .leaderboard-state #leaderboardSignIn[hidden]{ display:none; }
 .leaderboard-state #leaderboardRetry{ width:100%; max-width:320px; margin-top:8px; order:5; }
 .leaderboard-retry{ display:flex; align-items:center; justify-content:center; width:100%; max-width:320px; height:46px; border:0; border-radius:14px; padding:0 20px; background:var(--ac); color:var(--ink) !important; font:800 15px/1 Poppins, sans-serif; cursor:pointer; text-decoration:none !important; }
+.leaderboard-retry[hidden]{ display:none; }
 .leaderboard-retry:hover{ background:var(--ac2); text-decoration:none !important; }
 .leaderboard-results[hidden]{ display:none; }
 .leaderboard-page-empty{ padding:36px 20px; border:1px solid var(--bd); border-radius:18px; background:var(--sf); text-align:center; }
