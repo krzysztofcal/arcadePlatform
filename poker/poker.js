@@ -1829,7 +1829,7 @@
     }
 
     function showLobbyView(view, focusTarget){
-      if (window.MOBILE_POKER_CONFIG && view !== 'modes' && !lobbyAuthenticated){
+      if (window.MOBILE_POKER_CONFIG && (view === 'tables' || view === 'progression') && !lobbyAuthenticated){
         view = 'modes';
         setError(errorEl, 'Sign in to browse persistent-chip tables and progression, or play as Guest.');
       }
