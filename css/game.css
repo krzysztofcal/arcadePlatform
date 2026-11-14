@@ -72,3 +72,5 @@ canvas#game{ width:100%; height:auto; aspect-ratio:460/320; background:#000; bor
 .gameWrap.fsActive .fsExitOverlay{ display:block; }
 .fsBtn{ background:var(--panel); border:1px solid var(--border); color:var(--gold); border-radius:11px; padding:8px 12px; display:inline-flex; gap:8px; align-items:center; cursor:pointer; font:700 13px Poppins, sans-serif; }
 button:focus-visible, a:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.slot-fixed{ display:none !important; }
+:fullscreen ~ .mobile-bottom-nav, :fullscreen .mobile-bottom-nav, body.fullscreen .mobile-bottom-nav, .fsActive ~ .mobile-bottom-nav, .gameWrap.fsActive ~ .mobile-bottom-nav, body:has(.fsActive) .mobile-bottom-nav, body:has(:fullscreen) .mobile-bottom-nav{ display:none !important; }

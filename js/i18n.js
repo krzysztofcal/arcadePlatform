@@ -47,7 +47,7 @@
     menuArcadeHub: { en: 'Arcade Hub', pl: 'Arcade Hub' },
     menuLanguage: { en: 'Language', pl: 'Język' },
     home: { en: 'Home', pl: 'Start' },
-    leaderboard: { en: 'Leaderboard', pl: 'Ranking' },
+    leaderboard: { en: 'Ranking', pl: 'Ranking' },
     leaderboardPageTitle: { en: 'XP Leaderboard', pl: 'Ranking XP' },
     leaderboardPageSubtitle: { en: 'See who is earning the most XP across Arcade Hub.', pl: 'Zobacz, kto zdobywa najwięcej XP w Arcade Hub.' },
     leaderboardToday: { en: 'Today', pl: 'Dzisiaj' },
@@ -94,7 +94,7 @@
     noRecentlyPlayed: { en: 'No recently played games', pl: 'Nie grałeś jeszcze w żadną grę' },
     browseGames: { en: 'Browse games', pl: 'Przeglądaj gry' },
     settings: { en: 'Settings', pl: 'Ustawienia' },
-    playRandomGame: { en: 'Play Random Game', pl: 'Losowa gra' },
+    playRandomGame: { en: 'Random game', pl: 'Losowa gra' },
     search: { en: 'Search', pl: 'Szukaj' },
     licensesTitle: { en: 'Game Licenses & Credits', pl: 'Licencje i podziękowania' },
     licensesIntro1: {

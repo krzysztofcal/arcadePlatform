@@ -180,7 +180,7 @@
       if (item.hrefEn) link.setAttribute('data-href-en', item.hrefEn);
       if (item.hrefPl) link.setAttribute('data-href-pl', item.hrefPl);
       if (item.id) link.setAttribute('data-nav-id', item.id);
-      if (isActive(item.href)) link.classList.add('is-active');
+      if (item.id !== 'random' && isActive(item.href)) link.classList.add('is-active');
       if (item.id === 'random'){
         link.addEventListener('click', handleRandomGameClick);
       }
@@ -249,7 +249,7 @@
 
   function renderBottomNav(items){
     if (!doc.body || typeof doc.body.appendChild !== 'function') return;
-    if (!doc.querySelector('.shell')) return;
+    if (!doc.querySelector('.shell') && !doc.querySelector('.layout')) return;
     const mobile = !!window.MOBILE_POKER_CONFIG;
     if (mobile && !['/poker/', '/poker/index.html', '/account.html'].includes(window.location.pathname)) return;
     let nav = doc.getElementById('mobileBottomNav');
@@ -268,7 +268,7 @@
       link.className = 'mobile-bottom-nav__item';
       link.href = item.href || '#';
       link.setAttribute('data-nav-id', item.id);
-      const active = mobile ? (window.location.pathname === '/account.html' ? 'profile' : doc.body.dataset.mobileLobbyView || 'modes') === item.id : item.id !== 'search' && isActive(item.href);
+      const active = mobile ? (window.location.pathname === '/account.html' ? 'profile' : doc.body.dataset.mobileLobbyView || 'modes') === item.id : item.id !== 'search' && item.id !== 'random' && isActive(item.href);
       if (active) { link.classList.add('is-active'); link.setAttribute('aria-current', 'page'); }
       if (mobile) {
         link.classList.add('shortcut');

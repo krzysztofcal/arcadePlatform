@@ -15,12 +15,12 @@
   const menuItems = [
     { id: 'home', labelKey: 'home', fallbackLabel: 'Home', href: '/index.html', className: 'sb-home', iconSvg: icons.home },
     { id: 'poker', labelKey: 'navPoker', fallbackLabel: 'Poker', href: '/poker/', iconSvg: icons.poker },
-    { id: 'leaderboard', labelKey: 'leaderboard', fallbackLabel: 'Leaderboard', href: '/leaderboard.html', iconSvg: icons.leaderboard },
+    { id: 'leaderboard', labelKey: 'leaderboard', fallbackLabel: 'Ranking', href: '/leaderboard.html', iconSvg: icons.leaderboard },
     { id: 'favorites', labelKey: 'favorites', fallbackLabel: 'Favorites', href: '/favorites.html', iconSvg: icons.favorites },
     { id: 'recentlyPlayed', labelKey: 'recentlyPlayed', fallbackLabel: 'Recently Played', href: '/recently-played.html', iconSvg: icons.recent },
     { id: 'xp', labelKey: 'navXp', fallbackLabel: 'XP', href: '/xp.html', iconSvg: icons.xp },
-    { id: 'random', labelKey: 'playRandomGame', fallbackLabel: 'Play Random Game', href: '/index.html', className: 'sb-random', iconSvg: icons.random },
-    { id: 'profile', labelKey: 'profileAndAccount', fallbackLabel: 'Profile and account', href: '/account.html', section: 'account', iconSvg: icons.profile },
+    { id: 'random', labelKey: 'playRandomGame', fallbackLabel: 'Random game', href: '/index.html', className: 'sb-random', iconSvg: icons.random },
+    { id: 'profile', labelKey: 'account', fallbackLabel: 'Account', href: '/account.html', section: 'account', iconSvg: icons.profile },
     { id: 'about', labelKey: 'about', fallbackLabel: 'About', href: '/about.en.html', hrefEn: '/about.en.html', hrefPl: '/about.pl.html', section: 'account', iconSvg: icons.about },
     { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', href: '/admin.html', requiresAdmin: true, iconSvg: icons.settings }
   ];
@@ -28,7 +28,7 @@
   const bottomItems = [
     { id: 'home', labelKey: 'home', fallbackLabel: 'Home', href: '/index.html', iconSvg: icons.home },
     { id: 'poker', labelKey: 'navPoker', fallbackLabel: 'Poker', href: '/poker/', iconSvg: icons.poker },
-    { id: 'leaderboard', labelKey: 'leaderboard', fallbackLabel: 'Leaderboard', href: '/leaderboard.html', iconSvg: icons.leaderboard },
+    { id: 'leaderboard', labelKey: 'leaderboard', fallbackLabel: 'Ranking', href: '/leaderboard.html', iconSvg: icons.leaderboard },
     { id: 'favorites', labelKey: 'favorites', fallbackLabel: 'Favorites', href: '/favorites.html', iconSvg: icons.favorites },
     { id: 'profile', labelKey: 'account', fallbackLabel: 'Account', href: '/account.html', iconSvg: icons.profile }
   ];

@@ -130,31 +130,36 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#2fe0a0" stroke-width="2" stroke-linecap="round"/></svg>
         <input type="search" id="mobileSearchInput" data-i18n-aria="searchAria" data-i18n-placeholder="searchPlaceholder" aria-label="Search games" placeholder="Search games" />
       </div>
-      <section class="home-bonuses" id="homeBonuses" aria-labelledby="homeBonusesTitle" hidden>
-        <div class="home-bonuses__mark" aria-hidden="true">CH</div>
-        <div class="home-bonuses__content">
-          <h2 id="homeBonusesTitle" data-i18n="homeBonusesTitle">Bonuses ready to claim</h2>
-          <div class="home-bonuses__list" id="homeBonusesList"></div>
-          <p class="home-bonuses__status" id="homeBonusesStatus" aria-live="polite"></p>
+      <div class="home-top-grid" id="homeTopGrid">
+        <section class="home-poker-promo mc" id="homePokerPromo">
+          <div class="im" style="background-image:url(/poker/assets/lobby/online-v2.webp)">
+            <span class="tag">POKER</span>
+          </div>
+          <div class="bd">
+            <h3 data-i18n="pokerPromoTitle">Arcade Poker</h3>
+            <p class="sub" data-i18n="pokerPromoSubtitle">Texas Hold’em na wirtualne żetony: online, z botami lub offline.</p>
+            <a href="/poker/" class="btn" style="align-self:flex-start" data-i18n="pokerPromoCta">Wejdź do pokera</a>
+          </div>
+        </section>
+        <div class="home-top-stack" id="homeTopStack">
+          <section class="home-bonuses" id="homeBonuses" aria-labelledby="homeBonusesTitle" hidden>
+            <div class="home-bonuses__mark" aria-hidden="true">CH</div>
+            <div class="home-bonuses__content">
+              <h2 id="homeBonusesTitle" data-i18n="homeBonusesTitle">Bonuses ready to claim</h2>
+              <div class="home-bonuses__list" id="homeBonusesList"></div>
+              <p class="home-bonuses__status" id="homeBonusesStatus" aria-live="polite"></p>
+            </div>
+          </section>
+          <div class="home-featured" id="homeFeatured"></div>
+          <section class="home-recent" id="homeRecentlyPlayed" hidden>
+            <div class="sh">
+              <h2 class="h2" data-i18n="recentlyPlayed">Recently played</h2>
+              <a href="recently-played.html" class="lk" data-i18n="viewAllRecent">All ›</a>
+            </div>
+            <div class="ggrid home-recent-grid" id="homeRecentlyPlayedGrid"></div>
+          </section>
         </div>
-      </section>
-      <section class="home-poker-promo mc" id="homePokerPromo">
-        <div class="im" style="background-image:url(/poker/assets/lobby/online-v2.webp)">
-          <span class="tag">POKER</span>
-        </div>
-        <div class="bd">
-          <h3 data-i18n="pokerPromoTitle">Arcade Poker</h3>
-          <p class="sub" data-i18n="pokerPromoSubtitle">Texas Hold’em na wirtualne żetony: online, z botami lub offline.</p>
-          <a href="/poker/" class="btn" style="align-self:flex-start" data-i18n="pokerPromoCta">Wejdź do pokera</a>
-        </div>
-      </section>
-      <section class="home-recent" id="homeRecentlyPlayed" hidden>
-        <div class="sh">
-          <h2 class="h2" data-i18n="recentlyPlayed">Recently played</h2>
-          <a href="recently-played.html" class="lk" data-i18n="viewAllRecent">All ›</a>
-        </div>
-        <div class="ggrid home-recent-grid" id="homeRecentlyPlayedGrid"></div>
-      </section>
+      </div>
       <div class="sh" style="margin-top:12px;">
         <h2 class="h2" data-i18n="allGames">All games</h2>
         <button type="button" class="btn sm gh" id="homeRandomBtn">

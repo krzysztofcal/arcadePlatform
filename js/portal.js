@@ -73,6 +73,7 @@
       const thumb = document.createElement('div');
       thumb.className = 'thumb';
       if (game.thumbnail){
+        thumb.style.setProperty('--thumb-image', `url("${game.thumbnail}")`);
         thumb.style.backgroundImage = `url(${game.thumbnail})`;
       }
       a.appendChild(thumb);

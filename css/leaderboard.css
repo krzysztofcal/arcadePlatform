@@ -17,11 +17,16 @@
 .leaderboard-skeleton::after{ content:""; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(90deg, transparent, rgba(255,255,255,.05), transparent); animation:leaderboard-shimmer 1.25s infinite; }
 .leaderboard-skeleton--podium{ height:180px; }
 .leaderboard-skeleton--row{ grid-column:1 / -1; height:60px; }
-.leaderboard-state{ padding:44px 22px; border:1px solid var(--bd); border-radius:20px; background:var(--sf); text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; }
+.leaderboard-state{ padding:44px 24px; border:1px solid var(--bd); border-radius:20px; background:var(--sf); text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; max-width:440px; margin:24px auto; }
+.leaderboard-state::before{ content:"🔒"; width:56px; height:56px; border-radius:18px; background:var(--sf2); border:1px solid var(--bd); display:grid; place-items:center; color:var(--ac); font-size:24px; line-height:56px; order:1; }
 .leaderboard-state[hidden]{ display:none; }
-.leaderboard-state h2{ margin:0; color:var(--tx); font:800 22px/1.25 Poppins, sans-serif; }
-.leaderboard-state p{ max-width:580px; margin:0; color:var(--mu); line-height:1.55; font-size:14px; }
-.leaderboard-retry{ margin-top:12px; border:0; border-radius:12px; padding:10px 20px; background:var(--ac); color:var(--ink); font:800 14px/1 Poppins, sans-serif; cursor:pointer; }
+.leaderboard-state h2{ margin:0; color:var(--tx); font:800 22px/1.25 Poppins, sans-serif; order:2; }
+.leaderboard-state #leaderboardStateText{ max-width:380px; margin:0; color:var(--mu); line-height:1.55; font-size:14px; order:3; }
+.leaderboard-state #leaderboardSignIn{ width:100%; margin:8px 0 0; order:4; display:flex; justify-content:center; }
+.leaderboard-state #leaderboardSignIn[hidden]{ display:none; }
+.leaderboard-state #leaderboardRetry{ width:100%; max-width:320px; margin-top:8px; order:5; }
+.leaderboard-retry{ display:flex; align-items:center; justify-content:center; width:100%; max-width:320px; height:46px; border:0; border-radius:14px; padding:0 20px; background:var(--ac); color:var(--ink) !important; font:800 15px/1 Poppins, sans-serif; cursor:pointer; text-decoration:none !important; }
+.leaderboard-retry:hover{ background:var(--ac2); text-decoration:none !important; }
 .leaderboard-results[hidden]{ display:none; }
 .leaderboard-page-empty{ padding:36px 20px; border:1px solid var(--bd); border-radius:18px; background:var(--sf); text-align:center; }
 .leaderboard-page-empty[hidden]{ display:none; }

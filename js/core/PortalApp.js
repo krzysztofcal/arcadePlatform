@@ -326,12 +326,17 @@
       promo.setAttribute('aria-label', 'Featured arcade game');
       if (href) promo.href = href;
 
+      const art = this.document.createElement('div');
+      art.className = 'hero-art';
+      if (featured) this.applyThumbnail(art, featured);
+      promo.appendChild(art);
+
       const copy = this.document.createElement('div');
       copy.className = 'hero-copy';
 
       const kicker = this.document.createElement('span');
       kicker.className = 'hero-kicker';
-      kicker.textContent = lang === 'pl' ? 'Dzienny bonus' : 'Daily Bonus';
+      kicker.textContent = lang === 'pl' ? 'GRA DNIA' : 'GAME OF THE DAY';
       copy.appendChild(kicker);
 
       const title = this.document.createElement('h2');
@@ -342,17 +347,12 @@
       text.textContent = featured ? this.resolveDescription(featured, lang) : (lang === 'pl' ? 'Wybierz grę i wskocz do akcji.' : 'Pick a game and jump into the action.');
       copy.appendChild(text);
 
-      const action = this.document.createElement('span');
-      action.className = 'hero-action';
-      action.textContent = this.t('playChip') || 'PLAY';
-      copy.appendChild(action);
-
       promo.appendChild(copy);
 
-      const art = this.document.createElement('div');
-      art.className = 'hero-art';
-      if (featured) this.applyThumbnail(art, featured);
-      promo.appendChild(art);
+      const action = this.document.createElement('span');
+      action.className = 'hero-action';
+      action.textContent = lang === 'pl' ? 'Graj' : (this.t('playChip') || 'Play');
+      promo.appendChild(action);
 
       return promo;
     }
@@ -371,8 +371,20 @@
       this.grid.removeAttribute('aria-busy');
       const lang = this.getLang();
       const sortedList = this.sortGames(list);
+      const featuredHost = this.document.getElementById('homeFeatured');
+      if (featuredHost){
+        featuredHost.innerHTML = '';
+        if (sortedList[0] && category !== 'Favorites' && category !== 'Recently Played'){
+          featuredHost.appendChild(this.createHeroCard(sortedList[0], lang));
+          featuredHost.hidden = false;
+        } else {
+          featuredHost.hidden = true;
+        }
+      }
       const fragment = this.document.createDocumentFragment();
-      fragment.appendChild(this.createHeroCard(sortedList[0] || null, lang));
+      if (!featuredHost && sortedList[0] && category !== 'Favorites' && category !== 'Recently Played'){
+        fragment.appendChild(this.createHeroCard(sortedList[0], lang));
+      }
       for (const item of sortedList){
         const href = this.playableHref(item, lang);
         fragment.appendChild(href ? this.createPlayableCard(item, lang, href) : this.createPlaceholderCard(item, lang));
