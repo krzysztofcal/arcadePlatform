@@ -208,6 +208,15 @@ Agents MUST use this to locate logic quickly.
 
 ---
 
+## Agent checkout placement on the VPS
+
+- Shared policy: `AGENTS.md`, Task workspace lifecycle (Codex, Claude Code, Antigravity).
+- Read-only new-path check: `scripts/ops/agent-workdir-preflight.mjs <unique-task-name>`.
+- Inventory and native Git/launcher usage: `docs/agent-work-directories.md`.
+- Reuse active task checkouts; allocate new ones only on the verified Volume. Missing mount means STOP, never a root-disk fallback.
+
+---
+
 ## ⚡ How to Navigate the Code
 
 When solving a problem:
