@@ -77,6 +77,7 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 @keyframes xp-badge-spin{ 0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);} }
 @media (min-width: 1024px){ .hamburger{ display:none !important; } }
 @media (min-width: 1024px){ .shell{ grid-template-columns:236px minmax(0, 1fr); gap:24px; padding:0 24px 0 0; min-height:calc(100vh - var(--topbar-offset)); } }
+@media (min-width: 1024px){ .shell > main{ grid-column:2; } }
 @media (min-width: 1024px){ .sidebar{ position:fixed; left:max(0px, calc((100vw - 1440px) / 2)); top:var(--topbar-offset); width:236px; height:calc(100vh - var(--topbar-offset)); transform:none; display:flex; flex-direction:column; background:var(--bg2); border:0; border-right:1px solid var(--bd); border-radius:0; padding:20px 14px; gap:4px; overflow-y:auto; overflow-x:hidden; z-index:90; } }
 @media (min-width: 1024px){ .sidebar.collapsed{ width:236px; transform:none; } }
 @media (min-width: 1024px){ .sidebar.expanded{ width:236px; transform:none; } }
@@ -315,7 +316,8 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 .chip-ledger__amount--positive{ color:var(--accent); }
 .chip-ledger__amount--negative{ color:var(--red); }
 .page-account{ min-height:100vh; display:flex; flex-direction:column; }
-.page-account main{ flex:1 1 auto; display:flex; flex-direction:column; min-height:0; }
+.page-account main{ flex:1 1 auto; display:flex; flex-direction:column; }
+.page-account .shell{ flex:0 0 auto; }
 .page-account .chip-panel{ flex:1 1 auto; min-height:0; }
 .page-account .chip-ledger__scroll{ flex:1 1 auto; min-height:240px; height:auto; }
 @media (max-width: 600px){ .chip-ledger__item{ padding:10px 12px; } }
@@ -364,10 +366,9 @@ html.netlify-drawer-active .site-footer{ transform:translateY(calc(-1 * var(--ne
 html.netlify-drawer-active .mobile-bottom-nav{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 html.netlify-drawer-active #klaro .cookie-notice{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 
-.shell main.legal-doc,.shell main:has(> h1:first-child),.shell main:has(> .page-boot + h1),.shell main:has(> p:first-child),.shell main:has(> .license-section),.shell main:has(> .page){ max-width:760px; margin:0 auto; width:100%; }
-.shell main{ background:var(--bg) !important; color:var(--tx); }
-.shell main h1{ font-size:28px; font-weight:800; color:var(--tx) !important; margin:24px 0 12px; letter-spacing:-0.01em; }
-.shell main h2{ font-size:20px; font-weight:800; color:var(--tx) !important; margin:24px 0 8px; }
-.shell main h3{ font-size:16px; font-weight:700; color:var(--tx) !important; margin:18px 0 6px; }
-.shell main p,.shell main li{ font-size:15px; line-height:1.7; color:var(--tx); margin:0 0 12px; letter-spacing:normal; word-spacing:normal; }
-.shell main a{ color:var(--ac); }
+.shell main:is([style],.about-page,:has(> .license-section)){ max-width:760px; margin:0 auto; width:100%; background:var(--bg) !important; color:var(--tx) !important; }
+.shell main:is([style],.about-page,:has(> .license-section)) h1{ font-size:28px; font-weight:800; color:var(--tx) !important; margin:24px 0 12px; letter-spacing:-0.01em; }
+.shell main:is([style],.about-page,:has(> .license-section)) h2{ font-size:20px; font-weight:800; color:var(--tx) !important; margin:24px 0 8px; }
+.shell main:is([style],.about-page,:has(> .license-section)) h3{ font-size:16px; font-weight:700; color:var(--tx) !important; margin:18px 0 6px; }
+.shell main:is([style],.about-page,:has(> .license-section)) p,.shell main:is([style],.about-page,:has(> .license-section)) li{ font-size:15px; line-height:1.7; color:var(--tx); margin:0 0 12px; letter-spacing:normal; word-spacing:normal; }
+.shell main:is([style],.about-page,:has(> .license-section)) a{ color:var(--ac); }

@@ -1824,7 +1824,7 @@
       var dot = document.getElementById('pokerBonusDot');
       if (!dot) return;
       var hasDaily = !!(lobbyAuthenticated && dailyState && dailyState.eligible && !dailyState.alreadyClaimed);
-      var hasWelcome = !!(welcomeBonusState && welcomeBonusState.eligible && !welcomeBonusState.alreadyClaimed);
+      var hasWelcome = !!(lobbyAuthenticated && welcomeBonusBanner && !welcomeBonusBanner.hidden);
       dot.hidden = !(hasDaily || hasWelcome);
     }
 
@@ -1861,7 +1861,7 @@
         }
       }
       setMobileLobbyView(view);
-      if (!window.MOBILE_POKER_CONFIG && window.location && window.location.hash !== '#' + view){
+      if (!window.MOBILE_POKER_CONFIG && focusTarget !== false && window.location && window.location.hash !== '#' + view){
         try {
           if (window.history && window.history.replaceState){
             window.history.replaceState(null, '', '#' + view);
