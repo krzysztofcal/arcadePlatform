@@ -1,10 +1,10 @@
-html{ color-scheme:dark; background:#0a0f14; color:#f2f6f9; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-body{ margin:0; background:#0a0f14; color:#f2f6f9; line-height:1.7; font-size:15px; }
-main, .legal-document{ max-width:760px; margin:0 auto; padding:28px 18px 80px; line-height:1.75; color:#f2f6f9; }
+html{ color-scheme:dark; background:#0a0f14; color:#f2f6f9; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; letter-spacing:normal; word-spacing:normal; }
+body{ margin:0; background:#0a0f14; color:#f2f6f9; line-height:1.7; font-size:15px; letter-spacing:normal; word-spacing:normal; }
+main, .legal-document{ max-width:760px; margin:0 auto; padding:28px 18px 80px; line-height:1.75; color:#f2f6f9; letter-spacing:normal; word-spacing:normal; }
 h1{ font-size:28px; font-weight:800; color:#f2f6f9; margin:24px 0 12px; letter-spacing:-0.01em; }
-h2{ font-size:20px; font-weight:800; color:#f2f6f9; margin:24px 0 8px; }
-h3{ font-size:16px; font-weight:700; color:#f2f6f9; margin:18px 0 6px; }
-p, li{ color:#b3c0cd; font-size:15px; line-height:1.7; margin:0 0 12px; }
+h2{ font-size:20px; font-weight:800; color:#f2f6f9; margin:24px 0 8px; letter-spacing:normal; }
+h3{ font-size:16px; font-weight:700; color:#f2f6f9; margin:18px 0 6px; letter-spacing:normal; }
+p, li{ color:#b3c0cd; font-size:15px; line-height:1.7; margin:0 0 12px; letter-spacing:normal; word-spacing:normal; }
 a{ color:#2fe0a0; text-decoration:underline; }
 a:hover{ color:#19b983; }
 table{ width:100%; border-collapse:collapse; margin:16px 0; border:1px solid #2a3a4b; }

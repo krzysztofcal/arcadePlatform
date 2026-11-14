@@ -86,6 +86,7 @@
     pokerPromoTitle: { en: 'Arcade Poker', pl: 'Arcade Poker' },
     pokerPromoSubtitle: { en: 'Texas Hold’em with virtual chips: online, with bots or offline.', pl: 'Texas Hold’em na wirtualne żetony: online, z botami lub offline.' },
     pokerPromoCta: { en: 'Play Poker', pl: 'Wejdź do pokera' },
+    playPoker: { en: 'Play Poker', pl: 'Wejdź do pokera' },
     gameOfTheDay: { en: 'Game of the Day', pl: 'Gra dnia' },
     allGames: { en: 'All games', pl: 'Wszystkie gry' },
     viewAllRecent: { en: 'All ›', pl: 'Wszystkie ›' },
