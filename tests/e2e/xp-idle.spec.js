@@ -63,7 +63,7 @@ test.describe('XP idle behaviour', () => {
     await page.waitForTimeout(SETTLE_DELAY_MS);
 
     const performGesture = async (offset) => {
-      const base = 120 + offset * 30;
+      const base = 300 + offset * 20;
       await page.mouse.move(base, base);
       await page.waitForTimeout(50);
       await page.mouse.down();

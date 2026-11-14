@@ -87,10 +87,7 @@ html[data-auth="out"] #chipBadge{ display:none !important; }
 .hamburger{ display:none !important; }
 @media (max-width: 1023px){ .hamburger{ display:none !important; } }
 @media (max-width: 1023px){ .hamburger span{ display:none !important; } }
-@media (max-width: 1023px){ .sidebar{ position:fixed; left:12px; top:calc(var(--topbar-offset) + 8px); bottom:calc(var(--bottom-nav-h) + 14px + env(safe-area-inset-bottom, 0px)); width:min(280px, calc(100vw - 24px)); height:auto; max-height:calc(100vh - var(--topbar-offset) - var(--bottom-nav-h) - 24px - env(safe-area-inset-bottom, 0px)); padding:14px; border-radius:18px; background:var(--bg2); border:1px solid var(--bd); box-shadow:0 16px 48px rgba(0,0,0,.6); transform:translateX(calc(-100% - 18px)); transition:transform .24s ease; z-index:80; overflow-y:auto; overflow-x:hidden; } }
-@media (max-width: 1023px){ .sidebar.expanded{ transform:translateX(0); } }
-@media (max-width: 1023px){ .sidebar.collapsed{ transform:translateX(calc(-100% - 18px)); } }
-@media (max-width: 1023px){ .sidebar .sb-label{ max-width:180px; opacity:1; } }
+@media (max-width: 1023px){ .sidebar{ display:none; } }
 .sb-nav{ width:100%; }
 .sb-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
 .sb-item{ list-style:none; }
@@ -365,7 +362,8 @@ a.card:hover{ border-color:var(--ac); transform:translateY(-2px); }
 button:focus-visible, a:focus-visible, input:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
 .visually-hidden{ position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .sr-only{ position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-html.netlify-drawer-active .site-footer{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
+html.netlify-drawer-active .site-footer{ padding-bottom:calc(24px + var(--netlify-drawer-offset)); }
+@media (max-width: 1023px){ html.netlify-drawer-active .site-footer{ padding-bottom:calc(var(--bottom-nav-h) + 24px + var(--netlify-drawer-offset) + env(safe-area-inset-bottom, 0px)); } }
 html.netlify-drawer-active .mobile-bottom-nav{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 html.netlify-drawer-active #klaro .cookie-notice{ transform:translateY(calc(-1 * var(--netlify-drawer-offset))); }
 

@@ -48,10 +48,10 @@ test('renders podium, dense rows, outside-page position and period navigation', 
   await expect(page.locator('#leaderboardMe')).toContainText('#42');
   await expect(page.locator('#leaderboardMe a')).toHaveAttribute('href', '/u/ranked-player');
   await expect(page.locator('#xpBadge .xp-badge__label')).toHaveText('Lvl 4, 450 XP');
-  await page.locator('.site-footer [data-lang="pl"]').click();
+  await page.locator('#sidebar [data-lang="pl"]').click();
   await expect(page.locator('#leaderboardTitle')).toHaveText('Ranking XP');
   await expect(page.locator('#leaderboardPageNumber')).toHaveText('Strona 1');
-  await page.locator('.site-footer [data-lang="en"]').click();
+  await page.locator('#sidebar [data-lang="en"]').click();
   await expect(page.locator('#leaderboardTitle')).toHaveText('XP Leaderboard');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

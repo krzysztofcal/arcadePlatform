@@ -198,7 +198,7 @@ test('respects a later bubble handler that cancels an internal link', async ({ p
     link.id = 'cancelledInternalLink';
     link.href = '/account.html?cancelled=1';
     link.textContent = 'Open controlled panel';
-    document.body.appendChild(link);
+    document.querySelector('main').appendChild(link);
     document.addEventListener('click', (event) => {
       if (event.target && event.target.closest && event.target.closest('#cancelledInternalLink')) event.preventDefault();
     });

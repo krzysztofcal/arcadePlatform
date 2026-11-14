@@ -1,9 +1,10 @@
 :root{ --bg:#0a0f14; --panel:#131c25; --border:#2a3a4b; --muted:#b3c0cd; --accent:#2fe0a0; --accent-2:#19b983; }
 *{ box-sizing:border-box; }
 body{ margin:0; background:var(--bg); color:#f2f6f9; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding-bottom:100px; padding-top:calc(var(--topbar-offset, var(--topbar-h, 64px)) + 16px); }
-.layout{ display:grid; grid-template-columns:72px 1fr; gap:16px; padding:14px 18px; min-height:100vh; }
-@media (min-width: 1024px){ .layout{ grid-template-columns:236px 1fr; gap:24px; padding:18px 24px; } }
-@media (max-width: 860px){ .layout{ grid-template-columns:1fr; padding:10px 12px; } .right{ display:none; } }
+.layout{ display:grid; grid-template-columns:minmax(0, 1fr); gap:16px; padding:10px 12px; min-height:100vh; }
+@media (min-width: 1024px){ .layout{ grid-template-columns:236px minmax(0, 1fr); gap:24px; padding:18px 24px; } }
+@media (min-width: 1024px){ .layout > .center{ grid-column:2; } }
+@media (max-width: 860px){ .right{ display:none; } }
 .center{ display:flex; flex-direction:column; gap:14px; padding-bottom:80px; max-width:960px; width:100%; }
 .gameWrap{ background:var(--panel); border:1px solid var(--border); border-radius:20px; padding:12px; position:relative; margin-bottom:20px; overflow:hidden; }
 .gameWrap.fsActive{ border-radius:0; border:none; padding:10px; }
