@@ -148,12 +148,6 @@
 
         <div class="account-status" id="accountStatus" aria-live="polite" hidden></div>
 
-        <section class="card" id="account-deletion" hidden aria-labelledby="accountDeletionWebTitle">
-          <h2 class="h2" id="accountDeletionWebTitle" data-i18n="accountDeletionWebTitle" style="font-size:16px;">Delete your Arcade Poker account</h2>
-          <p class="account-note sub" data-i18n="accountDeletionWebSteps">You can request deletion here in your browser, even after uninstalling the app. Sign in, then choose Delete account in Account and confirm. This deletes your shared game account, not just the app on your device.</p>
-          <p class="account-note sub"><a href="#signinForm" data-i18n="signIn" class="lk">Sign in</a> · <span data-i18n="accountDeletionWebHelp">Cannot sign in or need help? Contact</span> <a href="mailto:contact@kcswh.pl" class="lk">contact@kcswh.pl</a>.</p>
-        </section>
-
         <section id="authForms" data-i18n-aria="authentication" aria-label="Authentication">
           <div class="account-auth-tabs seg" role="tablist" aria-label="Sign in or create account">
             <button type="button" class="account-auth-tab on" id="authTabSignIn" role="tab" aria-selected="true" aria-controls="authSignInPanel" data-i18n="signIn">Sign in</button>
@@ -210,6 +204,12 @@
             </form>
             <p class="account-note sub" data-i18n="accountVerification">We may ask you to verify your email before unlocking cloud sync.</p>
           </div>
+        </section>
+
+        <section class="card" id="account-deletion" tabindex="-1" hidden aria-labelledby="accountDeletionWebTitle">
+          <h2 class="h2" id="accountDeletionWebTitle" data-i18n="accountDeletionWebTitle" style="font-size:16px;">Delete your Arcade Poker account</h2>
+          <p class="account-note sub" data-i18n="accountDeletionWebSteps">You can request deletion here in your browser, even after uninstalling the app. Sign in, then choose Delete account in Account and confirm. This deletes your shared game account, not just the app on your device.</p>
+          <p class="account-note sub"><a href="#signinForm" data-i18n="signIn" class="lk">Sign in</a> · <span data-i18n="accountDeletionWebHelp">Cannot sign in or need help? Contact</span> <a href="mailto:contact@kcswh.pl" class="lk">contact@kcswh.pl</a>.</p>
         </section>
 
         <section class="card account-confirmation" id="signupConfirmation" role="status" aria-live="polite" hidden>

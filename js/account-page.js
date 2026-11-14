@@ -237,7 +237,16 @@
 
   var deletionLinkFocused = false;
   function focusDeletionLink(){
-    if (window.MOBILE_POKER_CONFIG || !currentUser || window.location.hash !== '#account-deletion' || deletionLinkFocused || !nodes.deleteBtn) return;
+    if (window.MOBILE_POKER_CONFIG || window.location.hash !== '#account-deletion') return;
+    if (!currentUser){
+      if (nodes.deletionInfo && !nodes.deletionInfo.hidden){
+        if (nodes.deletionInfo.scrollIntoView) nodes.deletionInfo.scrollIntoView({block:'start'});
+        if (nodes.deletionInfo.classList && nodes.deletionInfo.classList.add) nodes.deletionInfo.classList.add('account-danger-highlight');
+        if (nodes.deletionInfo.focus) nodes.deletionInfo.focus({preventScroll:true});
+      }
+      return;
+    }
+    if (deletionLinkFocused || !nodes.deleteBtn) return;
     deletionLinkFocused = true;
     var dangerZone = nodes.deleteBtn.closest ? nodes.deleteBtn.closest('.account-danger-zone') : null;
     if (dangerZone) dangerZone.classList.add('account-danger-highlight');

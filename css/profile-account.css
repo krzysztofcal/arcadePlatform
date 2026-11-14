@@ -34,16 +34,21 @@
 .auth-panel{background:var(--sf);border:1px solid var(--bd);border-radius:20px;padding:24px;display:flex;flex-direction:column;gap:16px;}
 .auth-panel[hidden]{display:none!important;}
 .account-form{display:flex;flex-direction:column;gap:12px;}
+.account-form[hidden]{display:none!important;}
+.account-form[hidden="until-found"]{display:none!important;}
 .account-form label{font-size:13.5px;font-weight:700;color:var(--tx);}
 .account-form input{height:46px;border-radius:13px;background:var(--bg2);border:1px solid var(--bd);padding:0 14px;color:var(--tx);font-size:15px;width:100%;}
 .account-form input:focus{outline:2px solid var(--ac);outline-offset:1px;}
 .account-form button[type="submit"]{height:46px;border-radius:14px;border:0;background:var(--ac);color:var(--ink);font-weight:800;font-size:15px;cursor:pointer;margin-top:6px;}
 .account-form__link{background:transparent;border:0;color:var(--ac);font-size:14px;font-weight:700;cursor:pointer;text-align:center;padding:6px;}
 .account-google{height:46px;border-radius:14px;border:1px solid var(--bd);background:var(--sf);color:var(--tx);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;}
+.account-google[hidden]{display:none!important;}
 .account-google svg{width:20px;height:20px;flex:0 0 20px;}
 .account-google-divider{display:flex;align-items:center;gap:12px;margin:8px 0;color:var(--mu);font-size:13px;}
+.account-google-divider[hidden]{display:none!important;}
 .account-google-divider::before,.account-google-divider::after{content:"";flex:1;height:1px;background:var(--bd);}
-#account-deletion{border-color:rgba(255,123,123,.4);background:transparent;margin-top:24px;max-width:540px;}
+#account-deletion{border-color:rgba(255,123,123,.4);background:transparent;margin-top:24px;max-width:540px;padding:24px;scroll-margin-top:80px;}
+#account-deletion[hidden]{display:none!important;}
 .account-header-card{display:flex;align-items:center;gap:16px;padding:18px 20px;}
 .account-header-card .av{width:64px;height:64px;border-radius:50%;background:var(--sf2) center/cover;border:2px solid var(--ac);flex:0 0 64px;}
 .account-header-card .h2{font-size:20px;font-weight:800;margin:0;}
@@ -64,7 +69,7 @@
 .chip-ledger__pagination button{height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx);font-weight:700;cursor:pointer;}
 .chip-ledger__page-status{color:var(--mu);font-size:13px;font-weight:600;}
 .account-bonus{border-color:rgba(242,195,91,.55);background:rgba(242,195,91,.07);border-radius:20px;padding:16px;}
-.account-danger-zone{border-color:rgba(255,123,123,.45);background:transparent;border-radius:20px;padding:20px;margin-top:20px;}
+.account-danger-zone{border-color:rgba(255,123,123,.45);background:transparent;border-radius:20px;padding:20px;margin-top:20px;scroll-margin-top:80px;}
 @keyframes accountDangerPulse{0%{box-shadow:0 0 0 0 rgba(255,123,123,.5);}70%{box-shadow:0 0 0 10px rgba(255,123,123,0);}100%{box-shadow:0 0 0 0 rgba(255,123,123,0);}}
 .account-danger-highlight{animation:accountDangerPulse 1.5s ease-out 2;border-color:var(--red)!important;}
 dialog#accountDeletionDialog{border:1px solid var(--bd);border-radius:22px;background:var(--sf);color:var(--tx);padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.7);max-width:440px;width:calc(100% - 32px);}
