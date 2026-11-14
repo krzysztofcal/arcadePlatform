@@ -1,6 +1,6 @@
 -- PREPARED ONLY: not a migration, not authorized to execute. Stage only (#1140); Production needs its own operation.
 -- Target: published Terms 2026-10-28-a2 with Privacy 2026-11-12-a3 (see terms-activation.md for pins and evidence).
--- The APK pin is still a sentinel, so this file refuses to activate until the OWNER approves an APK reader pin.
+-- APK pin: OWNER-approved Stage-only debug APK from #1244 (not a Google Play AAB); valid until 2026-11-20.
 -- One approved activation advances the version and active flag on the same row; no receipt conversion.
 -- Operator must use one connection, stop on first error, ROLLBACK, never retry.
 BEGIN ISOLATION LEVEL REPEATABLE READ;
@@ -25,12 +25,12 @@ BEGIN
  THEN RAISE EXCEPTION 'OWNER/LEGAL version not approved'; END IF;
  -- Reader compatibility is an external preflight attestation, not discoverable by SQL.
  -- Pins: API = WWW runtime main 34a6c3ea, WS = Stage WS release 227fef03 (same WS surface as main),
- -- documents = sha256 of the sorted '<path>:<sha256>' lines of Terms a2 and Privacy a3 PL/EN, APK = not approved yet.
+ -- documents = sha256 of the sorted '<path>:<sha256>' lines of Terms a2 and Privacy a3 PL/EN, APK = Stage debug APK sha256.
  readers:=nullif(current_setting('arcade.terms_readers',true),'')::jsonb;
  IF readers IS NULL OR readers->>'version' IS DISTINCT FROM approved_version
   OR readers->>'apiSha' IS DISTINCT FROM '34a6c3ea96bdce39736b68e6f3ab8fb5c3e5ff82'
   OR readers->>'wsSha' IS DISTINCT FROM '227fef03d187c3b8802ee7422991bbe566f472e2'
-  OR readers->>'apkSha' IS DISTINCT FROM 'APK_SHA_NOT_APPROVED'
+  OR readers->>'apkSha' IS DISTINCT FROM 'a9eb1151c11813fb245866b1cc331636c275a3cf8a3ac3f87ae2d731cc1d1982'
   OR readers->>'documentsSha256' IS DISTINCT FROM 'a9fea5a27e8a59e521132c6f08a64ad58f8a577f5406330c7692320632b7a44f'
   OR readers->>'apiSha'='API_SHA_NOT_APPROVED'
   OR readers->>'wsSha'='WS_SHA_NOT_APPROVED'

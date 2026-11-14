@@ -1,7 +1,7 @@
 # Terms a2 activation — Stage operation and Production proposal (#1140)
 
-**Status:** prepared only. `enable-terms.sql` still refuses to run: the APK reader pin is not approved. No Stage or
-Production SQL is authorized by this file; each execution needs a separate OWNER GO.
+**Status:** prepared only. All Stage reader pins are approved (the APK pin for Stage only). No Stage or Production
+SQL is authorized by this file; each execution needs a separate OWNER GO after the final independent review.
 
 ## Pins in `enable-terms.sql` (verified 2026-11-14, read-only)
 
@@ -13,9 +13,10 @@ Production SQL is authorized by this file; each execution needs a separate OWNER
 | API/WWW reader | `34a6c3ea96bdce39736b68e6f3ab8fb5c3e5ff82` | `main` with the Terms dialog fixes (#1244) |
 | WS reader | `227fef03d187c3b8802ee7422991bbe566f472e2` | Running Stage WS release; same WS surface as `main` and as WS Production `49e785b7` |
 | Documents | `a9fea5a27e8a59e521132c6f08a64ad58f8a577f5406330c7692320632b7a44f` | SHA-256 of the sorted `<path>:<sha256>` lines for `legal/terms.2026-10-28-a2.{pl,en}.html` and `legal/privacy.2026-11-12-a3.{pl,en}.html` |
-| APK reader | **not approved** (`APK_SHA_NOT_APPROVED`) | Candidate for the Stage trial only: debug Stage APK `a9eb1151…1982` from #1244 (`736eb01d`, packaged web identical to `main`; artifact expires 2026-11-20). A debug APK is not the signed Production AAB |
+| APK reader | `a9eb1151c11813fb245866b1cc331636c275a3cf8a3ac3f87ae2d731cc1d1982` | OWNER-approved for **Stage only**: debug APK from #1244, workflow `43525617080`, artifact `14084224474`, source `736eb01d`, application ID `pl.kcswh.arcadepoker.stage`, API origin `https://deploy-preview-1244--playkcswh.netlify.app`, Supabase Stage, WS Preview, Android Debug signature, artifact valid until 2026-11-20. Not a Google Play AAB and never a Production pin |
 
-Approving the APK pin is a reviewed change to the `apkSha` comparison in `enable-terms.sql`; the sentinel guards stay.
+The sentinel guards stay for every pin, so an operator-supplied sentinel is always refused. `34a6c3ea` and
+`736eb01d` differ only in VPS admin operation files and their workflow and guard test, so the APK's Deploy Preview #1244 serves the same web runtime.
 
 ## Stage preconditions (why they differ from Production)
 
@@ -32,15 +33,20 @@ any of these, so Production must not be normalized or migrated just to activate 
    `arcade.terms_legal_version=2026-10-28-a2`, `arcade.terms_readers` (the JSON tuple above), the two fingerprints and
    the receipt count.
 3. Run `enable-terms.sql`; stop on the first error, `ROLLBACK`, never retry blindly.
-4. Stage smoke (Deploy Preview with runtime identical to `34a6c3ea`, WS Preview `227fef03`, approved Stage APK): the
+4. Before the smoke, verify read-only that Deploy Preview #1244 still answers with `build-info.js` commit `736eb01d`
+   (the approved APK's API origin), that WS Preview still runs `227fef03` and that the APK artifact has not expired.
+   If any of these fails, stop: the pins no longer describe the readers.
+5. Stage smoke (Deploy Preview #1244, WS Preview `227fef03`, approved Stage APK): the
    dialog links Terms a2 and Privacy a3; accept; new game, reaction, gift, avatar change; guest accept + reaction;
    "Not now" still allows resume, leave, settlement, leaderboard opt-out and account-deletion request; lobby shows
    the Terms message instead of a raw code.
 
 ## Emergency switch-off
 
-- Stage: `disable-terms.sql` with `arcade.terms_confirmation=DISABLE TERMS krydukthwdvccggbyjfw`. It changes only
-  `active=false`, keeps version a2 and every receipt, shares the activation lock and aborts on any other write.
+- Stage: one session on Stage with exactly `arcade.terms_project=krydukthwdvccggbyjfw` and
+  `arcade.terms_confirmation=DISABLE TERMS krydukthwdvccggbyjfw`, then `disable-terms.sql`. No pins or fingerprints are
+  needed, so it stays usable in an incident. It changes only `active=false`, keeps version a2 and every receipt,
+  shares the activation lock and aborts on any other write; stop on the first error and `ROLLBACK`.
 - Production (proposal, no SQL yet): the same operation with the Production identity (`7575202818581710058`,
   `otbqfijerkieoxwpxjnm`) and phrase `DISABLE TERMS otbqfijerkieoxwpxjnm`, prepared and reviewed together with the
   Production activation.
@@ -52,8 +58,10 @@ A separate operation, not this file: Production identity and phrase; Production 
 `variants_enabled`; no normalization or `bio` requirement); the same receipt/profile fingerprints, single `UPDATE`,
 transaction-write check and lock discipline; reader pins = published WWW Production SHA, running WS Production
 release, the approved signed AAB (or an explicit OWNER decision that no APK reader exists yet) and the same documents
-hash. Order: WWW already serves Terms a2 → Stage trial passed → Production activation in a quiet window (0 humans at
-tables, outside ledger slots) → monitor `terms_required` → APK/AAB → Play Data safety.
+hash. Order: WWW already serves Terms a2 → Stage trial passed → **before activation:** decide how installed older APKs
+behave under mandatory acceptance (they need the #1244 dialog fixes) and confirm Android release readiness (signed
+AAB, Play Data safety) → Production activation in a quiet window (0 humans at tables, outside ledger slots) →
+monitor `terms_required`.
 
 ## User impact once active
 

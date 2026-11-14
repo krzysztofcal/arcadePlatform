@@ -36,12 +36,13 @@ test('guarded Stage Terms activation and deactivation: fail closed, exact histor
   const disable=await readFile(new URL('../../specs/1114-arcade-profiles-avatars/operations/disable-terms.sql',import.meta.url),'utf8');
   // Approved pins live in the operation itself; the literal sentinel guards must stay for every pin.
   const pinOf=key=>original.match(new RegExp("readers->>'"+key+"' IS DISTINCT FROM '([^']+)'"))[1];
-  const real={apiSha:pinOf('apiSha'),wsSha:pinOf('wsSha'),documentsSha256:pinOf('documentsSha256')};
-  for(const value of Object.values(real))assert.match(value,/^[0-9a-f]{40,64}$/,'approved API/WS/documents pins');
-  assert.equal(pinOf('apkSha'),'APK_SHA_NOT_APPROVED','APK reader pin is not approved yet');
+  const real={apiSha:pinOf('apiSha'),wsSha:pinOf('wsSha'),apkSha:pinOf('apkSha'),documentsSha256:pinOf('documentsSha256')};
+  for(const value of Object.values(real))assert.match(value,/^[0-9a-f]{40,64}$/,'approved API/WS/APK/documents pins');
+  // OWNER-approved Stage-only debug APK from #1244 (workflow 43525617080); not a Google Play AAB.
+  assert.equal(real.apkSha,'a9eb1151c11813fb245866b1cc331636c275a3cf8a3ac3f87ae2d731cc1d1982','approved Stage APK pin');
   for(const sentinel of ['API_SHA_NOT_APPROVED','WS_SHA_NOT_APPROVED','APK_SHA_NOT_APPROVED','DOCUMENTS_HASH_NOT_APPROVED'])assert.ok(original.includes("='"+sentinel+"'"),'sentinel guard kept: '+sentinel);
   assert.ok(original.includes("approved_version='OWNER_LEGAL_VERSION_NOT_APPROVED'"),'version sentinel guard kept');
-  const readersWith=over=>JSON.stringify({version:'2026-10-28-a2',...real,apkSha:'fixture-apk',...over});
+  const readersWith=over=>JSON.stringify({version:'2026-10-28-a2',...real,...over});
   const system=(await sql`select system_identifier::text id from pg_control_system()`)[0].id;
   assert.notEqual(system,'7656985631720456337','never use Stage');
   const set=async(k,v)=>sql`select set_config(${k},${v},false)`;
@@ -64,21 +65,20 @@ test('guarded Stage Terms activation and deactivation: fail closed, exact histor
   const local=original.replaceAll('7656985631720456337',system);
   await denied(local,/version not approved/);
   await set('arcade.terms_legal_version','2026-10-28-a2');
-  // As committed, the unapproved APK pin keeps activation refused.
-  await denied(local,/readers preflight not approved/);
-  // Simulate the OWNER approving an APK reader pin; only the comparison changes, the sentinel guard stays.
-  const approvedApk=local.replace("readers->>'apkSha' IS DISTINCT FROM 'APK_SHA_NOT_APPROVED'","readers->>'apkSha' IS DISTINCT FROM 'fixture-apk'");
-  assert.notEqual(approvedApk,local);
-  for(const [key,wrong] of [['version','2026-10-26-a1'],['apiSha','0'.repeat(40)],['wsSha','0'.repeat(40)],['apkSha','other-apk'],['documentsSha256','0'.repeat(64)]]){
+  // Every pin must match exactly; a sentinel value is refused even if supplied by the operator.
+  for(const [key,wrong] of [['version','2026-10-26-a1'],['apiSha','0'.repeat(40)],['wsSha','0'.repeat(40)],['apkSha','0'.repeat(64)],['apkSha','APK_SHA_NOT_APPROVED'],['documentsSha256','0'.repeat(64)]]){
    await set('arcade.terms_readers',readersWith({[key]:wrong}));
-   await denied(approvedApk,/readers preflight not approved/);
+   await denied(local,/readers preflight not approved/);
   }
+  // A committed sentinel comparison keeps the operation refused even when the operator supplies the sentinel.
+  const sentinelApk=local.replace("readers->>'apkSha' IS DISTINCT FROM '"+real.apkSha+"'","readers->>'apkSha' IS DISTINCT FROM 'APK_SHA_NOT_APPROVED'");
+  assert.notEqual(sentinelApk,local);
   await set('arcade.terms_readers',readersWith({apkSha:'APK_SHA_NOT_APPROVED'}));
-  await denied(local,/readers preflight not approved/);
+  await denied(sentinelApk,/readers preflight not approved/);
   await set('arcade.terms_readers',readersWith({}));
-  await denied(approvedApk,/migration\/hash history/);
-  const ready=approvedApk.replace(/manifest_hash constant text := '[0-9a-f]{64}'/,"manifest_hash constant text := '"+createHash('sha256').update(lines.join('\n')).digest('hex')+"'");
-  assert.notEqual(ready,approvedApk);
+  await denied(local,/migration\/hash history/);
+  const ready=local.replace(/manifest_hash constant text := '[0-9a-f]{64}'/,"manifest_hash constant text := '"+createHash('sha256').update(lines.join('\n')).digest('hex')+"'");
+  assert.notEqual(ready,local);
   await sql.unsafe("update private.profile_terms_receipts set request_id='changed-receipt'");
   await denied(ready,/inventory drift/,await state());
   await sql.unsafe("update private.profile_terms_receipts set request_id='old-receipt'");
