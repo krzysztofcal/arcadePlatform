@@ -6,6 +6,7 @@ Before starting any work in this repository, read and follow:
 - `.specify/memory/constitution.md` (binding project constitution)
 
 ## Core Guardrails
+- **VPS Checkout Placement**: Claude Code, Codex and Antigravity MUST create every new VPS checkout/worktree on the verified Hetzner Volume, following `AGENTS.md` → Task workspace lifecycle. Before each creation, run `node scripts/ops/agent-workdir-preflight.mjs <unique-task-name>` and use its successful stdout as the explicit Git destination. Any failure means STOP with no root-disk fallback. Reuse existing task checkouts at their original location; see `docs/agent-work-directories.md` for launcher limitations.
 - **No Self-Merge**: Never merge a pull request unless the user explicitly commands it in the current prompt.
 - **No Unauthorized Deploys**: Agent GitHub access is NOT authorization for Production deployment. Every required OWNER GO is mandatory.
 - **Approved Procedures Only**: Deployments and administrative tasks must use only official approved paths (`WS Server Deploy`, `scripts/www-production-release.mjs`, `VPS Admin Operation`, `DB Stage Apply PR`, `Release Record`). Never bypass via manual SSH, sudo, root, or direct restart (does not preclude OWNER emergency recovery C7).
