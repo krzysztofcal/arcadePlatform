@@ -78,8 +78,9 @@ filesystem, using the placement policy and existing preflight in AGENTS.md,
 Task workspace lifecycle. Current Hetzner device protections MUST remain in
 force; another host requires separately OWNER-approved filesystem identity
 and provisioning. Missing or unverifiable identity, mount or permissions,
-or any preflight failure, MUST mean STOP without fallback to the system disk. Existing task checkouts MUST remain at
-their original locations and be reused; this rule authorizes no migration or cleanup. See
+or any preflight failure, MUST mean STOP without fallback to the system disk.
+Existing task checkouts MUST remain at their original locations and be reused;
+this rule authorizes no migration or cleanup. See
 docs/agent-work-directories.md for the explicit Git destination and launcher
 limitations.
 

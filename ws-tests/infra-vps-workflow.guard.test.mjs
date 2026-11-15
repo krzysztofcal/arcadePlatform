@@ -2002,6 +2002,7 @@ test('storage configuration and mount failures never fall back to Hetzner or roo
   const mutations = [
     fx => { fx.text = '{'; }, fx => { fx.text = '{}'; }, fx => { fx.text = 'null'; },
     fx => { fx.text = JSON.stringify({ uuid: '../../sda1' }); },
+    fx => { fx.text = JSON.stringify({ uuid: 'AAAAAAAA-2222-4333-8444-555555555555' }); },
     fx => { fx.text = JSON.stringify({ uuid: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }); },
     fx => { fx.text = JSON.stringify({ uuid: fx.uuid, mount: '/tmp' }); },
     fx => { fx.meta.get(fx.config).uid = 1000; }, fx => { fx.meta.get(fx.config).gid = 1000; },
@@ -2011,7 +2012,7 @@ test('storage configuration and mount failures never fall back to Hetzner or roo
     fx => { fx.meta.get('/etc/arcadeplatform').uid = 1000; },
     fx => { fx.redirected = '/etc/arcadeplatform'; }, fx => { fx.redirected = fx.config; },
     fx => { fx.io.fs.readFileSync = () => { throw new Error('unreadable'); }; },
-    fx => { fx.io.fs.lstatSync = () => { throw new Error('unverifiable'); }; },
+    fx => { fx.io.fs.lstatSync = () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); }; },
     fx => { fx.status = 1; }, fx => { fx.output = ''; },
     fx => { fx.output = `${fx.mount} /dev/unknown ext4 rw`; },
     fx => { fx.output = `${fx.mount} /dev/nvme0n1p2 ext4 ro`; },
@@ -2036,4 +2037,52 @@ test('storage configuration and mount failures never fall back to Hetzner or roo
   for (const slug of ['', '.', '..', '../escape', '/tmp/task', 'a/b', 'a b', 'a'.repeat(81)]) {
     assert.throws(() => newAgentWorkdir(slug, agentStorageFixture().io), /STOP agent_workdir/);
   }
+});
+
+
+test('invalid config cannot select an otherwise valid Hetzner fallback', async () => {
+  const { newAgentWorkdir } = await import('../scripts/ops/agent-workdir-preflight.mjs');
+  const fx = agentStorageFixture();
+  const mount = '/mnt/HC_Volume_107462648';
+  const root = `${mount}/copilot-work`;
+  fx.meta.set(mount, fx.meta.get(fx.mount));
+  fx.meta.set(root, fx.meta.get(fx.root));
+  fx.meta.set('/dev/sdb', fx.meta.get('/dev/nvme0n1p2'));
+  const lstat = fx.io.fs.lstatSync;
+  const realpath = fx.io.fs.realpathSync;
+  let absent = true;
+  const mounts = [];
+  fx.io.fs.lstatSync = p => {
+    if (p === fx.config && absent) throw Object.assign(new Error('absent'), { code: 'ENOENT' });
+    return lstat(p);
+  };
+  fx.io.fs.realpathSync = p => p === '/dev/disk/by-id/scsi-0HC_Volume_107462648' ? '/dev/sdb' : realpath(p);
+  fx.io.run = argv => {
+    mounts.push(argv[4]);
+    return { status: 0, stdout: `${mount} /dev/sdb ext4 rw` };
+  };
+  // First prove this alternate target really could allocate if selected.
+  assert.equal(newAgentWorkdir('task-1257', fx.io), `${root}/task-1257`);
+  assert.deepEqual(mounts, [mount]);
+  absent = false; mounts.length = 0;
+  for (const badConfig of ['{', '{}', JSON.stringify({ uuid: 'unknown' }),
+    JSON.stringify({ uuid: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' })]) {
+    fx.text = badConfig;
+    assert.throws(() => newAgentWorkdir('task-1257', fx.io), /STOP agent_workdir/);
+    assert.deepEqual(mounts, [], 'invalid config is refused before any alternate mount lookup');
+  }
+  fx.text = JSON.stringify({ uuid: fx.uuid });
+  fx.io.run = argv => {
+    mounts.push(argv[4]);
+    return argv[4] === mount ? { status: 0, stdout: `${mount} /dev/sdb ext4 rw` } : { status: 1, stdout: '' };
+  };
+  assert.throws(() => newAgentWorkdir('task-1257', fx.io), /STOP agent_workdir volume_not_verified_rw_mount/);
+  assert.deepEqual(mounts, ['/mnt/agent-work'], 'failed configured mount must not try valid Hetzner');
+  mounts.length = 0;
+  fx.io.fs.lstatSync = p => {
+    if (p === fx.config) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    return lstat(p);
+  };
+  assert.throws(() => newAgentWorkdir('task-1257', fx.io), /STOP agent_workdir storage_config_unavailable/);
+  assert.deepEqual(mounts, []);
 });

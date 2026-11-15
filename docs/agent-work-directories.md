@@ -19,7 +19,7 @@ As inspected on 2026-11-14 at main `34a6c3ea`:
 | Codex `create_worktree` tool | Exposes a ref, but no destination parameter; existing tool attachments and Git worktrees can be listed | Reuse the recorded checkout. For new tasks use Git with the checked destination until the native tool supports selecting it; do not call it and then move the result |
 | Claude Code `--worktree` | Creates a worktree automatically; existing examples/worktrees use `.claude/worktrees` | Open Claude from an explicitly prepared Volume worktree, without `--worktree`; resume an existing task in its recorded directory |
 | `~/.claude/skills/agy-implement/agy-implement.sh` | Takes an existing `--worktree`, verifies the `agy/*` branch and uses a per-worktree lock; it does not create the worktree | Coordinator creates the worktree on the Volume and passes that exact path; reuse it for worker follow-ups |
-| Local `agy-implement/SKILL.md` | Example currently creates `/home/copilot/work/agy-<slug>` | Use the checked Volume path instead; the shared repo rule takes precedence over the example |
+| Local `agy-implement/SKILL.md` | Historical root-path example; superseded by the 2026-11-15 inspection below | Use the reviewed host-specific preflight/path pins and its checked destination |
 | Repo `AGENTS.md`, Claude `CLAUDE.md` | Shared lifecycle policy; `CLAUDE.md` directs Claude to read `AGENTS.md` | Read current shared instructions before allocating a workspace; pass them to delegated workers |
 
 No existing repository checkout manager was found. The change retains Git and
@@ -102,6 +102,8 @@ For the future dev host, the alternate contract is deliberately fixed:
   config means STOP; an invalid configured target never retries Hetzner.
 - `/dev/disk/by-uuid/<uuid>` must resolve to the actual block device mounted
   EXT4 rw at exactly `/mnt/agent-work`. Device names are not pinned on OVH.
+  Use a plain disk/partition; LVM/device-mapper source aliases are not supported
+  and STOP when the resolved device name differs from `findmnt`.
   Both host contracts reject the system filesystem, redirected mount/workspace
   paths and a mount directory writable by non-root users.
 - `copilot-work` must be a real directory on that same filesystem, owned by the
@@ -124,8 +126,8 @@ This expands constitution VI to provider-neutral verified storage (1.4.0 →
 It does not authorize provisioning, migration, WS changes or T004–T008.
 
 This check is a point-in-time guard, not a mount lock or a security sandbox for
-agents that can run arbitrary commands. Do not unmount/change the selected filesystem while
-agents allocate or use worktrees; if mount identity changes, stop allocation
+agents that can run arbitrary commands. Do not unmount/change the selected
+filesystem while agents allocate or use worktrees; if mount identity changes, stop allocation
 and investigate rather than writing to the root filesystem. The mount directory
 is root-owned and not writable by copilot when unmounted; do not change it or
 create fallback parents. No script here remounts it or repairs permissions.
@@ -241,7 +243,7 @@ launchers, `findmnt`, `df`, `du` and readable `/proc` cwd/environment:
 | `~/.codex` | Root, ~5.3 GiB; sessions ~3.2 GiB, packages ~996 MiB, `.tmp` ~87 MiB, generated_images ~73 MiB | Retain sessions, SQLite state, auth, locks and installed packages; TMPDIR does not relocate these stores |
 | Claude executable | NVM `@anthropic-ai/claude-code/bin/claude.exe`; active readable cwd `/home/copilot/work/arcadePlatform2`, no task TMPDIR/cache overrides | Future explicit cwd and scoped environment; no active-session changes |
 | `~/.claude`, `/tmp/claude-1001` | Root, ~129 MiB and ~1.9 GiB respectively; projects ~98 MiB | Keep session/file-history/config stores; use task TMPDIR for future cooperating temporary writes, verify actual CLI behavior |
-| Antigravity `~/.local/bin/agy` and `agy-implement.sh` | Binary on root; wrapper inherits environment and accepts arbitrary `--out`; no readable active agy process observed | Separate OWNER GO to update installed skill's two stale root allocation examples and add scoped launch recipe/pre-heavy check; pass Volume `--out` |
+| Antigravity `~/.local/bin/agy` and `agy-implement.sh` | Binary on root; wrapper inherits environment and accepts arbitrary `--out`; no readable active agy process observed | Historical activation note superseded by the 2026-11-15 inspection above; OVH still needs separate GO to update host path/hash pins; pass verified-filesystem `--out` |
 | `~/.gemini/antigravity-cli` | Root, ~745 MiB; conversations ~387 MiB, brain ~323 MiB | Keep brain/conversations/config/identity; use scoped TMPDIR and explicit wrapper outputs; optional `agy --log-file` only for new disposable diagnostic logs |
 | `/tmp`, `~/.cache`, `~/.npm` | Root, ~6.4 GiB, ~1.4 GiB, ~375 MiB; Playwright ~924 MiB, arcadeplatform cache ~412 MiB | Future task settings above; no cache/session migration authorized |
 
