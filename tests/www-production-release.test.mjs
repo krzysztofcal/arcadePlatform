@@ -572,3 +572,18 @@ test('a failed-job-only rerun cannot bypass the record gate and create a Release
   assert.equal(result.status, 1);
   assert.match(result.stdout + result.stderr, /publish only on the first attempt; dispatch again/);
 });
+
+test('missing or unreadable execute receipts always mean uncertainty, preventing automatic discard', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'www-receipt-'));
+  const file = path.join(dir, 'receipt.json');
+  try {
+    for (const content of [null, '{truncated', 'null', '{}', '{"status":"unknown"}']) {
+      if (content === null) { if (fs.existsSync(file)) fs.unlinkSync(file); }
+      else fs.writeFileSync(file, content);
+      assert.throws(() => actions.readReleaseReceipt(file, true), error => error.uncertain === true);
+      assert.throws(() => actions.readReleaseReceipt(file, false), error => error.uncertain === false);
+    }
+    fs.writeFileSync(file, '{"status":"published"}');
+    assert.equal(actions.readReleaseReceipt(file, true).status, 'published');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

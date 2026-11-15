@@ -126,12 +126,25 @@ export async function liveSmoke({ sha, deployId, api, readTarget, published = tr
   return { status: published ? 'live_verified' : 'candidate_static_verified', sha, deployId };
 }
 
+// An interrupted execute can leave a missing/truncated receipt after restore. Never classify that as pre-publish.
+export function readReleaseReceipt(file, execute) {
+  try {
+    const receipt = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const known = ['dry_run_pass', 'checks_failed', 'not_published', 'published', 'published_smoke_failed', 'uncertain', 'discarded', 'discard_unverified'];
+    if (!receipt || !known.includes(receipt.status)) throw new Error('invalid_receipt');
+    return receipt;
+  } catch {
+    const error = new Error('release_receipt_unreadable_STOP');
+    error.uncertain = execute;
+    throw error;
+  }
+}
+
 function release(args, file, env) {
   const r = spawnSync(process.execPath, ['scripts/www-production-release.mjs', ...args, '--receipt', file], {
     env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 180000
   });
-  if (!fs.existsSync(file)) { const e = new Error('release_receipt_missing_STOP'); e.uncertain = args.includes('--execute'); throw e; }
-  const receipt = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const receipt = readReleaseReceipt(file, args.includes('--execute'));
   if (r.status !== 0) { const e = new Error(`release_${receipt.status}_STOP`); e.receipt = receipt; throw e; }
   return receipt;
 }
