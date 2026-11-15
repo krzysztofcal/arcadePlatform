@@ -74,7 +74,7 @@ export function approvedWwwRecord(run, jobs, reviews, receipt, owner) {
   const published = (jobs?.jobs || []).filter(j => j.name === 'publish');
   if (published.length !== 1 || published[0].conclusion !== 'success'
     || !ownerApproved(reviews, 'www-production', owner) || receipt?.schema !== 1
-    || String(receipt.runId) !== String(run.id) || receipt.status !== 'live_verified'
+    || !RUN_ID.test(String(receipt.candidateRunId)) || String(receipt.runId) !== String(run.id) || receipt.status !== 'live_verified'
     || receipt.sha !== run.head_sha || !DEPLOY.test(receipt.deployId || '')
     || receipt.release?.status !== 'published' || receipt.release.sha !== receipt.sha || receipt.release.deployId !== receipt.deployId
     || receipt.smoke?.status !== 'live_verified' || receipt.smoke.sha !== receipt.sha || receipt.smoke.deployId !== receipt.deployId) fail('www_approved_chain_unproven');

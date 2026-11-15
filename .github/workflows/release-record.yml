@@ -1,12 +1,12 @@
 name: Release Record
 
 # #1159 Addendum B: records the running WWW, WS and Android versions as one GitHub Release (tag
-# release-<UTC date>-<run number>, single asset release-manifest.json). Each record changes one component, verified
+# release-<UTC date>-<run number> (direct) or <run ID> (approved WWW chain), single asset release-manifest.json). Each record changes one component, verified
 # from existing evidence, and carries the others unchanged from the previous record. It deploys nothing: no
 # deployment, WS restart, migration, WWW publication or Google Play upload is reachable here, and a tag or release
 # created with GITHUB_TOKEN starts no workflow. The record job (dry run, owner or release agent) has read-only
 # permissions; only the publish job, run solely when the owner dispatched with publish=true, may create the tag and
-# release. Android attestation is owner-only.
+# release. The verified OWNER WWW chain may call this workflow for WWW only. Android attestation is owner-only.
 on:
   workflow_dispatch:
     inputs:
@@ -63,6 +63,7 @@ on:
           - production
 
   # Narrow caller capability, validated against github.workflow_ref and owner approval below.
+  # WS/Android inputs deliberately exist only on workflow_dispatch; the narrow reusable path is WWW-only.
   workflow_call:
     inputs:
       component:
@@ -149,8 +150,8 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/releases/tags/$LATEST" > .release/previous-release.json
             PREVIOUS_RUN_ID="$(jq -r '.recordedBy.runId // ""' .release/previous/release-manifest.json)"
             [[ "$PREVIOUS_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || { echo "previous record names no Release Record run"; exit 1; }
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID" > .release/previous-run.json
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/jobs?per_page=100" > .release/previous-jobs.json
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/attempts/1" > .release/previous-run.json
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/attempts/1/jobs?per_page=100" > .release/previous-jobs.json
             if [[ "$(jq -r .path .release/previous-run.json)" == .github/workflows/www-publish.yml ]]; then
               gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/approvals" | jq '{reviews: .}' > .release/previous-www-chain.json
               echo 'PREVIOUS_WWW_CHAIN_FILE=.release/previous-www-chain.json' >> "$GITHUB_ENV"

@@ -61,3 +61,19 @@ the AAB SHA-256 (the AAB stays with Google Play).
   dispatch. There is no secret, environment, SSH, Netlify or Play access.
 - A tag or release created with `GITHUB_TOKEN` starts no workflow, and no workflow triggers on tags or releases;
   every `push` trigger is limited to `main` (guarded by `tests/www-production-release.test.mjs`).
+
+## Approved WWW publication chain (#1254, activation requires separate OWNER GO)
+
+After the two OWNER-only WWW actions in [the WWW SOP](www-production-release.md), successful static LIVE verification
+calls this same workflow for WWW only. The reusable path requires the exact `www-publish.yml@refs/heads/main` caller,
+OWNER actor and triggering actor, first attempt, actual `www-production` OWNER approval, successful publication job
+and immutable `www-publication-1` receipt. It grants no agent/app or arbitrary workflow publication capability and
+inherits no secrets. The direct OWNER dispatch remains available, including reconciliation if a record fails after
+Production publication.
+
+Chained tags are `release-<UTC date>-<workflow run ID>`; direct records retain the run-number suffix. Schema stays 1:
+WWW evidence adds `publicationRunId`, `candidateRunId`, `environment`. Later records verify the immutable asset,
+original successful owner run/record job and approval history. They read **attempt 1**, not mutable latest-attempt
+metadata; a skipped unauthorized rerun cannot invalidate a recorded release. Expired operational artifacts do not
+invalidate immutable records. Chained records permanently retain the origin references; the first chain check uses
+the unexpired publication artifact. Existing direct records remain valid.

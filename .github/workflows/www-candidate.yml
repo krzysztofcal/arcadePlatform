@@ -74,8 +74,9 @@ jobs:
         with:
           name: www-candidate-1
           path: .www/*.json
+          include-hidden-files: true
           retention-days: 1
-          if-no-files-found: warn
+          if-no-files-found: error
       - name: Reconcile failed or cancelled candidate without guessing
         if: ${{ failure() || cancelled() }}
         env:
@@ -88,6 +89,7 @@ jobs:
         with:
           name: www-candidate-cleanup-1
           path: .www/*.json
+          include-hidden-files: true
           retention-days: 7
           if-no-files-found: warn
       - name: Remove ephemeral SSH material

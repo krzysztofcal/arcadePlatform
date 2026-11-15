@@ -42,7 +42,7 @@ Use the existing read-only SSH mechanism, not the WS deployment account/key. Eph
 1. Actions → **Create WWW Candidate**, branch `main`, optional full `sha` equal to current main HEAD. Approve
    `www-candidate`. This calls the existing hook once with a unique run/attempt/random title, correlates a *new*
    exact-SHA production deploy through the Netlify API, waits boundedly for ready, then runs the existing complete
-   dry-run. Summary provides the permalink and candidate run link/ID. No automatic publication.
+   dry-run and the same full static smoke against the candidate before publication. Summary provides the permalink and candidate run link/ID. No automatic publication.
 2. Within **30 minutes from candidate creation**, Actions → **Publish WWW Production**, branch `main`, input
    `candidate_run_id` from step 1; approve `www-production`. It accepts only a successful owner main candidate run,
    attempt 1, with one immutable `www-candidate-1` artifact and exact provenance. It runs the existing full validation
@@ -52,7 +52,7 @@ Use the existing read-only SSH mechanism, not the WS deployment account/key. Eph
 
 Both actions share one concurrency group (including approval wait and record); do not enqueue unrelated releases.
 GitHub concurrency is not an unbounded FIFO: a later queued request can replace a pending one. Never rerun a run;
-attempts beyond 1 fail closed. Avoid merges and WS deployments during release. Reconcile interrupted runs before
+attempts beyond 1 cannot operate; source/previous evidence is pinned to original attempt 1. Avoid merges and WS deployments during release. Reconcile interrupted runs before
 starting another release. No lock can prevent an OWNER out-of-band Netlify operation; existing final checks detect drift.
 
 LIVE verification reads only `/`, `/js/build-info.js`, canonical Terms PL/EN, Privacy PL/EN and `/account.html`.
@@ -66,8 +66,8 @@ Candidate permalinks expose Production functions. Do not test mutations there or
 A failed candidate attempts the existing guarded discard. Failed/cancelled jobs also reconcile only their own saved
 intent/unique marker and attempt guarded discard; building/unknown/published deploys cannot be deleted. Hard runner
 loss or job timeout can prevent cleanup entirely: inspect the artifact/summary and reconcile manually. An unidentified
-hook response or an ambiguous title is STOP, never permission to pick the latest deploy. Polling is bounded to about
-10 minutes, API requests have deadlines, and the hook POST is never retried.
+hook response or an ambiguous title is STOP, never permission to pick the latest deploy. Polling is bounded by a wall-clock deadline of about
+10 minutes (plus an in-flight bounded API request), API requests have deadlines, and the hook POST is never retried.
 
 For an abandoned or expired successful candidate use **Publish WWW Production** with its `candidate_run_id` and
 `discard=true`, then approve the environment. Stale/expired candidates encountered by normal publish are discarded

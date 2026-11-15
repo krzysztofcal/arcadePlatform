@@ -82,8 +82,9 @@ jobs:
         with:
           name: www-publication-1
           path: .www/*.json
+          include-hidden-files: true
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error
       - name: Remove ephemeral SSH material
         if: ${{ always() }}
         run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts

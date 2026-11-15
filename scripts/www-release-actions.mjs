@@ -56,11 +56,24 @@ export function correlatedCandidate(deploys, { marker, sha, startedAt, previousI
   if (matches.length > 1) fail('ambiguous_hook_candidates');
   if (!matches.length) return null;
   const d = matches[0];
-  if (!ID.test(d.id || '') || previousIds.includes(d.id) || !(Date.parse(d.created_at) >= Date.parse(startedAt))
-    || d.site_id !== SITE.id || d.context !== 'production' || d.branch !== 'main' || d.commit_ref !== sha
+  if (!ID.test(d.id || '') || previousIds.includes(d.id) || !(Date.parse(d.created_at) >= Date.parse(startedAt) - 60000)
+    || d.site_id !== SITE.id || d.context !== 'production' || d.branch !== 'main'
     || d.review_id || d.published_at) fail('hook_candidate_identity_mismatch');
   return d;
 }
+
+// The unique new ID is saved before final identity checks, so a stale-main build can still be safely discarded.
+export function hookCandidateReady(deploy, sha) {
+  if (!['ready', 'error'].includes(deploy.state)) return false; // commit_ref may be null before clone.
+  if (deploy.commit_ref !== sha) fail('hook_candidate_sha_mismatch');
+  if (deploy.state === 'error') fail('candidate_build_failed');
+  return true;
+}
+const targetFile = (sha, path) => {
+  const r = spawnSync('git', ['show', `${sha}:${path}`], { encoding: 'utf8' });
+  if (r.status !== 0) fail('target_file_unreadable');
+  return r.stdout;
+};
 
 function checkContext(workflow, env, requireHead = true) {
   if (env.GITHUB_REPOSITORY !== REPO || env.GITHUB_REF !== 'refs/heads/main' || env.GITHUB_EVENT_NAME !== 'workflow_dispatch'
@@ -88,7 +101,7 @@ async function staticGet(origin, path) {
   if (r.status !== 200) fail(`static_http_${r.status}:${path}`);
   return { body: await r.text(), headers: r.headers };
 }
-export async function liveSmoke({ sha, deployId, api, readTarget, get = path => staticGet(SITE.url, path) }) {
+export async function liveSmoke({ sha, deployId, api, readTarget, published = true, get = path => staticGet(SITE.url, path) }) {
   const info = parseBuildInfo((await get(`/js/build-info.js?release=${deployId}`)).body);
   if (info?.commitHash !== sha || info.deployId !== deployId || info.context !== 'production'
     || info.branch !== 'main' || info.siteUrl !== SITE.url || info.pokerWsUrl !== SITE.ws || info.isProduction !== true) fail('live_identity_mismatch');
@@ -108,8 +121,9 @@ export async function liveSmoke({ sha, deployId, api, readTarget, get = path => 
   const account = (await get('/account.html')).body;
   if (account !== readTarget('account.html')) fail('live_account_route_mismatch');
   const site = await api.site();
-  if (site.id !== SITE.id || site.published_deploy?.id !== deployId || site.published_deploy.locked !== true) fail('live_published_lock_mismatch');
-  return { status: 'live_verified', sha, deployId };
+  if (site.id !== SITE.id || site.published_deploy?.locked !== true
+    || (published ? site.published_deploy.id !== deployId : site.published_deploy.id === deployId)) fail('live_published_lock_mismatch');
+  return { status: published ? 'live_verified' : 'candidate_static_verified', sha, deployId };
 }
 
 function release(args, file, env) {
@@ -146,7 +160,9 @@ async function candidate(env) {
     // Never retry this POST. Correlate by the documented exact trigger_title, not by the latest deploy or response shape.
     const r = await fetch(hook, { method: 'POST', body: '{}', redirect: 'error', signal: AbortSignal.timeout(20000) });
     if (!r.ok) fail('hook_response_failed_STOP');
-    for (let i = 0; i < 60; i++) {
+    const deadline = Date.now() + 10 * 60 * 1000;
+    let ready = false;
+    while (Date.now() < deadline) {
       const locked = await api.site();
       if (locked.published_deploy?.id !== site.published_deploy.id || locked.published_deploy?.locked !== true) fail('published_lock_changed_STOP');
       const deploys = await apiGet(`/sites/${SITE.id}/deploys?per_page=100`, env);
@@ -155,22 +171,24 @@ async function candidate(env) {
         p.deployId = d.id; p.status = 'candidate_building'; save('.www/candidate.json', p);
         const full = await api.deploy(d.id);
         correlatedCandidate([full], { marker: p.marker, sha, startedAt: p.createdAt, previousIds: before.map(x => x.id) });
-        if (full.state === 'error') fail('candidate_build_failed');
-        if (full.state === 'ready') break;
+        if (hookCandidateReady(full, sha)) { ready = true; break; }
       }
-      if (i === 59) fail('candidate_poll_timeout_STOP');
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      await new Promise(resolve => setTimeout(resolve, Math.min(10000, Math.max(0, deadline - Date.now()))));
     }
     if (!p.deployId) fail('candidate_unidentified_STOP');
+    if (!ready) fail('candidate_poll_timeout_STOP');
     p.validation = release(['--sha', sha, '--deploy', p.deployId], '.www/dry-run.json', env);
+    p.staticValidation = await liveSmoke({ sha, deployId: p.deployId, api, published: false,
+      readTarget: path => targetFile(sha, path), get: path => staticGet(`https://${p.deployId}--${SITE.name}.netlify.app`, path) });
     p.status = 'candidate_ready'; save('.www/candidate.json', p);
     summary(`Candidate ready: https://${p.deployId}--${SITE.name}.netlify.app\n\nSHA: ${sha}\n\nCandidate run: https://github.com/${REPO}/actions/runs/${p.runId} (attempt 1). Publish within 30 minutes; otherwise discard.`, env);
   } catch (e) {
+    const hookNotCalled = p.status === 'hook_not_called';
     p.status = 'candidate_failed_STOP';
     if (p.deployId) {
       try { p.discard = release(['--discard', '--deploy', p.deployId, '--confirm', discardPhrase(p.deployId)], '.www/discard.json', env); }
       catch { p.status = 'discard_unverified_STOP'; }
-    } else p.status = 'unidentified_hook_outcome_STOP';
+    } else p.status = hookNotCalled ? 'hook_not_called' : 'unidentified_hook_outcome_STOP';
     save('.www/candidate.json', p);
     summary(`STOP: ${p.status}. Inspect this run's receipt and reconcile hook marker; do not guess or delete another deploy.`, env);
     throw e;
@@ -181,7 +199,7 @@ async function publish(env) {
   checkContext('www-publish', env);
   checkEnvironment('www-production', env, true);
   if (!RUN.test(env.CANDIDATE_RUN_ID || '')) fail('invalid_candidate_run_id');
-  const run = gh(`actions/runs/${env.CANDIDATE_RUN_ID}`);
+  const run = gh(`actions/runs/${env.CANDIDATE_RUN_ID}/attempts/1`);
   trustedOwnerRun(run, 'krzysztofcal', 'www-candidate');
   const artifacts = gh(`actions/runs/${run.id}/artifacts?per_page=100`).artifacts;
   const matches = artifacts.filter(a => a.name === 'www-candidate-1' && !a.expired);
@@ -192,8 +210,10 @@ async function publish(env) {
   // Expired/stale candidates can only be discarded. Identity/provenance must pass even on cleanup.
   const receipt = { schema: 1, runId: env.GITHUB_RUN_ID, candidateRunId: String(run.id), sha: p.sha, deployId: p.deployId, status: 'not_published' };
   save('.www/publication.json', receipt);
+  let discardAttempted = false;
   try {
     if (env.DISCARD === 'true' || p.sha !== env.GITHUB_SHA || Date.now() - Date.parse(p.createdAt) > 30 * 60 * 1000) {
+      discardAttempted = true;
       receipt.discard = release(['--discard', '--deploy', p.deployId, '--confirm', discardPhrase(p.deployId)], '.www/discard.json', env);
       receipt.status = 'discarded'; save('.www/publication.json', receipt);
       summary('Candidate discarded with API and permalink 404 proof. No publication.', env);
@@ -204,7 +224,7 @@ async function publish(env) {
     receipt.status = 'publication_uncertain_STOP'; save('.www/publication.json', receipt);
     receipt.release = release(['--sha', p.sha, '--deploy', p.deployId, '--execute', '--confirm', phrase(p.sha, p.deployId)], '.www/release.json', env);
     receipt.status = 'published_smoke_pending'; save('.www/publication.json', receipt);
-    receipt.smoke = await liveSmoke({ sha: p.sha, deployId: p.deployId, api: netlifyApi(env.NETLIFY_AUTH_TOKEN), readTarget: path => { const r = spawnSync('git', ['show', `${p.sha}:${path}`], { encoding: 'utf8' }); if (r.status !== 0) fail('target_file_unreadable'); return r.stdout; } });
+    receipt.smoke = await liveSmoke({ sha: p.sha, deployId: p.deployId, api: netlifyApi(env.NETLIFY_AUTH_TOKEN), readTarget: path => targetFile(p.sha, path) });
     receipt.status = 'live_verified';
     fs.appendFileSync(env.GITHUB_OUTPUT, `deploy_id=${p.deployId}\nsha=${p.sha}\nverified=true\n`);
     summary(`Published and LIVE verified: ${p.sha}, deploy ${p.deployId}, locked. Release Record follows automatically.`, env);
@@ -214,7 +234,7 @@ async function publish(env) {
       receipt.status = e.uncertain || receipt.release?.status === 'uncertain' ? 'uncertain_STOP' : 'published_smoke_failed_STOP';
       summary(`STOP: ${receipt.status}. Production may already have changed. No retry, rollback or deletion. OWNER decision required.`, env);
     } else if (receipt.status !== 'discarded') {
-      try { receipt.discard = release(['--discard', '--deploy', p.deployId, '--confirm', discardPhrase(p.deployId)], '.www/discard.json', env); receipt.status = 'not_published_discarded'; }
+      try { if (discardAttempted) fail('discard_already_attempted_STOP'); receipt.discard = release(['--discard', '--deploy', p.deployId, '--confirm', discardPhrase(p.deployId)], '.www/discard.json', env); receipt.status = 'not_published_discarded'; }
       catch { receipt.status = 'discard_unverified_STOP'; }
       summary(`STOP: ${receipt.status}. Consult receipts.`, env);
     }
@@ -275,7 +295,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     else fail('unknown_operation');
   }).catch(e => {
     // Do not log fetch errors: they can contain the secret hook URL.
-    summary('STOP: release action failed. Read the sanitized receipts; never retry an uncertain publication.', env);
-    process.stderr.write('WWW_ACTION_STOP (see receipts)\n'); process.exitCode = 1;
+    const code = /^[a-z0-9_,:./-]+(?:_STOP)?$/.test(e.message || '') ? e.message : 'details_suppressed';
+    summary(`STOP: ${code}. Read the sanitized receipts; never retry an uncertain publication.`, env);
+    process.stderr.write(`WWW_ACTION_STOP ${code} (see receipts)\n`); process.exitCode = 1;
   });
 }

@@ -317,7 +317,7 @@ test('release record workflow publishes one manifest asset and cannot reach any 
   assert.match(record, /\[\[ "\$CONFIRMATION" == "RECORD \$COMPONENT RELEASE" \]\]/);
   assert.match(record, /ws-server-deploy\.yml\/runs\?branch=main&event=workflow_dispatch/);
   assert.match(record, /releases\/tags\/\$LATEST" > \.release\/previous-release\.json/, 'the previous release is checked, not only its asset');
-  assert.match(record, /actions\/runs\/\$PREVIOUS_RUN_ID\/jobs/, 'the run the previous manifest names is checked');
+  assert.match(record, /actions\/runs\/\$PREVIOUS_RUN_ID\/attempts\/1\/jobs/, 'the run the previous manifest names is checked');
   assert.match(publish, /--jq \.immutable\)"\n.*\[\[ "\$IMMUTABLE" == true \]\]/, 'a published record must be immutable');
   for (const block of workflow.split(/\n      - name: /).slice(1)) {
     const script = block.split('run: |')[1] || '';
@@ -474,7 +474,7 @@ test('hook correlation identifies only a unique new exact-SHA production candida
   const options = { marker, sha, startedAt: '2026-11-15T10:00:00Z', previousIds: [live] };
   assert.equal(actions.correlatedCandidate([deploy], options).id, id);
   assert.equal(actions.correlatedCandidate([{ ...deploy, title: 'other' }], options), null);
-  for (const list of [[deploy, { ...deploy, id: 'e'.repeat(24) }], [{ ...deploy, commit_ref: ws }], [{ ...deploy, id: live }]]) {
+  for (const list of [[deploy, { ...deploy, id: 'e'.repeat(24) }], [{ ...deploy, id: live }]]) {
     assert.throws(() => actions.correlatedCandidate(list, options));
   }
 });
@@ -490,7 +490,7 @@ test('automatic record accepts only successful owner WWW publication with actual
   const run = ownerRun({ path: '.github/workflows/www-publish.yml' });
   const jobs = { jobs: [{ name: 'publish', conclusion: 'success' }] };
   const reviews = [{ state: 'approved', user: { login: 'krzysztofcal' }, environments: [{ name: 'www-production' }] }];
-  const receipt = { schema: 1, runId: '42', status: 'live_verified', sha, deployId: id,
+  const receipt = { schema: 1, runId: '42', candidateRunId: '41', status: 'live_verified', sha, deployId: id,
     release: { status: 'published', sha, deployId: id }, smoke: { status: 'live_verified', sha, deployId: id } };
   assert.equal(manifestModule.approvedWwwRecord(run, jobs, reviews, receipt, 'krzysztofcal').deployId, id);
   for (const bad of [{ ...receipt, runId: '43' }, { ...receipt, status: 'uncertain_STOP' }, { ...receipt, deployId: live }]) {
@@ -517,4 +517,38 @@ test('LIVE smoke checks approved static legal documents, identity, deletion page
   assert.ok(paths.every(path => !path.startsWith('/api') && !path.includes('/functions')));
   await assert.rejects(actions.liveSmoke({ ...args, api: { site: async () => ({ id: SITE.id, published_deploy: { id, locked: false } }) } }), /lock_mismatch/);
   await assert.rejects(actions.liveSmoke({ ...args, get: async path => ({ ...await get(path), body: path === '/legal/privacy.en.html' ? 'stale' : (await get(path)).body }) }), /legal_mismatch/);
+});
+
+
+test('hook identity persists a unique marker deploy before final SHA validation, including pre-clone null SHA', () => {
+  const d = { ...base().deploy, title: 'marker', created_at: '2026-11-15T10:00:01Z', commit_ref: ws };
+  const options = { marker: 'marker', sha, startedAt: '2026-11-15T10:00:00Z', previousIds: [] };
+  assert.equal(actions.correlatedCandidate([d], options).id, id);
+  assert.throws(() => actions.hookCandidateReady(d, sha), /hook_candidate_sha_mismatch/);
+  assert.equal(actions.hookCandidateReady({ ...d, state: 'building', commit_ref: null }, sha), false);
+  assert.equal(actions.hookCandidateReady({ ...d, commit_ref: sha }, sha), true);
+});
+test('candidate static preflight applies the complete smoke before publication, with a locked different deploy', async () => {
+  const csp = "default-src 'self';";
+  const targets = { _headers: `Content-Security-Policy: ${csp}\n`, 'account.html': '<section id="account-deletion"></section>' };
+  for (const type of ['terms', 'privacy']) for (const lang of ['pl', 'en']) targets[`legal/${type}.${lang}.html`] = '<p>Version: 2026-11-15-a1</p><h2 id="account-deletion">Delete</h2>';
+  const args = { sha, deployId: id, published: false, readTarget: path => targets[path],
+    get: async path => ({ body: path.startsWith('/js/build-info') ? buildInfoJs({ siteUrl: SITE.url, pokerWsUrl: SITE.ws }) : targets[path.slice(1)] || '',
+      headers: new Headers({ 'content-security-policy': csp, 'strict-transport-security': 'max-age=31536000' }) }),
+    api: { site: async () => ({ id: SITE.id, published_deploy: { id: live, locked: true } }) } };
+  assert.equal((await actions.liveSmoke(args)).status, 'candidate_static_verified');
+});
+test('chained immutable previous record trusts the original successful attempt and rejects missing approval or publish proof', () => {
+  const tag = 'release-20261115-42';
+  const manifest = buildManifest({ component: 'www', evidence: { sha, netlifyDeployId: id, publicationRunId: '42' }, tag,
+    recordedBy: { ...by, runId: '42' }, recordedAt: '2026-11-15T10:00:00Z' });
+  const release = { tag_name: tag, draft: false, prerelease: false, immutable: true, author: { login: 'github-actions[bot]' },
+    assets: [{ name: 'release-manifest.json', uploader: { login: 'github-actions[bot]' } }] };
+  const run = ownerRun({ path: '.github/workflows/www-publish.yml' });
+  const jobs = { jobs: [{ name: 'publish', conclusion: 'success' }, { name: 'record / publish', conclusion: 'success' }] };
+  const chain = { reviews: [{ state: 'approved', user: { login: 'krzysztofcal' }, environments: [{ name: 'www-production' }] }] };
+  assert.equal(previousRecord(manifest, release, run, jobs, 'krzysztofcal', chain), manifest);
+  assert.throws(() => previousRecord(manifest, release, run, jobs, 'krzysztofcal', { reviews: [] }));
+  assert.throws(() => previousRecord(manifest, release, run, { jobs: jobs.jobs.slice(1) }, 'krzysztofcal', chain));
+  assert.throws(() => previousRecord(manifest, release, { ...run, run_attempt: 2 }, jobs, 'krzysztofcal', chain));
 });
