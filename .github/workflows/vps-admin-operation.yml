@@ -27,6 +27,9 @@ on:
           - ws-preview-isolation-provision
           - ws-preview-isolation-rollback
           - volume-workdir-prepare
+          - codex-bwrap-apparmor-check
+          - codex-bwrap-apparmor-install
+          - codex-bwrap-apparmor-rollback
       reason:
         description: One line, 10-200 letters, digits, spaces or .,:;()/+=_- (shown to the approver before approval)
         required: true

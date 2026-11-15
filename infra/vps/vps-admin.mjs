@@ -667,6 +667,14 @@ export const OPERATIONS = Object.freeze({
     },
   ])),
   "volume-workdir-prepare": prepareVolumeWorkdir,
+  ...Object.fromEntries(["check", "install", "rollback"].map((action) => [
+    `codex-bwrap-apparmor-${action}`, (host, runId) => {
+      const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/codex-bwrap-apparmor.py", action, String(runId)], 120000);
+      if (result.status === 0 && /^BWRAP_OK [a-z0-9_= .]+$/.test(result.stdout)) return { ok: true, details: result.stdout.slice(9) };
+      if (/^BWRAP_BLOCKED [a-z0-9_]+$/.test(result.stdout)) return { ok: false, blocked: result.stdout.slice(14) };
+      return { ok: false, failed: "bwrap_inspect_protected_manifest_no_retry" };
+    },
+  ])),
 });
 
 function audit(host, fields) {

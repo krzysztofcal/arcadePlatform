@@ -43,6 +43,12 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - Agents may implement, test, commit, push feature branches and open or update PRs as the App. Push to `main` and force push are forbidden.
 - Merging into `main` requires the code owner `@krzysztofcal`: an OWNER approval of an agent PR (a new push dismisses it), or the `pull_request`-only bypass of the user `krzysztofcal` for OWNER PRs. Agents never approve, bypass or merge on the OWNER's behalf. Activation of this rule and OWNER credential changes follow `specs/1229-agent-github-identity/`.
 
+### Netlify Deploy Preview
+
+- PRs with no needed WWW testing MUST by default have `[skip netlify]` in the PR title from creation.
+- Build a Deploy Preview when actual WWW, UI or Netlify function testing is needed; relevant required validation uses exact PR HEAD.
+- Never skip required browser verification just to save a build.
+
 ---
 
 ## 🧠 Core Rules (CRITICAL)
