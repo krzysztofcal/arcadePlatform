@@ -563,3 +563,12 @@ test('direct release publication rejects reruns before any record or chain opera
   assert.equal(spawnSync('bash', ['-c', script], { env: { ...env, GITHUB_RUN_ATTEMPT: '1' } }).status, 0);
   assert.notEqual(spawnSync('bash', ['-c', script], { env: { ...env, GITHUB_RUN_ATTEMPT: '2' } }).status, 0);
 });
+
+test('a failed-job-only rerun cannot bypass the record gate and create a Release', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/release-record.yml', import.meta.url), 'utf8');
+  const publishScript = workflow.split('      - name: Publish the GitHub Release\n')[1].split('        run: |\n')[1];
+  // Empty PATH guarantees this negative authorization fixture cannot reach jq, gh or a remote mutation.
+  const result = spawnSync('/bin/bash', ['-c', publishScript], { encoding: 'utf8', env: { PATH: '', GITHUB_RUN_ATTEMPT: '2' } });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout + result.stderr, /publish only on the first attempt; dispatch again/);
+});

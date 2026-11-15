@@ -233,6 +233,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 ]] || { echo "publish only on the first attempt; dispatch again"; exit 1; }
           TAG="$(jq -r .tag release-manifest.json)"
           TARGET="$(jq -r '.components[.changed].sha' release-manifest.json)"
           [[ "$TAG" =~ ^release-[0-9]{8}-[1-9][0-9]{0,19}$ && "$TARGET" =~ ^[a-f0-9]{40}$ ]] || { echo "invalid manifest"; exit 1; }
