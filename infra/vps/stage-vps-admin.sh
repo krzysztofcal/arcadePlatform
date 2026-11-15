@@ -25,9 +25,10 @@ try:
     if not root.is_absolute() or root != root.resolve() or script != script.resolve():
         raise ValueError()
     sources = [root, *root.parents, script, *script.parents, root/'infra', root/'infra/vps',
-               root/'infra/vps/ws-server-preview.service.d']
+               root/'infra/vps/ws-server-preview.service.d', root/'.github', root/'.github/workflows',
+               root/'.github/workflows/vps-admin-operation.yml']
     sources += [root/'infra/vps'/name for name in (
-        'vps-admin.mjs', 'arcade-admin.sudoers', 'github-app-token.py',
+        'vps-admin.mjs', 'vps-admin-approval.mjs', 'arcade-admin.sudoers', 'github-app-token.py',
         'ws-preview-isolation.py', 'prepare-ws-preview-v3.py', 'ws-preview-owner.pub',
         'codex-bwrap-apparmor.py', 'bwrap-userns-restrict',
         'ws-server-preview.service.d/99-preview-isolation.conf')]
@@ -35,6 +36,15 @@ try:
         info = file.lstat()
         if (stat.S_ISLNK(info.st_mode) or (info.st_uid, info.st_gid) != (0, 0)
                 or info.st_mode & 0o022 or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))):
+            raise ValueError()
+    # Stage the new catalog contract together; this does not install/update/execute the signer itself.
+    op = 'github-app-token-update'
+    for rel, marker in [
+        ('infra/vps/vps-admin.mjs', '"' + op + '": installGithubAppToken,'),
+        ('infra/vps/vps-admin-approval.mjs', '"' + op + '": {'),
+        ('infra/vps/arcade-admin.sudoers', '/usr/local/sbin/arcade-vps-admin ' + op + ' *'),
+        ('.github/workflows/vps-admin-operation.yml', '          - ' + op + '\n')]:
+        if (root/rel).read_text().count(marker) != 1:
             raise ValueError()
 except (OSError, ValueError):
     sys.exit('untrusted_staging_source: use an OWNER-controlled root-owned reviewed checkout')

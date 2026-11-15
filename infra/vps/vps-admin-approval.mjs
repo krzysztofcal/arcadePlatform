@@ -86,6 +86,14 @@ export const APPROVAL = Object.freeze({
     sideEffects: "The result and the journal record the commit and the new and previous SHA-256 of the helper.",
     rollback: "Merge the previous helper to main through a reviewed PR and request this operation again.",
   },
+  "github-app-token-update": {
+    title: "Update only the existing protected GitHub App signer code from this run's main commit",
+    readOnly: false,
+    changes: "Replaces only /usr/local/sbin/arcade-github-app-token (existing root:root 0755 single-link executable) with infra/vps/github-app-token.py from the exact current-main run SHA. Verifies trusted parents, Git blob, Python syntax without execution, destination preimage and final hash/owner/mode; atomically renames and fsyncs.",
+    risk: "Changes the code used for subsequent App token issuance, including permissions requested by reviewed main. Does not change App installation settings. A late failure can leave new bytes installed: inspect replaced state and digests before another action.",
+    sideEffects: "Code-only replacement and journal receipts with commit and old/new SHA-256. No private-key access, token issuance, signer execution, account, sudo policy, client, service or Production change. No automatic retry or rollback.",
+    rollback: "OWNER reviews/merges the intended previous signer code to main and separately approves this operation again. Never delete the key or rerun create-only preparation.",
+  },
   "github-app-token-prepare": {
     title: "Prepare an isolated non-root GitHub App signer without moving a key",
     readOnly: false,
@@ -160,6 +168,7 @@ const IMPLEMENTATION_FILES = {
   ])),
   "ledger-production-dispatcher-install": ["infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh"],
   "ws-restart-gate-install": ["infra/vps/ws-restart-gate.mjs"],
+  "github-app-token-update": ["infra/vps/github-app-token.py", "infra/vps/vps-admin.mjs", "infra/vps/stage-vps-admin.sh"],
   "github-app-token-prepare": ["infra/vps/github-app-token.py"],
   "github-app-key-quarantine": ["infra/vps/github-app-token.py"],
   "ws-preview-isolation-provision": PREVIEW_IMPLEMENTATION,
