@@ -160,6 +160,7 @@ It returns the existing `vpsWsRelease()` evidence format with only required publ
 If SSH policy, permissions, identity, manifest, source SHA or host-key provenance is unverified, release
 activation remains BLOCKED. Do not widen WS permissions or borrow the Preview/deployment key. Key revocation
 uses a reviewed empty public-key asset plus separately approved key-sync; partial failure requires protected
-state inspection without automatic retry. Existing manual WWW release remains available under its own gates.
+state inspection without automatic retry. A fresh OWNER-approved empty-asset key-sync can revoke a known
+interrupted enrollment slot even when WS/SSH/wrapper health has drifted; it does not resume the failed action. Existing manual WWW release remains available under its own gates.
 No breaking change to WWW/WS runtime or existing release workflows; this additive admin path requires separate
 installation/configuration/acceptance GO before first use.

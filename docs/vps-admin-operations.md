@@ -30,7 +30,7 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | `ws-restart-gate-install` | Installs `infra/vps/ws-restart-gate.mjs` from `main` as `/usr/local/sbin/arcade-ws-restart-gate` (`root:root 0755`). Verifies the run is an in-progress `VPS Admin Operation` `workflow_dispatch` on `main` (`run_not_main_vps_admin_dispatch`) and `main` still points at the run's commit (`main_advanced`). Validates syntax with `node --check` on a `.mjs` temporary file, validates required modes and git blob SHA (`content_mismatch` keeps old helper), and replaces atomically with `rename(2)`. Runs a post-install gate check (accepting safe or blocked, refusing `gate_error`), attempts atomic recovery from previous bytes on verification failure, never restarts WS Production, and records the commit and SHA-256 in the journal |
 | `github-app-token-update` | Code-only update of the **existing** `/usr/local/sbin/arcade-github-app-token` from `infra/vps/github-app-token.py` at this approved run's exact current-main SHA. Requires trusted ancestors and root:root 0755 single-link target, verifies Git blob and Python AST syntax without execution, rechecks main and destination preimage, fsyncs and atomically renames, then verifies installed hash/owner/mode. No key access, signer execution, token issuance, account/sudo/client/App-setting/service change or automatic retry/rollback. Receipt includes commit, previous/new SHA-256 and observed replacement state on failure. |
 | `www-ws-read-prepare` | Creates only a disabled dedicated WWW SSH reader, root-owned empty authorization and fixed wrapper; verifies SSH policy and existing metadata read/no-write access. No key, sudo rule or service/configuration change. |
-| `www-ws-read-key-sync` | Atomically syncs only its owned authorization slot from the fixed reviewed current-main public-key asset; empty asset revokes access. Requires complete verified preparation. No free key/path/command input. |
+| `www-ws-read-key-sync` | Atomically syncs only its owned authorization slot from the fixed reviewed current-main public-key asset; empty asset revokes access. Enrollment requires complete verified preparation; empty-asset revocation accepts known interrupted key transitions and does not require WS/SSH/wrapper health. No free key/path/command input. |
 | `github-app-token-prepare` | Prepare only the fixed non-root signer account, protected empty key directory, executable and narrow run-as policy. No key read/copy, token mint, client switch or service operation. Partial failure requires protected-manifest inspection. |
 | `github-app-key-quarantine` | After OWNER accepts new gh/Git behavior: verify the replacement signer through metadata-only info output (one scoped token is minted and discarded), then reuse the existing descriptor-based quarantine for only `.arcade-code-agent/app.pem`. Does not rotate/revoke the key or invalidate existing tokens. |
 | `ws-preview-isolation-provision` | Full read-only preflight, then hard-kick/stop only Preview, verify empty cgroup, backup and isolate deploy/runtime identities; leaves Preview stopped. Occupied tables do not block Stage. No receipt or settlement guarantee. |
@@ -589,7 +589,7 @@ It does not read environments, logs, application files, credentials or arbitrary
 Enrollment always generates `restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc`
 plus the fixed forced command. No other key options are accepted as input. Preparation checks root-owned
 SSH config and recursively included files, and effective `sshd -T` policy without changing/reloading it.
-Any `Match` is deliberately unsupported (even for another account), ambiguous Include, alternate key file,
+Configuration parsing and `sshd -T` describe the default on-disk configuration, not proof of the running daemon configuration. Before activation OWNER must separately verify that the running daemon uses this default configuration without `-f`/`-o` overrides and that it matches reviewed disk state; this PR neither reloads SSH nor claims live acceptance. Any `Match` is deliberately unsupported (even for another account), ambiguous Include, alternate key file,
 AuthorizedKeysCommand, certificate trust/principals, existing ForceCommand, unsafe AcceptEnv, password/
 interactive/hostbased/GSSAPI/Kerberos authentication, enabled tunnels, disabled StrictModes/pubkey/PAM or unknown policy blocks.
 Only default `.ssh/authorized_keys .ssh/authorized_keys2` is accepted; the second slot must remain empty.
@@ -628,14 +628,13 @@ protected-state inspection; it is not a reason to expand Production permissions 
    through an explicitly authorized read-only acceptance. This is not authorization for a release.
 
 Successful repeats verify state and no-op. A protected transition phase is written before any creation
-or key replacement; interrupted/failed transitions block subsequent requests. `ADMIN_FAILED` does not mean
+or key replacement; interrupted/failed transitions block preparation/enrollment requests, with only the narrow revocation exception below. `ADMIN_FAILED` does not mean
 unchanged state: OWNER must inspect protected manifest/account/authorization through approved maintenance.
 There is no automatic retry, repair, account deletion or rollback. Revocation/rotation is a separate reviewed
-public-asset PR and approved key-sync; an empty asset disables only this owned slot. A failed transition
-must be resolved before this path can be used. Do not restore deployment/OWNER keys as a fallback.
+public-asset PR and approved key-sync; an empty asset disables only this owned slot. An interrupted key transition may be revoked after inspection and a **fresh OWNER approval**, using only its known old/pending slot hashes. Empty-asset revocation verifies approved current-main code/dependency/asset, protected manifest, root-owned slot and known preimage; it bypasses WS/SSH/account/wrapper-health checks and verifies the resulting empty slot. It never resumes failed enrollment or repairs other state. Unknown authorization, incomplete preparation or missing protected state still blocks. Revoking this slot does not attest that unrelated SSH configuration is safe. Do not restore deployment/OWNER keys as a fallback.
 
 Updating installed wrapper code is intentionally outside these two actions: a staged-code mismatch with
-an existing wrapper blocks. Any future code upgrade needs a separately reviewed approved procedure.
+an existing wrapper blocks preparation/enrollment, but never blocks approved revocation of the known slot. Any future code upgrade needs a separately reviewed approved procedure.
 No existing SSH identities, WS workflows/runtime, financial behavior or manual WWW release path changes.
 The only new installed authority after enrollment is this fixed evidence read. Actual provisioning and
 first SSH acceptance remain pending; this PR alone does not remove the activation blocker.

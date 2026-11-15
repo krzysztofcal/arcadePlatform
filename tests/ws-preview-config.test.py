@@ -931,6 +931,7 @@ class WwwRead(unittest.TestCase):
             (self.root/rel).mkdir(parents=True, exist_ok=True)
         self.task.source.write_bytes((Path(__file__).parents[1]/'infra/vps/www-ws-read.py').read_bytes())
         self.task.key_source.write_bytes(b'')
+        self.task.dependency.write_bytes((Path(__file__).parents[1]/'infra/vps/prepare-ws-preview-v3.py').read_bytes())
         (self.root/'etc/ssh/sshd_config').write_text('Include /etc/ssh/sshd_config.d/*.conf\n')
         for directory in self.root.rglob('*'):
             if directory.is_dir():directory.chmod(0o755)
@@ -956,7 +957,7 @@ class WwwRead(unittest.TestCase):
             if argv[0].endswith('id'):return '998'
             if argv[0].endswith('getent'):return 'arcade-www-read:x:998:'
             if argv[0].endswith('passwd'):return 'arcade-www-read L fixture'
-            if argv[0].endswith('sudo'):return 'User arcade-www-read is not allowed to run sudo'
+            if argv[0].endswith('sudo'):return 'User arcade-www-read is not allowed to run sudo on fixture.'
             return ''
         self.task.run=run
 
@@ -988,6 +989,13 @@ class WwwRead(unittest.TestCase):
             with self.assertRaisesRegex(self.m.Refused,'effective_ssh_policy_mismatch'):self.task.execute('prepare','123')
             self.assertFalse(self.task.base.exists())
             self.policy[name]=previous
+        original=self.task.run
+        def unsafe_env(argv,expected=(0,)):
+            output=original(argv,expected)
+            return output+'\nacceptenv LD_*\nacceptenv LANG\nacceptenv LC_*' if argv[0].endswith('sshd') else output
+        self.task.run=unsafe_env
+        with self.assertRaisesRegex(self.m.Refused,'unsafe_acceptenv'):self.task.execute('prepare','123')
+        self.task.run=original
         self.exists=True
         with self.assertRaisesRegex(self.m.Refused,'existing_identity'):self.task.execute('prepare','123')
         self.exists=False
@@ -1016,7 +1024,7 @@ class WwwRead(unittest.TestCase):
             if route.startswith('actions/runs/'):
                 return {'id':123,'path':'.github/workflows/vps-admin-operation.yml','event':'workflow_dispatch',
                         'head_branch':'main','status':'in_progress','head_sha':sha}
-            path=self.task.source if 'www-ws-read.py?' in route else self.task.key_source
+            path=self.task.dependency if 'prepare-ws-preview-v3.py?' in route else self.task.source if 'www-ws-read.py?' in route else self.task.key_source
             data=path.read_bytes()
             return {'type':'file','path':'infra/vps/'+path.name,
                     'sha':self.m.hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()}
@@ -1037,6 +1045,38 @@ class WwwRead(unittest.TestCase):
         self.assertEqual(json.loads(self.task.manifest.read_text())['phase'],'key_syncing')
         with self.assertRaisesRegex(self.m.Refused,'partial_state'):self.task.execute('key-sync','125')
         self.assertEqual(self.task.auth.read_bytes(),b'')
+
+    def test_revoke_after_uncertain_enable_ignores_unrelated_health_but_checks_preimage(self):
+        from unittest.mock import patch
+        self.task.execute('prepare','123')
+        self.task.key_source.write_bytes(b'ssh-ed25519 '+base64.b64encode(b'\0\0\0\x0bssh-ed25519\0\0\0\x20'+b'x'*32)+b'\n')
+        original=self.task.files.atomic
+        def after_rename(path,*args,**kwargs):
+            original(path,*args,**kwargs)
+            if path==self.task.auth:raise OSError('synthetic fsync failure after rename')
+        with patch.object(self.task.files,'atomic',side_effect=after_rename):
+            with self.assertRaises(OSError):self.task.execute('key-sync','124')
+        self.assertTrue(self.task.auth.read_bytes())
+        self.assertEqual(json.loads(self.task.manifest.read_text())['phase'],'key_syncing')
+        self.task.key_source.write_bytes(b'')
+        self.task.source.write_bytes(self.task.source.read_bytes()+b'\n# future code\n')
+        with patch.object(self.task,'ssh_policy',side_effect=AssertionError('must not gate revocation')),patch.object(self.task,'check_reads',side_effect=AssertionError('WS unavailable')):
+            self.assertEqual(self.task.execute('key-sync','125'),'key_disabled')
+        self.assertEqual(self.task.auth.read_bytes(),b'')
+        self.assertEqual(json.loads(self.task.manifest.read_text())['phase'],'prepared')
+        self.task.auth.write_bytes(b'unknown authorization')
+        with self.assertRaisesRegex(self.m.Refused,'authorization_drift'):self.task.execute('key-sync','126')
+
+    def test_sudo_denial_accepts_both_documented_statuses_but_not_grants(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        for status in [0,1]:
+            with patch.object(self.m.subprocess,'run',return_value=SimpleNamespace(returncode=status,stdout=b'User arcade-www-read is not allowed to run sudo on fixture.')):
+                self.assertIn('not allowed',self.m.run_fixed(['/usr/bin/sudo','-n','-l','-U',self.m.USER],expected=(0,1)))
+        self.task.execute('prepare','123')
+        original=self.task.run
+        self.task.run=lambda argv,expected=(0,): 'User arcade-www-read may run the following commands on fixture: (ALL) ALL' if argv[0].endswith('sudo') else original(argv,expected)
+        with self.assertRaisesRegex(self.m.Refused,'reader_sudo_not_verified'):self.task.execute('prepare','124')
 
     def test_wrapper_returns_only_fixed_public_evidence(self):
         from unittest.mock import patch

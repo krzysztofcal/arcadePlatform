@@ -11,6 +11,7 @@ from pathlib import Path
 import pwd
 import grp
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -67,7 +68,9 @@ def serve(original, argv, root=Path('/'), run=run_fixed):
     require(re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', installed), 'unexpected_release_timestamp')
     service = run(['/usr/bin/systemctl', 'show', 'ws-server.service', '-p', 'ActiveState', '-p', 'ExecMainStartTimestamp', '--timestamp=unix'])
     props = dict(line.split('=', 1) for line in service.splitlines())
-    require(set(props) == {'ActiveState', 'ExecMainStartTimestamp'}, 'unexpected_service_properties')
+    require(set(props) == {'ActiveState', 'ExecMainStartTimestamp'}
+            and re.fullmatch(r'active|reloading|inactive|failed|activating|deactivating|maintenance',props['ActiveState'])
+            and re.fullmatch(r'@[0-9]+|n/a',props['ExecMainStartTimestamp']), 'unexpected_service_properties')
     # Same fields consumed by vpsWsRelease; whitelist output instead of exposing extra metadata fields.
     return '\n'.join(['/'+relative, json.dumps({k: release[k] for k in ['releaseSha', 'environment', 'deployRef']}),
                       '', installed, 'ActiveState='+props['ActiveState'], 'ExecMainStartTimestamp='+props['ExecMainStartTimestamp']])+'\n'
@@ -98,6 +101,7 @@ class Preparation:
         self.root = root
         self.source = root/'usr/local/libexec/arcade-vps-admin/www-ws-read.py'
         self.key_source = root/'usr/local/libexec/arcade-vps-admin/www-ws-read-owner.pub'
+        self.dependency = self.source.with_name('prepare-ws-preview-v3.py')
         self.base = root/'var/lib/arcade-admin/www-ws-read'
         self.home = root/HOME.lstrip('/')
         self.wrapper = root/WRAPPER.lstrip('/')
@@ -130,7 +134,7 @@ class Preparation:
                 and run.get('status') == 'in_progress', 'not_main_admin_run')
         sha = run.get('head_sha', '')
         require(SHA.fullmatch(sha) and self.current_main() == sha, 'main_advanced')
-        sources = [(self.source, 'infra/vps/www-ws-read.py')]
+        sources = [(self.source, 'infra/vps/www-ws-read.py'), (self.dependency,'infra/vps/prepare-ws-preview-v3.py')]
         if action == 'key-sync': sources.append((self.key_source, 'infra/vps/www-ws-read-owner.pub'))
         for path, rel in sources:
             data = self.files.read(path, 0o644)
@@ -157,24 +161,25 @@ class Preparation:
             require(stat.S_ISREG(info.st_mode) and info.st_uid == self.files.uid and info.st_gid == self.files.gid
                     and not info.st_mode & 0o022, 'untrusted_sshd_config')
             for line in self.files.read(path, stat.S_IMODE(info.st_mode)).decode().splitlines():
-                tokens = line.split('#', 1)[0].split()
+                tokens = shlex.split(line,comments=True)
                 if not tokens:continue
                 keyword = tokens[0].lower().split('=', 1)[0]
                 require(keyword != 'match', 'sshd_match_requires_review')
                 if keyword == 'include':
                     require(tokens[0].lower() == 'include', 'sshd_include_requires_review')
                     for pattern in tokens[1:]:
-                        require(pattern.startswith('/etc/ssh/') and '%' not in pattern, 'sshd_include_requires_review')
+                        require(pattern.startswith('/etc/ssh/') and '%' not in pattern and '..' not in Path(pattern).parts, 'sshd_include_requires_review')
                         for item in sorted(glob.glob(str(self.root/pattern.lstrip('/')))):inspect(Path(item))
         inspect(self.root/'etc/ssh/sshd_config')
-        policy = dict(line.split(' ', 1) for line in self.run(['/usr/sbin/sshd','-T','-C','user='+USER+',host=localhost,addr=127.0.0.1']).splitlines())
+        entries = [line.split(' ', 1) for line in self.run(['/usr/sbin/sshd','-T','-C','user='+USER+',host=localhost,addr=127.0.0.1']).splitlines()]
+        policy = dict(entries)
         expected = {'authorizedkeysfile':'.ssh/authorized_keys .ssh/authorized_keys2', 'authorizedkeyscommand':'none',
             'authorizedprincipalscommand':'none','authorizedprincipalsfile':'none','trustedusercakeys':'none',
             'forcecommand':'none','permituserenvironment':'no','passwordauthentication':'no',
             'kbdinteractiveauthentication':'no','hostbasedauthentication':'no',
             'gssapiauthentication':'no','kerberosauthentication':'no','permittunnel':'no','strictmodes':'yes','pubkeyauthentication':'yes','usepam':'yes'}
         require(all(policy.get(k) == v for k,v in expected.items()), 'effective_ssh_policy_mismatch')
-        require(all(v in ['LANG', 'LC_*'] for v in policy.get('acceptenv', '').split()), 'unsafe_acceptenv')
+        require(all(v in ['LANG','LC_*'] for k,value in entries if k == 'acceptenv' for v in value.split()), 'unsafe_acceptenv')
 
     def check_account(self):
         account = self.account()
@@ -184,8 +189,9 @@ class Preparation:
         group = self.run(['/usr/bin/getent','group',USER]).strip().split(':')
         require(len(group) == 4 and group[0] == USER and group[2] == str(account.pw_gid) and group[3] == '', 'reader_group_drift')
         require(self.run(['/usr/bin/passwd','-S',USER]).split()[1] == 'L', 'reader_password_not_locked')
-        listing = self.run(['/usr/bin/sudo','-n','-l','-U',USER], expected=(1,))
-        require('not allowed to run sudo' in listing or 'may not run sudo' in listing, 'reader_sudo_not_verified')
+        listing = self.run(['/usr/bin/sudo','-n','-l','-U',USER], expected=(0,1))
+        require('may run the following commands' not in listing and
+                ('User '+USER+' is not allowed to run sudo on ' in listing or 'User '+USER+' may not run sudo on ' in listing), 'reader_sudo_not_verified')
 
     def check_reads(self):
         for rel in ['opt/ws-server/current/release-metadata.json','opt/ws-server/current/../.deployed-at']:
@@ -196,9 +202,9 @@ class Preparation:
             self.run(['/usr/sbin/runuser','-u',USER,'--','/usr/bin/test','-w',path], expected=(1,))
         self.run(['/usr/sbin/runuser','-u',USER,'--','/usr/bin/systemctl','show','ws-server.service','-p','ActiveState','-p','ExecMainStartTimestamp','--timestamp=unix'])
 
-    def state(self):
+    def state(self, revoking=False):
         data = json.loads(self.files.read(self.manifest, 0o600))
-        require(data.get('phase') == 'prepared', 'partial_state_inspect_no_retry')
+        require(data.get('phase') in (['prepared','key_syncing'] if revoking else ['prepared']), 'partial_state_inspect_no_retry')
         return data
 
     def save(self, state):
@@ -209,24 +215,45 @@ class Preparation:
         require(self.files.read(self.wrapper,0o755) == self.files.read(self.source,0o644), 'wrapper_drift')
         require(digest(self.files.read(self.auth,0o644)) == state['auth_sha256'], 'authorization_drift')
         require(self.files.read(self.auth2,0o644) == b'', 'alternate_authorization')
+        require(all(stat.S_IMODE(p.lstat().st_mode) == 0o755 for p in [self.home,self.home/'.ssh']), 'reader_directory_mode_drift')
+
+    def revoke(self, run_id, sha):
+        # Revocation has no WS/SSH/account/wrapper health dependency. Only this protected known slot is changed.
+        state = self.state(revoking=True)
+        current = self.files.read(self.auth,0o644)
+        known = {state['auth_sha256']}
+        if state['phase'] == 'key_syncing':known.add(state['pending_sha256'])
+        require(digest(current) in known, 'authorization_drift')
+        require(self.current_main() == sha, 'main_advanced')
+        if not current and state['phase'] == 'prepared':return 'key_disabled'
+        self.mutated=True
+        state.update(phase='key_syncing',auth_sha256=digest(current),pending_sha256=digest(b''),run=run_id)
+        self.save(state)
+        self.files.atomic(self.auth,b'',0o644,allowed={digest(current)})
+        require(self.files.read(self.auth,0o644) == b'', 'revocation_not_verified')
+        state.update(phase='prepared',auth_sha256=digest(b''))
+        state.pop('pending_sha256',None);self.save(state)
+        return 'key_disabled'
 
     def execute(self, action, run_id):
         require(action in ['prepare','key-sync'] and re.fullmatch(r'[1-9][0-9]{0,19}',run_id), 'unexpected_arguments')
         sha = self.approved(action,run_id)
+        desired = authorization(self.files.read(self.key_source,0o644)) if action == 'key-sync' else None
+        if desired == b'':return self.revoke(run_id,sha)
         self.ssh_policy()
         if self.base.exists() or self.base.is_symlink():
             state = self.state();self.verify(state)
             if action == 'prepare':return 'verified'
-            desired = authorization(self.files.read(self.key_source,0o644))
             current = self.files.read(self.auth,0o644)
             if current == desired:return 'verified'
             require(self.current_main() == sha, 'main_advanced')
             self.mutated=True
             # Mark transition first. Any interrupted enrollment blocks retries until protected-state inspection.
-            self.save({**state,'phase':'key_syncing','run':run_id})
+            self.save({**state,'phase':'key_syncing','pending_sha256':digest(desired),'run':run_id})
             self.files.atomic(self.auth, desired, 0o644, allowed={state['auth_sha256']})
             state.update(auth_sha256=digest(desired),run=run_id)
-            self.verify(state);self.save(state)
+            require(self.files.read(self.auth,0o644) == desired, 'enrollment_not_verified')
+            self.save(state)
             return 'key_enabled' if desired else 'key_disabled'
         require(action == 'prepare', 'prepare_required')
         require(not self.account() and not self.group_exists(), 'existing_identity')
@@ -241,7 +268,8 @@ class Preparation:
         self.save(state)
         self.run(['/usr/sbin/groupadd','--system',USER])
         self.run(['/usr/sbin/useradd','--system','--no-create-home','--home-dir',HOME,'--shell','/bin/sh','--gid',USER,'--password','*',USER])
-        self.home.mkdir(mode=0o755);(self.home/'.ssh').mkdir(mode=0o755)
+        self.home.mkdir(mode=0o755);self.home.chmod(0o755)
+        (self.home/'.ssh').mkdir(mode=0o755);(self.home/'.ssh').chmod(0o755)
         self.files.atomic(self.auth,b'',0o644);self.files.atomic(self.auth2,b'',0o644)
         self.files.atomic(self.wrapper,self.files.read(self.source,0o644),0o755)
         self.verify(state)

@@ -47,6 +47,16 @@ try:
         ('.github/workflows/vps-admin-operation.yml', '          - ' + op + '\n')]:
         if (root/rel).read_text().count(marker) != 1:
             raise ValueError()
+    for op in ('www-ws-read-prepare', 'www-ws-read-key-sync'):
+        for rel, marker in [
+            ('infra/vps/vps-admin-approval.mjs', '"' + op + '": {'),
+            ('infra/vps/arcade-admin.sudoers', '/usr/local/sbin/arcade-vps-admin ' + op + ' *'),
+            ('.github/workflows/vps-admin-operation.yml', '          - ' + op + '\n')]:
+            if (root/rel).read_text().count(marker) != 1:
+                raise ValueError()
+    helper = (root/'infra/vps/vps-admin.mjs').read_text()
+    if helper.count('`www-ws-read-${action}`') != 1 or helper.count('["prepare", "key-sync"].map((action)') != 1:
+        raise ValueError()
 except (OSError, ValueError):
     sys.exit('untrusted_staging_source: use an OWNER-controlled root-owned reviewed checkout')
 PY_TRUST
