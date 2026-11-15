@@ -317,7 +317,7 @@ test('release record workflow publishes one manifest asset and cannot reach any 
   assert.match(record, /\[\[ "\$CONFIRMATION" == "RECORD \$COMPONENT RELEASE" \]\]/);
   assert.match(record, /ws-server-deploy\.yml\/runs\?branch=main&event=workflow_dispatch/);
   assert.match(record, /releases\/tags\/\$LATEST" > \.release\/previous-release\.json/, 'the previous release is checked, not only its asset');
-  assert.match(record, /actions\/runs\/\$PREVIOUS_RUN_ID\/jobs/, 'the run the previous manifest names is checked');
+  assert.match(record, /actions\/runs\/\$PREVIOUS_RUN_ID\/attempts\/1\/jobs/, 'the run the previous manifest names is checked');
   assert.match(publish, /--jq \.immutable\)"\n.*\[\[ "\$IMMUTABLE" == true \]\]/, 'a published record must be immutable');
   for (const block of workflow.split(/\n      - name: /).slice(1)) {
     const script = block.split('run: |')[1] || '';
@@ -435,4 +435,155 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
 
 
   fs.rmSync(repo, { recursive: true, force: true });
+});
+
+// #1254: release authorization and immutable candidate provenance are business safety rules.
+const actions = await import('../scripts/www-release-actions.mjs');
+const ownerRun = (over = {}) => ({ id: 42, run_attempt: 1, head_sha: sha, head_branch: 'main',
+  path: '.github/workflows/www-candidate.yml', event: 'workflow_dispatch', status: 'completed', conclusion: 'success',
+  actor: { login: 'krzysztofcal' }, triggering_actor: { login: 'krzysztofcal' }, repository: { full_name: 'krzysztofcal/arcadePlatform' }, ...over });
+const provenance = () => ({ schema: 1, runId: '42', attempt: '1', sha, deployId: id, siteId: SITE.id,
+  actor: 'krzysztofcal', triggeringActor: 'krzysztofcal', status: 'candidate_ready', createdAt: '2026-11-15T10:00:00Z' });
+test('candidate provenance rejects agents, reruns, wrong workflow, expired and mismatched evidence', () => {
+  const now = Date.parse('2026-11-15T10:05:00Z');
+  assert.doesNotThrow(() => actions.validateCandidate(ownerRun(), provenance(), 'krzysztofcal', now));
+  for (const over of [{ actor: { login: 'arcade-code-agent[bot]' } }, { triggering_actor: { login: 'bot' } },
+    { path: '.github/workflows/other.yml' }, { event: 'pull_request' }, { run_attempt: 2 }, { head_sha: ws }, { conclusion: 'failure' }]) {
+    assert.throws(() => actions.validateCandidate(ownerRun(over), provenance(), 'krzysztofcal', now));
+  }
+  for (const over of [{ deployId: 'latest' }, { sha: ws }, { runId: '43' }, { status: 'checks_failed' }, { createdAt: '2026-11-14T10:00:00Z' }]) {
+    assert.throws(() => actions.validateCandidate(ownerRun(), { ...provenance(), ...over }, 'krzysztofcal', now));
+  }
+});
+test('Environment protection and actual owner approval fail closed', () => {
+  const settings = { can_admins_bypass: false, deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+    protection_rules: [{ type: 'required_reviewers', prevent_self_review: false, reviewers: [{ type: 'User', reviewer: { login: 'krzysztofcal' } }] }] };
+  const branches = { branch_policies: [{ name: 'main', type: 'branch' }] };
+  assert.deepEqual(actions.environmentFailures(settings, branches, 'krzysztofcal'), []);
+  assert.ok(actions.environmentFailures({ ...settings, protection_rules: [] }, branches, 'krzysztofcal').length);
+  assert.ok(actions.environmentFailures({ ...settings, can_admins_bypass: true }, branches, 'krzysztofcal').length);
+  assert.ok(actions.environmentFailures(settings, { branch_policies: [{ name: '*' }] }, 'krzysztofcal').length);
+  const reviews = [{ state: 'approved', user: { login: 'krzysztofcal' }, environments: [{ name: 'www-production' }] }];
+  assert.equal(actions.ownerApproved(reviews, 'www-production', 'krzysztofcal'), true);
+  assert.equal(actions.ownerApproved(reviews, 'www-candidate', 'krzysztofcal'), false);
+  assert.equal(actions.ownerApproved([], 'www-production', 'krzysztofcal'), false);
+});
+test('hook correlation identifies only a unique new exact-SHA production candidate', () => {
+  const marker = 'www-candidate:42:1:nonce';
+  const deploy = { ...base().deploy, title: marker, created_at: '2026-11-15T10:00:01Z' };
+  const options = { marker, sha, startedAt: '2026-11-15T10:00:00Z', previousIds: [live] };
+  assert.equal(actions.correlatedCandidate([deploy], options).id, id);
+  assert.equal(actions.correlatedCandidate([{ ...deploy, title: 'other' }], options), null);
+  for (const list of [[deploy, { ...deploy, id: 'e'.repeat(24) }], [{ ...deploy, id: live }]]) {
+    assert.throws(() => actions.correlatedCandidate(list, options));
+  }
+});
+test('a previously published candidate and a substituted discard identity fail closed', async () => {
+  assert.ok(with_(c => { c.deploy.published_at = '2026-11-14T00:00:00Z'; }).includes('previously_published'));
+  let deleted = false;
+  await assert.rejects(discardCandidate({ site: async () => base().site,
+    deploy: async () => ({ ...base().deploy, id: live }), discard: async () => { deleted = true; } }, id, async () => 404));
+  assert.equal(deleted, false);
+});
+
+test('automatic record accepts only successful owner WWW publication with actual Environment approval and live receipt', () => {
+  const run = ownerRun({ path: '.github/workflows/www-publish.yml' });
+  const jobs = { jobs: [{ name: 'publish', conclusion: 'success' }] };
+  const reviews = [{ state: 'approved', user: { login: 'krzysztofcal' }, environments: [{ name: 'www-production' }] }];
+  const receipt = { schema: 1, runId: '42', candidateRunId: '41', status: 'live_verified', sha, deployId: id,
+    release: { status: 'published', sha, deployId: id }, smoke: { status: 'live_verified', sha, deployId: id } };
+  assert.equal(manifestModule.approvedWwwRecord(run, jobs, reviews, receipt, 'krzysztofcal').deployId, id);
+  for (const bad of [{ ...receipt, runId: '43' }, { ...receipt, status: 'uncertain_STOP' }, { ...receipt, deployId: live }]) {
+    assert.throws(() => manifestModule.approvedWwwRecord(run, jobs, reviews, bad, 'krzysztofcal'));
+  }
+  assert.throws(() => manifestModule.approvedWwwRecord(run, jobs, [], receipt, 'krzysztofcal'));
+  assert.throws(() => manifestModule.approvedWwwRecord(ownerRun(), jobs, reviews, receipt, 'krzysztofcal'));
+});
+test('LIVE smoke checks approved static legal documents, identity, deletion page and final lock without API mutations', async () => {
+  const csp = "default-src 'self';";
+  const targets = { _headers: `  Content-Security-Policy: ${csp}\n`, 'account.html': '<section id="account-deletion"></section>\n' };
+  for (const type of ['terms', 'privacy']) for (const lang of ['pl', 'en']) {
+    targets[`legal/${type}.${lang}.html`] = `<p>Version: 2026-11-15-a1</p><h2 id="account-deletion">Delete</h2>\n`;
+  }
+  const paths = [];
+  const get = async path => {
+    paths.push(path);
+    return { body: path.startsWith('/js/build-info.js') ? buildInfoJs({ siteUrl: SITE.url, pokerWsUrl: SITE.ws }) : targets[path.slice(1)] || '',
+      headers: new Headers({ 'content-security-policy': csp, 'strict-transport-security': 'max-age=31536000' }) };
+  };
+  const args = { sha, deployId: id, readTarget: path => targets[path], get, api: { site: async () => ({ id: SITE.id, published_deploy: { id, locked: true } }) } };
+  assert.equal((await actions.liveSmoke(args)).status, 'live_verified');
+  assert.ok(paths.includes('/account.html'));
+  assert.ok(paths.every(path => !path.startsWith('/api') && !path.includes('/functions')));
+  await assert.rejects(actions.liveSmoke({ ...args, api: { site: async () => ({ id: SITE.id, published_deploy: { id, locked: false } }) } }), /lock_mismatch/);
+  await assert.rejects(actions.liveSmoke({ ...args, get: async path => ({ ...await get(path), body: path === '/legal/privacy.en.html' ? 'stale' : (await get(path)).body }) }), /legal_mismatch/);
+});
+
+
+test('hook identity persists a unique marker deploy before final SHA validation, including pre-clone null SHA', () => {
+  const d = { ...base().deploy, title: 'marker', created_at: '2026-11-15T10:00:01Z', commit_ref: ws };
+  const options = { marker: 'marker', sha, startedAt: '2026-11-15T10:00:00Z', previousIds: [] };
+  assert.equal(actions.correlatedCandidate([d], options).id, id);
+  assert.throws(() => actions.hookCandidateReady(d, sha), /hook_candidate_sha_mismatch/);
+  assert.equal(actions.hookCandidateReady({ ...d, state: 'building', commit_ref: null }, sha), false);
+  assert.equal(actions.hookCandidateReady({ ...d, commit_ref: sha }, sha), true);
+});
+test('candidate static preflight applies the complete smoke before publication, with a locked different deploy', async () => {
+  const csp = "default-src 'self';";
+  const targets = { _headers: `Content-Security-Policy: ${csp}\n`, 'account.html': '<section id="account-deletion"></section>' };
+  for (const type of ['terms', 'privacy']) for (const lang of ['pl', 'en']) targets[`legal/${type}.${lang}.html`] = '<p>Version: 2026-11-15-a1</p><h2 id="account-deletion">Delete</h2>';
+  const args = { sha, deployId: id, published: false, readTarget: path => targets[path],
+    get: async path => ({ body: path.startsWith('/js/build-info') ? buildInfoJs({ siteUrl: SITE.url, pokerWsUrl: SITE.ws }) : targets[path.slice(1)] || '',
+      headers: new Headers({ 'content-security-policy': csp, 'strict-transport-security': 'max-age=31536000' }) }),
+    api: { site: async () => ({ id: SITE.id, published_deploy: { id: live, locked: true } }) } };
+  assert.equal((await actions.liveSmoke(args)).status, 'candidate_static_verified');
+});
+test('chained immutable previous record trusts the original successful attempt and rejects missing approval or publish proof', () => {
+  const tag = 'release-20261115-42';
+  const manifest = buildManifest({ component: 'www', evidence: { sha, netlifyDeployId: id, publicationRunId: '42' }, tag,
+    recordedBy: { ...by, runId: '42' }, recordedAt: '2026-11-15T10:00:00Z' });
+  const release = { tag_name: tag, draft: false, prerelease: false, immutable: true, author: { login: 'github-actions[bot]' },
+    assets: [{ name: 'release-manifest.json', uploader: { login: 'github-actions[bot]' } }] };
+  const run = ownerRun({ path: '.github/workflows/www-publish.yml' });
+  const jobs = { jobs: [{ name: 'publish', conclusion: 'success' }, { name: 'record / publish', conclusion: 'success' }] };
+  const chain = { reviews: [{ state: 'approved', user: { login: 'krzysztofcal' }, environments: [{ name: 'www-production' }] }] };
+  assert.equal(previousRecord(manifest, release, run, jobs, 'krzysztofcal', chain), manifest);
+  assert.throws(() => previousRecord(manifest, release, run, jobs, 'krzysztofcal', { reviews: [] }));
+  assert.throws(() => previousRecord(manifest, release, run, { jobs: jobs.jobs.slice(1) }, 'krzysztofcal', chain));
+  assert.throws(() => previousRecord(manifest, release, { ...run, run_attempt: 2 }, jobs, 'krzysztofcal', chain));
+});
+
+test('direct release publication rejects reruns before any record or chain operation', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/release-record.yml', import.meta.url), 'utf8');
+  const script = /      - name: Check the request[\s\S]*?        run: \|\n([\s\S]*?)(?=\n      # Read-only)/.exec(workflow)[1];
+  const env = { PATH: process.env.PATH, COMPONENT: 'www', CONFIRMATION: 'RECORD www RELEASE', PUBLISH: 'true', APPROVED_WWW: 'false',
+    GITHUB_REPOSITORY: 'krzysztofcal/arcadePlatform', GITHUB_REPOSITORY_OWNER: 'krzysztofcal',
+    GITHUB_ACTOR: 'krzysztofcal', GITHUB_TRIGGERING_ACTOR: 'krzysztofcal',
+    CALLER: 'krzysztofcal/arcadePlatform/.github/workflows/release-record.yml@refs/heads/main' };
+  assert.equal(spawnSync('bash', ['-c', script], { env: { ...env, GITHUB_RUN_ATTEMPT: '1' } }).status, 0);
+  assert.notEqual(spawnSync('bash', ['-c', script], { env: { ...env, GITHUB_RUN_ATTEMPT: '2' } }).status, 0);
+});
+
+test('a failed-job-only rerun cannot bypass the record gate and create a Release', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/release-record.yml', import.meta.url), 'utf8');
+  const publishScript = workflow.split('      - name: Publish the GitHub Release\n')[1].split('        run: |\n')[1];
+  // Empty PATH guarantees this negative authorization fixture cannot reach jq, gh or a remote mutation.
+  const result = spawnSync('/bin/bash', ['-c', publishScript], { encoding: 'utf8', env: { PATH: '', GITHUB_RUN_ATTEMPT: '2' } });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout + result.stderr, /publish only on the first attempt; dispatch again/);
+});
+
+test('missing or unreadable execute receipts always mean uncertainty, preventing automatic discard', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'www-receipt-'));
+  const file = path.join(dir, 'receipt.json');
+  try {
+    for (const content of [null, '{truncated', 'null', '{}', '{"status":"unknown"}']) {
+      if (content === null) { if (fs.existsSync(file)) fs.unlinkSync(file); }
+      else fs.writeFileSync(file, content);
+      assert.throws(() => actions.readReleaseReceipt(file, true), error => error.uncertain === true);
+      assert.throws(() => actions.readReleaseReceipt(file, false), error => error.uncertain === false);
+    }
+    fs.writeFileSync(file, '{"status":"published"}');
+    assert.equal(actions.readReleaseReceipt(file, true).status, 'published');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

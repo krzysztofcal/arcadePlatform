@@ -81,6 +81,7 @@ export function candidateFailures({ sha, mainSha, site, deploy, buildInfo, funct
   add(deploy?.site_id === SITE.id && deploy?.context === 'production' && deploy?.branch === 'main' && deploy?.state === 'ready' && !deploy?.review_id, 'not_ready_main_production_deploy');
   add(deploy?.commit_ref === sha, 'deploy_sha_mismatch');
   add(site?.published_deploy?.id !== deploy?.id, 'already_published');
+  add(!deploy?.published_at, 'previously_published');
   add(mainSha === sha, 'not_current_main_head');
   add(buildInfo?.commitHash === sha && buildInfo?.context === 'production' && buildInfo?.deployId === deploy?.id && buildInfo?.siteUrl === SITE.url && buildInfo?.pokerWsUrl === SITE.ws, 'build_info_identity_mismatch');
   const live = (deploy?.available_functions || []).map(x => x.n).sort().join();
@@ -118,7 +119,7 @@ function readWsRelease(sshTarget) {
 export function netlifyApi(token, fetchImpl = fetch) {
   if (!token) throw new Error('netlify_token_missing');
   const call = async (method, path) => {
-    const r = await fetchImpl(`${API}${path}`, { method, headers: { authorization: `Bearer ${token}` } });
+    const r = await fetchImpl(`${API}${path}`, { method, headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
     if (!r.ok) throw new Error(`netlify_api_${r.status}`);
     return r.status === 204 ? null : r.json();
   };
@@ -158,7 +159,7 @@ export async function publishLocked(api, deployId, recheck) {
 // Deletes an unpublished candidate, then proves it is gone from the API and its permalink (404). Unproven deletion is reported, never assumed.
 export async function discardCandidate(api, deployId, permalinkStatus) {
   const [site, deploy] = await Promise.all([api.site(), api.deploy(deployId)]);
-  const ok = deploy?.site_id === SITE.id && deploy?.context === 'production' && !deploy?.published_at && site?.published_deploy?.id !== deployId && ['ready', 'error'].includes(deploy?.state);
+  const ok = deploy?.id === deployId && deploy?.site_id === SITE.id && deploy?.context === 'production' && !deploy?.published_at && site?.published_deploy?.id !== deployId && ['ready', 'error'].includes(deploy?.state);
   if (!ok) throw new Error('not_discardable_candidate');
   await api.discard(deployId);
   const apiGone = await api.deploy(deployId).then(() => false, e => e.message === 'netlify_api_404');
@@ -218,6 +219,9 @@ async function main(argv, env) {
       const recheck = async () => {
         if (mainSha() !== sha) throw new Error('not_current_main_head');
         if (readWsRelease(env.WS_PROD_SSH).active !== receipt.wsRelease) throw new Error('ws_release_changed');
+        const [nowSite, nowDeploy] = await Promise.all([api.site(), api.deploy(deployId)]);
+        if (nowSite.published_deploy?.id !== receipt.previousDeployId || nowSite.published_deploy?.locked !== true) throw new Error('published_deploy_changed');
+        if (nowDeploy.id !== deployId || nowDeploy.commit_ref !== sha || nowDeploy.site_id !== SITE.id || nowDeploy.state !== 'ready' || nowDeploy.context !== 'production' || nowDeploy.branch !== 'main' || nowDeploy.review_id || nowDeploy.published_at) throw new Error('candidate_changed');
       };
       Object.assign(receipt, await publishLocked(api, deployId, recheck));
       const live = await text(`${SITE.url}/js/build-info.js?release=${deployId}`).then(r => parseBuildInfo(r.body), () => null);

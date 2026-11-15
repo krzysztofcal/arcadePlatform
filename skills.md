@@ -246,3 +246,11 @@ When solving a problem:
 - Breaking global CSS
 - Missing reconnect edge cases
 - Not re-binding UI after DOM updates
+
+## WWW release tooling
+
+- `scripts/www-production-release.mjs`: existing validation, exact-main/WS rechecks, locked publication and guarded discard.
+- `scripts/www-release-actions.mjs`: OWNER workflow authorization, Environment/approval/provenance checks, hook correlation, static LIVE verification.
+- `.github/workflows/www-candidate.yml`, `www-publish.yml`: two-phase owner operation; no CI, merge or agent publication.
+- `.github/workflows/release-record.yml`, `scripts/release-manifest.mjs`: direct OWNER record or restricted approved WWW chain.
+- Configuration, activation and retained manual path: [WWW release SOP](docs/www-production-release.md).

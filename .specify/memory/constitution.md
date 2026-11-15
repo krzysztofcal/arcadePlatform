@@ -91,10 +91,10 @@ All Arcade Hub deployments and administrative operations must strictly use the a
 
 Official approved operational paths:
 - **WS Server Deploy**: Exact-SHA deployment workflow (`.github/workflows/ws-server-deploy.yml`) dispatched via GitHub App (`arcade-code-agent[bot]`), with human seat/financial preflight gates, restart gate, rollback receipts, and requiring explicit OWNER approval in the `ws-production` GitHub Environment.
-- **WWW Production Release**: Netlify production release procedure executed strictly via `scripts/www-production-release.mjs` (OWNER-run only).
+- **WWW Production Release**: OWNER-only two-phase GitHub candidate/publication actions, reusing `scripts/www-production-release.mjs`, with verified OWNER Environment approval and immutable candidate provenance. Activation/first run requires separate OWNER GO; retain the manual OWNER path until validated cutover (docs/www-production-release.md).
 - **VPS Admin Operation**: Root-on-demand administrative helper catalog (`.github/workflows/vps-admin-operation.yml`), requiring explicit OWNER approval in the `vps-admin` GitHub Environment.
 - **DB Stage Apply PR**: Shared Stage database schema migrations executed only via explicit `workflow_dispatch` from `main` (`.github/workflows/db-stage-apply-pr.yml`), where `apply` is owner-dispatched for the exact approved `sourceSha` and migration set in `stage-automation`.
-- **Release Record**: Audited immutable version provenance registry (`.github/workflows/release-record.yml`), documenting component SHAs and manifests (`publish=true` is owner-dispatched). Release Record is an audited version registry and does NOT perform deployment or mutate environments.
+- **Release Record**: Audited immutable version provenance registry (`.github/workflows/release-record.yml`), documenting component SHAs and manifests (`publish=true` is directly owner-dispatched or follows only the verified OWNER WWW publication chain). Release Record is an audited version registry and does NOT perform deployment or mutate environments.
 - **Android / Google Play**: Separate publishing track with independent review, signing, and explicit release gates.
 
 Stage/WS Preview accepts hard-kick deployment restarts, including occupied tables; no manual Leave,
@@ -217,4 +217,4 @@ resolved by changing the affected artifact or obtaining the explicit approval
 required by the relevant rule; weakening a principle to hide a violation is
 not an allowed resolution.
 
-**Version**: 1.3.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-14
+**Version**: 1.4.0 | **Ratified**: 2026-09-11 | **Last Amended**: 2026-11-15
