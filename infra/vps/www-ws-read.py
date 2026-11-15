@@ -134,6 +134,29 @@ class Preparation:
                 and run.get('status') == 'in_progress', 'not_main_admin_run')
         sha = run.get('head_sha', '')
         require(SHA.fullmatch(sha) and self.current_main() == sha, 'main_advanced')
+        # The existing main workflow derives its title/job names from inputs.operation. Actions GET run
+        # does not expose dispatch inputs; bind those names to this attempt's jobs and Environment review.
+        operation = 'www-ws-read-'+action
+        actor = run.get('actor',{}).get('login')
+        require(action in ['prepare','key-sync'] and run.get('run_attempt') == 1
+                and actor in ['krzysztofcal','arcade-code-agent[bot]']
+                and run.get('triggering_actor',{}).get('login') == actor
+                and run.get('display_title') == 'VPS Admin: '+operation+' (requested by '+actor+')', 'operation_request_mismatch')
+        response = self.api('actions/runs/'+run_id+'/attempts/1/jobs?per_page=10')
+        jobs = response.get('jobs',[])
+        require(response.get('total_count') == 2 and len(jobs) == 2
+                and all(str(j.get('run_id')) == run_id and j.get('run_attempt') == 1 and j.get('head_sha') == sha for j in jobs), 'operation_jobs_missing')
+        by_name = {j.get('name'):j for j in jobs}
+        request = by_name.get('1. Review request: '+operation,{})
+        operate = by_name.get('2. Run on the VPS after approval: '+operation,{})
+        require(request.get('status') == 'completed' and request.get('conclusion') == 'success'
+                and operate.get('status') == 'in_progress' and operate.get('conclusion') is None, 'operation_jobs_not_authorized')
+        reviews = self.api('actions/runs/'+run_id+'/approvals')
+        require(isinstance(reviews,list) and len(reviews) == 1, 'owner_approval_missing_or_ambiguous')
+        review = reviews[0]
+        require(review.get('state') == 'approved' and review.get('user',{}).get('login') == 'krzysztofcal'
+                and len(review.get('environments',[])) == 1
+                and review['environments'][0].get('name') == 'vps-admin', 'owner_operation_approval_missing')
         sources = [(self.source, 'infra/vps/www-ws-read.py'), (self.dependency,'infra/vps/prepare-ws-preview-v3.py')]
         if action == 'key-sync': sources.append((self.key_source, 'infra/vps/www-ws-read-owner.pub'))
         for path, rel in sources:

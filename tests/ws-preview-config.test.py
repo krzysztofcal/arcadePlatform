@@ -1017,23 +1017,55 @@ class WwwRead(unittest.TestCase):
         self.task.auth.write_text('unexpected authorization')
         with self.assertRaisesRegex(self.m.Refused,'authorization_drift'):self.task.execute('prepare','125')
 
-    def test_exact_main_source_and_incomplete_key_sync_fail_closed(self):
-        from unittest.mock import patch
-        sha='a'*40
+    def approval_api(self, action):
+        sha='a'*40;operation='www-ws-read-'+action
+        run={'id':123,'path':'.github/workflows/vps-admin-operation.yml','event':'workflow_dispatch',
+             'head_branch':'main','status':'in_progress','head_sha':sha,'run_attempt':1,
+             'actor':{'login':'arcade-code-agent[bot]'},'triggering_actor':{'login':'arcade-code-agent[bot]'},
+             'display_title':'VPS Admin: '+operation+' (requested by arcade-code-agent[bot])'}
+        jobs=[{'run_id':123,'run_attempt':1,'head_sha':sha,'name':'1. Review request: '+operation,'status':'completed','conclusion':'success'},
+              {'run_id':123,'run_attempt':1,'head_sha':sha,'name':'2. Run on the VPS after approval: '+operation,'status':'in_progress','conclusion':None}]
+        records={'actions/runs/123':run,'actions/runs/123/attempts/1/jobs?per_page=10':{'total_count':2,'jobs':jobs},
+                 'actions/runs/123/approvals':[{'state':'approved','user':{'login':'krzysztofcal'},'environments':[{'name':'vps-admin'}]}]}
         def api(route):
-            if route.startswith('actions/runs/'):
-                return {'id':123,'path':'.github/workflows/vps-admin-operation.yml','event':'workflow_dispatch',
-                        'head_branch':'main','status':'in_progress','head_sha':sha}
+            if route in records:return records[route]
             path=self.task.dependency if 'prepare-ws-preview-v3.py?' in route else self.task.source if 'www-ws-read.py?' in route else self.task.key_source
             data=path.read_bytes()
             return {'type':'file','path':'infra/vps/'+path.name,
                     'sha':self.m.hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()}
         self.task.api=api
+        return records
+
+    def test_owner_approval_must_cover_this_operation_and_first_attempt(self):
+        for action in ['prepare','key-sync']:
+            self.approval_api(action)
+            self.assertEqual(self.m.Preparation.approved(self.task,action,'123'),'a'*40)
+        for wrong in ['operation','job_operation','missing_approval','other_reviewer','other_environment','rejected','ambiguous_approval','rerun','missing_job']:
+            records=self.approval_api('prepare')
+            reviews=records['actions/runs/123/approvals']
+            jobs=records['actions/runs/123/attempts/1/jobs?per_page=10']
+            if wrong=='operation':records['actions/runs/123']['display_title']='VPS Admin: www-ws-read-key-sync (requested by arcade-code-agent[bot])'
+            if wrong=='job_operation':jobs['jobs'][1]['name']='2. Run on the VPS after approval: www-ws-read-key-sync'
+            if wrong=='missing_approval':reviews.clear()
+            if wrong=='other_reviewer':reviews[0]['user']['login']='arcade-code-agent[bot]'
+            if wrong=='other_environment':reviews[0]['environments'][0]['name']='ws-production'
+            if wrong=='rejected':reviews[0]['state']='rejected'
+            if wrong=='ambiguous_approval':reviews.append(reviews[0].copy())
+            if wrong=='rerun':records['actions/runs/123']['run_attempt']=2
+            if wrong=='missing_job':jobs['jobs'].pop()
+            with self.subTest(wrong=wrong),self.assertRaises(self.m.Refused):
+                self.m.Preparation.approved(self.task,'prepare','123')
+            self.assertFalse(self.task.base.exists());self.assertFalse(self.calls)
+
+    def test_exact_main_source_and_incomplete_key_sync_fail_closed(self):
+        from unittest.mock import patch
+        sha='a'*40
+        self.approval_api('key-sync');api=self.task.api
         self.assertEqual(self.m.Preparation.approved(self.task,'key-sync','123'),sha)
         with patch.object(self.task,'current_main',return_value='b'*40):
-            with self.assertRaisesRegex(self.m.Refused,'main_advanced'):self.m.Preparation.approved(self.task,'prepare','123')
+            with self.assertRaisesRegex(self.m.Refused,'main_advanced'):self.m.Preparation.approved(self.task,'key-sync','123')
         with patch.object(self.task,'api',side_effect=lambda route: api(route) if route.startswith('actions/') else {'sha':'bad'}):
-            with self.assertRaisesRegex(self.m.Refused,'staged_source_mismatch'):self.m.Preparation.approved(self.task,'prepare','123')
+            with self.assertRaisesRegex(self.m.Refused,'staged_source_mismatch'):self.m.Preparation.approved(self.task,'key-sync','123')
         self.task.execute('prepare','123')
         self.task.key_source.write_bytes(b'ssh-ed25519 '+base64.b64encode(b'\0\0\0\x0bssh-ed25519\0\0\0\x20'+b'x'*32)+b'\n')
         original=self.task.files.atomic
