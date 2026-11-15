@@ -117,7 +117,25 @@
 
     <section class="center">
       <a class="back" href="index.html"><span aria-hidden="true">← </span><span data-i18n="backToGames">Back to games</span></a>
-      <div class="slot-fixed" id="slotGameTop" aria-label="Promotional"><span class="slot-badge">Promo</span>Reserved slot</div>
+
+      <div class="gameWrap" id="frameWrap">
+        <div class="centerOverlay" id="consentOverlay">
+          <div>
+            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;" data-i18n="waitingForConsent">Waiting for consent...</div>
+          </div>
+        </div>
+
+        <div class="centerOverlay hidden" id="rotateOverlay">
+          <div>
+            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;" data-i18n="rotateDevice">Please rotate your device</div>
+          </div>
+        </div>
+
+        <div id="frameBox" class="frameBox">
+          <!-- iframe injected after consent -->
+        </div>
+      </div>
+
       <div class="titleBar">
         <h1 id="gameTitle" data-i18n="gameLoading">Loading...</h1>
         <div class="actions">
@@ -142,24 +160,6 @@
           <div class="pillRow" id="gameTags" aria-label="Tags"></div>
         </div>
       </section>
-
-      <div class="gameWrap" id="frameWrap">
-        <div class="centerOverlay" id="consentOverlay">
-          <div>
-            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;" data-i18n="waitingForConsent">Waiting for consent...</div>
-          </div>
-        </div>
-
-        <div class="centerOverlay hidden" id="rotateOverlay">
-          <div>
-            <div style="color:#9fb0d0; margin-bottom:8px; text-align:center;" data-i18n="rotateDevice">Please rotate your device</div>
-          </div>
-        </div>
-
-        <div id="frameBox" class="frameBox">
-          <!-- iframe injected after consent -->
-        </div>
-      </div>
 
       <div class="meta" id="gameMeta"></div>
 

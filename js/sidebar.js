@@ -56,6 +56,11 @@
   async function refreshAdminVisibility(){
     if (window.MOBILE_POKER_CONFIG) return;
     const requestId = ++state.adminRequestId;
+    // A session change revokes admin visibility before any await; it returns only after a fresh admin-me check.
+    if (state.isAdmin){
+      state.isAdmin = false;
+      render();
+    }
     const token = await getAccessToken();
     if (requestId !== state.adminRequestId) return;
     if (!token){
@@ -145,13 +150,14 @@
   }
 
   function render(){
+    doc.querySelectorAll('[data-admin-only]').forEach(function(node){ node.hidden = !state.isAdmin; });
     const list = ensureList();
     const items = getItems();
     const groups = [
-      { id: 'arcadeHub', labelKey: 'menuArcadeHub', fallbackLabel: 'Arcade Hub', items: items.filter(function(item){ return !item.section && !item.requiresAdmin; }) },
-      { id: 'about', items: items.filter(function(item){ return item.section === 'about'; }), heading: false },
-      { id: 'language', labelKey: 'menuLanguage', fallbackLabel: 'Language', language: true },
-      { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', items: items.filter(function(item){ return item.requiresAdmin; }) }
+      { id: 'arcadeHub', labelKey: 'menuArcadeHub', fallbackLabel: 'Arcade Hub', heading: false, items: items.filter(function(item){ return !item.section && !item.requiresAdmin; }) },
+      { id: 'account', labelKey: 'account', fallbackLabel: 'Account', items: items.filter(function(item){ return item.section === 'account'; }) },
+      { id: 'admin', labelKey: 'admin', fallbackLabel: 'Admin', items: items.filter(function(item){ return item.requiresAdmin; }) },
+      { id: 'language', labelKey: 'menuLanguage', fallbackLabel: 'Language', language: true }
     ];
     list.innerHTML = '';
     groups.forEach(function(group){
@@ -180,7 +186,7 @@
       if (item.hrefEn) link.setAttribute('data-href-en', item.hrefEn);
       if (item.hrefPl) link.setAttribute('data-href-pl', item.hrefPl);
       if (item.id) link.setAttribute('data-nav-id', item.id);
-      if (isActive(item.href)) link.classList.add('is-active');
+      if (item.id !== 'random' && isActive(item.href)) link.classList.add('is-active');
       if (item.id === 'random'){
         link.addEventListener('click', handleRandomGameClick);
       }
@@ -241,22 +247,15 @@
       {id:'bonus',labelKey:'mobileNavBonus',fallbackLabel:'Bonus',href:'/poker/index.html#bonus',art:'/poker/assets/lobby/bonus-v2.webp'},
       {id:'profile',labelKey:'mobileNavProfile',fallbackLabel:'Profile',href:'/account.html',art:'/poker/assets/themes/midnight-sapphire/avatar-frame.svg'}
     ];
-    const wanted = ['home', 'search', 'favorites', 'poker', 'profile'];
+    const wanted = ['home', 'poker', 'leaderboard', 'favorites', 'profile'];
     const byId = {};
     items.forEach(function(item){ byId[item.id] = item; });
-    byId.search = {
-      id: 'search',
-      labelKey: 'search',
-      fallbackLabel: 'Search',
-      href: '#search',
-      iconSvg: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m20.7 19.3-4.1-4.1a7.5 7.5 0 1 0-1.4 1.4l4.1 4.1 1.4-1.4ZM5 10.5a5.5 5.5 0 1 1 11 0 5.5 5.5 0 0 1-11 0Z"/></svg>'
-    };
     return wanted.map(function(id){ return byId[id]; }).filter(Boolean);
   }
 
   function renderBottomNav(items){
     if (!doc.body || typeof doc.body.appendChild !== 'function') return;
-    if (!doc.querySelector('.shell')) return;
+    if (!doc.querySelector('.shell') && !doc.querySelector('.layout')) return;
     const mobile = !!window.MOBILE_POKER_CONFIG;
     if (mobile && !['/poker/', '/poker/index.html', '/account.html'].includes(window.location.pathname)) return;
     let nav = doc.getElementById('mobileBottomNav');
@@ -275,7 +274,7 @@
       link.className = 'mobile-bottom-nav__item';
       link.href = item.href || '#';
       link.setAttribute('data-nav-id', item.id);
-      const active = mobile ? (window.location.pathname === '/account.html' ? 'profile' : doc.body.dataset.mobileLobbyView || 'modes') === item.id : item.id !== 'search' && isActive(item.href);
+      const active = mobile ? (window.location.pathname === '/account.html' ? 'profile' : doc.body.dataset.mobileLobbyView || 'modes') === item.id : item.id !== 'search' && item.id !== 'random' && isActive(item.href);
       if (active) { link.classList.add('is-active'); link.setAttribute('aria-current', 'page'); }
       if (mobile) {
         link.classList.add('shortcut');
@@ -426,8 +425,10 @@
     if (event && event.key === 'Escape') close();
   }
 
+  window.SidebarApp = { playRandomGame: handleRandomGameClick };
   if (window.MOBILE_POKER_CONFIG) doc.addEventListener('poker:lobby-view', function(){ renderBottomNav(getBottomItems()); });
   render();
+  doc.querySelectorAll('[data-random-game]').forEach(function(node){ node.addEventListener('click', handleRandomGameClick); });
   btn.addEventListener('click', toggle);
   doc.addEventListener('click', handleDocumentClick);
   doc.addEventListener('keydown', handleKeydown);

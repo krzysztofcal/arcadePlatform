@@ -121,6 +121,10 @@ function createDocument() {
     getElementById(id) {
       return nodes.get(id) || null;
     },
+    __adminOnly: [],
+    querySelectorAll(selector) {
+      return selector === "[data-admin-only]" ? this.__adminOnly : [];
+    },
     createElement(tagName) {
       return createElement(tagName);
     },
@@ -159,6 +163,9 @@ async function renderSidebarAs(statusCode, mobilePath) {
   toggle.setAttribute("aria-expanded", "false");
   document.__nodes.set("sidebar", sidebar);
   document.__nodes.set("sbToggle", toggle);
+  const adminLink = createElement("a");
+  adminLink.hidden = true;
+  document.__adminOnly.push(adminLink);
 
   if(mobilePath){
     document.body=createElement('body');
@@ -168,6 +175,7 @@ async function renderSidebarAs(statusCode, mobilePath) {
   }
   const authListeners = [];
   const fetchCalls = [];
+  const control = { status: statusCode, gate: null };
   const windowObj = {
     document,
     location: { pathname: "/index.html" },
@@ -188,7 +196,8 @@ async function renderSidebarAs(statusCode, mobilePath) {
     document,
     fetch: async (url, options) => {
       fetchCalls.push({ url, options });
-      return { status: statusCode };
+      if (control.gate) await control.gate;
+      return { status: control.status };
     },
     matchMedia: () => ({ matches: false }),
     setTimeout,
@@ -200,7 +209,7 @@ async function renderSidebarAs(statusCode, mobilePath) {
   await flush();
   await flush();
 
-  return { authListeners, fetchCalls, hrefs: collectHrefs(sidebar), document, sidebar, toggle };
+  return { authListeners, fetchCalls, hrefs: collectHrefs(sidebar), document, sidebar, toggle, adminLink, control };
 }
 
 test("sidebar shows Admin entry for verified admins", async () => {
@@ -211,6 +220,7 @@ test("sidebar shows Admin entry for verified admins", async () => {
   assert.equal(result.fetchCalls[0].options.headers.Authorization, "Bearer admin-token");
   assert.equal(result.authListeners.length, 1);
   assert.equal(result.hrefs.includes("/admin.html"), true);
+  assert.equal(result.adminLink.hidden, false);
 });
 
 test("sidebar hides Admin entry for non-admins", async () => {
@@ -218,6 +228,27 @@ test("sidebar hides Admin entry for non-admins", async () => {
 
   assert.equal(result.fetchCalls.length >= 1, true);
   assert.equal(result.hrefs.includes("/admin.html"), false);
+  assert.equal(result.adminLink.hidden, true);
+});
+
+test("admin entries are revoked immediately when the session changes", async () => {
+  const result = await renderSidebarAs(200);
+  assert.equal(result.adminLink.hidden, false);
+
+  let release;
+  result.control.status = 403;
+  result.control.gate = new Promise((resolve) => { release = resolve; });
+  result.authListeners[0]();
+  await flush();
+
+  assert.equal(result.adminLink.hidden, true);
+  assert.equal(collectHrefs(result.sidebar).includes("/admin.html"), false);
+
+  release();
+  await flush();
+  await flush();
+  assert.equal(result.adminLink.hidden, true);
+  assert.equal(collectHrefs(result.sidebar).includes("/admin.html"), false);
 });
 
 test("sidebar closes when clicking outside the expanded panel", async () => {

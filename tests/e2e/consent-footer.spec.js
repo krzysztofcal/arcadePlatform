@@ -34,13 +34,25 @@ test('Klaro consent buttons dismiss the notice and persist the decision', async 
   await expect.poll(async () => (await context.cookies()).some((cookie) => cookie.name === 'arcade_consent')).toBe(true);
 });
 
+async function footerLinkClearance(page, obstacleSelector) {
+  return page.evaluate((selector) => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    const obstacle = document.querySelector(selector);
+    const links = Array.from(document.querySelectorAll('.site-footer a')).filter((link) => link.getClientRects().length > 0);
+    if (!obstacle || !links.length) return -1;
+    const top = obstacle.getBoundingClientRect().top;
+    return Math.round(Math.min.apply(null, links.map((link) => top - link.getBoundingClientRect().bottom)));
+  }, obstacleSelector);
+}
+
 test('footer navigation remains clickable after consent is resolved', async ({ page, context }) => {
   await blockOptionalThirdPartyScripts(page);
   await context.addCookies([{ name: 'arcade_consent', value: encodeURIComponent(JSON.stringify({ googleAnalytics: false, googleAds: false })), domain: '127.0.0.1', path: '/' }]);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await addMockNetlifyDrawer(page);
 
-  await expect.poll(async () => { const box = await page.locator('.site-footer').boundingBox(); return Math.round(page.viewportSize().height - box.y - box.height); }).toBeGreaterThanOrEqual(48);
+  // Static footer: at the end of the page every footer link must sit above the Netlify drawer.
+  await expect.poll(() => footerLinkClearance(page, '[data-netlify-deploy-id]')).toBeGreaterThanOrEqual(0);
   await page.locator('.site-footer a[href="about.en.html"]').click();
   await expect(page).toHaveURL(/\/about\.en\.html$/);
 
@@ -50,6 +62,7 @@ test('footer navigation remains clickable after consent is resolved', async ({ p
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await addMockNetlifyDrawer(page);
   await expect.poll(async () => { const box = await page.locator('.mobile-bottom-nav').boundingBox(); return Math.round(page.viewportSize().height - box.y - box.height); }).toBeGreaterThanOrEqual(48);
+  await expect.poll(() => footerLinkClearance(page, '.mobile-bottom-nav')).toBeGreaterThanOrEqual(0);
   await page.locator('a[href="/poker/"]:visible').first().click();
   await expect(page).toHaveURL(/\/poker\/$/);
 });
