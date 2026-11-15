@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { trustedOwnerRun, ownerApproved } from './www-release-actions.mjs';
 import { latestWsDeploy, parseBuildInfo } from './www-production-release.mjs';
 
 // GitHub Release manifest for WWW, WS and Android (#1159 Addendum B). A release is an audited record of what is
@@ -12,7 +13,7 @@ const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const DEPLOY = /^[a-f0-9]{24}$/;
 const RUN_ID = /^[1-9][0-9]{0,19}$/;
-const TAG = /^release-[0-9]{8}-[1-9][0-9]{0,9}$/;
+const TAG = /^release-[0-9]{8}-[1-9][0-9]{0,19}$/;
 const ANDROID_TRACKS = Object.freeze(['internal', 'closed', 'open', 'production']);
 
 const fail = (reason) => { throw new Error(reason); };
@@ -66,17 +67,37 @@ export function androidEvidence({ sha, versionName, versionCode, aabSha256, trac
 // A release created or changed by anyone else, including the code agent, stops the record.
 export const RECORD_WORKFLOW = '.github/workflows/release-record.yml';
 const ACTIONS_BOT = 'github-actions[bot]';
-export function previousRecord(manifest, release, run, jobs, owner) {
+// Narrow approved chain: only the owner main WWW workflow, its successful publication job,
+// actual owner Environment approval and the immutable publication artifact can authorize a WWW record.
+export function approvedWwwRecord(run, jobs, reviews, receipt, owner) {
+  trustedOwnerRun(run, owner, 'www-publish', false);
+  const published = (jobs?.jobs || []).filter(j => j.name === 'publish');
+  if (published.length !== 1 || published[0].conclusion !== 'success'
+    || !ownerApproved(reviews, 'www-production', owner) || receipt?.schema !== 1
+    || String(receipt.runId) !== String(run.id) || receipt.status !== 'live_verified'
+    || receipt.sha !== run.head_sha || !DEPLOY.test(receipt.deployId || '')
+    || receipt.release?.status !== 'published' || receipt.release.sha !== receipt.sha || receipt.release.deployId !== receipt.deployId
+    || receipt.smoke?.status !== 'live_verified' || receipt.smoke.sha !== receipt.sha || receipt.smoke.deployId !== receipt.deployId) fail('www_approved_chain_unproven');
+  return receipt;
+}
+export function previousRecord(manifest, release, run, jobs, owner, chain = null) {
   if (manifest == null && release == null) return null;
   const assets = release?.assets || [];
   if (!manifest || !release || release.tag_name !== manifest.tag || release.draft !== false || release.prerelease !== false
     || release.immutable !== true || release.author?.login !== ACTIONS_BOT || assets.length !== 1
     || assets[0].name !== 'release-manifest.json' || assets[0].uploader?.login !== ACTIONS_BOT) fail('previous_release_untrusted');
   const by = manifest.recordedBy || {};
-  const publish = (jobs?.jobs || []).filter((job) => job.name === 'publish');
-  if (!run || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(owner)) || String(run.id) !== String(by.runId) || run.path !== RECORD_WORKFLOW || run.event !== 'workflow_dispatch' || run.head_branch !== 'main'
+  const chained = run?.path === '.github/workflows/www-publish.yml';
+  const publish = (jobs?.jobs || []).filter((job) => job.name === (chained ? 'record / publish' : 'publish'));
+  if (chained) {
+    if (!ownerApproved(chain?.reviews, 'www-production', owner) || Number(run.run_attempt) !== 1
+      || !(jobs?.jobs || []).some(j => j.name === 'publish' && j.conclusion === 'success')
+      || manifest.changed !== 'www' || manifest.components?.www?.sha !== run.head_sha
+      || String(manifest.components?.www?.publicationRunId) !== String(run.id)) fail('previous_www_chain_mismatch');
+  }
+  if (!run || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(String(owner)) || String(run.id) !== String(by.runId) || (!chained && run.path !== RECORD_WORKFLOW) || run.event !== 'workflow_dispatch' || run.head_branch !== 'main'
     || run.actor?.login !== owner || run.triggering_actor?.login !== owner || by.actor !== owner || by.triggeringActor !== owner
-    || String(manifest.tag).split('-')[2] !== String(run.run_number) || publish.length !== 1 || publish[0].conclusion !== 'success') {
+    || String(manifest.tag).split('-')[2] !== String(chained ? run.id : run.run_number) || publish.length !== 1 || publish[0].conclusion !== 'success') {
     fail('previous_record_not_owner_published');
   }
   return manifest;
@@ -118,11 +139,19 @@ if (isMain) {
   const read = (file) => (file ? JSON.parse(fs.readFileSync(file, 'utf8')) : null);
   try {
     const component = env.RELEASE_COMPONENT;
+    let approved = null;
+    if (env.APPROVED_WWW === 'true') {
+      const c = read(env.WWW_CHAIN_FILE);
+      approved = approvedWwwRecord(c?.run, c?.jobs, c?.reviews, c?.receipt, env.GITHUB_REPOSITORY_OWNER);
+      if (component !== 'www' || env.WWW_DEPLOY_ID !== approved.deployId) fail('www_chain_input_mismatch');
+    }
     if (!RUN_ID.test(String(env.GITHUB_RUN_ID)) || !RUN_ID.test(String(env.GITHUB_RUN_NUMBER))) fail('run_context_invalid');
-    const tag = `release-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${env.GITHUB_RUN_NUMBER}`;
+    const tag = `release-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${approved ? env.GITHUB_RUN_ID : env.GITHUB_RUN_NUMBER}`;
     let evidence;
     if (component === 'www') {
       evidence = wwwEvidence(fs.readFileSync(env.WWW_BUILD_INFO_FILE, 'utf8'), env.WWW_DEPLOY_ID);
+      if (approved && evidence.sha !== approved.sha) fail('www_chain_live_mismatch');
+      if (approved) Object.assign(evidence, { publicationRunId: String(approved.runId), candidateRunId: String(approved.candidateRunId), environment: 'www-production' });
     } else if (component === 'ws') {
       evidence = wsEvidence(read(env.WS_RUN_FILE), read(env.WS_JOBS_FILE), read(env.WS_RECEIPT_FILE), read(env.WS_RECENT_RUNS_FILE));
     } else {
@@ -130,7 +159,7 @@ if (isMain) {
         aabSha256: env.ANDROID_AAB_SHA256, track: env.ANDROID_TRACK, attestedBy: env.GITHUB_TRIGGERING_ACTOR, owner: env.GITHUB_REPOSITORY_OWNER });
     }
     const previous = previousRecord(read(env.PREVIOUS_MANIFEST_FILE), read(env.PREVIOUS_RELEASE_FILE), read(env.PREVIOUS_RUN_FILE),
-      read(env.PREVIOUS_JOBS_FILE), env.GITHUB_REPOSITORY_OWNER);
+      read(env.PREVIOUS_JOBS_FILE), env.GITHUB_REPOSITORY_OWNER, read(env.PREVIOUS_WWW_CHAIN_FILE));
     const manifest = buildManifest({ previous, component, evidence, tag,
       recordedAt: new Date().toISOString(), recordedBy: { actor: env.GITHUB_ACTOR, triggeringActor: env.GITHUB_TRIGGERING_ACTOR, runId: env.GITHUB_RUN_ID } });
     fs.writeFileSync('release-manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);

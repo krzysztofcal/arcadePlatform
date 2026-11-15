@@ -80,3 +80,10 @@ The receipt is always written: `dry_run_pass`, `checks_failed`, `not_published`,
 4. First release: decide WS compatibility first (main HEAD differs on the WS surface: release WS for that SHA through PR4 or wait), trigger the hook, dry-run, then `--execute`. If the release is aborted at any point, discard the candidate and require `discarded` (permalink 404); `discard_unverified` = STOP. Record the receipts and the restore/lock behavior in #1159.
 
 Rollback of the mechanism: revert this PR (Git Production builds resume, still unpublished while locked). Unlock only after confirming the published deploy is the intended one.
+
+## #1254 GitHub two-phase successor (not activated)
+
+See [WWW release SOP](../../docs/www-production-release.md) for the OWNER-only candidate/publication workflows,
+protected credentials/approvals, LIVE smoke and restricted automatic Release Record chain. This document's manual
+path remains active until separately authorized, validated cutover. The implementation does not invoke the hook,
+change Production secrets, publish, unlock or authorize the first run.

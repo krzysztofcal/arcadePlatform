@@ -436,3 +436,85 @@ test('WS release approval: request checks, last confirmed deploy, scope and summ
 
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+// #1254: release authorization and immutable candidate provenance are business safety rules.
+const actions = await import('../scripts/www-release-actions.mjs');
+const ownerRun = (over = {}) => ({ id: 42, run_attempt: 1, head_sha: sha, head_branch: 'main',
+  path: '.github/workflows/www-candidate.yml', event: 'workflow_dispatch', status: 'completed', conclusion: 'success',
+  actor: { login: 'krzysztofcal' }, triggering_actor: { login: 'krzysztofcal' }, repository: { full_name: 'krzysztofcal/arcadePlatform' }, ...over });
+const provenance = () => ({ schema: 1, runId: '42', attempt: '1', sha, deployId: id, siteId: SITE.id,
+  actor: 'krzysztofcal', triggeringActor: 'krzysztofcal', status: 'candidate_ready', createdAt: '2026-11-15T10:00:00Z' });
+test('candidate provenance rejects agents, reruns, wrong workflow, expired and mismatched evidence', () => {
+  const now = Date.parse('2026-11-15T10:05:00Z');
+  assert.doesNotThrow(() => actions.validateCandidate(ownerRun(), provenance(), 'krzysztofcal', now));
+  for (const over of [{ actor: { login: 'arcade-code-agent[bot]' } }, { triggering_actor: { login: 'bot' } },
+    { path: '.github/workflows/other.yml' }, { event: 'pull_request' }, { run_attempt: 2 }, { head_sha: ws }, { conclusion: 'failure' }]) {
+    assert.throws(() => actions.validateCandidate(ownerRun(over), provenance(), 'krzysztofcal', now));
+  }
+  for (const over of [{ deployId: 'latest' }, { sha: ws }, { runId: '43' }, { status: 'checks_failed' }, { createdAt: '2026-11-14T10:00:00Z' }]) {
+    assert.throws(() => actions.validateCandidate(ownerRun(), { ...provenance(), ...over }, 'krzysztofcal', now));
+  }
+});
+test('Environment protection and actual owner approval fail closed', () => {
+  const settings = { can_admins_bypass: false, deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+    protection_rules: [{ type: 'required_reviewers', prevent_self_review: false, reviewers: [{ type: 'User', reviewer: { login: 'krzysztofcal' } }] }] };
+  const branches = { branch_policies: [{ name: 'main', type: 'branch' }] };
+  assert.deepEqual(actions.environmentFailures(settings, branches, 'krzysztofcal'), []);
+  assert.ok(actions.environmentFailures({ ...settings, protection_rules: [] }, branches, 'krzysztofcal').length);
+  assert.ok(actions.environmentFailures({ ...settings, can_admins_bypass: true }, branches, 'krzysztofcal').length);
+  assert.ok(actions.environmentFailures(settings, { branch_policies: [{ name: '*' }] }, 'krzysztofcal').length);
+  const reviews = [{ state: 'approved', user: { login: 'krzysztofcal' }, environments: [{ name: 'www-production' }] }];
+  assert.equal(actions.ownerApproved(reviews, 'www-production', 'krzysztofcal'), true);
+  assert.equal(actions.ownerApproved(reviews, 'www-candidate', 'krzysztofcal'), false);
+  assert.equal(actions.ownerApproved([], 'www-production', 'krzysztofcal'), false);
+});
+test('hook correlation identifies only a unique new exact-SHA production candidate', () => {
+  const marker = 'www-candidate:42:1:nonce';
+  const deploy = { ...base().deploy, title: marker, created_at: '2026-11-15T10:00:01Z' };
+  const options = { marker, sha, startedAt: '2026-11-15T10:00:00Z', previousIds: [live] };
+  assert.equal(actions.correlatedCandidate([deploy], options).id, id);
+  assert.equal(actions.correlatedCandidate([{ ...deploy, title: 'other' }], options), null);
+  for (const list of [[deploy, { ...deploy, id: 'e'.repeat(24) }], [{ ...deploy, commit_ref: ws }], [{ ...deploy, id: live }]]) {
+    assert.throws(() => actions.correlatedCandidate(list, options));
+  }
+});
+test('a previously published candidate and a substituted discard identity fail closed', async () => {
+  assert.ok(with_(c => { c.deploy.published_at = '2026-11-14T00:00:00Z'; }).includes('previously_published'));
+  let deleted = false;
+  await assert.rejects(discardCandidate({ site: async () => base().site,
+    deploy: async () => ({ ...base().deploy, id: live }), discard: async () => { deleted = true; } }, id, async () => 404));
+  assert.equal(deleted, false);
+});
+
+test('automatic record accepts only successful owner WWW publication with actual Environment approval and live receipt', () => {
+  const run = ownerRun({ path: '.github/workflows/www-publish.yml' });
+  const jobs = { jobs: [{ name: 'publish', conclusion: 'success' }] };
+  const reviews = [{ state: 'approved', user: { login: 'krzysztofcal' }, environments: [{ name: 'www-production' }] }];
+  const receipt = { schema: 1, runId: '42', status: 'live_verified', sha, deployId: id,
+    release: { status: 'published', sha, deployId: id }, smoke: { status: 'live_verified', sha, deployId: id } };
+  assert.equal(manifestModule.approvedWwwRecord(run, jobs, reviews, receipt, 'krzysztofcal').deployId, id);
+  for (const bad of [{ ...receipt, runId: '43' }, { ...receipt, status: 'uncertain_STOP' }, { ...receipt, deployId: live }]) {
+    assert.throws(() => manifestModule.approvedWwwRecord(run, jobs, reviews, bad, 'krzysztofcal'));
+  }
+  assert.throws(() => manifestModule.approvedWwwRecord(run, jobs, [], receipt, 'krzysztofcal'));
+  assert.throws(() => manifestModule.approvedWwwRecord(ownerRun(), jobs, reviews, receipt, 'krzysztofcal'));
+});
+test('LIVE smoke checks approved static legal documents, identity, deletion page and final lock without API mutations', async () => {
+  const csp = "default-src 'self';";
+  const targets = { _headers: `  Content-Security-Policy: ${csp}\n`, 'account.html': '<section id="account-deletion"></section>\n' };
+  for (const type of ['terms', 'privacy']) for (const lang of ['pl', 'en']) {
+    targets[`legal/${type}.${lang}.html`] = `<p>Version: 2026-11-15-a1</p><h2 id="account-deletion">Delete</h2>\n`;
+  }
+  const paths = [];
+  const get = async path => {
+    paths.push(path);
+    return { body: path.startsWith('/js/build-info.js') ? buildInfoJs({ siteUrl: SITE.url, pokerWsUrl: SITE.ws }) : targets[path.slice(1)] || '',
+      headers: new Headers({ 'content-security-policy': csp, 'strict-transport-security': 'max-age=31536000' }) };
+  };
+  const args = { sha, deployId: id, readTarget: path => targets[path], get, api: { site: async () => ({ id: SITE.id, published_deploy: { id, locked: true } }) } };
+  assert.equal((await actions.liveSmoke(args)).status, 'live_verified');
+  assert.ok(paths.includes('/account.html'));
+  assert.ok(paths.every(path => !path.startsWith('/api') && !path.includes('/functions')));
+  await assert.rejects(actions.liveSmoke({ ...args, api: { site: async () => ({ id: SITE.id, published_deploy: { id, locked: false } }) } }), /lock_mismatch/);
+  await assert.rejects(actions.liveSmoke({ ...args, get: async path => ({ ...await get(path), body: path === '/legal/privacy.en.html' ? 'stale' : (await get(path)).body }) }), /legal_mismatch/);
+});

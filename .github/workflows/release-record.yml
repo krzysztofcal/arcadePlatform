@@ -62,6 +62,25 @@ on:
           - open
           - production
 
+  # Narrow caller capability, validated against github.workflow_ref and owner approval below.
+  workflow_call:
+    inputs:
+      component:
+        type: string
+        required: true
+      confirmation:
+        type: string
+        required: true
+      publish:
+        type: boolean
+        required: true
+      www_deploy_id:
+        type: string
+        required: true
+      approved_www:
+        type: boolean
+        required: true
+
 concurrency:
   group: release-record
   cancel-in-progress: false
@@ -93,6 +112,9 @@ jobs:
           COMPONENT: ${{ inputs.component }}
           CONFIRMATION: ${{ inputs.confirmation }}
           PUBLISH: ${{ inputs.publish }}
+          APPROVED_WWW: ${{ inputs.approved_www || false }}
+          CALLER: ${{ github.workflow_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           [[ "$CONFIRMATION" == "RECORD $COMPONENT RELEASE" ]] || { echo "confirmation phrase mismatch"; exit 1; }
@@ -101,6 +123,14 @@ jobs:
           # Publishing and the Android attestation are the owner's own act; an agent may only dry-run.
           [[ "$PUBLISH" != true || "$OWNER_RUN" == true ]] || { echo "only the owner may publish a release record"; exit 1; }
           [[ "$COMPONENT" != android || "$OWNER_RUN" == true ]] || { echo "only the owner may attest an Android release"; exit 1; }
+          if [[ "$APPROVED_WWW" == true ]]; then
+            [[ "$CALLER" == "$GITHUB_REPOSITORY/.github/workflows/www-publish.yml@refs/heads/main" && "$OWNER_RUN" == true && "$COMPONENT" == www && "$PUBLISH" == true && "$GITHUB_RUN_ATTEMPT" == 1 ]] || exit 1
+            mkdir -p .release
+            CHAIN_RUN_ID="$GITHUB_RUN_ID" CHAIN_DESTINATION=.release/www-chain.json node scripts/www-release-actions.mjs record-chain
+            echo 'WWW_CHAIN_FILE=.release/www-chain.json' >> "$GITHUB_ENV"
+          else
+            [[ "$CALLER" == "$GITHUB_REPOSITORY/.github/workflows/release-record.yml@refs/heads/main" ]] || exit 1
+          fi
 
       # Read-only: the previous record and the evidence of the changed component.
       - name: Collect evidence
@@ -121,6 +151,10 @@ jobs:
             [[ "$PREVIOUS_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || { echo "previous record names no Release Record run"; exit 1; }
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID" > .release/previous-run.json
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/jobs?per_page=100" > .release/previous-jobs.json
+            if [[ "$(jq -r .path .release/previous-run.json)" == .github/workflows/www-publish.yml ]]; then
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/approvals" | jq '{reviews: .}' > .release/previous-www-chain.json
+              echo 'PREVIOUS_WWW_CHAIN_FILE=.release/previous-www-chain.json' >> "$GITHUB_ENV"
+            fi
             { echo "PREVIOUS_MANIFEST_FILE=.release/previous/release-manifest.json"; echo "PREVIOUS_RELEASE_FILE=.release/previous-release.json"; echo "PREVIOUS_RUN_FILE=.release/previous-run.json"; echo "PREVIOUS_JOBS_FILE=.release/previous-jobs.json"; } >> "$GITHUB_ENV"
           fi
           case "$COMPONENT" in
@@ -148,6 +182,7 @@ jobs:
       - name: Build the release manifest
         env:
           RELEASE_COMPONENT: ${{ inputs.component }}
+          APPROVED_WWW: ${{ inputs.approved_www || false }}
           WWW_DEPLOY_ID: ${{ inputs.www_deploy_id }}
           ANDROID_SHA: ${{ inputs.android_sha }}
           ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
@@ -198,7 +233,7 @@ jobs:
           set -euo pipefail
           TAG="$(jq -r .tag release-manifest.json)"
           TARGET="$(jq -r '.components[.changed].sha' release-manifest.json)"
-          [[ "$TAG" =~ ^release-[0-9]{8}-[1-9][0-9]{0,9}$ && "$TARGET" =~ ^[a-f0-9]{40}$ ]] || { echo "invalid manifest"; exit 1; }
+          [[ "$TAG" =~ ^release-[0-9]{8}-[1-9][0-9]{0,19}$ && "$TARGET" =~ ^[a-f0-9]{40}$ ]] || { echo "invalid manifest"; exit 1; }
           # Rechecked without a checkout: the target is still on main and the tag still absent.
           STATUS="$(gh api "repos/$GITHUB_REPOSITORY/compare/$TARGET...main" --jq .status)"
           [[ "$STATUS" == ahead || "$STATUS" == identical ]] || { echo "release target $TARGET is not on main ($STATUS)"; exit 1; }

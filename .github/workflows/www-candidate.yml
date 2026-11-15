@@ -1,0 +1,95 @@
+name: Create WWW Candidate
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Optional full current main SHA (default dispatch main HEAD)
+        type: string
+        required: false
+
+# One queue across both actions, including approval wait and Release Record. Never cancel an active restore.
+concurrency:
+  group: www-production-release
+  cancel-in-progress: false
+permissions: {}
+jobs:
+  preflight:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify owner dispatch and protected Environment before requesting secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/www-release-actions.mjs check-candidate
+  candidate:
+    needs: preflight
+    environment: www-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Separate read-only SSH identity; never copy the WS deployment key into this Environment.
+      - name: Provision the approved read-only WS evidence identity on this ephemeral runner
+        env:
+          KEY: ${{ secrets.WS_PROD_SSH_KEY }}
+          HOSTS: ${{ secrets.WS_PROD_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$KEY" && -n "$HOSTS" ]] || exit 1
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Validate approval and perform the authorized operation
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          WS_PROD_SSH: ${{ secrets.WS_PROD_SSH }}
+          NETLIFY_BUILD_HOOK: ${{ secrets.NETLIFY_BUILD_HOOK }}
+          REQUESTED_SHA: ${{ inputs.sha }}
+        run: node scripts/www-release-actions.mjs candidate
+      - name: Retain sanitized immutable receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: www-candidate-1
+          path: .www/*.json
+          retention-days: 1
+          if-no-files-found: warn
+      - name: Reconcile failed or cancelled candidate without guessing
+        if: ${{ failure() || cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: node scripts/www-release-actions.mjs candidate-cleanup
+      - name: Retain final cleanup receipt
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: www-candidate-cleanup-1
+          path: .www/*.json
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Remove ephemeral SSH material
+        if: ${{ always() }}
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
