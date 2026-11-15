@@ -1579,9 +1579,10 @@ test("new agent workdir preflight fails closed on absent/wrong mounts and unsafe
       statfsSync: (p) => p === "/"
         ? { blocks: 100 * 1024 ** 2, bfree: (100 - usedPercent) * 1024 ** 2, bavail: (100 - usedPercent) * 1024 ** 2, bsize: 1024 }
         : { blocks: 49, bfree: volumeGiB, bavail: volumeGiB, bsize: 1024 ** 3 },
-      realpathSync: (p) => p.endsWith("scsi-0HC_Volume_107462648") ? device : canonical,
-      statSync: (p) => p === "/dev/sdb" ? { isBlockDevice: () => true, rdev: 16 } : directory(16),
+      realpathSync: (p) => p.endsWith("scsi-0HC_Volume_107462648") ? device : p === mount ? mount : canonical,
+      statSync: (p) => p === "/dev/sdb" ? { isBlockDevice: () => true, rdev: 16 } : directory(p === "/" ? 1 : 16),
       lstatSync: (p) => {
+        if (p === "/etc/arcadeplatform/agent-storage.json") throw Object.assign(new Error("absent"), { code: "ENOENT" });
         if (p === root) return directory(rootDevice, rootUid, rootGid, rootMode);
         if (exists) return directory(16);
         throw Object.assign(new Error("absent"), { code: "ENOENT" });
@@ -1946,5 +1947,93 @@ test('signer update preserves a pre-existing temporary path and rejects a writab
       assert.equal(fs.readFileSync(fx.dest, 'utf8'), fx.old);
       if (kind === 'temporary') assert.equal(fs.readFileSync(tmp, 'utf8'), 'existing evidence');
     } finally { fx.cleanup(); }
+  }
+});
+
+// #1257: synthetic filesystem boundary only; no mounts, /etc writes or host configuration.
+function agentStorageFixture() {
+  const config = '/etc/arcadeplatform/agent-storage.json';
+  const uuid = '11111111-2222-4333-8444-555555555555';
+  const mount = '/mnt/agent-work';
+  const root = `${mount}/copilot-work`;
+  const directory = (dev = 16, uid = 0, gid = 0, mode = 0o755) =>
+    ({ dev, uid, gid, mode, isDirectory: () => true });
+  const meta = new Map([
+    ...['/', '/etc', '/etc/arcadeplatform'].map(p => [p, directory(1)]),
+    [config, { uid: 0, gid: 0, mode: 0o644, nlink: 1, isFile: () => true }],
+    [mount, directory()], [root, directory(16, 1000, 1000, 0o750)],
+    ['/dev/nvme0n1p2', { rdev: 16, isBlockDevice: () => true }],
+  ]);
+  const fx = { config, uuid, mount, root, meta, text: JSON.stringify({ uuid }),
+    output: `${mount} /dev/nvme0n1p2 ext4 rw,relatime`, status: 0,
+    device: '/dev/nvme0n1p2', access: true, redirected: null, exists: false };
+  const missing = () => { throw Object.assign(new Error('absent'), { code: 'ENOENT' }); };
+  fx.io = { uid: 1000, gid: 1000, warn() {},
+    run(argv) {
+      assert.deepEqual(argv, ['/usr/bin/findmnt', '--noheadings', '--raw', '--mountpoint', mount,
+        '--output', 'TARGET,SOURCE,FSTYPE,OPTIONS']);
+      return { status: fx.status, stdout: fx.output };
+    },
+    fs: {
+      lstatSync: p => meta.get(p) ?? (fx.exists && p.startsWith(root + '/') ? directory() : missing()),
+      statSync: p => meta.get(p) ?? missing(),
+      readFileSync(p, encoding) { assert.equal(p, config); assert.equal(encoding, 'utf8'); return fx.text; },
+      realpathSync: p => p.startsWith('/dev/disk/by-uuid/') ? (p === `/dev/disk/by-uuid/${uuid}` ? fx.device : missing()) : p === fx.redirected ? '/tmp/redirected' : p,
+      accessSync() { if (!fx.access) throw new Error('denied'); },
+      statfsSync: () => ({ blocks: 100, bfree: 50, bavail: 50, bsize: 1024 ** 3 }),
+    },
+  };
+  return fx;
+}
+
+test('approved UUID storage allocates only on the separate verified filesystem', async () => {
+  const { newAgentWorkdir, checkAgentStorage } = await import('../scripts/ops/agent-workdir-preflight.mjs');
+  const fx = agentStorageFixture();
+  assert.equal(newAgentWorkdir('task-1257', fx.io), '/mnt/agent-work/copilot-work/task-1257');
+  assert.equal(checkAgentStorage(fx.io).volume.availableBytes, 50 * 1024 ** 3);
+  // Device names may change across boots: UUID must resolve to the actual mounted block device.
+  fx.meta.set('/dev/vdb', fx.meta.get('/dev/nvme0n1p2'));
+  fx.device = '/dev/vdb'; fx.output = `${fx.mount} /dev/vdb ext4 rw`;
+  assert.equal(newAgentWorkdir('task-1257', fx.io), '/mnt/agent-work/copilot-work/task-1257');
+});
+
+test('storage configuration and mount failures never fall back to Hetzner or root', async () => {
+  const { newAgentWorkdir } = await import('../scripts/ops/agent-workdir-preflight.mjs');
+  const mutations = [
+    fx => { fx.text = '{'; }, fx => { fx.text = '{}'; }, fx => { fx.text = 'null'; },
+    fx => { fx.text = JSON.stringify({ uuid: '../../sda1' }); },
+    fx => { fx.text = JSON.stringify({ uuid: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }); },
+    fx => { fx.text = JSON.stringify({ uuid: fx.uuid, mount: '/tmp' }); },
+    fx => { fx.meta.get(fx.config).uid = 1000; }, fx => { fx.meta.get(fx.config).gid = 1000; },
+    fx => { fx.meta.get(fx.config).mode = 0o666; }, fx => { fx.meta.get(fx.config).nlink = 2; },
+    fx => { fx.meta.get(fx.config).isFile = () => false; },
+    fx => { fx.meta.get('/etc/arcadeplatform').mode = 0o775; },
+    fx => { fx.meta.get('/etc/arcadeplatform').uid = 1000; },
+    fx => { fx.redirected = '/etc/arcadeplatform'; }, fx => { fx.redirected = fx.config; },
+    fx => { fx.io.fs.readFileSync = () => { throw new Error('unreadable'); }; },
+    fx => { fx.io.fs.lstatSync = () => { throw new Error('unverifiable'); }; },
+    fx => { fx.status = 1; }, fx => { fx.output = ''; },
+    fx => { fx.output = `${fx.mount} /dev/unknown ext4 rw`; },
+    fx => { fx.output = `${fx.mount} /dev/nvme0n1p2 ext4 ro`; },
+    fx => { fx.output = `/ /dev/nvme0n1p2 ext4 rw`; },
+    fx => { fx.output = `${fx.mount} /dev/nvme0n1p2 xfs rw`; },
+    fx => { fx.output += '\n' + fx.output; },
+    fx => { fx.device = '/dev/unknown'; },
+    fx => { fx.meta.get('/dev/nvme0n1p2').isBlockDevice = () => false; },
+    fx => { fx.meta.get('/dev/nvme0n1p2').rdev = 1; },
+    fx => { fx.meta.get('/').dev = 16; },
+    fx => { fx.redirected = fx.mount; }, fx => { fx.redirected = fx.root; },
+    fx => { fx.meta.get(fx.mount).uid = 1000; }, fx => { fx.meta.get(fx.mount).mode = 0o777; },
+    fx => { fx.meta.get(fx.root).uid = 0; }, fx => { fx.meta.get(fx.root).gid = 0; },
+    fx => { fx.meta.get(fx.root).mode = 0o775; }, fx => { fx.meta.get(fx.root).dev = 1; },
+    fx => { fx.meta.get(fx.root).isDirectory = () => false; },
+    fx => { fx.io.uid = 0; }, fx => { fx.access = false; }, fx => { fx.exists = true; },
+  ];
+  for (const [i, mutate] of mutations.entries()) {
+    const fx = agentStorageFixture(); mutate(fx);
+    assert.throws(() => newAgentWorkdir('task-1257', fx.io), /STOP agent_workdir/, `unsafe fixture ${i}`);
+  }
+  for (const slug of ['', '.', '..', '../escape', '/tmp/task', 'a/b', 'a b', 'a'.repeat(81)]) {
+    assert.throws(() => newAgentWorkdir(slug, agentStorageFixture().io), /STOP agent_workdir/);
   }
 });

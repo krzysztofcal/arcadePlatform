@@ -213,7 +213,7 @@ Agents MUST use this to locate logic quickly.
 - Shared policy: `AGENTS.md`, Task workspace lifecycle (Codex, Claude Code, Antigravity).
 - Read-only new-path check: `scripts/ops/agent-workdir-preflight.mjs <unique-task-name>`.
 - Inventory and native Git/launcher usage: `docs/agent-work-directories.md`.
-- Reuse active task checkouts; allocate new ones only on the verified Volume. Missing mount means STOP, never a root-disk fallback.
+- Reuse active task checkouts; allocate new ones only on the verified workspace filesystem (Hetzner defaults or the OWNER-provisioned UUID mount described in `docs/agent-work-directories.md`). Missing/invalid configuration or mount means STOP, never a root-disk fallback.
 
 ---
 

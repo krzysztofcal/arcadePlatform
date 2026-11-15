@@ -1,7 +1,9 @@
 # Agent work directories on the Arcade Platform VPS
 
 New Codex, Claude Code and Antigravity checkout/worktree content belongs under
-`/mnt/HC_Volume_107462648/copilot-work`. Existing tasks keep their original
+the host's verified workspace root: `/mnt/HC_Volume_107462648/copilot-work`
+on current Hetzner, or `/mnt/agent-work/copilot-work` after separately approved
+UUID filesystem provisioning. Existing tasks keep their original
 checkout, including those in `/home/copilot/work`, `/tmp` or `.claude/worktrees`.
 Check the task handoff and `git worktree list` first; do not allocate another
 checkout for a review or follow-up. If the recorded checkout is unavailable,
@@ -29,26 +31,24 @@ launcher to use an explicit prepared checkout, or STOP that launch path. A stale
 checkout or installed skill does not automatically receive new instructions;
 coordinators must supply this current rule before starting a new task/worker.
 
-## Local Antigravity skill update (separate GO required)
+## Local Antigravity configuration (separate GO required)
 
-Read-only inspection on 2026-11-14 confirmed that the installed
-`~/.claude/skills/agy-implement/SKILL.md` still uses
-`/home/copilot/work/agy-<slug>` in steps 2 and 3. This documentation does not
-update that local skill or authorize local launcher/configuration changes.
-
-After a separate explicit GO, minimally update those two examples: run the
-existing preflight from a trusted current checkout immediately before
-`git worktree add`, stop on any failure, use its stdout as the explicit
-destination, and pass that same path to `agy-implement.sh --worktree`.
-State that existing task checkouts are reused in place and reference AGENTS.md
-as the policy source. Review the local diff for stale root-disk allocation
-examples; no wrapper changes, new manager or migration are needed.
+Inspection on 2026-11-15 for #1257 found the installed
+`~/.claude/skills/agy-implement/SKILL.md` already using checked Volume paths,
+scoped TMP/cache and explicit `--worktree` / `--out`. It pins a preflight path
+under `copilot-work/agent-disk-guard` and its SHA-256, and references the common
+repository `/home/copilot/work/arcadePlatform`. On OVH these trusted checkout,
+preflight/hash and common-repository references must be reviewed and updated
+only after provisioning and separate GO. Do not copy stale pins or private HOME.
+The existing wrapper inherits the scoped environment and reuses an explicit
+worktree; no new launcher or manager is needed. Existing tasks retain their
+recorded checkout/runtime paths.
 
 Codex automatic `create_worktree` and Claude Code automatic `--worktree`
 launch paths still require separate operator configuration to open an
-explicitly prepared Volume checkout (or must remain unused). Updating the
-Antigravity skill examples is also a separate local step; repository policy
-does not configure these launchers automatically.
+explicitly prepared checkout on the verified filesystem (or must remain unused).
+This repository change neither modifies installed skills/launchers nor
+configures OVH, migrates sessions/worktrees, or starts T004 identity work.
 
 ## Allocate with the existing Git mechanism
 
@@ -84,16 +84,47 @@ Keep task ownership and review identities unchanged.
 
 ## Preflight and limits
 
-`node scripts/ops/agent-workdir-preflight.mjs <unique-task-name>` requires the
-exact `/dev/sdb` EXT4 read-write mount at `/mnt/HC_Volume_107462648`, the fixed
-Hetzner by-id link pointing to `/dev/sdb`, and a real `copilot-work` directory
-on the same device, owned by the non-root invoking uid/gid with mode `0750`
-and write/search access. It rejects redirected paths, missing/unverifiable
-mounts, existing destinations and invalid names (including traversal). No root
-permission or change to the admin helper is involved.
+`node scripts/ops/agent-workdir-preflight.mjs <unique-task-name>` is read-only.
+With no `/etc/arcadeplatform/agent-storage.json`, it retains the exact Hetzner
+identity: `/dev/sdb`, EXT4 rw at `/mnt/HC_Volume_107462648`, and
+`/dev/disk/by-id/scsi-0HC_Volume_107462648` resolving to `/dev/sdb`.
+A missing Hetzner mount is STOP, never automatic selection of another disk.
+
+For the future dev host, the alternate contract is deliberately fixed:
+
+- Mount: `/mnt/agent-work`; workspace root: `/mnt/agent-work/copilot-work`.
+- Non-secret config: `/etc/arcadeplatform/agent-storage.json`, containing
+  exactly one key, `uuid`, with the actual lowercase EXT4 filesystem UUID.
+  No placeholder UUID is supplied or activated by this PR.
+- The config must be a canonical regular file, `root:root 0644`, with one hard
+  link. Its ancestors must be canonical root-owned directories without
+  group/other write permission. Unreadable, malformed, symlinked or untrusted
+  config means STOP; an invalid configured target never retries Hetzner.
+- `/dev/disk/by-uuid/<uuid>` must resolve to the actual block device mounted
+  EXT4 rw at exactly `/mnt/agent-work`. Device names are not pinned on OVH.
+  Both host contracts reject the system filesystem, redirected mount/workspace
+  paths and a mount directory writable by non-root users.
+- `copilot-work` must be a real directory on that same filesystem, owned by the
+  non-root invoking uid/gid, exactly `0750`, with write/search access. Existing
+  destinations (including symlinks) and invalid/traversing task names are refused.
+- No CLI/environment override, mount/permission repair, disk discovery, or
+  root-disk fallback is provided. Capacity remains advisory, not a quota.
+
+After purchase, OWNER must inspect the actual partition layout, choose an
+isolated local partition or attached volume, approve its UUID and provision
+its mount/permissions/config through a separately approved admin procedure.
+An ordinary directory or bind of the system filesystem cannot substitute for
+this mount. Keep the config absent on current Hetzner; do not change its mount,
+by-id link or installed launchers. A single-root-filesystem OVH image requires
+separate storage provisioning before this guard can permit new workspaces.
+Do not run the WS `infra/vps/bootstrap.sh` for this dev-only setup.
+
+This expands constitution VI to provider-neutral verified storage (1.4.0 →
+1.5.0, MINOR: added supported host contract, unchanged Hetzner restrictions).
+It does not authorize provisioning, migration, WS changes or T004–T008.
 
 This check is a point-in-time guard, not a mount lock or a security sandbox for
-agents that can run arbitrary commands. Do not unmount/change the Volume while
+agents that can run arbitrary commands. Do not unmount/change the selected filesystem while
 agents allocate or use worktrees; if mount identity changes, stop allocation
 and investigate rather than writing to the root filesystem. The mount directory
 is root-owned and not writable by copilot when unmounted; do not change it or
@@ -119,7 +150,7 @@ legacy task resumes), run the reviewed current preflight, not a stale task copy:
 node /path/to/trusted-current-checkout/scripts/ops/agent-workdir-preflight.mjs --check
 ```
 
-Requires Node >=18.15 (VPS inspected with Node 22). `--check` verifies the same fixed Volume identity/ownership/access without
+Requires Node >=18.15 (VPS inspected with Node 22). `--check` verifies the selected filesystem identity/ownership/access without
 allocating a name, and prints root/Volume capacity as JSON. New allocations also
 perform this check. Root usage follows `df` (used / (used + available), rounded
 up): **WARN at 85%**, **CRITICAL at 90% or less than 4 GiB available**.
@@ -129,7 +160,7 @@ block allocation/continuation. Missing/invalid capacity metrics produce WARN
 and `null` for that filesystem in the JSON; they do not invalidate an otherwise
 verified destination. Stdout for successful name allocation remains one path.
 
-Fail-closed checks apply only to unsafe/unverifiable locations for **new Volume
+Fail-closed checks apply only to unsafe/unverifiable locations for **new workspace
 writes** (mount identity, canonical path, permissions, conflicts). On a location
 failure, do not allocate/write there and never fall back to root. Existing work
 may continue in its recorded location; do not interrupt active tasks, sessions,
@@ -147,7 +178,8 @@ Do not allocate a fresh runtime directory for each review round. For reuse, run
 `stat -c '%u:%g %a %d' -- "$agent_runtime" "$agent_runtime/tmp" "$agent_runtime/cache" "$agent_runtime/artifacts"`
 and `find "$agent_runtime" -type l -print`. Require the recorded canonical path,
 invoking uid/gid, mode 700 for all four directories, device matching
-`stat -c %d /mnt/HC_Volume_107462648`, no symlinks and successful inspection;
+`stat -c %d <approved-host-mount>` (`/mnt/HC_Volume_107462648` on Hetzner;
+`/mnt/agent-work` only on the provisioned UUID host), no symlinks and successful inspection;
 otherwise STOP. Skip allocation/mkdir and export the same variables in the
 subshell. These checks are not a lock against concurrent filesystem changes.
 
