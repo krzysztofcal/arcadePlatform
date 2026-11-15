@@ -106,3 +106,10 @@ additive; missing environments/secrets/approval/API capability blocks the new wo
 has been changed by implementation. No new service or dependency. No Supabase egress (only bounded GitHub/Netlify
 metadata and static GETs at owner release frequency). A future cutover/removal requires measured first-run evidence
 and separate OWNER approval.
+
+Additional operational compatibility notes: direct Release Record publication also requires a fresh attempt-1
+dispatch; failed runs must not be rerun to publish. The retained manual tool now bounds each Netlify API call to
+20 seconds, including restore: a slow/timeout restore becomes `uncertain`, requiring OWNER observation instead
+of waiting indefinitely. A candidate still building after cancellation/timeout needs the retained manual guarded
+discard once ready/error; the GitHub publisher accepts only successful validated candidates, so it cannot clean up
+that failed-run case. Never delete or edit a published immutable record to work around provenance failure.

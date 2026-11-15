@@ -51,7 +51,7 @@ export function environmentFailures(settings, branches, owner) {
 export const ownerApproved = (reviews, environment, owner) => Array.isArray(reviews) && reviews.some(r =>
   r.state === 'approved' && r.user?.login === owner && r.environments?.some(e => e.name === environment));
 
-export function correlatedCandidate(deploys, { marker, sha, startedAt, previousIds }) {
+export function correlatedCandidate(deploys, { marker, startedAt, previousIds }) {
   const matches = deploys.filter(d => d.title === marker);
   if (matches.length > 1) fail('ambiguous_hook_candidates');
   if (!matches.length) return null;
@@ -65,8 +65,8 @@ export function correlatedCandidate(deploys, { marker, sha, startedAt, previousI
 // The unique new ID is saved before final identity checks, so a stale-main build can still be safely discarded.
 export function hookCandidateReady(deploy, sha) {
   if (!['ready', 'error'].includes(deploy.state)) return false; // commit_ref may be null before clone.
-  if (deploy.commit_ref !== sha) fail('hook_candidate_sha_mismatch');
   if (deploy.state === 'error') fail('candidate_build_failed');
+  if (deploy.commit_ref !== sha) fail('hook_candidate_sha_mismatch');
   return true;
 }
 const targetFile = (sha, path) => {
@@ -170,7 +170,7 @@ async function candidate(env) {
       if (d) {
         p.deployId = d.id; p.status = 'candidate_building'; save('.www/candidate.json', p);
         const full = await api.deploy(d.id);
-        correlatedCandidate([full], { marker: p.marker, sha, startedAt: p.createdAt, previousIds: before.map(x => x.id) });
+        if (!correlatedCandidate([full], { marker: p.marker, startedAt: p.createdAt, previousIds: before.map(x => x.id) })) fail('hook_candidate_lost_STOP');
         if (hookCandidateReady(full, sha)) { ready = true; break; }
       }
       await new Promise(resolve => setTimeout(resolve, Math.min(10000, Math.max(0, deadline - Date.now()))));
@@ -229,7 +229,10 @@ async function publish(env) {
     fs.appendFileSync(env.GITHUB_OUTPUT, `deploy_id=${p.deployId}\nsha=${p.sha}\nverified=true\n`);
     summary(`Published and LIVE verified: ${p.sha}, deploy ${p.deployId}, locked. Release Record follows automatically.`, env);
   } catch (e) {
-    if (e.receipt) receipt.release = e.receipt;
+    if (e.receipt) {
+      if (e.receipt.status?.startsWith('discard')) receipt.discard = e.receipt;
+      else receipt.release = e.receipt;
+    }
     if (e.uncertain || ['uncertain', 'published_smoke_failed', 'published'].includes(receipt.release?.status) || receipt.status === 'published_smoke_pending') {
       receipt.status = e.uncertain || receipt.release?.status === 'uncertain' ? 'uncertain_STOP' : 'published_smoke_failed_STOP';
       summary(`STOP: ${receipt.status}. Production may already have changed. No retry, rollback or deletion. OWNER decision required.`, env);

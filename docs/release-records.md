@@ -77,3 +77,10 @@ original successful owner run/record job and approval history. They read **attem
 metadata; a skipped unauthorized rerun cannot invalidate a recorded release. Expired operational artifacts do not
 invalidate immutable records. Chained records permanently retain the origin references; the first chain check uses
 the unexpired publication artifact. Existing direct records remain valid.
+
+Publication (`publish=true`) is allowed only on attempt 1 for both direct and chained records. A failed direct
+publication must be a **new dispatch**, not “Re-run failed jobs”; inspect whether the tag/release already exists
+before dispatching. This intentionally changes direct rerun behaviour so every immutable record has stable
+first-attempt provenance. Before activation, verify the latest existing record has a successful attempt-1 publish;
+a historical later-attempt record requires OWNER reconciliation rather than deleting or editing an immutable record.
+Read-only check on 2026-11-15: latest `release-20261115-13`, run `43692925552`, attempt 1 publish succeeded.

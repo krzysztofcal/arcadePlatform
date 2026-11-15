@@ -552,3 +552,14 @@ test('chained immutable previous record trusts the original successful attempt a
   assert.throws(() => previousRecord(manifest, release, run, { jobs: jobs.jobs.slice(1) }, 'krzysztofcal', chain));
   assert.throws(() => previousRecord(manifest, release, { ...run, run_attempt: 2 }, jobs, 'krzysztofcal', chain));
 });
+
+test('direct release publication rejects reruns before any record or chain operation', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/release-record.yml', import.meta.url), 'utf8');
+  const script = /      - name: Check the request[\s\S]*?        run: \|\n([\s\S]*?)(?=\n      # Read-only)/.exec(workflow)[1];
+  const env = { PATH: process.env.PATH, COMPONENT: 'www', CONFIRMATION: 'RECORD www RELEASE', PUBLISH: 'true', APPROVED_WWW: 'false',
+    GITHUB_REPOSITORY: 'krzysztofcal/arcadePlatform', GITHUB_REPOSITORY_OWNER: 'krzysztofcal',
+    GITHUB_ACTOR: 'krzysztofcal', GITHUB_TRIGGERING_ACTOR: 'krzysztofcal',
+    CALLER: 'krzysztofcal/arcadePlatform/.github/workflows/release-record.yml@refs/heads/main' };
+  assert.equal(spawnSync('bash', ['-c', script], { env: { ...env, GITHUB_RUN_ATTEMPT: '1' } }).status, 0);
+  assert.notEqual(spawnSync('bash', ['-c', script], { env: { ...env, GITHUB_RUN_ATTEMPT: '2' } }).status, 0);
+});

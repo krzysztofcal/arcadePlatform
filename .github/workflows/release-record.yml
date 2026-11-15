@@ -123,6 +123,7 @@ jobs:
           [[ "$GITHUB_ACTOR" == "$GITHUB_REPOSITORY_OWNER" && "$GITHUB_TRIGGERING_ACTOR" == "$GITHUB_REPOSITORY_OWNER" ]] && OWNER_RUN=true
           # Publishing and the Android attestation are the owner's own act; an agent may only dry-run.
           [[ "$PUBLISH" != true || "$OWNER_RUN" == true ]] || { echo "only the owner may publish a release record"; exit 1; }
+          [[ "$PUBLISH" != true || "$GITHUB_RUN_ATTEMPT" == 1 ]] || { echo "publish only on the first attempt; dispatch again"; exit 1; }
           [[ "$COMPONENT" != android || "$OWNER_RUN" == true ]] || { echo "only the owner may attest an Android release"; exit 1; }
           if [[ "$APPROVED_WWW" == true ]]; then
             [[ "$CALLER" == "$GITHUB_REPOSITORY/.github/workflows/www-publish.yml@refs/heads/main" && "$OWNER_RUN" == true && "$COMPONENT" == www && "$PUBLISH" == true && "$GITHUB_RUN_ATTEMPT" == 1 ]] || exit 1
@@ -175,7 +176,7 @@ jobs:
               ;;
             www)
               [[ "$WWW_DEPLOY_ID" =~ ^[a-f0-9]{24}$ ]] || { echo "www_deploy_id must be a Netlify deploy id"; exit 1; }
-              curl -fsS --max-time 20 https://play.kcswh.pl/js/build-info.js -o .release/build-info.js
+              curl -fsS --max-time 20 "https://play.kcswh.pl/js/build-info.js?release=$WWW_DEPLOY_ID" -o .release/build-info.js
               echo "WWW_BUILD_INFO_FILE=.release/build-info.js" >> "$GITHUB_ENV"
               ;;
           esac
