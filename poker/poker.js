@@ -1723,6 +1723,21 @@
     var pokerProgressionContent = document.getElementById('pokerProgressionContent');
     var createDialog = document.getElementById('pokerCreateDialog');
 
+    // The offline bundle writes this label in English on every wallet update; keep it localized without rebuilding the bundle.
+    var offlinePlayBtn = document.getElementById('offlinePlay');
+    var offlinePlayKeys = { 'PLAY NOW': 'offlinePlayNow', 'NEW GAME': 'offlineNewGame' };
+    function localizeOfflinePlay(){
+      var key = offlinePlayKeys[offlinePlayBtn.textContent];
+      if (!key) return;
+      offlinePlayBtn.setAttribute('data-i18n', key);
+      var label = t(key, offlinePlayBtn.textContent);
+      if (label !== offlinePlayBtn.textContent) offlinePlayBtn.textContent = label;
+    }
+    if (offlinePlayBtn && typeof MutationObserver === 'function'){
+      new MutationObserver(localizeOfflinePlay).observe(offlinePlayBtn, { childList: true });
+      localizeOfflinePlay();
+    }
+
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
       if (button.dataset.panel === 'daily') { openDailyBonus(); return; }

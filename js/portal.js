@@ -95,7 +95,8 @@
       meta.className = 'card-meta';
       const label = document.createElement('span');
       label.className = 'label';
-      label.textContent = game.category || 'Arcade';
+      const categoryName = (Array.isArray(game.category) ? game.category[0] : game.category) || 'Arcade';
+      label.textContent = (window.I18N && typeof window.I18N.t === 'function' && window.I18N.t('category' + categoryName)) || categoryName;
       meta.appendChild(label);
       body.appendChild(meta);
 

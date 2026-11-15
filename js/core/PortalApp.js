@@ -68,7 +68,10 @@
       this.document = options.doc || global.document;
       this.gameUtils = SHARED_GAME_UTILS;
       this.searchUtils = SEARCH_UTILS;
-      this.onLangChange = () => this.renderCurrentList('langchange');
+      this.onLangChange = () => {
+        this.categoryButtons.forEach((button, name) => { button.textContent = this.categoryLabel(name); });
+        this.renderCurrentList('langchange');
+      };
     }
 
     refreshCategoryItemsFromCatalog(){
@@ -116,6 +119,12 @@
         } catch (err) {}
       }
       return 'en';
+    }
+
+    categoryLabel(name){
+      const key = 'category' + name;
+      const label = this.t(key);
+      return label && label !== key ? label : name;
     }
 
     t(key){
@@ -264,7 +273,7 @@
       meta.className = 'card-meta';
       const category = this.document.createElement('span');
       category.className = 'label';
-      category.textContent = item && Array.isArray(item.category) && item.category[0] ? item.category[0] : this.t('playChip');
+      category.textContent = item && Array.isArray(item.category) && item.category[0] ? this.categoryLabel(item.category[0]) : this.t('playChip');
       meta.appendChild(category);
       body.appendChild(meta);
 
@@ -305,7 +314,7 @@
       meta.className = 'card-meta';
       const category = this.document.createElement('span');
       category.className = 'label';
-      category.textContent = item && Array.isArray(item.category) && item.category[0] ? item.category[0] : 'Soon';
+      category.textContent = item && Array.isArray(item.category) && item.category[0] ? this.categoryLabel(item.category[0]) : 'Soon';
       meta.appendChild(category);
       body.appendChild(meta);
 
@@ -524,7 +533,7 @@
         const button = this.document.createElement('button');
         button.type = 'button';
         button.className = 'category-button';
-        button.textContent = name;
+        button.textContent = this.categoryLabel(name);
         button.dataset.category = name;
         button.setAttribute('aria-pressed', 'false');
         button.addEventListener('click', () => this.handleCategorySelect(name));
