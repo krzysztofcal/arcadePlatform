@@ -31,7 +31,7 @@ Only `www-candidate` additionally holds `NETLIFY_BUILD_HOOK`: the existing main 
 Do not create a parallel hook or use CLI production deploys. Keep Netlify auto publishing locked and `[build].ignore`
 unchanged. Confirm the token can access site `f7e19a84-28f7-41f7-978a-f3b4552a404d`, never another site.
 
-Provision the SSH identity through the existing approved administrative process, separately authorized. It must
+Provision the SSH identity through the dedicated two-step VPS Admin process below, separately authorized. It must
 support only the existing fixed `VPS_READ` in `scripts/www-production-release.mjs` (current release/metadata,
 installation timestamp, service status), with no writes, shell expansion, forwarding or deployment authority.
 If that identity is not already available, activation is blocked; implementation grants no provisioning authority.
@@ -132,3 +132,35 @@ dispatch; failed runs must not be rerun to publish. The retained manual tool now
 of waiting indefinitely. A candidate still building after cancellation/timeout needs the retained manual guarded
 discard once ready/error; the GitHub publisher accepts only successful validated candidates, so it cannot clean up
 that failed-run case. Never delete or edit a published immutable record to work around provenance failure.
+
+
+## Dedicated SSH evidence identity: pending activation (#1254)
+
+Use only `arcade-www-read` provisioned by `www-ws-read-prepare`, followed by separately approved
+`www-ws-read-key-sync`. See [VPS Admin enrollment and recovery](vps-admin-operations.md#dedicated-www-evidence-reader-1254).
+The fixed public-key asset starts empty. This code PR neither provisions the account nor installs/generates
+any real key. Both actions retain `vps-admin` OWNER approval; WWW's two separate Environments retain their
+own OWNER approvals and accepted self-approval policy. No WS/VPS Environment is reused for WWW publishing.
+
+After successful preparation, reviewed public-key enrollment and explicit read-only SSH acceptance,
+OWNER separately configures these three secrets in **both** `www-candidate` and `www-production`:
+
+| Secret | Value source (never print private data) |
+|---|---|
+| `WS_PROD_SSH` | `arcade-www-read@<verified-current-VPS-host>`; never a deployment or OWNER identity |
+| `WS_PROD_SSH_KEY` | Corresponding dedicated private key, entered directly by OWNER from secure off-VPS custody |
+| `WS_PROD_KNOWN_HOSTS` | OpenSSH known_hosts entry for that exact hostname/port, verified against host public key/fingerprint through an independent trusted OWNER console |
+
+Do not trust runtime `ssh-keyscan`, disable strict checking or pin a Hetzner IP/host key in code. A future
+OVH migration repeats trusted provisioning, public-key enrollment and independent host-key verification;
+update endpoint/pin only under separate GO. Never copy the private key onto either VPS. The wrapper accepts
+only the existing exact `VPS_READ`; interactive sessions, arbitrary commands and forwarding stay disabled.
+It returns the existing `vpsWsRelease()` evidence format with only required public metadata fields.
+
+If SSH policy, permissions, identity, manifest, source SHA or host-key provenance is unverified, release
+activation remains BLOCKED. Do not widen WS permissions or borrow the Preview/deployment key. Key revocation
+uses a reviewed empty public-key asset plus separately approved key-sync; partial failure requires protected
+state inspection without automatic retry. A fresh OWNER-approved empty-asset key-sync can revoke a known
+interrupted enrollment slot even when WS/SSH/wrapper health has drifted; it does not resume the failed action. Existing manual WWW release remains available under its own gates.
+No breaking change to WWW/WS runtime or existing release workflows; this additive admin path requires separate
+installation/configuration/acceptance GO before first use.

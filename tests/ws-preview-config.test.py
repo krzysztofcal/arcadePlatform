@@ -917,5 +917,228 @@ class GitHubAppToken(unittest.TestCase):
             self.assertFalse(any('systemctl' in a[0] for a in calls))
 
 
+class WwwRead(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('www_read', Path(__file__).parents[1]/'infra/vps/www-ws-read.py')
+        cls.m = importlib.util.module_from_spec(spec); spec.loader.exec_module(cls.m)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name); self.root.chmod(0o700)
+        self.task = self.m.Preparation(root=self.root, files=config.SecureFiles(os.getuid(), os.getgid(), self.root))
+        for rel in ['usr/local/sbin', 'usr/local/libexec/arcade-vps-admin', 'var/lib/arcade-admin', 'etc/ssh/sshd_config.d']:
+            (self.root/rel).mkdir(parents=True, exist_ok=True)
+        self.task.source.write_bytes((Path(__file__).parents[1]/'infra/vps/www-ws-read.py').read_bytes())
+        self.task.key_source.write_bytes(b'')
+        self.task.dependency.write_bytes((Path(__file__).parents[1]/'infra/vps/prepare-ws-preview-v3.py').read_bytes())
+        (self.root/'etc/ssh/sshd_config').write_text('Include /etc/ssh/sshd_config.d/*.conf\n')
+        for directory in self.root.rglob('*'):
+            if directory.is_dir():directory.chmod(0o755)
+            elif directory.is_file():directory.chmod(0o644)
+        self.exists = False; self.calls = []
+        from types import SimpleNamespace
+        self.info = SimpleNamespace(pw_uid=999, pw_gid=998, pw_dir='/var/lib/arcade-www-read', pw_shell='/bin/sh')
+        self.task.account = lambda: self.info if self.exists else None
+        self.task.group_exists = lambda: self.exists
+        self.task.approved = lambda action, run: 'a'*40
+        self.task.check_reads = lambda: None
+        self.task.current_main = lambda: 'a'*40
+        policy = {'authorizedkeysfile':'.ssh/authorized_keys .ssh/authorized_keys2', 'authorizedkeyscommand':'none',
+            'authorizedprincipalscommand':'none','authorizedprincipalsfile':'none','trustedusercakeys':'none',
+            'forcecommand':'none','permituserenvironment':'no','passwordauthentication':'no',
+            'kbdinteractiveauthentication':'no','hostbasedauthentication':'no',
+            'gssapiauthentication':'no','kerberosauthentication':'no','permittunnel':'no','strictmodes':'yes','pubkeyauthentication':'yes','usepam':'yes'}
+        self.policy=policy
+        def run(argv, expected=(0,)):
+            self.calls.append(argv)
+            if argv[0].endswith('sshd'):return '\n'.join(k+' '+v for k,v in policy.items())
+            if argv[0].endswith('useradd'):self.exists=True
+            if argv[0].endswith('id'):return '998'
+            if argv[0].endswith('getent'):return 'arcade-www-read:x:998:'
+            if argv[0].endswith('passwd'):return 'arcade-www-read L fixture'
+            if argv[0].endswith('sudo'):return 'User arcade-www-read is not allowed to run sudo on fixture.'
+            return ''
+        self.task.run=run
+
+    def test_prepare_sync_revoke_and_repeats_touch_only_owned_authorization(self):
+        self.assertEqual(self.task.execute('prepare','123'),'prepared')
+        original = self.task.auth.read_bytes();self.assertEqual(original,b'')
+        self.assertEqual(self.task.execute('prepare','124'),'verified')
+        wire=b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20'+b'x'*32
+        self.task.key_source.write_bytes(b'ssh-ed25519 '+base64.b64encode(wire)+b' fixture\n')
+        self.assertEqual(self.task.execute('key-sync','125'),'key_enabled')
+        auth=self.task.auth.read_text();self.assertIn('restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc,command=',auth)
+        self.assertNotIn('fixture',auth)
+        self.assertEqual(self.task.execute('key-sync','126'),'verified')
+        self.task.key_source.write_bytes(b'')
+        self.assertEqual(self.task.execute('key-sync','127'),'key_disabled')
+        self.assertEqual(self.task.auth.read_bytes(),b'')
+        self.assertFalse(any(a[0].endswith('systemctl') for a in self.calls))
+        self.assertFalse(any('sudoers' in str(a) or 'PRIVATE KEY' in str(a) for a in self.calls))
+
+    def test_match_foreign_account_and_partial_prepare_stop_without_repair(self):
+        (self.root/'etc/ssh/sshd_config.d/other.conf').write_text('Match Address 192.0.2.1\n ForceCommand other\n')
+        (self.root/'etc/ssh/sshd_config.d/other.conf').chmod(0o644)
+        with self.assertRaisesRegex(self.m.Refused,'sshd_match_requires_review'):self.task.execute('prepare','123')
+        self.assertFalse(self.task.base.exists())
+        (self.root/'etc/ssh/sshd_config.d/other.conf').unlink()
+        for name,value in [('authorizedkeyscommand','/other'),('authorizedkeysfile','/other'),
+                ('gssapiauthentication','yes'),('kerberosauthentication','yes'),('permittunnel','yes')]:
+            previous=self.policy[name];self.policy[name]=value
+            with self.assertRaisesRegex(self.m.Refused,'effective_ssh_policy_mismatch'):self.task.execute('prepare','123')
+            self.assertFalse(self.task.base.exists())
+            self.policy[name]=previous
+        original=self.task.run
+        def unsafe_env(argv,expected=(0,)):
+            output=original(argv,expected)
+            return output+'\nacceptenv LD_*\nacceptenv LANG\nacceptenv LC_*' if argv[0].endswith('sshd') else output
+        self.task.run=unsafe_env
+        with self.assertRaisesRegex(self.m.Refused,'unsafe_acceptenv'):self.task.execute('prepare','123')
+        self.task.run=original
+        self.exists=True
+        with self.assertRaisesRegex(self.m.Refused,'existing_identity'):self.task.execute('prepare','123')
+        self.exists=False
+        previous=self.task.run
+        def fail(argv, expected=(0,)):
+            if argv[0].endswith('useradd'):raise self.m.Refused('fixture_failure')
+            return previous(argv,expected)
+        self.task.run=fail
+        with self.assertRaises(self.m.Refused):self.task.execute('prepare','123')
+        self.assertEqual(json.loads(self.task.manifest.read_text())['phase'],'preparing')
+        with self.assertRaisesRegex(self.m.Refused,'partial_state'):self.task.execute('prepare','124')
+
+    def test_authorization_drift_and_options_or_private_key_input_are_rejected(self):
+        self.task.execute('prepare','123')
+        for data in [b'-----BEGIN OPENSSH PRIVATE KEY-----',b'command="other" ssh-ed25519 AAAA',b'ssh-ed25519 invalid']:
+            self.task.key_source.write_bytes(data)
+            with self.assertRaises(self.m.Refused):self.task.execute('key-sync','124')
+            self.assertEqual(self.task.auth.read_bytes(),b'')
+        self.task.auth.write_text('unexpected authorization')
+        with self.assertRaisesRegex(self.m.Refused,'authorization_drift'):self.task.execute('prepare','125')
+
+    def approval_api(self, action):
+        sha='a'*40;operation='www-ws-read-'+action
+        run={'id':123,'path':'.github/workflows/vps-admin-operation.yml','event':'workflow_dispatch',
+             'head_branch':'main','status':'in_progress','head_sha':sha,'run_attempt':1,
+             'actor':{'login':'arcade-code-agent[bot]'},'triggering_actor':{'login':'arcade-code-agent[bot]'},
+             'display_title':'VPS Admin: '+operation+' (requested by arcade-code-agent[bot])'}
+        jobs=[{'run_id':123,'run_attempt':1,'head_sha':sha,'name':'1. Review request: '+operation,'status':'completed','conclusion':'success'},
+              {'run_id':123,'run_attempt':1,'head_sha':sha,'name':'2. Run on the VPS after approval: '+operation,'status':'in_progress','conclusion':None}]
+        records={'actions/runs/123':run,'actions/runs/123/attempts/1/jobs?per_page=10':{'total_count':2,'jobs':jobs},
+                 'actions/runs/123/approvals':[{'state':'approved','user':{'login':'krzysztofcal'},'environments':[{'name':'vps-admin'}]}]}
+        def api(route):
+            if route in records:return records[route]
+            path=self.task.dependency if 'prepare-ws-preview-v3.py?' in route else self.task.source if 'www-ws-read.py?' in route else self.task.key_source
+            data=path.read_bytes()
+            return {'type':'file','path':'infra/vps/'+path.name,
+                    'sha':self.m.hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()}
+        self.task.api=api
+        return records
+
+    def test_owner_approval_must_cover_this_operation_and_first_attempt(self):
+        for action in ['prepare','key-sync']:
+            self.approval_api(action)
+            self.assertEqual(self.m.Preparation.approved(self.task,action,'123'),'a'*40)
+        for wrong in ['operation','job_operation','missing_approval','other_reviewer','other_environment','rejected','ambiguous_approval','rerun','missing_job']:
+            records=self.approval_api('prepare')
+            reviews=records['actions/runs/123/approvals']
+            jobs=records['actions/runs/123/attempts/1/jobs?per_page=10']
+            if wrong=='operation':records['actions/runs/123']['display_title']='VPS Admin: www-ws-read-key-sync (requested by arcade-code-agent[bot])'
+            if wrong=='job_operation':jobs['jobs'][1]['name']='2. Run on the VPS after approval: www-ws-read-key-sync'
+            if wrong=='missing_approval':reviews.clear()
+            if wrong=='other_reviewer':reviews[0]['user']['login']='arcade-code-agent[bot]'
+            if wrong=='other_environment':reviews[0]['environments'][0]['name']='ws-production'
+            if wrong=='rejected':reviews[0]['state']='rejected'
+            if wrong=='ambiguous_approval':reviews.append(reviews[0].copy())
+            if wrong=='rerun':records['actions/runs/123']['run_attempt']=2
+            if wrong=='missing_job':jobs['jobs'].pop()
+            with self.subTest(wrong=wrong),self.assertRaises(self.m.Refused):
+                self.m.Preparation.approved(self.task,'prepare','123')
+            self.assertFalse(self.task.base.exists());self.assertFalse(self.calls)
+
+    def test_exact_main_source_and_incomplete_key_sync_fail_closed(self):
+        from unittest.mock import patch
+        sha='a'*40
+        self.approval_api('key-sync');api=self.task.api
+        self.assertEqual(self.m.Preparation.approved(self.task,'key-sync','123'),sha)
+        with patch.object(self.task,'current_main',return_value='b'*40):
+            with self.assertRaisesRegex(self.m.Refused,'main_advanced'):self.m.Preparation.approved(self.task,'key-sync','123')
+        with patch.object(self.task,'api',side_effect=lambda route: api(route) if route.startswith('actions/') else {'sha':'bad'}):
+            with self.assertRaisesRegex(self.m.Refused,'staged_source_mismatch'):self.m.Preparation.approved(self.task,'key-sync','123')
+        self.task.execute('prepare','123')
+        self.task.key_source.write_bytes(b'ssh-ed25519 '+base64.b64encode(b'\0\0\0\x0bssh-ed25519\0\0\0\x20'+b'x'*32)+b'\n')
+        original=self.task.files.atomic
+        def fail(path,*args,**kwargs):
+            if path==self.task.auth:raise OSError('synthetic interruption')
+            return original(path,*args,**kwargs)
+        with patch.object(self.task.files,'atomic',side_effect=fail):
+            with self.assertRaises(OSError):self.task.execute('key-sync','124')
+        self.assertEqual(json.loads(self.task.manifest.read_text())['phase'],'key_syncing')
+        with self.assertRaisesRegex(self.m.Refused,'partial_state'):self.task.execute('key-sync','125')
+        self.assertEqual(self.task.auth.read_bytes(),b'')
+
+    def test_revoke_after_uncertain_enable_ignores_unrelated_health_but_checks_preimage(self):
+        from unittest.mock import patch
+        self.task.execute('prepare','123')
+        self.task.key_source.write_bytes(b'ssh-ed25519 '+base64.b64encode(b'\0\0\0\x0bssh-ed25519\0\0\0\x20'+b'x'*32)+b'\n')
+        original=self.task.files.atomic
+        def after_rename(path,*args,**kwargs):
+            original(path,*args,**kwargs)
+            if path==self.task.auth:raise OSError('synthetic fsync failure after rename')
+        with patch.object(self.task.files,'atomic',side_effect=after_rename):
+            with self.assertRaises(OSError):self.task.execute('key-sync','124')
+        self.assertTrue(self.task.auth.read_bytes())
+        self.assertEqual(json.loads(self.task.manifest.read_text())['phase'],'key_syncing')
+        self.task.key_source.write_bytes(b'')
+        self.task.source.write_bytes(self.task.source.read_bytes()+b'\n# future code\n')
+        with patch.object(self.task,'ssh_policy',side_effect=AssertionError('must not gate revocation')),patch.object(self.task,'check_reads',side_effect=AssertionError('WS unavailable')):
+            self.assertEqual(self.task.execute('key-sync','125'),'key_disabled')
+        self.assertEqual(self.task.auth.read_bytes(),b'')
+        self.assertEqual(json.loads(self.task.manifest.read_text())['phase'],'prepared')
+        self.task.auth.write_bytes(b'unknown authorization')
+        with self.assertRaisesRegex(self.m.Refused,'authorization_drift'):self.task.execute('key-sync','126')
+
+    def test_sudo_denial_accepts_both_documented_statuses_but_not_grants(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        for status in [0,1]:
+            with patch.object(self.m.subprocess,'run',return_value=SimpleNamespace(returncode=status,stdout=b'User arcade-www-read is not allowed to run sudo on fixture.')):
+                self.assertIn('not allowed',self.m.run_fixed(['/usr/bin/sudo','-n','-l','-U',self.m.USER],expected=(0,1)))
+        self.task.execute('prepare','123')
+        original=self.task.run
+        self.task.run=lambda argv,expected=(0,): 'User arcade-www-read may run the following commands on fixture: (ALL) ALL' if argv[0].endswith('sudo') else original(argv,expected)
+        with self.assertRaisesRegex(self.m.Refused,'reader_sudo_not_verified'):self.task.execute('prepare','124')
+
+    def test_wrapper_returns_only_fixed_public_evidence(self):
+        from unittest.mock import patch
+        target=self.root/('opt/ws-server/releases/'+'a'*40+'/ws-server')
+        target.mkdir(parents=True)
+        (target.parents[2]/'current').symlink_to(target)
+        (target/'release-metadata.json').write_text(json.dumps({'releaseSha':'a'*40,'environment':'production','deployRef':'main','extra':'not returned'}))
+        (target.parent/'.deployed-at').write_text('2026-11-15T10:00:00Z\n')
+        calls=[]
+        def run(argv):
+            calls.append(argv)
+            return 'ActiveState=active\nExecMainStartTimestamp=@1794736860\n'
+        with patch.object(self.m.pwd,'getpwnam',return_value=self.info),patch.object(self.m.os,'geteuid',return_value=999),patch.object(self.m.os,'getgroups',return_value=[998]):
+            output=self.m.serve(self.m.VPS_READ,[],self.root,run)
+            self.assertNotIn('not returned',output)
+            self.assertTrue(output.startswith('/opt/ws-server/releases/'+'a'*40+'/ws-server\n'))
+            self.assertEqual(calls,[['/usr/bin/systemctl','show','ws-server.service','-p','ActiveState','-p','ExecMainStartTimestamp','--timestamp=unix']])
+            (target/'release-metadata.json').unlink()
+            (target/'release-metadata.json').symlink_to(self.task.source)
+            with self.assertRaises(OSError):self.m.serve(self.m.VPS_READ,[],self.root,run)
+
+    def test_wrapper_rejects_every_nonexact_command_or_uid_before_reading(self):
+        from unittest.mock import patch
+        with patch.object(self.m.pwd,'getpwnam',return_value=self.info),patch.object(self.m.os,'geteuid',return_value=999),patch.object(self.m.os,'getgroups',return_value=[998]):
+            for command in ['',self.m.VPS_READ+' ',self.m.VPS_READ+'; id','bash','sudo id']:
+                with self.assertRaises(self.m.Refused):self.m.serve(command,[],self.root)
+            with self.assertRaises(self.m.Refused):self.m.serve(self.m.VPS_READ,['extra'],self.root)
+        with patch.object(self.m.os,'geteuid',return_value=0):
+            with self.assertRaises(self.m.Refused):self.m.serve(self.m.VPS_READ,[],self.root)
+
+
 if __name__ == '__main__':
     unittest.main()

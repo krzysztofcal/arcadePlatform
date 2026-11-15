@@ -28,6 +28,7 @@ try:
                root/'infra/vps/ws-server-preview.service.d', root/'.github', root/'.github/workflows',
                root/'.github/workflows/vps-admin-operation.yml']
     sources += [root/'infra/vps'/name for name in (
+        'www-ws-read.py', 'www-ws-read-owner.pub',
         'vps-admin.mjs', 'vps-admin-approval.mjs', 'arcade-admin.sudoers', 'github-app-token.py',
         'ws-preview-isolation.py', 'prepare-ws-preview-v3.py', 'ws-preview-owner.pub',
         'codex-bwrap-apparmor.py', 'bwrap-userns-restrict',
@@ -46,6 +47,16 @@ try:
         ('.github/workflows/vps-admin-operation.yml', '          - ' + op + '\n')]:
         if (root/rel).read_text().count(marker) != 1:
             raise ValueError()
+    for op in ('www-ws-read-prepare', 'www-ws-read-key-sync'):
+        for rel, marker in [
+            ('infra/vps/vps-admin-approval.mjs', '"' + op + '": {'),
+            ('infra/vps/arcade-admin.sudoers', '/usr/local/sbin/arcade-vps-admin ' + op + ' *'),
+            ('.github/workflows/vps-admin-operation.yml', '          - ' + op + '\n')]:
+            if (root/rel).read_text().count(marker) != 1:
+                raise ValueError()
+    helper = (root/'infra/vps/vps-admin.mjs').read_text()
+    if helper.count('`www-ws-read-${action}`') != 1 or helper.count('["prepare", "key-sync"].map((action)') != 1:
+        raise ValueError()
 except (OSError, ValueError):
     sys.exit('untrusted_staging_source: use an OWNER-controlled root-owned reviewed checkout')
 PY_TRUST
@@ -130,7 +141,7 @@ for directory in /usr/local/libexec /usr/local/libexec/arcade-vps-admin /var/lib
 done
 install -d -o root -g root -m 0755 /usr/local/libexec/arcade-vps-admin
 install -d -o root -g root -m 0700 /var/lib/arcade-admin
-for asset in github-app-token.py ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub codex-bwrap-apparmor.py bwrap-userns-restrict; do
+for asset in www-ws-read.py www-ws-read-owner.pub github-app-token.py ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub codex-bwrap-apparmor.py bwrap-userns-restrict; do
   test -f "$REPO_ROOT/infra/vps/$asset" && test ! -L "$REPO_ROOT/infra/vps/$asset" || exit 1
   install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"
   cmp -- "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"

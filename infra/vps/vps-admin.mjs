@@ -736,6 +736,14 @@ export const OPERATIONS = Object.freeze({
   "ledger-production-dispatcher-install": installProductionDispatcher,
   "ws-restart-gate-install": installWsRestartGate,
   "github-app-token-update": installGithubAppToken,
+  ...Object.fromEntries(["prepare", "key-sync"].map((action) => [
+    `www-ws-read-${action}`, (host, runId) => {
+      const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/www-ws-read.py", action, String(runId)], 180000);
+      if (result.status === 0 && /^WWW_READ_OK [a-z0-9_]+$/.test(result.stdout)) return { ok: true, details: result.stdout };
+      if (result.status !== 0 && result.stdout === "WWW_READ_BLOCKED preflight_or_read_refused") return { ok: false, blocked: "www_read_preflight_or_read_refused" };
+      return { ok: false, failed: "www_read_inspect_protected_state_no_retry" };
+    },
+  ])),
   "github-app-token-prepare": (host, runId) => {
     const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", String(runId)], 180000);
     return result.status === 0 && result.stdout === "GITHUB_TOKEN_OK prepared_no_key_no_client_switch"

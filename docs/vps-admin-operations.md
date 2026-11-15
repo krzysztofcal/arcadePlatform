@@ -29,6 +29,8 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | `ledger-production-dispatcher-install` | Installs `infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh` from `main` as `/usr/local/bin/arcade-chips-ledger-production-dispatch.sh` (`root:root 0755`). Before any change the helper reads this run from the GitHub API and blocks unless it is the in-progress `VPS Admin Operation` `workflow_dispatch` on `main` (`run_not_main_vps_admin_dispatch`) and `main` still points at the run's commit (`main_advanced`). A failed `systemctl stop` of either timer is reported for each timer; the other one is still stopped. It then pauses both timers as `ledger-dispatchers-pause` does, downloads the script at that exact commit, checks it is a bash script of at most 64 KiB whose git object id equals the one the contents API reports for that path and commit (`content_mismatch` keeps the old script), and replaces the old one with `rename(2)`. The result and the journal record `commit=<sha> sha256=<new> previous=<old>`, also for a failure during the install, which reads the destination back and reports `replaced=yes|no|unknown`. The timers stay stopped, also after a failure (`…timers_left_stopped`); `ledger-dispatchers-resume` is the separate next request. A script-only change needs no `systemd-daemon-reload`; the result shows `reload:<yes/no>` |
 | `ws-restart-gate-install` | Installs `infra/vps/ws-restart-gate.mjs` from `main` as `/usr/local/sbin/arcade-ws-restart-gate` (`root:root 0755`). Verifies the run is an in-progress `VPS Admin Operation` `workflow_dispatch` on `main` (`run_not_main_vps_admin_dispatch`) and `main` still points at the run's commit (`main_advanced`). Validates syntax with `node --check` on a `.mjs` temporary file, validates required modes and git blob SHA (`content_mismatch` keeps old helper), and replaces atomically with `rename(2)`. Runs a post-install gate check (accepting safe or blocked, refusing `gate_error`), attempts atomic recovery from previous bytes on verification failure, never restarts WS Production, and records the commit and SHA-256 in the journal |
 | `github-app-token-update` | Code-only update of the **existing** `/usr/local/sbin/arcade-github-app-token` from `infra/vps/github-app-token.py` at this approved run's exact current-main SHA. Requires trusted ancestors and root:root 0755 single-link target, verifies Git blob and Python AST syntax without execution, rechecks main and destination preimage, fsyncs and atomically renames, then verifies installed hash/owner/mode. No key access, signer execution, token issuance, account/sudo/client/App-setting/service change or automatic retry/rollback. Receipt includes commit, previous/new SHA-256 and observed replacement state on failure. |
+| `www-ws-read-prepare` | Creates only a disabled dedicated WWW SSH reader, root-owned empty authorization and fixed wrapper; verifies SSH policy and existing metadata read/no-write access. No key, sudo rule or service/configuration change. |
+| `www-ws-read-key-sync` | Atomically syncs only its owned authorization slot from the fixed reviewed current-main public-key asset; empty asset revokes access. Enrollment requires complete verified preparation; empty-asset revocation accepts known interrupted key transitions and does not require WS/SSH/wrapper health. No free key/path/command input. |
 | `github-app-token-prepare` | Prepare only the fixed non-root signer account, protected empty key directory, executable and narrow run-as policy. No key read/copy, token mint, client switch or service operation. Partial failure requires protected-manifest inspection. |
 | `github-app-key-quarantine` | After OWNER accepts new gh/Git behavior: verify the replacement signer through metadata-only info output (one scoped token is minted and discarded), then reuse the existing descriptor-based quarantine for only `.arcade-code-agent/app.pem`. Does not rotate/revoke the key or invalidate existing tokens. |
 | `ws-preview-isolation-provision` | Full read-only preflight, then hard-kick/stop only Preview, verify empty cgroup, backup and isolate deploy/runtime identities; leaves Preview stopped. Occupied tables do not block Stage. No receipt or settlement guarantee. |
@@ -564,3 +566,75 @@ Bootstrap constraint: the complete catalog PR itself touches `.github/workflows/
 currently downscoped bot token can reject its push. That rejection is STOP, not permission to omit the workflow,
 use OWNER credentials, execute a local root patch or expand token scope ad hoc. Retain the reviewed complete patch
 for the OWNER-approved bootstrap/publication route; creating this operation does not itself install it.
+
+
+## Dedicated WWW evidence reader (#1254)
+
+The two closed operations use `infra/vps/www-ws-read.py` and the existing catalog lock, run ID,
+main-SHA, audit and `vps-admin` OWNER approval gates. They never use the Preview deploy identity,
+`arcade-admin` or `arcade-release` as a WWW reader. This PR's fixed `infra/vps/www-ws-read-owner.pub`
+is empty: merging/staging alone enables no SSH access. There is no private-key generation/import code.
+
+`www-ws-read-prepare` creates the locked system account/group `arcade-www-read`, no supplementary
+or deployment groups and no sudo privileges. Its `/bin/sh` is required for sshd to start the forced
+command, not authorization for a shell session: root owns the home, both supported authorized-keys
+slots and `/usr/local/sbin/arcade-www-read`; the slots initially contain no keys. The executable
+accepts only byte-exact `SSH_ORIGINAL_COMMAND == VPS_READ` from `scripts/www-production-release.mjs`,
+no arguments and the dedicated non-root uid/group. It interprets that one request without a shell:
+resolves the fixed current release, reads only bounded release metadata/deployed timestamp and runs
+fixed `systemctl show ws-server.service` for `ActiveState` and `ExecMainStartTimestamp`. Output
+whitelists only releaseSha/environment/deployRef, release path, timestamp and those two properties.
+It does not read environments, logs, application files, credentials or arbitrary paths.
+
+Enrollment always generates `restrict,no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,no-user-rc`
+plus the fixed forced command. No other key options are accepted as input. Preparation checks root-owned
+SSH config and recursively included files, and effective `sshd -T` policy without changing/reloading it.
+Configuration parsing and `sshd -T` describe the default on-disk configuration, not proof of the running daemon configuration. Before activation OWNER must separately verify that the running daemon uses this default configuration without `-f`/`-o` overrides and that it matches reviewed disk state; this PR neither reloads SSH nor claims live acceptance. Any `Match` is deliberately unsupported (even for another account), ambiguous Include, alternate key file,
+AuthorizedKeysCommand, certificate trust/principals, existing ForceCommand, unsafe AcceptEnv, password/
+interactive/hostbased/GSSAPI/Kerberos authentication, enabled tunnels, disabled StrictModes/pubkey/PAM or unknown policy blocks.
+Only default `.ssh/authorized_keys .ssh/authorized_keys2` is accepted; the second slot must remain empty.
+OWNER must resolve any incompatibility through a separate reviewed, approved change; never relax this
+preflight or edit SSH config as an activation shortcut.
+
+Existing WS permissions must already allow the new unprivileged user to read the two metadata files
+and service properties while denying write to WS root/releases/current, the release parent and metadata.
+Preparation checks this after creating the still-disabled identity. It never grants ACLs, joins a release
+group or changes WS ownership/modes. Missing read access causes a partial preparation STOP requiring
+protected-state inspection; it is not a reason to expand Production permissions automatically.
+
+### Later activation, each step requires separate GO OWNER
+
+1. After merge, verify exact current main, reviewed code and trusted **OWNER-controlled root:root**
+   checkout. Through the approved catalog staging procedure, stage the helper, sudoers and inert
+   support assets together (`stage-vps-admin.sh`). Never run root staging from the agent checkout.
+   Staging does not create the WWW account, install the wrapper or activate a key. On a new OVH host,
+   reviewed bootstrap stages the same assets; provider addresses/host keys are not in this implementation.
+2. Request `VPS Admin Operation` on main, operation `www-ws-read-prepare`, confirmation
+   `RUN www-ws-read-prepare`, with a bounded reason. OWNER inspects source/installed catalog and approves
+   `vps-admin`. Require `ADMIN_OK` and a complete protected manifest at
+   `/var/lib/arcade-admin/www-ws-read/manifest.json`; verify empty root-owned authorization, isolated account,
+   no sudo, wrapper hash and effective SSH policy. No SSH/service restart or reload is needed.
+3. In a separately authorized enrollment, OWNER obtains a dedicated Ed25519 key pair **off VPS**.
+   Private half stays outside repository, VPS and logs. Review only the public half/fingerprint in a small
+   PR replacing the fixed `infra/vps/www-ws-read-owner.pub` (one `ssh-ed25519 BASE64 [comment]` line, no
+   options). Merge is OWNER-only. Never supply a key, filename or command through workflow inputs.
+4. After separate GO, stage trusted current-main assets again, verify the public fingerprint and installed
+   wrapper code, then request/approve `www-ws-read-key-sync`, confirmation `RUN www-ws-read-key-sync`.
+   The module validates run/current-main SHA and Git blob integrity of staged code and public-key asset;
+   it verifies known preimage, atomically renames/fsyncs authorization and verifies resulting bytes/state.
+   Root:root file/parent ownership, modes and single-link rules reuse `SecureFiles`.
+5. Separately configure the WWW Environment secrets per [WWW SOP](www-production-release.md), with an
+   independently verified SSH host-key pin. Verify exact-command success and denied shell/PTY/forwarding
+   through an explicitly authorized read-only acceptance. This is not authorization for a release.
+
+Successful repeats verify state and no-op. A protected transition phase is written before any creation
+or key replacement; interrupted/failed transitions block preparation/enrollment requests, with only the narrow revocation exception below. `ADMIN_FAILED` does not mean
+unchanged state: OWNER must inspect protected manifest/account/authorization through approved maintenance.
+There is no automatic retry, repair, account deletion or rollback. Revocation/rotation is a separate reviewed
+public-asset PR and approved key-sync; an empty asset disables only this owned slot. An interrupted key transition may be revoked after inspection and a **fresh OWNER approval**, using only its known old/pending slot hashes. Empty-asset revocation verifies approved current-main code/dependency/asset, protected manifest, root-owned slot and known preimage; it bypasses WS/SSH/account/wrapper-health checks and verifies the resulting empty slot. It never resumes failed enrollment or repairs other state. Unknown authorization, incomplete preparation or missing protected state still blocks. Revoking this slot does not attest that unrelated SSH configuration is safe. Do not restore deployment/OWNER keys as a fallback.
+
+Updating installed wrapper code is intentionally outside these two actions: a staged-code mismatch with
+an existing wrapper blocks preparation/enrollment, but never blocks approved revocation of the known slot. Any future code upgrade needs a separately reviewed approved procedure.
+No existing SSH identities, WS workflows/runtime, financial behavior or manual WWW release path changes.
+The only new installed authority after enrollment is this fixed evidence read. Actual provisioning and
+first SSH acceptance remain pending; this PR alone does not remove the activation blocker.
