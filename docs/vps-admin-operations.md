@@ -28,6 +28,7 @@ This reuses the T004 release pattern (`ws-server-deploy.yml` job `deploy`, `ws-p
 | `copilot-secret-snapshots-quarantine` | Moves the fixed list of `copilot` files that hold credentials or their recovery copies (`HOST.quarantine.files` in `infra/vps/vps-admin.mjs`; nothing else in the home) into `/var/lib/arcade-admin/quarantine/<runId>/` (`root:root 0700`) with `rename(2)`, so `copilot` can no longer read them. The home and every parent directory are opened with `O_NOFOLLOW`, each relative to the previous descriptor, and the move goes through these descriptors, so a symlink or rename in `copilot`'s tree cannot redirect it. Before the first move every file must exist as a single-link regular file of `copilot` in `copilot` directories, no process may refer to it (cwd, root, executable, descriptor or memory mapping, by device and inode), existing quarantine directories must already be `root:root 0700` (never changed) and the run directory must be new. `MANIFEST` records each file's identity, then `moving <i>` before and `moved <i>` after its rename (both directories and the file itself fsynced in between) and ends with `complete <n>` only for full custody. The result is `custody=complete`, otherwise `ADMIN_FAILED <step> custody=none|partial|uncertain|moved_but_open moved=<k>/<n> manifest=<path>`. A missing file blocks (`file_<i>_missing`), also after an earlier run. Output carries only counts and paths, never file contents |
 | `ledger-production-dispatcher-install` | Installs `infra/vps/production-retention/arcade-chips-ledger-production-dispatch.sh` from `main` as `/usr/local/bin/arcade-chips-ledger-production-dispatch.sh` (`root:root 0755`). Before any change the helper reads this run from the GitHub API and blocks unless it is the in-progress `VPS Admin Operation` `workflow_dispatch` on `main` (`run_not_main_vps_admin_dispatch`) and `main` still points at the run's commit (`main_advanced`). A failed `systemctl stop` of either timer is reported for each timer; the other one is still stopped. It then pauses both timers as `ledger-dispatchers-pause` does, downloads the script at that exact commit, checks it is a bash script of at most 64 KiB whose git object id equals the one the contents API reports for that path and commit (`content_mismatch` keeps the old script), and replaces the old one with `rename(2)`. The result and the journal record `commit=<sha> sha256=<new> previous=<old>`, also for a failure during the install, which reads the destination back and reports `replaced=yes|no|unknown`. The timers stay stopped, also after a failure (`…timers_left_stopped`); `ledger-dispatchers-resume` is the separate next request. A script-only change needs no `systemd-daemon-reload`; the result shows `reload:<yes/no>` |
 | `ws-restart-gate-install` | Installs `infra/vps/ws-restart-gate.mjs` from `main` as `/usr/local/sbin/arcade-ws-restart-gate` (`root:root 0755`). Verifies the run is an in-progress `VPS Admin Operation` `workflow_dispatch` on `main` (`run_not_main_vps_admin_dispatch`) and `main` still points at the run's commit (`main_advanced`). Validates syntax with `node --check` on a `.mjs` temporary file, validates required modes and git blob SHA (`content_mismatch` keeps old helper), and replaces atomically with `rename(2)`. Runs a post-install gate check (accepting safe or blocked, refusing `gate_error`), attempts atomic recovery from previous bytes on verification failure, never restarts WS Production, and records the commit and SHA-256 in the journal |
+| `github-app-token-update` | Code-only update of the **existing** `/usr/local/sbin/arcade-github-app-token` from `infra/vps/github-app-token.py` at this approved run's exact current-main SHA. Requires trusted ancestors and root:root 0755 single-link target, verifies Git blob and Python AST syntax without execution, rechecks main and destination preimage, fsyncs and atomically renames, then verifies installed hash/owner/mode. No key access, signer execution, token issuance, account/sudo/client/App-setting/service change or automatic retry/rollback. Receipt includes commit, previous/new SHA-256 and observed replacement state on failure. |
 | `github-app-token-prepare` | Prepare only the fixed non-root signer account, protected empty key directory, executable and narrow run-as policy. No key read/copy, token mint, client switch or service operation. Partial failure requires protected-manifest inspection. |
 | `github-app-key-quarantine` | After OWNER accepts new gh/Git behavior: verify the replacement signer through metadata-only info output (one scoped token is minted and discarded), then reuse the existing descriptor-based quarantine for only `.arcade-code-agent/app.pem`. Does not rotate/revoke the key or invalidate existing tokens. |
 | `ws-preview-isolation-provision` | Full read-only preflight, then hard-kick/stop only Preview, verify empty cgroup, backup and isolate deploy/runtime identities; leaves Preview stopped. Occupied tables do not block Stage. No receipt or settlement guarantee. |
@@ -509,3 +510,57 @@ merge-ready catalog update.
           - codex-bwrap-apparmor-install
           - codex-bwrap-apparmor-rollback
 ```
+
+## GitHub App signer code updates (#1254 / #1255)
+
+This operation extends the existing OWNER-approved `VPS Admin Operation` path, using the
+`ws-restart-gate-install` exact-main/Git-blob/atomic-install pattern. It has no path, URL, command, permission or key
+input: only the normal numeric run ID. The dispatch request summary links the exact run SHA's signer code and
+installer; the existing requester checks, required `vps-admin` approval, catalog flock and journal remain in place.
+Only `arcade-admin` gains the single fixed catalog command; `copilot` gains no sudo rule or root capability.
+
+The updater never executes the downloaded or installed Python file. It invokes distribution Python only for
+`ast.parse` of the temporary public source file (`-I -B`, no import of the signer, no bytecode output). Final verification
+reads only executable bytes and metadata. It neither accesses `/var/lib/arcade-github-app/app.pem` nor invokes
+`--info`, OpenSSL, runuser or any token issuance. Private-key custody, signer account, fixed run-as policy, installed
+client wrappers and GitHub installation settings are unchanged. Only the approved signer code changes; its reviewed
+permission allowlist affects subsequent token requests when the existing client later invokes the signer.
+
+The target must already be a regular root:root 0755 single-link executable under real root-owned, non-group/other
+writable ancestors. Missing files, symlinks, hardlinks, unsafe modes, drift, non-main/finished/wrong workflow runs,
+main advancement, invalid/mismatched source or syntax errors fail closed before replacement. A temporary path is
+created exclusively in the same protected directory: an existing path blocks and is never deleted. Before atomic
+rename, main and the old destination inode/content/mode are checked again. The new file and directory are fsynced;
+read-back hash/owner/mode must match. No automatic repair, cancellation or retry is attempted.
+
+Failure after replacement can leave new code installed. The journal and result report `replaced=yes|no|different|unknown`
+with available commit and SHA-256 evidence. `ADMIN_FAILED` is not proof of no change. Inspect actual bytes/custody and
+journal before another OWNER decision. Recovery is reviewed roll-forward/previous-code-on-main followed by a new
+approved operation; never rerun create-only `github-app-token-prepare` or alter/delete/reimport the private key.
+
+### Separate activation steps (not performed by this implementation)
+
+1. OWNER review and merge the catalog PR, including the workflow choice, approval description and sudoers entry.
+   The workflow source/permission change in PR #1255 is separate: merge it before requesting an update intended to
+   enable `workflows: write`. This catalog change does not alter the signer's permission allowlist itself.
+2. Separate trusted-maintenance GO: stage the reviewed **merged main** catalog/sudoers/support using the existing
+   `stage-vps-admin.sh` trusted root-owned source procedure above. Its preflight also validates ownership of the
+   workflow/approval source and requires the new operation in helper, approval, sudoers and workflow together.
+   Staging still does **not** update/execute the signer, mint tokens or change the private key. Agent-owned checkouts
+   cannot be staged as root; no agent root/sudo/SSH bypass is authorized by this PR.
+3. Separate OWNER approval: dispatch `VPS Admin Operation` from main with `operation=github-app-token-update`,
+   confirmation `RUN github-app-token-update` and a specific reason. Approve the reviewed run SHA in `vps-admin`.
+   Main must remain at that SHA until replacement; an advance blocks. The installed catalog must already include
+   the operation; never dispatch an unavailable operation or broaden sudo to compensate.
+4. Verify its journal/receipt and installed public-code hash. A separately authorized normal client metadata probe
+   may subsequently mint a token through the existing fixed non-root mechanism; it is **not part of this updater**.
+   Only after the installed #1255 permission change is proven may the unchanged WWW branch be pushed for its Draft PR.
+
+No merge, staging, privileged operation, signer/key installation, workflow dispatch or Production operation is
+performed while implementing/testing/reviewing this catalog PR. Tests use unprivileged synthetic files and mocked
+GitHub metadata; real syntax validation parses only synthetic public code. Existing operations keep their behavior.
+
+Bootstrap constraint: the complete catalog PR itself touches `.github/workflows/vps-admin-operation.yml`; the
+currently downscoped bot token can reject its push. That rejection is STOP, not permission to omit the workflow,
+use OWNER credentials, execute a local root patch or expand token scope ad hoc. Retain the reviewed complete patch
+for the OWNER-approved bootstrap/publication route; creating this operation does not itself install it.

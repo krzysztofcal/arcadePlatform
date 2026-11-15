@@ -22,6 +22,7 @@ on:
           - copilot-secret-snapshots-quarantine
           - ledger-production-dispatcher-install
           - ws-restart-gate-install
+          - github-app-token-update
           - github-app-token-prepare
           - github-app-key-quarantine
           - ws-preview-isolation-provision

@@ -1830,3 +1830,121 @@ test("VPS admin staging refuses an agent-writable source tree before installing 
     assert.match(run.stderr, /untrusted_staging_source/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// #1254: signer code update only; all I/O below is synthetic and no signer/key/root operation runs.
+function tokenUpdateFixture(options = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-update-'));
+  const dest = path.join(dir, 'arcade-github-app-token');
+  const old = '#!/usr/bin/python3 -I\n# old signer fixture\n';
+  const script = options.script ?? '#!/usr/bin/python3 -I\n# trusted new signer fixture\n';
+  const published = options.published ?? script;
+  fs.writeFileSync(dest, old, { mode: 0o755 });
+  const commit = 'a'.repeat(40);
+  const source = 'infra/vps/github-app-token.py';
+  const blob = crypto.createHash('sha1').update(`blob ${Buffer.byteLength(published)}\0`).update(published).digest('hex');
+  const admin = fakeAdminHost();
+  const calls = []; let mainCalls = 0;
+  const host = { ...admin.host, tokenSigner: { source, dest, uid: process.getuid(), gid: process.getgid(), ancestorRoot: dir },
+    run(argv) {
+      calls.push(argv);
+      if (argv[0] === '/usr/bin/curl') {
+        const url = argv.at(-1);
+        if (url.endsWith('/actions/runs/41700000020')) return { status: 0, stdout: JSON.stringify({ id: 41700000020,
+          path: '.github/workflows/vps-admin-operation.yml', event: 'workflow_dispatch', head_branch: 'main',
+          head_sha: commit, status: 'in_progress', ...options.run }) };
+        if (url.endsWith('/commits/main')) { mainCalls++; return { status: 0, stdout: mainCalls > 1 && options.lateMain ? options.lateMain : options.main ?? commit }; }
+        if (url.includes(`/contents/${source}?ref=${commit}`)) return { status: 0, stdout: JSON.stringify({ type: 'file', path: source, sha: blob }) };
+        if (url === `https://raw.githubusercontent.com/krzysztofcal/arcadePlatform/${commit}/${source}`) {
+          fs.writeFileSync(argv[argv.indexOf('-o') + 1], script); return { status: options.downloadExit ?? 0, stdout: '' };
+        }
+        throw new Error('unexpected fixture URL');
+      }
+      if (argv[0] === '/usr/bin/python3') {
+        assert.deepEqual(argv.slice(1, 4), ['-I', '-B', '-c']);
+        assert.match(argv[4], /ast\.parse/);
+        assert.doesNotMatch(argv[4], /exec\(|importlib|compile\(/);
+        if (options.beforeReplace) options.beforeReplace(dest);
+        return options.syntaxExit !== undefined ? { status: options.syntaxExit, stdout: '' } : spawnSync(argv[0], argv.slice(1), { encoding: 'utf8' });
+      }
+      assert.ok(!argv.includes(dest), 'installer never executes the signer');
+      assert.ok(!argv.some(a => a.includes('/var/lib/arcade-github-app') || a === '/usr/sbin/runuser'), 'no private key or token issuance');
+      return admin.host.run(argv);
+    }
+  };
+  return { dir, dest, old, script, commit, host, calls, cleanup() {
+    fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(path.dirname(admin.host.lockFile), { recursive: true, force: true });
+  } };
+}
+
+test('signer update installs only reviewed exact-main bytes atomically, verifies metadata and never executes code', async () => {
+  const { runOperation } = await import('../infra/vps/vps-admin.mjs');
+  const fx = tokenUpdateFixture();
+  const digest = text => crypto.createHash('sha256').update(text).digest('hex');
+  let renames = 0;
+  fx.host.rename = (from, to) => { assert.equal(to, fx.dest); assert.equal(fs.readFileSync(to, 'utf8'), fx.old); renames++; fs.renameSync(from, to); };
+  try {
+    const result = runOperation('github-app-token-update', '41700000020', fx.host);
+    assert.equal(result.ok, true, result.line);
+    assert.equal(renames, 1);
+    assert.equal(fs.readFileSync(fx.dest, 'utf8'), fx.script);
+    assert.equal(fs.statSync(fx.dest).mode & 0o7777, 0o755);
+    assert.match(result.line, new RegExp(`commit=${fx.commit} sha256=${digest(fx.script)} previous=${digest(fx.old)}`));
+    assert.deepEqual(fs.readdirSync(fx.dir), [path.basename(fx.dest)]);
+  } finally { fx.cleanup(); }
+});
+
+test('signer update fails closed before replacement on run/SHA/blob/syntax or existing-file custody drift', async () => {
+  const { runOperation } = await import('../infra/vps/vps-admin.mjs');
+  for (const options of [{ main: 'b'.repeat(40) }, { lateMain: 'b'.repeat(40) }, { run: { event: 'pull_request' } },
+    { run: { head_branch: 'feature' } }, { run: { path: '.github/workflows/other.yml' } }, { run: { status: 'completed' } },
+    { script: '#!/usr/bin/python3 -I\n# tampered', published: '#!/usr/bin/python3 -I\n# original' },
+    { syntaxExit: 1 }, { downloadExit: 22 }, { script: '<html>not python</html>' }]) {
+    const fx = tokenUpdateFixture(options);
+    try {
+      assert.equal(runOperation('github-app-token-update', '41700000020', fx.host).ok, false, JSON.stringify(options));
+      assert.equal(fs.readFileSync(fx.dest, 'utf8'), fx.old);
+      assert.deepEqual(fs.readdirSync(fx.dir), [path.basename(fx.dest)]);
+    } finally { fx.cleanup(); }
+  }
+  for (const drift of ['missing', 'symlink', 'hardlink', 'mode', 'late-content']) {
+    const fx = tokenUpdateFixture(drift === 'late-content' ? { beforeReplace: dest => fs.writeFileSync(dest, 'changed by another administrator') } : {});
+    try {
+      if (drift === 'missing') fs.unlinkSync(fx.dest);
+      if (drift === 'symlink') { fs.renameSync(fx.dest, `${fx.dest}.other`); fs.symlinkSync(`${fx.dest}.other`, fx.dest); }
+      if (drift === 'hardlink') fs.linkSync(fx.dest, `${fx.dest}.other`);
+      if (drift === 'mode') fs.chmodSync(fx.dest, 0o777);
+      assert.equal(runOperation('github-app-token-update', '41700000020', fx.host).ok, false, drift);
+      if (!['missing', 'late-content'].includes(drift)) assert.equal(fs.readFileSync(fx.dest, 'utf8'), fx.old);
+    } finally { fx.cleanup(); }
+  }
+});
+
+test('signer update reports observed replacement on a post-rename failure instead of claiming no change', async () => {
+  const { runOperation } = await import('../infra/vps/vps-admin.mjs');
+  for (const corrupt of [false, true]) {
+    const fx = tokenUpdateFixture();
+    fx.host.rename = (from, to) => { fs.renameSync(from, to); if (corrupt) fs.writeFileSync(to, 'unexpected bytes'); else throw new Error('after rename'); };
+    try {
+      const result = runOperation('github-app-token-update', '41700000020', fx.host);
+      assert.equal(result.ok, false);
+      assert.match(result.line, new RegExp(`ADMIN_FAILED github-app-token-update .*replaced=${corrupt ? 'different' : 'yes'}`));
+    } finally { fx.cleanup(); }
+  }
+});
+
+
+test('signer update preserves a pre-existing temporary path and rejects a writable parent', async () => {
+  const { runOperation } = await import('../infra/vps/vps-admin.mjs');
+  for (const kind of ['temporary', 'parent']) {
+    const fx = tokenUpdateFixture();
+    try {
+      const tmp = path.join(fx.dir, '.arcade-github-app-token.41700000020.py');
+      if (kind === 'temporary') fs.writeFileSync(tmp, 'existing evidence');
+      else fs.chmodSync(fx.dir, 0o777);
+      const result = runOperation('github-app-token-update', '41700000020', fx.host);
+      assert.match(result.line, new RegExp(kind === 'temporary' ? 'temporary_path_exists$' : 'untrusted_signer_parent$'));
+      assert.equal(fs.readFileSync(fx.dest, 'utf8'), fx.old);
+      if (kind === 'temporary') assert.equal(fs.readFileSync(tmp, 'utf8'), 'existing evidence');
+    } finally { fx.cleanup(); }
+  }
+});

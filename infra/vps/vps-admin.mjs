@@ -49,6 +49,12 @@ const HOST = {
     dest: "/usr/local/sbin/arcade-ws-restart-gate",
     uid: 0, gid: 0,
   },
+  // Code-only update of the existing non-root signer. Never run it or touch its key/account/policy.
+  tokenSigner: {
+    source: "infra/vps/github-app-token.py",
+    dest: "/usr/local/sbin/arcade-github-app-token",
+    uid: 0, gid: 0, ancestorRoot: "/",
+  },
   // Verified files of the agent account that hold credentials or their recovery copies. They move into a root-only
   // quarantine kept for recovery; copilot cannot read them afterwards. Nothing else in copilot's home is touched.
   quarantine: {
@@ -448,6 +454,89 @@ function installWsRestartGate(host, runId) {
   }
 }
 
+// Same exact-main/Git-blob install pattern as the WS restart gate, but Python is only parsed as data.
+// Unlike signer preparation, this operation may replace only an existing trusted executable. No signer execution,
+// token request, private-key access, account/policy change or rollback/retry is reachable here.
+function installGithubAppToken(host, runId) {
+  const g = host.tokenSigner;
+  const api = (route, accept) => curl(host, `https://api.github.com/repos/${REPO}/${route}`, ["-H", `Accept: ${accept}`]);
+  const response = api(`actions/runs/${runId}`, "application/vnd.github+json");
+  let run;
+  try { run = response.status === 0 ? JSON.parse(response.stdout) : null; } catch { run = null; }
+  if (!run) throw new Unverifiable("github_run");
+  if (String(run.id) !== String(runId) || run.path !== ".github/workflows/vps-admin-operation.yml" || run.event !== "workflow_dispatch"
+    || run.head_branch !== "main" || run.status !== "in_progress" || !COMMIT.test(String(run.head_sha))) return { ok: false, blocked: "run_not_main_vps_admin_dispatch" };
+  const mainIsCurrent = () => {
+    const main = api("commits/main", "application/vnd.github.sha");
+    if (main.status !== 0 || !COMMIT.test(main.stdout)) throw new Unverifiable("github_main");
+    return main.stdout === run.head_sha;
+  };
+  if (!mainIsCurrent()) return { ok: false, blocked: "main_advanced" };
+  const entry = api(`contents/${g.source}?ref=${run.head_sha}`, "application/vnd.github.object+json");
+  let blob;
+  try { blob = entry.status === 0 ? JSON.parse(entry.stdout) : null; } catch { blob = null; }
+  if (!blob || blob.type !== "file" || blob.path !== g.source || !COMMIT.test(String(blob.sha))) throw new Unverifiable("github_contents");
+
+  const trustedFile = stat => stat?.isFile() && stat.uid === g.uid && stat.gid === g.gid
+    && stat.nlink === 1 && (stat.mode & 0o7777) === 0o755;
+  // The production uid is fixed at root; fixtures may use their unprivileged uid. Every ancestor is non-writable
+  // by other identities and non-symlinked, so an agent cannot redirect the temporary file or atomic replacement.
+  for (let dir = path.dirname(g.dest); ; dir = path.dirname(dir)) {
+    const stat = lstatOrNull(dir);
+    if (!stat?.isDirectory() || ![0, g.uid].includes(stat.uid) || (stat.mode & 0o022)) return { ok: false, blocked: "untrusted_signer_parent" };
+    if (dir === g.ancestorRoot) break;
+    if (path.dirname(dir) === dir) return { ok: false, blocked: "untrusted_signer_parent" };
+  }
+  const current = lstatOrNull(g.dest);
+  if (!trustedFile(current)) return { ok: false, blocked: "untrusted_existing_signer" };
+  const previousFd = fs.openSync(g.dest, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let tmpCreated = false;
+  const tmp = path.join(path.dirname(g.dest), `.${path.basename(g.dest)}.${runId}.py`);
+  let ids = null;
+  let previousSha = null;
+  try {
+    if (!sameFile(current, fs.fstatSync(previousFd))) return { ok: false, blocked: "signer_changed" };
+    if (current.size > 65536) return { ok: false, blocked: "unexpected_existing_signer" };
+    const previous = fs.readFileSync(previousFd);
+    previousSha = sha256(previous);
+    if (previous.length > 65536) return { ok: false, blocked: "unexpected_existing_signer" };
+    // Never remove a pre-existing temporary path, symlink or unknown artifact.
+    let fd;
+    try { fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600); }
+    catch (error) { if (error.code === "EEXIST") return { ok: false, blocked: "temporary_path_exists" }; throw error; }
+    fs.closeSync(fd); tmpCreated = true;
+    if (curl(host, `https://raw.githubusercontent.com/${REPO}/${run.head_sha}/${g.source}`, ["-o", tmp]).status !== 0) return { ok: false, failed: "download" };
+    if (fs.lstatSync(tmp).size > 65536) return { ok: false, blocked: "unexpected_script" };
+    const bytes = fs.readFileSync(tmp);
+    if (bytes.length > 65536 || !bytes.toString("utf8").startsWith("#!/usr/bin/python3 -I\n")) return { ok: false, blocked: "unexpected_script" };
+    if (gitBlob(bytes) !== blob.sha) return { ok: false, blocked: "content_mismatch" };
+    const syntax = host.run(["/usr/bin/python3", "-I", "-B", "-c",
+      "import ast,sys; ast.parse(open(sys.argv[1], encoding='utf-8').read(), filename=sys.argv[1])", tmp], 10000);
+    if (syntax.status !== 0) return { ok: false, blocked: "syntax_error" };
+    ids = { sha: sha256(bytes), previous: sha256(previous), text: `commit=${run.head_sha} sha256=${sha256(bytes)} previous=${sha256(previous)}` };
+    fs.chownSync(tmp, g.uid, g.gid);
+    fs.chmodSync(tmp, 0o755);
+    fsyncFd(fs.openSync(tmp, "r"), true);
+    if (!mainIsCurrent()) return { ok: false, blocked: "main_advanced" };
+    if (!trustedFile(lstatOrNull(g.dest)) || !sameFile(current, lstatOrNull(g.dest))
+      || sha256(fs.readFileSync(g.dest)) !== ids.previous) return { ok: false, blocked: "signer_changed" };
+    host.rename(tmp, g.dest);
+    fsyncFd(fs.openSync(path.dirname(g.dest), O_DIR), true);
+    if (!trustedFile(lstatOrNull(g.dest)) || sha256(fs.readFileSync(g.dest)) !== ids.sha) throw new Error("verification_failed");
+    return { ok: true, details: `updated ${ids.text} verified_code_only` };
+  } catch {
+    let replaced = "unknown";
+    try {
+      const observed = sha256(fs.readFileSync(g.dest));
+      replaced = ids && observed === ids.sha ? "yes" : previousSha && observed === previousSha ? "no" : "different";
+    } catch { /* preserve unknown */ }
+    return { ok: false, failed: `update replaced=${replaced}${ids ? ` ${ids.text}` : ""}` };
+  } finally {
+    fs.closeSync(previousFd);
+    if (tmpCreated) fs.rmSync(tmp, { force: true });
+  }
+}
+
 // #1240 one-time public npm tarball cache only. These SHA-512/size pairs were independently
 // checked against https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/<version>.
 // No metadata/index, installation, session, test directory or caller-selected path is eligible.
@@ -646,6 +735,7 @@ export const OPERATIONS = Object.freeze({
   "copilot-secret-snapshots-quarantine": quarantineSnapshots,
   "ledger-production-dispatcher-install": installProductionDispatcher,
   "ws-restart-gate-install": installWsRestartGate,
+  "github-app-token-update": installGithubAppToken,
   "github-app-token-prepare": (host, runId) => {
     const result = host.run(["/usr/bin/python3", "-I", "-B", "/usr/local/libexec/arcade-vps-admin/github-app-token.py", "prepare", String(runId)], 180000);
     return result.status === 0 && result.stdout === "GITHUB_TOKEN_OK prepared_no_key_no_client_switch"
