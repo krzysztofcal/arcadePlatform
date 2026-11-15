@@ -587,3 +587,85 @@ test('missing or unreadable execute receipts always mean uncertainty, preventing
     assert.equal(actions.readReleaseReceipt(file, true).status, 'published');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// OWNER-approved #1254 follow-up: bounded automatic selection; no real GitHub/Netlify/WS requests.
+const selectionProvenance = (over = {}) => { const p = { ...provenance(), ...over }; return { ...p,
+  validation: { status: 'dry_run_pass', sha: p.sha, deployId: p.deployId },
+  staticValidation: { status: 'candidate_static_verified', sha: p.sha, deployId: p.deployId } }; };
+function selectionFixture(items = [{ run: ownerRun(), p: selectionProvenance() }], total = items.length) {
+  const routes = [], verified = [];
+  return { routes, verified,
+    options: { now: () => Date.parse('2026-11-15T10:05:00Z'),
+      read(route) {
+        routes.push(route);
+        if (route.startsWith('actions/workflows/www-candidate.yml/runs?')) return { total_count: total, workflow_runs: items.map(x => x.run) };
+        const match = /actions\/runs\/(\d+)\/(attempts\/1|artifacts\?per_page=100)/.exec(route);
+        assert.ok(match, route);
+        const item = items.find(x => String(x.run.id) === match[1]); assert.ok(item);
+        return match[2] === 'attempts/1' ? item.run : { total_count: 1, artifacts: item.artifacts ?? [{ name: 'www-candidate-1', expired: false }] };
+      },
+      download(id) { return items.find(x => String(x.run.id) === String(id)).p; },
+      verify(p) { verified.push(p.deployId); return items.find(x => x.p === p).eligible !== false; }
+    }
+  };
+}
+test('automatic candidate selection uses the one validated current-main candidate and a complete bounded query', async () => {
+  const fx = selectionFixture();
+  assert.equal((await actions.resolveCandidate('', sha, fx.options)).deployId, id);
+  assert.deepEqual(fx.verified, [id]);
+  assert.match(fx.routes[0], new RegExp(`head_sha=${sha}`));
+  assert.match(fx.routes[0], /actor=krzysztofcal/);
+  assert.match(fx.routes[0], /per_page=5/);
+  assert.doesNotMatch(fx.routes[0], /created=/, 'a long approval wait must not hide a fresh candidate');
+});
+test('automatic candidate selection stops on none, ambiguity or incomplete bounded history', async () => {
+  await assert.rejects(actions.resolveCandidate('', sha, selectionFixture([]).options), /no_eligible_candidate/);
+  const second = { run: ownerRun({ id: 43 }), p: selectionProvenance({ runId: '43', deployId: 'e'.repeat(24) }) };
+  const two = selectionFixture([{ run: ownerRun(), p: selectionProvenance() }, second]);
+  await assert.rejects(actions.resolveCandidate('', sha, two.options), /ambiguous_candidates/);
+  assert.equal(two.verified.length, 2);
+  for (const total of [6, 2, undefined]) {
+    const fx = selectionFixture(); const read = fx.options.read;
+    fx.options.read = route => route.includes('/workflows/') ? { total_count: total, workflow_runs: [ownerRun()] } : read(route);
+    await assert.rejects(actions.resolveCandidate('', sha, fx.options), /candidate_search_incomplete/);
+    assert.deepEqual(fx.verified, []);
+  }
+});
+test('automatic selection rejects invalid identity/SHA/provenance/time and never bypasses safety validation', async () => {
+  const original = { run: ownerRun(), p: selectionProvenance() };
+  for (const item of [
+    { ...original, run: ownerRun({ actor: { login: 'bot' } }) },
+    { ...original, run: ownerRun({ head_sha: ws }) },
+    { ...original, p: { ...provenance(), runId: '99' } },
+    { ...original, p: { ...provenance(), status: 'checks_failed' } },
+    { ...original, p: { ...provenance(), createdAt: '2026-11-15T09:00:00Z' } },
+    { ...original, p: { ...provenance(), createdAt: '2026-11-15T10:06:00Z' } },
+    { ...original, p: { ...selectionProvenance(), validation: null } }, { ...original, artifacts: [] }, { ...original, run: ownerRun({ run_attempt: 2 }) }
+  ]) await assert.rejects(actions.resolveCandidate('', sha, selectionFixture([item]).options));
+  const fx = selectionFixture(); fx.options.verify = () => { throw new Error('netlify_or_ws_identity_STOP'); };
+  await assert.rejects(actions.resolveCandidate('', sha, fx.options), /netlify_or_ws_identity_STOP/);
+  await assert.rejects(actions.resolveCandidate('', sha, selectionFixture([{ ...original, eligible: false }]).options), /no_eligible_candidate/);
+});
+test('explicit candidate ID preserves validated recovery for expired candidates without automatic search', async () => {
+  const p = { ...provenance(), createdAt: '2026-11-14T10:00:00Z' };
+  const fx = selectionFixture([{ run: ownerRun(), p }]);
+  assert.equal(await actions.resolveCandidate('42', sha, fx.options), p);
+  assert.ok(fx.routes.every(route => !route.includes('/workflows/')));
+  assert.deepEqual(fx.verified, []);
+  await assert.rejects(actions.resolveCandidate('latest', sha, fx.options), /invalid_candidate_run_id/);
+  const bad = selectionFixture([{ run: ownerRun(), p: { ...p, sha: ws } }]);
+  await assert.rejects(actions.resolveCandidate('42', sha, bad.options), /candidate_provenance_mismatch/);
+});
+
+
+test('automatic selection skips proven published candidates but stops if validation becomes uncertain or too old', async () => {
+  const first = { run: ownerRun(), p: selectionProvenance(), eligible: false };
+  const second = { run: ownerRun({ id: 43 }), p: selectionProvenance({ runId: '43', deployId: 'e'.repeat(24) }) };
+  assert.equal((await actions.resolveCandidate('', sha, selectionFixture([first, second]).options)).runId, '43');
+  const unknown = selectionFixture(); unknown.options.verify = () => undefined;
+  await assert.rejects(actions.resolveCandidate('', sha, unknown.options), /candidate_safety_evidence_incomplete/);
+  const expired = selectionFixture(); let now = Date.parse('2026-11-15T10:05:00Z');
+  expired.options.now = () => now;
+  expired.options.verify = () => { now = Date.parse('2026-11-15T10:31:00Z'); return true; };
+  await assert.rejects(actions.resolveCandidate('', sha, expired.options), /candidate_expired/);
+});

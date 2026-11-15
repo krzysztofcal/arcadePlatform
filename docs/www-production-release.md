@@ -39,16 +39,35 @@ Use the existing read-only SSH mechanism, not the WS deployment account/key. Eph
 
 ## Two OWNER actions (mobile GitHub UI is sufficient)
 
-1. Actions → **Create WWW Candidate**, branch `main`, optional full `sha` equal to current main HEAD. Approve
-   `www-candidate`. This calls the existing hook once with a unique run/attempt/random title, correlates a *new*
-   exact-SHA production deploy through the Netlify API, waits boundedly for ready, then runs the existing complete
-   dry-run and the same full static smoke against the candidate before publication. Summary provides the permalink and candidate run link/ID. No automatic publication.
-2. Within **30 minutes from candidate creation**, Actions → **Publish WWW Production**, branch `main`, input
-   `candidate_run_id` from step 1; approve `www-production`. It accepts only a successful owner main candidate run,
-   attempt 1, with one immutable `www-candidate-1` artifact and exact provenance. It runs the existing full validation
-   and immediate current-main/WS/candidate/current-deploy rechecks before its only restore call. Lock is preserved
-   or relocked once by the existing tool. GET-only LIVE verification then automatically calls restricted Release
-   Record; no separate dispatch or deploy ID entry.
+1. Actions → **Create WWW Candidate** → **Run workflow**, branch `main`, leave optional `sha` blank.
+2. Approve **`www-candidate`**. The existing hook is called once; complete dry-run and static candidate smoke run.
+3. Open the clickable immutable Netlify candidate permalink in that run's **Summary**. Inspect read-only only:
+   candidate functions use Production data; this is not an isolated Stage preview.
+4. Within **30 minutes from candidate creation**, Actions → **Publish WWW Production** → **Run workflow**, branch
+   `main`, leave `candidate_run_id` blank and `discard=false`.
+5. Approve **`www-production`**. Empty ID selects only the unique fully eligible candidate, using the existing
+   complete safety dry-run before the normal execute path and its immediate rechecks.
+6. Automatic GET-only LIVE verification and immutable Release Record follow publication; no separate dispatch.
+
+Automatic selection reads **at most five successful OWNER/main candidate runs for the exact current main SHA**,
+then requires the API's total count to match the complete returned list. It deliberately does not filter by run
+creation time: a long Environment approval wait must not hide a fresh candidate. Reruns are excluded. Each candidate
+needs an authentic unexpired artifact, matching `candidate_ready` provenance and dry-run/static-check receipts,
+age at most 30 minutes (rechecked after validation), and the existing Netlify identity/unpublished/lock/function/
+header/WS checks. Proven stale or already-published candidates are ineligible. No eligible candidate, multiple eligible
+candidates, more than five matching runs, missing/incomplete evidence, or other validation errors mean **STOP before
+restore or discard**. There is no latest-run/latest-deploy fallback and no unbounded pagination. A long-lived main
+revision can hit the five-run bound; reconcile candidates and supply an explicit ID instead of guessing.
+
+A nonempty `candidate_run_id` retains the existing explicit-ID validation and recovery/discard path. In particular,
+`discard=true` should use that explicit run ID for an abandoned/expired candidate; blank-ID discovery only accepts
+fresh eligible unpublished candidates. Existing safe discard, lock, uncertain-execute STOP and no automatic rollback
+remain unchanged.
+
+OWNER self-approval is intentionally accepted **only for the two new WWW Environments** (`prevent_self_review=false`).
+Keep them separate; do not reuse or modify `ws-production`, `vps-admin`, or other existing Environments. Their
+policies and authorities remain distinct. Activation and all Environment/secret/SSH configuration still need
+separate OWNER GO and remain BLOCKED until configured.
 
 Both actions share one concurrency group (including approval wait and record); do not enqueue unrelated releases.
 GitHub concurrency is not an unbounded FIFO: a later queued request can replace a pending one. Never rerun a run;

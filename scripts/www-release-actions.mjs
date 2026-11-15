@@ -208,20 +208,74 @@ async function candidate(env) {
   }
 }
 
+function downloadCandidate(runId) {
+  const dir = `.www/source-${runId}`;
+  command('gh', ['run', 'download', String(runId), '--repo', REPO, '--name', 'www-candidate-1', '--dir', dir]);
+  return JSON.parse(fs.readFileSync(`${dir}/candidate.json`, 'utf8'));
+}
+
+function loadCandidate(runId, read, download, now) {
+  if (!RUN.test(runId || '')) fail('invalid_candidate_run_id');
+  const run = read(`actions/runs/${runId}/attempts/1`);
+  trustedOwnerRun(run, 'krzysztofcal', 'www-candidate');
+  if (String(run.id) !== String(runId)) fail('candidate_run_id_mismatch');
+  const result = read(`actions/runs/${run.id}/artifacts?per_page=100`);
+  if (!Array.isArray(result.artifacts) || result.total_count !== result.artifacts.length) fail('candidate_artifact_list_incomplete');
+  const matches = result.artifacts.filter(a => a.name === 'www-candidate-1' && !a.expired);
+  if (matches.length !== 1) fail('candidate_artifact_missing_or_ambiguous');
+  const p = download(String(run.id));
+  validateCandidate(run, p, 'krzysztofcal', now, true);
+  return p;
+}
+
+export async function resolveCandidate(runId, sha, { read = gh, download = downloadCandidate, verify, now = Date.now } = {}) {
+  if (runId) return loadCandidate(runId, read, download, now()); // Keep explicit-ID recovery/discard semantics.
+  if (!SHA.test(sha || '')) fail('invalid_main_sha');
+  // Five successful owner runs for this exact main revision, not five arbitrary recent runs/deploys. No creation
+  // date cutoff: an approval wait can be long while the candidate itself is fresh. Overflow is STOP, never guessing.
+  const result = read(`actions/workflows/www-candidate.yml/runs?branch=main&event=workflow_dispatch&status=success&actor=krzysztofcal&head_sha=${sha}&per_page=5`);
+  if (!Array.isArray(result.workflow_runs) || !Number.isInteger(result.total_count) || result.total_count > 5
+    || result.total_count !== result.workflow_runs.length) fail('candidate_search_incomplete');
+  const eligible = [];
+  for (const run of result.workflow_runs) {
+    if (Number(run.run_attempt) > 1) continue;
+    trustedOwnerRun(run, 'krzysztofcal', 'www-candidate');
+    if (run.head_sha !== sha) fail('candidate_search_sha_mismatch');
+    const p = loadCandidate(String(run.id), read, download, now());
+    if (p.sha !== sha) fail('candidate_search_sha_mismatch');
+    if (now() - Date.parse(p.createdAt) > 30 * 60 * 1000) continue;
+    validateCandidate(run, p, 'krzysztofcal', now());
+    if (p.validation?.status !== 'dry_run_pass' || p.validation.sha !== sha || p.validation.deployId !== p.deployId
+      || p.staticValidation?.status !== 'candidate_static_verified' || p.staticValidation.sha !== sha
+      || p.staticValidation.deployId !== p.deployId) fail('candidate_evidence_incomplete');
+    if (typeof verify !== 'function') fail('candidate_safety_verifier_missing');
+    const safe = await verify(p);
+    if (safe === true) eligible.push({ run, p });
+    else if (safe !== false) fail('candidate_safety_evidence_incomplete');
+  }
+  if (eligible.length !== 1) fail(eligible.length ? 'ambiguous_candidates' : 'no_eligible_candidate');
+  validateCandidate(eligible[0].run, eligible[0].p, 'krzysztofcal', now());
+  return eligible[0].p;
+}
+
 async function publish(env) {
   checkContext('www-publish', env);
   checkEnvironment('www-production', env, true);
-  if (!RUN.test(env.CANDIDATE_RUN_ID || '')) fail('invalid_candidate_run_id');
-  const run = gh(`actions/runs/${env.CANDIDATE_RUN_ID}/attempts/1`);
-  trustedOwnerRun(run, 'krzysztofcal', 'www-candidate');
-  const artifacts = gh(`actions/runs/${run.id}/artifacts?per_page=100`).artifacts;
-  const matches = artifacts.filter(a => a.name === 'www-candidate-1' && !a.expired);
-  if (matches.length !== 1) fail('candidate_artifact_missing_or_ambiguous');
-  command('gh', ['run', 'download', String(run.id), '--repo', REPO, '--name', 'www-candidate-1', '--dir', '.www/source']);
-  const p = JSON.parse(fs.readFileSync('.www/source/candidate.json', 'utf8'));
-  validateCandidate(run, p, 'krzysztofcal', Date.now(), true);
+  // Resolve completely before entering the mutation/discard path. Automatic discovery performs read-only checks.
+  const p = await resolveCandidate(env.CANDIDATE_RUN_ID, env.GITHUB_SHA, { verify: candidate => {
+    try {
+      release(['--sha', candidate.sha, '--deploy', candidate.deployId], `.www/selection-${candidate.runId}.json`, env);
+      return true;
+    } catch (error) {
+      const receipt = error.receipt;
+      // A proven published candidate is simply ineligible; missing/uncertain/other safety failures stop discovery.
+      if (receipt?.status === 'checks_failed' && receipt.failures?.length
+        && receipt.failures.every(code => ['already_published', 'previously_published'].includes(code))) return false;
+      throw error;
+    }
+  } });
   // Expired/stale candidates can only be discarded. Identity/provenance must pass even on cleanup.
-  const receipt = { schema: 1, runId: env.GITHUB_RUN_ID, candidateRunId: String(run.id), sha: p.sha, deployId: p.deployId, status: 'not_published' };
+  const receipt = { schema: 1, runId: env.GITHUB_RUN_ID, candidateRunId: String(p.runId), sha: p.sha, deployId: p.deployId, status: 'not_published' };
   save('.www/publication.json', receipt);
   let discardAttempted = false;
   try {

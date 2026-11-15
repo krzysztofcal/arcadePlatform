@@ -3,9 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       candidate_run_id:
-        description: Successful Create WWW Candidate run ID
+        description: Optional candidate run ID (blank selects the unique eligible candidate)
         type: string
-        required: true
+        required: false
+        default: ''
       discard:
         description: Discard an abandoned candidate instead of publishing
         type: boolean
