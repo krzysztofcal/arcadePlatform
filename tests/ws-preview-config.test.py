@@ -821,6 +821,7 @@ class GitHubAppToken(unittest.TestCase):
             self.assertEqual(m.validate_response({**body,'token':'ghs_5609023_' + 'x' * 1200}), 'ghs_5609023_' + 'x' * 1200)
             for change in [{'permissions':{**m.PERMISSIONS,'administration':'write'}},
                            {'permissions':{**m.PERMISSIONS,'actions':'read'}},
+                           {'permissions':{k:v for k,v in m.PERMISSIONS.items() if k != 'workflows'}},
                            {'repositories':[{'id':1,'full_name':'foreign/repo'}]},
                            {'repository_selection':'all'}, {'expires_at':'2099-01-01T00:00:00Z'}, {'token':'secret\nleak'}]:
                 with self.subTest(change=next(iter(change))):
@@ -843,6 +844,7 @@ class GitHubAppToken(unittest.TestCase):
         self.assertNotIn('fixture-signature',' '.join(argv))
         request=opener.open.call_args.args[0]
         self.assertEqual(request.full_url,'https://api.github.com/app/installations/178502493/access_tokens')
+        self.assertEqual(json.loads(request.data)['permissions'].get('workflows'), 'write')
         self.assertEqual(json.loads(request.data),{'repository_ids':[1076414433],'permissions':m.PERMISSIONS})
         self.assertTrue(any(isinstance(h,m.urllib.request.ProxyHandler) and h.proxies=={} for h in build.call_args.args))
         with self.assertRaises(m.Refused):m.NoRedirect().redirect_request(None,None,302,'redirect',{},'https://foreign.invalid')
