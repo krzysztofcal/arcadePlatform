@@ -21,7 +21,7 @@ import urllib.request
 USER = 'arcade-github-token'
 KEY = Path('/var/lib/arcade-github-app/app.pem')
 PERMISSIONS = {'contents': 'write', 'pull_requests': 'write', 'issues': 'write',
-               'metadata': 'read', 'actions': 'write', 'checks': 'read'}
+               'metadata': 'read', 'actions': 'write', 'checks': 'read', 'workflows': 'write'}
 POLICY = b'''# Only a fixed non-root signer; no shell, key/path/scope inputs or root access.
 Defaults!/usr/local/sbin/arcade-github-app-token !log_input, !log_output
 copilot ALL=(arcade-github-token) NOPASSWD: NOSETENV: /usr/local/sbin/arcade-github-app-token "", /usr/local/sbin/arcade-github-app-token --info
