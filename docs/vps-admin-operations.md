@@ -591,7 +591,7 @@ plus the fixed forced command. No other key options are accepted as input. Prepa
 SSH config and recursively included files, and effective `sshd -T` policy without changing/reloading it.
 Any `Match` is deliberately unsupported (even for another account), ambiguous Include, alternate key file,
 AuthorizedKeysCommand, certificate trust/principals, existing ForceCommand, unsafe AcceptEnv, password/
-interactive/hostbased authentication, disabled StrictModes/pubkey/PAM or unknown policy blocks.
+interactive/hostbased/GSSAPI/Kerberos authentication, enabled tunnels, disabled StrictModes/pubkey/PAM or unknown policy blocks.
 Only default `.ssh/authorized_keys .ssh/authorized_keys2` is accepted; the second slot must remain empty.
 OWNER must resolve any incompatibility through a separate reviewed, approved change; never relax this
 preflight or edit SSH config as an activation shortcut.

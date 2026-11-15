@@ -171,7 +171,8 @@ class Preparation:
         expected = {'authorizedkeysfile':'.ssh/authorized_keys .ssh/authorized_keys2', 'authorizedkeyscommand':'none',
             'authorizedprincipalscommand':'none','authorizedprincipalsfile':'none','trustedusercakeys':'none',
             'forcecommand':'none','permituserenvironment':'no','passwordauthentication':'no',
-            'kbdinteractiveauthentication':'no','hostbasedauthentication':'no','strictmodes':'yes','pubkeyauthentication':'yes','usepam':'yes'}
+            'kbdinteractiveauthentication':'no','hostbasedauthentication':'no',
+            'gssapiauthentication':'no','kerberosauthentication':'no','permittunnel':'no','strictmodes':'yes','pubkeyauthentication':'yes','usepam':'yes'}
         require(all(policy.get(k) == v for k,v in expected.items()), 'effective_ssh_policy_mismatch')
         require(all(v in ['LANG', 'LC_*'] for v in policy.get('acceptenv', '').split()), 'unsafe_acceptenv')
 

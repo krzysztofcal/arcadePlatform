@@ -946,7 +946,9 @@ class WwwRead(unittest.TestCase):
         policy = {'authorizedkeysfile':'.ssh/authorized_keys .ssh/authorized_keys2', 'authorizedkeyscommand':'none',
             'authorizedprincipalscommand':'none','authorizedprincipalsfile':'none','trustedusercakeys':'none',
             'forcecommand':'none','permituserenvironment':'no','passwordauthentication':'no',
-            'kbdinteractiveauthentication':'no','hostbasedauthentication':'no','strictmodes':'yes','pubkeyauthentication':'yes','usepam':'yes'}
+            'kbdinteractiveauthentication':'no','hostbasedauthentication':'no',
+            'gssapiauthentication':'no','kerberosauthentication':'no','permittunnel':'no','strictmodes':'yes','pubkeyauthentication':'yes','usepam':'yes'}
+        self.policy=policy
         def run(argv, expected=(0,)):
             self.calls.append(argv)
             if argv[0].endswith('sshd'):return '\n'.join(k+' '+v for k,v in policy.items())
@@ -980,6 +982,12 @@ class WwwRead(unittest.TestCase):
         with self.assertRaisesRegex(self.m.Refused,'sshd_match_requires_review'):self.task.execute('prepare','123')
         self.assertFalse(self.task.base.exists())
         (self.root/'etc/ssh/sshd_config.d/other.conf').unlink()
+        for name,value in [('authorizedkeyscommand','/other'),('authorizedkeysfile','/other'),
+                ('gssapiauthentication','yes'),('kerberosauthentication','yes'),('permittunnel','yes')]:
+            previous=self.policy[name];self.policy[name]=value
+            with self.assertRaisesRegex(self.m.Refused,'effective_ssh_policy_mismatch'):self.task.execute('prepare','123')
+            self.assertFalse(self.task.base.exists())
+            self.policy[name]=previous
         self.exists=True
         with self.assertRaisesRegex(self.m.Refused,'existing_identity'):self.task.execute('prepare','123')
         self.exists=False
