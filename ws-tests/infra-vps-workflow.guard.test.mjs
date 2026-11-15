@@ -2086,3 +2086,30 @@ test('invalid config cannot select an otherwise valid Hetzner fallback', async (
   assert.throws(() => newAgentWorkdir('task-1257', fx.io), /STOP agent_workdir storage_config_unavailable/);
   assert.deepEqual(mounts, []);
 });
+
+
+test("WWW read-only SSH catalog keeps fixed command and separate preparation/enrollment", async () => {
+  const { runOperation } = await import('../infra/vps/vps-admin.mjs');
+  const { VPS_READ, vpsWsRelease } = await import('../scripts/www-production-release.mjs');
+  const source = fileText('infra/vps/www-ws-read.py');
+  assert.equal(source.match(/^VPS_READ = '([^']+)'$/m)?.[1], VPS_READ);
+  for (const action of ['prepare', 'key-sync']) {
+    const fx = fakeAdminHost();
+    const original = fx.host.run;
+    fx.host.run = (argv, ...args) => {
+      if (argv[0] !== '/usr/bin/python3') return original(argv, ...args);
+      assert.deepEqual(argv, ['/usr/bin/python3', '-I', '-B', '/usr/local/libexec/arcade-vps-admin/www-ws-read.py', action, '123']);
+      return { status: 0, stdout: 'WWW_READ_OK verified' };
+    };
+    assert.equal(runOperation(`www-ws-read-${action}`, '123', fx.host).ok, true);
+  }
+  for (const script of ['stage-vps-admin.sh', 'bootstrap.sh']) {
+    const text = fileText(`infra/vps/${script}`);
+    assert.match(text, /for asset in www-ws-read.py www-ws-read-owner.pub /);
+    assert.doesNotMatch(text, /www-ws-read.py[" ]+(prepare|key-sync)/, 'staging never activates the identity');
+  }
+  const result = spawnSync('python3', ['-B', 'tests/ws-preview-config.test.py', 'WwwRead'], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  assert.equal(result.status, 0, result.stderr);
+  const sha = 'a'.repeat(40);
+  assert.equal(vpsWsRelease(`/opt/ws-server/releases/${sha}/ws-server\n${JSON.stringify({ releaseSha: sha, environment: 'production', deployRef: 'main' })}\n\n2026-11-15T10:00:00Z\nActiveState=active\nExecMainStartTimestamp=@1794736860\n`), sha);
+});

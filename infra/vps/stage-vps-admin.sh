@@ -28,6 +28,7 @@ try:
                root/'infra/vps/ws-server-preview.service.d', root/'.github', root/'.github/workflows',
                root/'.github/workflows/vps-admin-operation.yml']
     sources += [root/'infra/vps'/name for name in (
+        'www-ws-read.py', 'www-ws-read-owner.pub',
         'vps-admin.mjs', 'vps-admin-approval.mjs', 'arcade-admin.sudoers', 'github-app-token.py',
         'ws-preview-isolation.py', 'prepare-ws-preview-v3.py', 'ws-preview-owner.pub',
         'codex-bwrap-apparmor.py', 'bwrap-userns-restrict',
@@ -130,7 +131,7 @@ for directory in /usr/local/libexec /usr/local/libexec/arcade-vps-admin /var/lib
 done
 install -d -o root -g root -m 0755 /usr/local/libexec/arcade-vps-admin
 install -d -o root -g root -m 0700 /var/lib/arcade-admin
-for asset in github-app-token.py ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub codex-bwrap-apparmor.py bwrap-userns-restrict; do
+for asset in www-ws-read.py www-ws-read-owner.pub github-app-token.py ws-preview-isolation.py prepare-ws-preview-v3.py ws-preview-owner.pub codex-bwrap-apparmor.py bwrap-userns-restrict; do
   test -f "$REPO_ROOT/infra/vps/$asset" && test ! -L "$REPO_ROOT/infra/vps/$asset" || exit 1
   install -o root -g root -m 0644 "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"
   cmp -- "$REPO_ROOT/infra/vps/$asset" "/usr/local/libexec/arcade-vps-admin/$asset"
