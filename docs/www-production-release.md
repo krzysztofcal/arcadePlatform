@@ -25,7 +25,7 @@ Environment-scoped secrets in **both** environments:
 | `NETLIFY_AUTH_TOKEN` | Existing authorized site API access for validation/discard; publisher also restores/relocks |
 | `WS_PROD_SSH` | Existing read-only SSH evidence target (`user@host`) |
 | `WS_PROD_SSH_KEY` | Dedicated evidence-only identity, not `WS_PRODUCTION_SSH_KEY` or an OWNER deployment key |
-| `WS_PROD_KNOWN_HOSTS` | Independently verified host-key pin; never runtime `ssh-keyscan` trust |
+| `WS_PROD_KNOWN_HOSTS` | Independently verified host-key pin, or the explicitly approved one-time Hetzner exception below; never runtime `ssh-keyscan` trust |
 
 Only `www-candidate` additionally holds `NETLIFY_BUILD_HOOK`: the existing main Production hook for `playkcswh`.
 Do not create a parallel hook or use CLI production deploys. Keep Netlify auto publishing locked and `[build].ignore`
@@ -43,8 +43,9 @@ Use the existing read-only SSH mechanism, not the WS deployment account/key. Eph
 2. Approve **`www-candidate`**. The existing hook is called once; complete dry-run and static candidate smoke run.
 3. Open the clickable immutable Netlify candidate permalink in that run's **Summary**. Inspect read-only only:
    candidate functions use Production data; this is not an isolated Stage preview.
-4. Within **30 minutes from candidate creation**, Actions → **Publish WWW Production** → **Run workflow**, branch
-   `main`, leave `candidate_run_id` blank and `discard=false`.
+4. Within **48 hours from candidate creation**, Actions → **Publish WWW Production** → **Run workflow**, branch
+   `main`, leave `candidate_run_id` blank and `discard=false`. Finish approval/publication before expiry;
+   dispatching before the deadline does not reserve the candidate.
 5. Approve **`www-production`**. Empty ID selects only the unique fully eligible candidate, using the existing
    complete safety dry-run before the normal execute path and its immediate rechecks.
 6. Automatic GET-only LIVE verification and immutable Release Record follow publication; no separate dispatch.
@@ -53,8 +54,9 @@ Automatic selection reads **at most five successful OWNER/main candidate runs fo
 then requires the API's total count to match the complete returned list. It deliberately does not filter by run
 creation time: a long Environment approval wait must not hide a fresh candidate. Reruns are excluded. Each candidate
 needs an authentic unexpired artifact, matching `candidate_ready` provenance and dry-run/static-check receipts,
-age at most 30 minutes (rechecked after validation), and the existing Netlify identity/unpublished/lock/function/
-header/WS checks. Proven stale or already-published candidates are ineligible. No eligible candidate, multiple eligible
+age at most 48 hours from provenance `createdAt` (before the build hook, not approval or build completion;
+exactly 48 hours is accepted, greater age is expired, and age is rechecked after validation), and the existing
+Netlify identity/unpublished/lock/function/header/WS checks. Proven stale or already-published candidates are ineligible. No eligible candidate, multiple eligible
 candidates, more than five matching runs, missing/incomplete evidence, or other validation errors mean **STOP before
 restore or discard**. There is no latest-run/latest-deploy fallback and no unbounded pagination. A long-lived main
 revision can hit the five-run bound; reconcile candidates and supply an explicit ID instead of guessing.
@@ -62,7 +64,15 @@ revision can hit the five-run bound; reconcile candidates and supply an explicit
 A nonempty `candidate_run_id` retains the existing explicit-ID validation and recovery/discard path. In particular,
 `discard=true` should use that explicit run ID for an abandoned/expired candidate; blank-ID discovery only accepts
 fresh eligible unpublished candidates. Existing safe discard, lock, uncertain-execute STOP and no automatic rollback
-remain unchanged.
+remain unchanged. Returning the next day works only while the candidate SHA is still the exact current
+`main` and all current Production checks (including WS compatibility and the published Netlify lock) pass.
+The longer lifetime never freezes or bypasses those checks. More successful runs can accumulate over 48 hours;
+the existing five-run completeness bound and ambiguity STOP remain unchanged.
+
+This policy applies to new candidates created after this change is merged. Run `43863728077` was started
+with the old code and retention; do not modify, rerun or reuse it as a new 48-hour candidate. Its cleanup,
+if needed, requires the existing separately approved guarded discard. Create a fresh candidate from the
+then-current main under separate OWNER GO; this PR starts no build or publication.
 
 OWNER self-approval is intentionally accepted **only for the two new WWW Environments** (`prevent_self_review=false`).
 Keep them separate; do not reuse or modify `ws-production`, `vps-admin`, or other existing Environments. Their
@@ -79,6 +89,11 @@ Legal documents and account page must exactly match the approved commit; legal v
 and Privacy must contain the account-deletion anchor. Build identity, CSP/HSTS and Netlify locked published deploy
 are checked. It never invokes functions, login, deletion, chips, XP, Redis or other mutating API endpoints.
 
+The root `netlify.toml` disables Pretty URLs HTML post-processing so Netlify does not rewrite anchor
+URLs/serialization after the build. Legal/account comparison remains exact; version and deletion-anchor
+checks are not relaxed. This affects newly built HTML only, not existing deploys. Preserve explicit
+`.html` links and the configured redirects; do not enable HTML rewriting to work around a smoke failure.
+
 ## STOP and cleanup
 
 Candidate permalinks expose Production functions. Do not test mutations there or leave candidates abandoned.
@@ -89,7 +104,9 @@ hook response or an ambiguous title is STOP, never permission to pick the latest
 10 minutes (plus an in-flight bounded API request), API requests have deadlines, and the hook POST is never retried.
 
 For an abandoned or expired successful candidate use **Publish WWW Production** with its `candidate_run_id` and
-`discard=true`, then approve the environment. Stale/expired candidates encountered by normal publish are discarded
+`discard=true`, then approve the environment. After 48 hours, blank-ID discovery excludes that candidate;
+use its explicit ID for cleanup while its 3-day artifact is still available. Retention does not extend
+publish eligibility. Stale/expired candidates encountered by explicit-ID normal publish are discarded
 and the job fails asking for a new candidate. Discard still validates trusted provenance and refuses previously
 published/current/building deploys. API 404 **and** permalink 404 are required; otherwise `discard_unverified_STOP`.
 There is no unattended scheduled deletion. Lost/expired artifacts require the retained manual guarded discard path
@@ -99,7 +116,7 @@ After restore, failures are **published_smoke_failed_STOP** or **uncertain_STOP*
 retry, rollback, historical restore or candidate deletion occurs. A killed execute process can leave an uncertain
 receipt: OWNER must inspect the actual site/deploy/lock before any further action. GitHub summaries and sanitized JSON
 receipts distinguish candidate failure, discard, publication, LIVE smoke and record outcome. Candidate artifacts last
-1 day, publication/cleanup artifacts 7 days; download operational evidence promptly. This retention is not automatic
+3 days, publication/cleanup artifacts 7 days; download operational evidence promptly. This retention is not automatic
 deploy deletion. An immutable GitHub Release retains WWW deploy/SHA/publication/candidate run references permanently.
 
 If LIVE passes but Release Record fails, **Production is already published**. The parent run is failed, never a
@@ -119,8 +136,9 @@ Subsequent records validate the immutable asset plus parent owner run, successfu
 approval history; they do not depend on expiring artifacts. Old direct records remain valid. Record creation never
 publishes Netlify or deploys WS.
 
-No runtime, Netlify routing/build-ignore, WS package, DB schema, browser scripts, CSP configuration or financial
-behavior changes. Existing direct release tooling remains supported until validated cutover. New configuration is
+The original automation implementation changed no runtime, Netlify routing/build-ignore, WS package, DB
+schema, browser scripts, CSP configuration or financial behavior. The later Pretty URLs setting above
+changes HTML link serialization for future builds; explicit redirects and build-ignore remain unchanged. Existing direct release tooling remains supported until validated cutover. New configuration is
 additive; missing environments/secrets/approval/API capability blocks the new workflows. No Production configuration
 has been changed by implementation. No new service or dependency. No Supabase egress (only bounded GitHub/Netlify
 metadata and static GETs at owner release frequency). A future cutover/removal requires measured first-run evidence
@@ -149,7 +167,7 @@ OWNER separately configures these three secrets in **both** `www-candidate` and 
 |---|---|
 | `WS_PROD_SSH` | `arcade-www-read@<verified-current-VPS-host>`; never a deployment or OWNER identity |
 | `WS_PROD_SSH_KEY` | Corresponding dedicated private key, entered directly by OWNER from secure off-VPS custody |
-| `WS_PROD_KNOWN_HOSTS` | OpenSSH known_hosts entry for that exact hostname/port, verified against host public key/fingerprint through an independent trusted OWNER console |
+| `WS_PROD_KNOWN_HOSTS` | OpenSSH known_hosts entry for that exact hostname/port, verified against host public key/fingerprint through an independent trusted OWNER console, subject only to the one-time Hetzner exception below |
 
 Do not trust runtime `ssh-keyscan`, disable strict checking or pin a Hetzner IP/host key in code. A future
 OVH migration repeats trusted provisioning, public-key enrollment and independent host-key verification;
@@ -157,10 +175,68 @@ update endpoint/pin only under separate GO. Never copy the private key onto eith
 only the existing exact `VPS_READ`; interactive sessions, arbitrary commands and forwarding stay disabled.
 It returns the existing `vpsWsRelease()` evidence format with only required public metadata fields.
 
-If SSH policy, permissions, identity, manifest, source SHA or host-key provenance is unverified, release
-activation remains BLOCKED. Do not widen WS permissions or borrow the Preview/deployment key. Key revocation
+If SSH policy, permissions, identity, manifest or source SHA is unverified, release activation remains BLOCKED.
+Unverified host-key provenance also blocks activation unless the scoped exception below is approved and all its conditions hold.
+Do not widen WS permissions or borrow the Preview/deployment key. Key revocation
 uses a reviewed empty public-key asset plus separately approved key-sync; partial failure requires protected
 state inspection without automatic retry. A fresh OWNER-approved empty-asset key-sync can revoke a known
 interrupted enrollment slot even when WS/SSH/wrapper health has drifted; it does not resume the failed action. Existing manual WWW release remains available under its own gates.
 No breaking change to WWW/WS runtime or existing release workflows; this additive admin path requires separate
 installation/configuration/acceptance GO before first use.
+
+
+## One-time Hetzner host-key provenance exception (#1254)
+
+**Security exception proposal; approval/use status is recorded in issue #1254 as specified below.**
+Absent that record, the exception is not approved: **STOP**. Preparing, approving review of, or merging
+this documentation alone does not approve the exception or authorize activation. The default remains independent host-key
+verification. Only the first WWW SSH activation on the current Hetzner VPS at `91.98.174.191` may use
+this exception, bound to this exact ED25519 host-key fingerprint:
+
+`SHA256:X6pvnIIAu6NWMpnsOguE5D+J/bo+94o0hlnDhRYQTAQ`
+
+Evidence reported by OWNER on 2026-11-16 for the proposed first activation:
+
+- An existing historical `known_hosts` entry in OWNER's Termux matches the host public key read on the VPS.
+- The matching ED25519 key has the fingerprint above.
+- For the dedicated `arcade-www-read` identity, the exact `VPS_READ` request succeeded; shell, PTY and
+  forwarding attempts were denied.
+
+These are OWNER-reported results, not tests repeated by this documentation PR. Historical `known_hosts`
+and OWNER's statement are **not independent cryptographic verification of host identity**. Reading a key
+through the existing VPS connection does not establish an independent trust anchor. Agreement and the
+acceptance tests demonstrate continuity and reader restrictions, but cannot exclude an already compromised
+client/server or an interception present when trust was first established. A falsely trusted host could
+forge WS release evidence and undermine WWW release validation; this residual risk is deliberately accepted
+only through the explicit exception approval, not described as equivalent security. Although establishment
+of the pin is a one-time action, this residual risk persists for every later candidate/publication using
+that pin until independent verification succeeds or the key is replaced under the normal procedure.
+
+Before use, OWNER must post a distinct written exception-approval comment in
+[issue #1254](https://github.com/krzysztofcal/arcadePlatform/issues/1254), linking this documentation PR.
+An approving PR review or merge alone is insufficient. The comment must explicitly name `91.98.174.191`,
+the actual SSH port and fingerprint, accept the ongoing residual risk above, and retain the exact public
+OpenSSH `known_hosts` entry and the reported comparison/test results with their provenance. The port is
+not established by this documentation; absent its explicit binding in that record means **STOP**.
+Use the IP literal in the SSH endpoint and corresponding exact IP/port `known_hosts` entry. Obtain the
+pin and comparison from OWNER's own historical entry and retained evidence, never by copying a pin from
+this document. Missing or inconsistent evidence means **STOP**; keep private keys and tokens out of the record.
+
+OWNER must append a consumed status to the same issue record once the initial pin is configured, with
+the date and a reference to the separate configuration GO. No record means not approved; an approved
+record without a consumed entry is not proof that configuration completed. Inspect actual configuration
+before further action; never repeat configuration automatically. Initial configuration of this same pin
+in both `www-candidate` and `www-production` is covered as one enrollment, not a new exception per
+Environment. Later re-entry of the identical pin for the identical host/port remains bound to this
+acceptance record and needs separate configuration GO; it does not renew or widen the exception.
+Configuration and first activation still require their separate OWNER GO; all VPS/WWW Environment
+approvals and other activation gates remain mandatory.
+
+`StrictHostKeyChecking=yes` and the exact public-key pin remain mandatory for every connection, using only
+`arcade-www-read` and its dedicated key. A fingerprint mismatch, unavailable pin or unexpected endpoint
+means **STOP**, fail closed: no automatic replacement, `accept-new`, runtime `ssh-keyscan` trust, alternative
+identity or disabled checking. The one-time exception covers only establishing this initial pin; subsequent
+connections must continue to match it. It grants no exception for key rotation, host rebuild/replacement,
+a different address/port, OVH migration or any other host. Those require independent host-key verification
+and separate OWNER approval under the normal procedure. No SSH code, workflow, secret or VPS configuration
+is changed by documenting this exception, and no WWW build or publication is authorized.

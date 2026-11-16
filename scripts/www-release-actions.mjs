@@ -8,6 +8,7 @@ const SHA = /^[a-f0-9]{40}$/;
 const ID = /^[a-f0-9]{24}$/;
 const RUN = /^[1-9][0-9]{0,19}$/;
 const REPO = 'krzysztofcal/arcadePlatform';
+const CANDIDATE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const fail = reason => { throw new Error(reason); };
 const command = (cmd, args) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 180000 });
@@ -32,7 +33,7 @@ export function validateCandidate(run, p, owner, now = Date.now(), allowExpired 
     || p.sha !== run.head_sha || String(p.runId) !== String(run.id) || String(p.attempt) !== String(run.run_attempt)
     || p.actor !== owner || p.triggeringActor !== owner) fail('candidate_provenance_mismatch');
   const age = now - Date.parse(p.createdAt);
-  if (!Number.isFinite(age) || age < 0 || (!allowExpired && age > 30 * 60 * 1000)) fail('candidate_expired');
+  if (!Number.isFinite(age) || age < 0 || (!allowExpired && age > CANDIDATE_MAX_AGE_MS)) fail('candidate_expired');
 }
 
 export function environmentFailures(settings, branches, owner) {
@@ -194,7 +195,7 @@ async function candidate(env) {
     p.staticValidation = await liveSmoke({ sha, deployId: p.deployId, api, published: false,
       readTarget: path => targetFile(sha, path), get: path => staticGet(`https://${p.deployId}--${SITE.name}.netlify.app`, path) });
     p.status = 'candidate_ready'; save('.www/candidate.json', p);
-    summary(`Candidate ready: https://${p.deployId}--${SITE.name}.netlify.app\n\nSHA: ${sha}\n\nCandidate run: https://github.com/${REPO}/actions/runs/${p.runId} (attempt 1). Publish within 30 minutes; otherwise discard.`, env);
+    summary(`Candidate ready: https://${p.deployId}--${SITE.name}.netlify.app\n\nSHA: ${sha}\n\nCandidate run: https://github.com/${REPO}/actions/runs/${p.runId} (attempt 1). Publish within ${CANDIDATE_MAX_AGE_MS / (60 * 60 * 1000)} hours from candidate creation; otherwise discard.`, env);
   } catch (e) {
     const hookNotCalled = p.status === 'hook_not_called';
     p.status = 'candidate_failed_STOP';
@@ -243,7 +244,7 @@ export async function resolveCandidate(runId, sha, { read = gh, download = downl
     if (run.head_sha !== sha) fail('candidate_search_sha_mismatch');
     const p = loadCandidate(String(run.id), read, download, now());
     if (p.sha !== sha) fail('candidate_search_sha_mismatch');
-    if (now() - Date.parse(p.createdAt) > 30 * 60 * 1000) continue;
+    if (now() - Date.parse(p.createdAt) > CANDIDATE_MAX_AGE_MS) continue;
     validateCandidate(run, p, 'krzysztofcal', now());
     if (p.validation?.status !== 'dry_run_pass' || p.validation.sha !== sha || p.validation.deployId !== p.deployId
       || p.staticValidation?.status !== 'candidate_static_verified' || p.staticValidation.sha !== sha
@@ -279,7 +280,7 @@ async function publish(env) {
   save('.www/publication.json', receipt);
   let discardAttempted = false;
   try {
-    if (env.DISCARD === 'true' || p.sha !== env.GITHUB_SHA || Date.now() - Date.parse(p.createdAt) > 30 * 60 * 1000) {
+    if (env.DISCARD === 'true' || p.sha !== env.GITHUB_SHA || Date.now() - Date.parse(p.createdAt) > CANDIDATE_MAX_AGE_MS) {
       discardAttempted = true;
       receipt.discard = release(['--discard', '--deploy', p.deployId, '--confirm', discardPhrase(p.deployId)], '.www/discard.json', env);
       receipt.status = 'discarded'; save('.www/publication.json', receipt);
