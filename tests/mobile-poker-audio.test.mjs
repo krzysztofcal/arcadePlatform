@@ -27,7 +27,7 @@ test('adapter in node:vm with no Capacitor or getPlatform() === "web" is inactiv
     assert.equal(await audio.play('bet'), false);
     assert.equal(await audio.voice('check'), false);
     assert.equal(await audio.preload(['bet']), false);
-    assert.equal(await audio.stop(), undefined);
+    assert.equal(await audio.stop(), false);
     assert.deepEqual(Object.keys(windowListeners), []);
     assert.deepEqual(Object.keys(documentListeners), []);
   }
@@ -60,7 +60,7 @@ test('adapter in node:vm with no Capacitor or getPlatform() === "web" is inactiv
     assert.equal(await audio.play('bet'), false);
     assert.equal(await audio.voice('check'), false);
     assert.equal(await audio.preload(['bet']), false);
-    assert.equal(await audio.stop(), undefined);
+    assert.equal(await audio.stop(), false);
     assert.deepEqual(Object.keys(windowListeners), []);
     assert.deepEqual(Object.keys(documentListeners), []);
     assert.deepEqual(pluginCalls, []);
@@ -117,9 +117,9 @@ test('adapter with fake android PokerAudio plugin forwards gestures and calls sa
   assert.ok(setEnabledCall, 'setEnabled must be called');
   assert.equal(setEnabledCall.setEnabled.enabled, false);
 
-  // Invalid cue names are not forwarded: '../x', 'A', '', null, undefined, 'lobby'
+  // Invalid cue names are not forwarded (the native owner additionally refuses the music cue)
   const callCountBefore = calls.length;
-  for (const invalid of ['../x', 'A', '', null, undefined, 'lobby', 'has space']) {
+  for (const invalid of ['../x', 'A', '', null, undefined, 'has space']) {
     const rPlay = await audio.play(invalid);
     assert.equal(rPlay, false);
     const rVoice = await audio.voice(invalid);
@@ -168,7 +168,7 @@ test('adapter with fake android PokerAudio plugin forwards gestures and calls sa
     assert.equal(await brokenAudio.play('bet'), false);
     assert.equal(await brokenAudio.voice('bet'), false);
     assert.equal(await brokenAudio.preload(['bet']), false);
-    assert.equal(await brokenAudio.stop(), undefined);
+    assert.equal(await brokenAudio.stop(), false);
   });
 });
 

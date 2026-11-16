@@ -126,23 +126,13 @@ for (const name of pages) {
 }
 await cp(path.join(root, 'poker/assets'), path.join(out, 'poker/assets'), { recursive: true });
 await put('index.html', launch);
-const audioDir = path.join(here, 'audio');
+// #1146: local audio for the native Android owner; WWW never references these files.
 const audioFiles = [];
-const AUDIO_FILE_RE = /^[a-z0-9_]+\.(wav|ogg|mp3|m4a)$/;
-try {
-  const entries = await readdir(audioDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isFile() && AUDIO_FILE_RE.test(entry.name)) {
-      const data = await readFile(path.join(audioDir, entry.name));
-      const sha256 = createHash('sha256').update(data).digest('hex');
-      await put(path.join('mobile/audio', entry.name), data);
-      audioFiles.push({ name: entry.name, bytes: data.length, sha256 });
-    }
-  }
-} catch (err) {
-  if (err.code !== 'ENOENT') throw err;
+for (const name of (await readdir(path.join(here, 'audio'))).filter(name => /^[a-z0-9_]+\.(wav|ogg|mp3|m4a)$/.test(name)).sort()) {
+  const data = await readFile(path.join(here, 'audio', name));
+  await put('mobile/audio/' + name, data);
+  audioFiles.push({ name, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') });
 }
-audioFiles.sort((a, b) => a.name.localeCompare(b.name));
 // Validate the composed documents, including isolated Offline, before claiming CSP/SRI PASS.
 for (const name of [...pages, 'index.html']) {
   const html = await readFile(path.join(out, name), 'utf8');

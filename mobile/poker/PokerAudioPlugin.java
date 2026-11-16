@@ -4,21 +4,18 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.res.AssetFileDescriptor;
 import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.SoundPool;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.webkit.WebView;
-
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -26,776 +23,393 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.WebViewListener;
 import com.getcapacitor.annotation.CapacitorPlugin;
-
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.regex.Pattern;
 
+// The single audio owner. It lives with the Activity/Bridge, not with an HTML document, so the
+// music player and its playhead survive every WebView page navigation. All state is main-thread only.
 @CapacitorPlugin(name = "PokerAudio")
 public class PokerAudioPlugin extends Plugin {
     private static final String TAG = "PokerAudio";
-    private static final float TARGET_GAIN = 0.35f;
-    private static final Pattern CUE_PATTERN = Pattern.compile("^[a-z0-9_]{1,40}$");
+    private static final String DIR = "public/mobile/audio";
+    private static final String MUSIC = "lobby";
+    private static final float GAIN = 0.35f;
+    private static final float DUCK = 0.3f;
+    private static final long FADE_MS = 600;
+    private static final long STEP_MS = 50;
+    private static final long STALE_MS = 400;
+    private static final int MAX_STREAMS = 4;
+    private static final Pattern CUE = Pattern.compile("[a-z0-9_]{1,40}");
 
-    // State
-    private boolean enabled = true;
-    private boolean unlocked = false;
-    private boolean resumed = false;
-    private boolean musicScene = false;
-    private boolean hold = false;
-    private boolean focusPaused = false;
-    private boolean ducked = false;
-    private boolean focusHeld = false;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Map<String, String> files = new HashMap<>(); // cue -> bundled file name
+    private final Map<String, Integer> sounds = new HashMap<>(); // cue -> SoundPool id
+    private final Set<Integer> loaded = new HashSet<>();
+    private final Map<Integer, long[]> pending = new HashMap<>(); // id -> {requested at, voice}
+    private final ArrayDeque<Integer> streams = new ArrayDeque<>();
+    private AudioManager audioManager;
+    private MediaPlayer player;
+    private SoundPool pool;
+    private boolean enabled = true; // persisted; every other flag is per process
+    private boolean unlocked; // a user gesture happened
+    private boolean resumed; // Activity is in the foreground
+    private boolean musicScene; // current document is a lobby/profile page
+    private boolean hold; // route or focus was lost; wait for the next foreground or Sound ON
+    private boolean focusPaused; // transient focus loss, e.g. a phone call
+    private boolean focusHeld;
+    private boolean ducked;
+    private boolean prepared;
+    private boolean listening;
+    private float volume;
+    private float fadeTarget;
+    private int voiceStream;
 
-    // Concurrency / Lifecycle
-    private Handler mainHandler;
-    private boolean noisyReceiverRegistered = false;
+    private final AudioManager.OnAudioFocusChangeListener focus = change -> main.post(() -> {
+        if (change == AudioManager.AUDIOFOCUS_GAIN) {
+            focusPaused = false;
+            ducked = false;
+        } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) {
+            ducked = true;
+        } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+            focusPaused = true;
+        } else if (change == AudioManager.AUDIOFOCUS_LOSS) {
+            focusHeld = false;
+            hold = true;
+        } else return;
+        if (!audible()) stopCues();
+        sync(audible());
+    });
 
-    // Assets
-    private final Map<String, String> assetFiles = new HashMap<>();
-
-    // Music (MediaPlayer)
-    private MediaPlayer mediaPlayer;
-    private boolean mediaPlayerPrepared = false;
-    private boolean mediaPlayerPreparing = false;
-    private float currentVolume = 0.0f;
-    private Runnable currentFade = null;
-    private AudioFocusRequest audioFocusRequest = null;
-
-    // Cues (SoundPool)
-    private SoundPool soundPool;
-    private final Map<String, Integer> cueToSoundId = new HashMap<>();
-    private final Map<Integer, String> soundIdToCue = new HashMap<>();
-    private final Set<Integer> loadedSoundIds = new HashSet<>();
-    private final Set<Integer> activeStreams = new HashSet<>();
-    private int lastVoiceStream = 0;
-    private final Map<Integer, PendingCuePlay> pendingPlays = new HashMap<>();
-
-    private static class PendingCuePlay {
-        final String cue;
-        final String channel;
-        final long timestamp;
-        final PluginCall call;
-
-        PendingCuePlay(String cue, String channel, long timestamp, PluginCall call) {
-            this.cue = cue;
-            this.channel = channel;
-            this.timestamp = timestamp;
-            this.call = call;
-        }
-    }
-
-    private final BroadcastReceiver noisyReceiver = new BroadcastReceiver() {
+    private final BroadcastReceiver noisy = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
-                runOnMain(() -> onBecomingNoisy());
-            }
+            // Headphones/Bluetooth went away: never continue on the phone speaker.
+            hold = true;
+            stopCues();
+            sync(false);
         }
     };
 
-    private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = new AudioManager.OnAudioFocusChangeListener() {
+    private final Runnable fadeStep = new Runnable() {
         @Override
-        public void onAudioFocusChange(int focusChange) {
-            runOnMain(() -> handleAudioFocusChange(focusChange));
+        public void run() {
+            try {
+                if (player == null || !prepared) return;
+                float step = GAIN * STEP_MS / FADE_MS;
+                volume = Math.abs(fadeTarget - volume) <= step ? fadeTarget : volume + Math.signum(fadeTarget - volume) * step;
+                player.setVolume(volume, volume);
+                if (volume != fadeTarget) main.postDelayed(this, STEP_MS);
+                else if (fadeTarget == 0f) pauseMusic();
+            } catch (RuntimeException error) {
+                fail(error);
+            }
         }
     };
 
     @Override
     public void load() {
-        super.load();
-        mainHandler = new Handler(Looper.getMainLooper());
-        runOnMain(() -> {
-            try {
-                SharedPreferences prefs = getContext().getSharedPreferences("poker_audio", Context.MODE_PRIVATE);
-                enabled = prefs.getBoolean("sound_on", true);
-
-                initAssetMap();
-
-                IntentFilter filter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    getContext().registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-                } else {
-                    getContext().registerReceiver(noisyReceiver, filter);
-                }
-                noisyReceiverRegistered = true;
-
-                if (bridge != null) {
-                    bridge.addWebViewListener(new WebViewListener() {
-                        @Override
-                        public void onPageCommitVisible(WebView view, String url) {
-                            runOnMain(() -> {
-                                if (url == null) return;
-                                Uri page = Uri.parse(url);
-                                boolean nextMusicScene = "https".equals(page.getScheme())
-                                        && "localhost".equals(page.getHost())
-                                        && ("/poker/index.html".equals(page.getPath())
-                                        || "/poker/".equals(page.getPath())
-                                        || "/account.html".equals(page.getPath()));
-                                if (nextMusicScene != musicScene) {
-                                    musicScene = nextMusicScene;
-                                    sync(true);
-                                }
-                            });
-                        }
-                    });
-
-                    WebView webView = bridge.getWebView();
-                    if (webView != null && webView.getUrl() != null) {
-                        Uri page = Uri.parse(webView.getUrl());
-                        musicScene = "https".equals(page.getScheme())
-                                && "localhost".equals(page.getHost())
-                                && ("/poker/index.html".equals(page.getPath())
-                                || "/poker/".equals(page.getPath())
-                                || "/account.html".equals(page.getPath()));
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Initialization failed: " + e.getMessage());
+        try {
+            audioManager = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            enabled = getContext().getSharedPreferences("poker_audio", Context.MODE_PRIVATE).getBoolean("sound_on", true);
+            String[] names = getContext().getAssets().list(DIR);
+            if (names != null) for (String name : names) {
+                int dot = name.lastIndexOf('.');
+                if (dot > 0) files.put(name.substring(0, dot), name);
             }
-        });
+        } catch (IOException | RuntimeException error) {
+            fail(error);
+        }
+    }
+
+    @Override
+    protected void handleOnStart() {
+        if (listening) return;
+        listening = true;
+        try {
+            // Not in load(): Capacitor replaces the listener list right after it constructs the bridge.
+            bridge.addWebViewListener(new WebViewListener() {
+                @Override
+                public void onPageCommitVisible(WebView view, String url) {
+                    Uri page = Uri.parse(url == null ? "" : url);
+                    String path = page.getPath();
+                    // Positive list: table, Offline, legal and unknown documents never carry music.
+                    musicScene = "https".equals(page.getScheme()) && "localhost".equals(page.getHost())
+                        && ("/poker/index.html".equals(path) || "/poker/".equals(path) || "/account.html".equals(path));
+                    sync(true);
+                }
+            });
+            ContextCompat.registerReceiver(getContext(), noisy, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED);
+        } catch (RuntimeException error) {
+            fail(error);
+        }
     }
 
     @Override
     protected void handleOnResume() {
-        runOnMain(() -> {
-            try {
-                resumed = true;
-                hold = false;
-                sync(true);
-            } catch (Exception e) {
-                Log.w(TAG, "handleOnResume failed: " + e.getMessage());
-            }
-        });
+        resumed = true;
+        hold = false;
+        sync(true);
     }
 
     @Override
     protected void handleOnPause() {
-        runOnMain(() -> {
-            try {
-                resumed = false;
-                stopAllCues();
-                sync(false);
-            } catch (Exception e) {
-                Log.w(TAG, "handleOnPause failed: " + e.getMessage());
-            }
-        });
+        resumed = false;
+        focusPaused = false; // focus is given up below and requested again on return
+        stopCues();
+        sync(false);
     }
 
     @Override
     protected void handleOnDestroy() {
-        runOnMain(() -> {
-            try {
-                if (noisyReceiverRegistered) {
-                    getContext().unregisterReceiver(noisyReceiver);
-                    noisyReceiverRegistered = false;
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Unregistering noisy receiver failed: " + e.getMessage());
-            }
-            abandonAudioFocus();
-            releaseMediaPlayer();
-            releaseSoundPool();
+        try {
+            if (listening) getContext().unregisterReceiver(noisy);
+        } catch (RuntimeException error) {
+            fail(error);
+        }
+        focusPaused = false;
+        releaseMusic();
+        stopCues();
+        if (pool != null) pool.release();
+        pool = null;
+    }
+
+    @PluginMethod
+    public void unlock(PluginCall call) {
+        run(call, () -> {
+            unlocked = true;
+            sync(true);
+            return null;
         });
     }
 
-    private void runOnMain(Runnable runnable) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
+    @PluginMethod
+    public void setEnabled(PluginCall call) {
+        run(call, () -> {
+            enabled = Boolean.TRUE.equals(call.getBoolean("enabled", true));
+            getContext().getSharedPreferences("poker_audio", Context.MODE_PRIVATE).edit().putBoolean("sound_on", enabled).apply();
+            if (enabled) {
+                hold = false;
+                unlocked = true; // the toggle is itself a user gesture
+            } else stopCues();
+            sync(enabled);
+            return state();
+        });
+    }
+
+    @PluginMethod
+    public void getState(PluginCall call) {
+        run(call, this::state);
+    }
+
+    @PluginMethod
+    public void play(PluginCall call) {
+        run(call, () -> {
+            boolean voice = "voice".equals(call.getString("channel"));
+            Integer id = audible() ? loadCue(call.getString("cue")) : null;
+            boolean played = id != null && loaded.contains(id) && startCue(id, voice);
+            // A cue that is still decoding may start late, but only while it is still relevant.
+            if (id != null && !loaded.contains(id)) pending.put(id, new long[] { SystemClock.uptimeMillis(), voice ? 1 : 0 });
+            return new JSObject().put("played", played);
+        });
+    }
+
+    @PluginMethod
+    public void preload(PluginCall call) {
+        run(call, () -> {
+            JSArray cues = call.getArray("cues");
+            for (int i = 0; cues != null && i < cues.length(); i++) loadCue(cues.optString(i));
+            return null;
+        });
+    }
+
+    @PluginMethod
+    public void stop(PluginCall call) {
+        run(call, () -> {
+            stopCues();
+            return null;
+        });
+    }
+
+    // Plugin calls arrive on Capacitor's worker thread. They always resolve: audio must never break a page.
+    private void run(PluginCall call, Callable<JSObject> body) {
+        main.post(() -> {
+            JSObject result = null;
             try {
-                runnable.run();
-            } catch (Exception e) {
-                Log.w(TAG, "Execution error: " + e.getMessage());
+                result = body.call();
+            } catch (Exception error) {
+                fail(error);
             }
-        } else if (mainHandler != null) {
-            mainHandler.post(() -> {
-                try {
-                    runnable.run();
-                } catch (Exception e) {
-                    Log.w(TAG, "Execution error: " + e.getMessage());
-                }
-            });
+            if (result == null) call.resolve();
+            else call.resolve(result);
+        });
+    }
+
+    private JSObject state() {
+        boolean playing = false;
+        try {
+            playing = player != null && prepared && player.isPlaying();
+        } catch (RuntimeException error) {
+            fail(error);
         }
+        return new JSObject().put("enabled", enabled).put("unlocked", unlocked).put("musicPlaying", playing);
     }
 
     private boolean audible() {
         return enabled && unlocked && resumed && !hold && !focusPaused;
     }
 
-    private void onBecomingNoisy() {
-        hold = true;
-        stopAllCues();
-        sync(false);
+    private void fail(Exception error) {
+        Log.w(TAG, error.getClass().getSimpleName());
     }
 
-    private void handleAudioFocusChange(int focusChange) {
-        switch (focusChange) {
-            case AudioManager.AUDIOFOCUS_GAIN:
-                focusHeld = true;
-                focusPaused = false;
-                ducked = false;
-                sync(true);
-                break;
-            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
-                ducked = true;
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                    cancelFade();
-                    currentVolume = TARGET_GAIN * 0.30f;
-                    try {
-                        mediaPlayer.setVolume(currentVolume, currentVolume);
-                    } catch (Exception ignored) {}
-                }
-                break;
-            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                focusPaused = true;
-                stopAllCues();
-                sync(false);
-                break;
-            case AudioManager.AUDIOFOCUS_LOSS:
-                hold = true;
-                focusHeld = false;
-                stopAllCues();
-                sync(false);
-                break;
-        }
-    }
-
-    private void initAssetMap() {
+    // The one place that decides whether music plays. fade=false silences immediately.
+    @SuppressWarnings("deprecation") // one focus API for every supported level (minSdk 24)
+    private void sync(boolean fade) {
         try {
-            String[] files = getContext().getAssets().list("public/mobile/audio");
-            if (files != null) {
-                for (String f : files) {
-                    int dot = f.lastIndexOf('.');
-                    String base = (dot > 0) ? f.substring(0, dot) : f;
-                    assetFiles.put(base, f);
-                }
+            boolean want = audible() && musicScene;
+            if (want && player == null) {
+                openMusic(); // continues from onPrepared
+                return;
             }
-        } catch (IOException e) {
-            Log.w(TAG, "Failed listing assets: " + e.getMessage());
+            if (player == null || !prepared) {
+                if (!want) dropFocus();
+                return;
+            }
+            if (want) {
+                if (!focusHeld) focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+                if (!focusHeld) return;
+                if (!player.isPlaying()) player.start(); // resumes at the kept position
+                fadeTo(GAIN * (ducked ? DUCK : 1f));
+            } else if (fade && player.isPlaying()) fadeTo(0f);
+            else pauseMusic();
+        } catch (RuntimeException error) {
+            fail(error);
+            releaseMusic();
         }
     }
 
-    private AudioManager getAudioManager() {
-        try {
-            return (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
-        } catch (Exception e) {
-            Log.w(TAG, "AudioManager unavailable: " + e.getMessage());
-            return null;
-        }
+    private void fadeTo(float target) {
+        fadeTarget = target;
+        main.removeCallbacks(fadeStep);
+        main.post(fadeStep);
     }
 
-    private boolean requestAudioFocus() {
-        AudioManager am = getAudioManager();
-        if (am == null) return false;
-        try {
-            int res;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (audioFocusRequest == null) {
-                    AudioAttributes attrs = new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_GAME)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build();
-                    audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                            .setAudioAttributes(attrs)
-                            .setAcceptsDelayedFocusGain(false)
-                            .setOnAudioFocusChangeListener(audioFocusChangeListener, mainHandler)
-                            .build();
-                }
-                res = am.requestAudioFocus(audioFocusRequest);
-            } else {
-                res = am.requestAudioFocus(audioFocusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
-            }
-            focusHeld = (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
-            return focusHeld;
-        } catch (Exception e) {
-            Log.w(TAG, "requestAudioFocus failed: " + e.getMessage());
-            return false;
+    // Pause keeps the playhead; the track is never rewound.
+    private void pauseMusic() {
+        main.removeCallbacks(fadeStep);
+        volume = 0f;
+        if (player != null && prepared) {
+            if (player.isPlaying()) player.pause();
+            player.setVolume(0f, 0f);
         }
+        dropFocus();
     }
 
-    private void abandonAudioFocus() {
-        if (!focusHeld) return;
-        AudioManager am = getAudioManager();
-        if (am != null) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    if (audioFocusRequest != null) {
-                        am.abandonAudioFocusRequest(audioFocusRequest);
-                    }
-                } else {
-                    am.abandonAudioFocus(audioFocusChangeListener);
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "abandonAudioFocus failed: " + e.getMessage());
-            }
-        }
+    @SuppressWarnings("deprecation")
+    private void dropFocus() {
+        if (!focusHeld || focusPaused) return; // keep the request during a transient loss to hear GAIN
         focusHeld = false;
+        ducked = false;
+        audioManager.abandonAudioFocus(focus);
     }
 
-    private void initMediaPlayer() {
-        if (mediaPlayer != null || mediaPlayerPreparing) return;
-        String fileName = assetFiles.get("lobby");
-        if (fileName == null) {
-            Log.w(TAG, "Lobby audio asset missing");
-            return;
-        }
-        mediaPlayerPreparing = true;
-        try {
-            MediaPlayer mp = new MediaPlayer();
-            AudioAttributes attrs = new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build();
-            mp.setAudioAttributes(attrs);
-            mp.setLooping(true);
+    private AudioAttributes attributes(int contentType) {
+        return new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(contentType).build();
+    }
 
-            AssetFileDescriptor afd = getContext().getAssets().openFd("public/mobile/audio/" + fileName);
-            mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
-            afd.close();
-
-            mp.setOnPreparedListener(p -> runOnMain(() -> {
-                mediaPlayerPrepared = true;
-                mediaPlayerPreparing = false;
+    private void openMusic() {
+        String file = files.get(MUSIC);
+        if (file == null) return;
+        MediaPlayer next = new MediaPlayer();
+        player = next;
+        prepared = false;
+        volume = 0f;
+        try (AssetFileDescriptor fd = getContext().getAssets().openFd(DIR + "/" + file)) {
+            next.setAudioAttributes(attributes(AudioAttributes.CONTENT_TYPE_MUSIC));
+            next.setDataSource(fd.getFileDescriptor(), fd.getStartOffset(), fd.getLength());
+            next.setLooping(true);
+            next.setVolume(0f, 0f);
+            next.setOnPreparedListener(ready -> {
+                if (ready != player) return;
+                prepared = true;
                 sync(true);
-            }));
-
-            mp.setOnErrorListener((p, what, extra) -> {
-                Log.w(TAG, "MediaPlayer error: " + what + ", " + extra);
-                runOnMain(() -> releaseMediaPlayer());
+            });
+            next.setOnErrorListener((broken, what, extra) -> {
+                Log.w(TAG, "music error " + what);
+                if (broken == player) releaseMusic(); // a later navigation or resume may try again
                 return true;
             });
-
-            mp.setVolume(0.0f, 0.0f);
-            currentVolume = 0.0f;
-            mp.prepareAsync();
-            mediaPlayer = mp;
-        } catch (Exception e) {
-            Log.w(TAG, "initMediaPlayer failed: " + e.getMessage());
-            mediaPlayerPreparing = false;
-            releaseMediaPlayer();
+            next.prepareAsync();
+        } catch (IOException | RuntimeException error) {
+            fail(error);
+            releaseMusic();
         }
     }
 
-    private void releaseMediaPlayer() {
-        cancelFade();
-        if (mediaPlayer != null) {
-            try {
-                if (mediaPlayer.isPlaying()) {
-                    mediaPlayer.stop();
-                }
-                mediaPlayer.reset();
-                mediaPlayer.release();
-            } catch (Exception e) {
-                Log.w(TAG, "releaseMediaPlayer failed: " + e.getMessage());
-            }
-            mediaPlayer = null;
-        }
-        mediaPlayerPrepared = false;
-        mediaPlayerPreparing = false;
-        currentVolume = 0.0f;
-    }
-
-    private void cancelFade() {
-        if (currentFade != null) {
-            if (mainHandler != null) {
-                mainHandler.removeCallbacks(currentFade);
-            }
-            currentFade = null;
-        }
-    }
-
-    private void fadeVolumeTo(final float targetVol, final Runnable onComplete) {
-        cancelFade();
-        final float startVol = currentVolume;
-        final float delta = targetVol - startVol;
-        final int totalSteps = 12;
-        final long stepInterval = 50L;
-
-        if (Math.abs(delta) < 0.001f) {
-            currentVolume = targetVol;
-            if (mediaPlayer != null) {
-                try {
-                    mediaPlayer.setVolume(currentVolume, currentVolume);
-                } catch (Exception ignored) {}
-            }
-            if (onComplete != null) onComplete.run();
-            return;
-        }
-
-        currentFade = new Runnable() {
-            int step = 0;
-
-            @Override
-            public void run() {
-                step++;
-                if (mediaPlayer == null) {
-                    currentFade = null;
-                    return;
-                }
-                if (step >= totalSteps) {
-                    currentVolume = targetVol;
-                    try {
-                        mediaPlayer.setVolume(currentVolume, currentVolume);
-                    } catch (Exception ignored) {}
-                    currentFade = null;
-                    if (onComplete != null) {
-                        onComplete.run();
-                    }
-                } else {
-                    currentVolume = startVol + delta * ((float) step / totalSteps);
-                    try {
-                        mediaPlayer.setVolume(currentVolume, currentVolume);
-                    } catch (Exception ignored) {}
-                    if (mainHandler != null) {
-                        mainHandler.postDelayed(this, stepInterval);
-                    }
-                }
-            }
-        };
-        if (mainHandler != null) {
-            mainHandler.postDelayed(currentFade, stepInterval);
-        }
-    }
-
-    private void sync(boolean fade) {
-        boolean wantsToPlay = audible() && musicScene;
-
-        if (wantsToPlay) {
-            if (mediaPlayer == null) {
-                initMediaPlayer();
-                return;
-            }
-            if (!mediaPlayerPrepared) {
-                return;
-            }
-
-            if (!focusHeld) {
-                boolean granted = requestAudioFocus();
-                if (!granted) {
-                    return;
-                }
-            }
-
-            cancelFade();
-            try {
-                if (!mediaPlayer.isPlaying()) {
-                    mediaPlayer.setVolume(currentVolume, currentVolume);
-                    mediaPlayer.start();
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "mediaPlayer start failed: " + e.getMessage());
-                releaseMediaPlayer();
-                return;
-            }
-
-            float target = ducked ? (TARGET_GAIN * 0.30f) : TARGET_GAIN;
-            if (fade) {
-                fadeVolumeTo(target, null);
-            } else {
-                currentVolume = target;
-                try {
-                    mediaPlayer.setVolume(currentVolume, currentVolume);
-                } catch (Exception ignored) {}
-            }
-        } else {
-            if (mediaPlayer == null || !mediaPlayerPrepared) {
-                if (!focusPaused) {
-                    abandonAudioFocus();
-                }
-                return;
-            }
-
-            if (fade) {
-                fadeVolumeTo(0.0f, () -> {
-                    try {
-                        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                            mediaPlayer.pause();
-                        }
-                    } catch (Exception ignored) {}
-                    if (!focusPaused) {
-                        abandonAudioFocus();
-                    }
-                });
-            } else {
-                cancelFade();
-                try {
-                    if (mediaPlayer.isPlaying()) {
-                        mediaPlayer.pause();
-                    }
-                    currentVolume = 0.0f;
-                    mediaPlayer.setVolume(0.0f, 0.0f);
-                } catch (Exception ignored) {}
-                if (!focusPaused) {
-                    abandonAudioFocus();
-                }
-            }
-        }
-    }
-
-    private boolean isMusicPlaying() {
-        if (mediaPlayer != null && mediaPlayerPrepared) {
-            try {
-                return mediaPlayer.isPlaying();
-            } catch (Exception ignored) {}
-        }
-        return false;
-    }
-
-    private void initSoundPool() {
-        if (soundPool != null) return;
+    private void releaseMusic() {
+        main.removeCallbacks(fadeStep);
         try {
-            AudioAttributes cueAttrs = new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build();
-            soundPool = new SoundPool.Builder()
-                    .setMaxStreams(4)
-                    .setAudioAttributes(cueAttrs)
-                    .build();
-            soundPool.setOnLoadCompleteListener((sp, sampleId, status) ->
-                    runOnMain(() -> handleSoundPoolLoaded(sampleId, status)));
-        } catch (Exception e) {
-            Log.w(TAG, "initSoundPool failed: " + e.getMessage());
-            soundPool = null;
+            if (player != null) player.release();
+            dropFocus();
+        } catch (RuntimeException error) {
+            fail(error);
         }
+        player = null;
+        prepared = false;
     }
 
-    private void releaseSoundPool() {
-        stopAllCues();
-        if (soundPool != null) {
-            try {
-                soundPool.release();
-            } catch (Exception e) {
-                Log.w(TAG, "releaseSoundPool failed: " + e.getMessage());
-            }
-            soundPool = null;
+    private Integer loadCue(String cue) throws IOException {
+        String file = cue == null || !CUE.matcher(cue).matches() || MUSIC.equals(cue) ? null : files.get(cue);
+        if (file == null) return null;
+        Integer id = sounds.get(cue);
+        if (id != null) return id;
+        if (pool == null) {
+            pool = new SoundPool.Builder().setMaxStreams(MAX_STREAMS).setAudioAttributes(attributes(AudioAttributes.CONTENT_TYPE_SONIFICATION)).build();
+            pool.setOnLoadCompleteListener((source, sampleId, status) -> main.post(() -> cueLoaded(sampleId, status)));
         }
-        cueToSoundId.clear();
-        soundIdToCue.clear();
-        loadedSoundIds.clear();
-        pendingPlays.clear();
+        try (AssetFileDescriptor fd = getContext().getAssets().openFd(DIR + "/" + file)) {
+            id = pool.load(fd, 1);
+        }
+        sounds.put(cue, id);
+        return id;
     }
 
-    private void stopAllCues() {
-        if (soundPool != null) {
-            for (int streamId : activeStreams) {
-                try {
-                    soundPool.stop(streamId);
-                } catch (Exception ignored) {}
-            }
-            activeStreams.clear();
-            lastVoiceStream = 0;
-        }
-        for (PendingCuePlay p : pendingPlays.values()) {
-            try {
-                p.call.resolve(new JSObject().put("played", false));
-            } catch (Exception ignored) {}
-        }
-        pendingPlays.clear();
-    }
-
-    private int playSoundPoolSample(int soundId, String channel) {
-        if (soundPool == null) return 0;
+    private void cueLoaded(int id, int status) {
+        long[] request = pending.remove(id);
+        if (status != 0 || pool == null) return;
+        loaded.add(id);
         try {
-            if ("voice".equals(channel) && lastVoiceStream != 0) {
-                soundPool.stop(lastVoiceStream);
-                activeStreams.remove(lastVoiceStream);
-                lastVoiceStream = 0;
-            }
-            int streamId = soundPool.play(soundId, 1.0f, 1.0f, 1, 0, 1.0f);
-            if (streamId != 0) {
-                if ("voice".equals(channel)) {
-                    lastVoiceStream = streamId;
-                }
-                activeStreams.add(streamId);
-            }
-            return streamId;
-        } catch (Exception e) {
-            Log.w(TAG, "playSoundPoolSample failed: " + e.getMessage());
-            return 0;
+            // Stale cues are dropped rather than played late.
+            if (request != null && audible() && SystemClock.uptimeMillis() - request[0] <= STALE_MS) startCue(id, request[1] == 1);
+        } catch (RuntimeException error) {
+            fail(error);
         }
     }
 
-    private void handleSoundPoolLoaded(int sampleId, int status) {
-        if (status == 0) {
-            loadedSoundIds.add(sampleId);
-            PendingCuePlay pending = pendingPlays.remove(sampleId);
-            if (pending != null) {
-                long age = SystemClock.uptimeMillis() - pending.timestamp;
-                if (age < 400 && audible()) {
-                    int streamId = playSoundPoolSample(sampleId, pending.channel);
-                    pending.call.resolve(new JSObject().put("played", streamId != 0));
-                } else {
-                    pending.call.resolve(new JSObject().put("played", false));
-                }
-            }
-        } else {
-            PendingCuePlay pending = pendingPlays.remove(sampleId);
-            if (pending != null) {
-                pending.call.resolve(new JSObject().put("played", false));
-            }
+    private boolean startCue(int id, boolean voice) {
+        if (voice && voiceStream != 0) pool.stop(voiceStream); // one dealer line at a time
+        int stream = pool.play(id, 1f, 1f, voice ? 2 : 1, 0, 1f);
+        if (stream == 0) return false;
+        if (voice) voiceStream = stream;
+        streams.add(stream);
+        if (streams.size() > MAX_STREAMS) streams.remove(); // older streams have already been recycled
+        return true;
+    }
+
+    private void stopCues() {
+        pending.clear();
+        voiceStream = 0;
+        try {
+            if (pool != null) for (int stream : streams) pool.stop(stream);
+        } catch (RuntimeException error) {
+            fail(error);
         }
-    }
-
-    // --- Plugin Methods (arrive on background threads, all resolve, never reject) ---
-
-    @PluginMethod
-    public void unlock(PluginCall call) {
-        runOnMain(() -> {
-            try {
-                unlocked = true;
-                sync(true);
-            } catch (Exception e) {
-                Log.w(TAG, "unlock failed: " + e.getMessage());
-            } finally {
-                call.resolve();
-            }
-        });
-    }
-
-    @PluginMethod
-    public void setEnabled(PluginCall call) {
-        runOnMain(() -> {
-            try {
-                Boolean req = call.getBoolean("enabled");
-                enabled = req != null ? req : true;
-                getContext().getSharedPreferences("poker_audio", Context.MODE_PRIVATE)
-                        .edit()
-                        .putBoolean("sound_on", enabled)
-                        .apply();
-                if (!enabled) {
-                    stopAllCues();
-                    sync(false);
-                } else {
-                    hold = false;
-                    unlocked = true;
-                    sync(true);
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "setEnabled failed: " + e.getMessage());
-            } finally {
-                call.resolve(new JSObject().put("enabled", enabled));
-            }
-        });
-    }
-
-    @PluginMethod
-    public void getState(PluginCall call) {
-        runOnMain(() -> {
-            JSObject res = new JSObject();
-            try {
-                res.put("enabled", enabled);
-                res.put("unlocked", unlocked);
-                res.put("musicPlaying", isMusicPlaying());
-            } catch (Exception e) {
-                Log.w(TAG, "getState failed: " + e.getMessage());
-                res.put("enabled", enabled);
-                res.put("unlocked", unlocked);
-                res.put("musicPlaying", false);
-            } finally {
-                call.resolve(res);
-            }
-        });
-    }
-
-    @PluginMethod
-    public void play(PluginCall call) {
-        runOnMain(() -> {
-            try {
-                String cue = call.getString("cue");
-                if (cue == null || !CUE_PATTERN.matcher(cue).matches() || "lobby".equals(cue)) {
-                    call.resolve(new JSObject().put("played", false));
-                    return;
-                }
-                String fileName = assetFiles.get(cue);
-                if (fileName == null || !audible()) {
-                    call.resolve(new JSObject().put("played", false));
-                    return;
-                }
-
-                String channel = "voice".equals(call.getString("channel")) ? "voice" : "sfx";
-                initSoundPool();
-                if (soundPool == null) {
-                    call.resolve(new JSObject().put("played", false));
-                    return;
-                }
-
-                Integer soundId = cueToSoundId.get(cue);
-                if (soundId == null) {
-                    AssetFileDescriptor afd = getContext().getAssets().openFd("public/mobile/audio/" + fileName);
-                    soundId = soundPool.load(afd, 1);
-                    afd.close();
-                    cueToSoundId.put(cue, soundId);
-                    soundIdToCue.put(soundId, cue);
-                }
-
-                if (loadedSoundIds.contains(soundId)) {
-                    int streamId = playSoundPoolSample(soundId, channel);
-                    call.resolve(new JSObject().put("played", streamId != 0));
-                } else {
-                    final int sId = soundId;
-                    pendingPlays.put(soundId, new PendingCuePlay(cue, channel, SystemClock.uptimeMillis(), call));
-                    if (mainHandler != null) {
-                        mainHandler.postDelayed(() -> {
-                            PendingCuePlay p = pendingPlays.remove(sId);
-                            if (p != null) {
-                                p.call.resolve(new JSObject().put("played", false));
-                            }
-                        }, 400);
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "play failed: " + e.getMessage());
-                call.resolve(new JSObject().put("played", false));
-            }
-        });
-    }
-
-    @PluginMethod
-    public void preload(PluginCall call) {
-        runOnMain(() -> {
-            try {
-                JSArray cues = call.getArray("cues");
-                if (cues != null) {
-                    initSoundPool();
-                    if (soundPool != null) {
-                        for (int i = 0; i < cues.length(); i++) {
-                            String cue = cues.optString(i);
-                            if (cue != null && CUE_PATTERN.matcher(cue).matches() && !"lobby".equals(cue)) {
-                                String fileName = assetFiles.get(cue);
-                                if (fileName != null && !cueToSoundId.containsKey(cue)) {
-                                    try {
-                                        AssetFileDescriptor afd = getContext().getAssets().openFd("public/mobile/audio/" + fileName);
-                                        int soundId = soundPool.load(afd, 1);
-                                        afd.close();
-                                        cueToSoundId.put(cue, soundId);
-                                        soundIdToCue.put(soundId, cue);
-                                    } catch (Exception ignored) {}
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "preload failed: " + e.getMessage());
-            } finally {
-                call.resolve();
-            }
-        });
-    }
-
-    @PluginMethod
-    public void stop(PluginCall call) {
-        runOnMain(() -> {
-            try {
-                stopAllCues();
-            } catch (Exception e) {
-                Log.w(TAG, "stop failed: " + e.getMessage());
-            } finally {
-                call.resolve();
-            }
-        });
+        streams.clear();
     }
 }

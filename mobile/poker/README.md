@@ -89,17 +89,17 @@ The artifact includes build-receipt.json (PR/source/deploy/origins/app version/C
 
 ## #1146 PR1: Android audio foundation
 
-Local Capacitor plugin `PokerAudioPlugin.java` owns audio state, looping `MediaPlayer` and `SoundPool` on Android's main thread. Music survives document navigation because the Activity/Bridge instance persists while the WebView swaps HTML documents.
+`PokerAudioPlugin.java` is a local Capacitor plugin copied into the generated project and registered in `MainActivity` by `configure-android.mjs`. Its single instance belongs to the Activity/Bridge, so one looping `MediaPlayer` and its playhead outlive every WebView document navigation; pages never own audio. It decides the music scene itself from the committed document URL (Lobby views and Profile play; table, Offline table, legal and unknown documents fade out and pause), so Offline keeps its isolated CSP/SRI and needs no script. No Service, permission, dependency or network use; audio never plays in the background.
 
-| State | Source / Lifecycle | Audio Impact |
+| State | Set by | Effect |
 | --- | --- | --- |
-| `enabled` | `poker_audio.sound_on` pref (default ON) | Persisted toggle; `false` silences immediately |
-| `unlocked` | First gesture (`pointerdown`/`keydown`) | Ephemeral; music/cues remain silent until gesture |
-| `musicScene` | URL allowlist (`/poker/`, `/account.html`) | Table/other routes fade out music; resume fades in |
-| `hold`/`focusPaused` | Noisy unplug / focus loss / phone calls | Immediate pause on noisy/loss; duck on transient |
+| `enabled` | SharedPreferences `poker_audio/sound_on`, default ON | OFF stops music and cues at once and survives relaunch |
+| `unlocked` | first `pointerdown`/`keydown` of the process (`audio.js`) | nothing is audible before a user gesture |
+| `resumed` | Activity resume/pause (background, lock, external browser) | immediate pause and focus release; fade-in on return |
+| `musicScene` | `onPageCommitVisible` URL allowlist | ~600 ms fade then pause; resume at the kept position |
+| `hold` | headset/Bluetooth unplug, permanent focus loss | silent until the next foreground or Sound ON |
+| `focusPaused` / duck | transient Audio Focus loss (call) / can-duck | pause until focus returns / 30% volume |
 
-The bridge adapter `/mobile/audio.js` defines `window.MobilePokerAudio` (`available`, `isEnabled`, `setEnabled`, `play`, `voice`, `preload`, `stop`); on Web/WWW all calls resolve safe values without DOM listeners.
+`/mobile/audio.js` exposes `window.MobilePokerAudio`: `available()`, `isEnabled()`, `setEnabled(on)`, `play(cue)`, `voice(cue)`, `preload(cues)`, `stop()`. Every method resolves a boolean and never throws; without the Android plugin (WWW, Deploy Preview, any browser) it is a silent no-op with no listeners. Cues are `SoundPool` samples named by the files in `mobile/poker/audio/` (`[a-z0-9_]`), share the same mute/lifecycle gate, drop when stale and allow one voice line at a time. PR1 ships only the generated test loop `lobby.wav` (see `audio/manifest.json`).
 
-Phone test: sideload debug APK, tap anywhere to unlock, verify music loops across Lobby and Account navigation, fades out on entering Table, and toggles via footer `#mobileSoundToggle`.
-
-Out of scope for PR1: Settings UI, SFX catalogue, dealer voice, and bonus cues. Physical device behavior is unverified until OWNER phone test.
+Phone test (pending, OWNER): fresh install is silent until the first tap, then music starts; Lobby → Tables/Progression/Bonus → Profile → Lobby keeps playing without a restart; entering Online or Offline table fades out and returning continues from the same place; the temporary `Sound: On/Off` button under Lobby/Profile mutes at once and stays after force-close; Home, lock, a call and unplugging headphones silence it. Not in PR1: Settings UI, SFX catalogue, dealer voice, bonus cue. CI proves compilation and packaging only; continuity and lifecycle are unverified until that phone test.

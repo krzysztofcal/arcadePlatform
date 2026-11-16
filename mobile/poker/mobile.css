@@ -13,4 +13,5 @@ body.mobile-poker-navigation .mobile-bottom-nav[data-poker-navigation] [data-nav
 body.mobile-poker-navigation .mobile-bottom-nav[data-poker-navigation] .mobile-bottom-nav__item:focus-visible{outline:2px solid var(--ac);outline-offset:-2px}
 body.mobile-poker-navigation .mobile-bottom-nav[data-poker-navigation] .mobile-bottom-nav__icon{display:flex}
 body.mobile-poker-navigation .site-footer{position:static;display:flex;flex-wrap:wrap;width:auto;margin:16px 12px;transform:none}
-#mobileSoundToggle{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 16px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:#141d27;color:#e7edf8;font:600 13px/1.2 system-ui,sans-serif;cursor:pointer}
+#mobileSoundToggle[hidden]{display:none}
+#mobileSoundToggle{display:inline-flex;margin:8px 12px;align-items:center;justify-content:center;min-height:44px;padding:8px 16px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:#141d27;color:#e7edf8;font:600 13px/1.2 system-ui,sans-serif;cursor:pointer}
