@@ -256,11 +256,11 @@ function loadLobbyHarness(options = {}){
     elements.pokerWelcomeBonusBanner.querySelector = (selector) => selector === 'strong' ? welcomeHeading : null;
   }
   if (options.mobileNav || options.dailyPanel) {
-    for (const id of ['pokerModesView','pokerTablesView','pokerProgressionView','dailyDialog','dailyClaim','dailyProgress','dailyReset','dailySuccess','dailySignIn','dailyDisclaimer']) elements[id] = makeElement(id);
-    elements.dailyShortcut = makeElement('dailyShortcut'); elements.dailyShortcut.dataset.panel = 'daily';
-    elements.dailyDialog.querySelectorAll = () => [];
-    elements.dailyDialog.showModal = () => { elements.dailyDialog.open = true; };
-    elements.dailyDialog.close = () => { elements.dailyDialog.open = false; setImmediate(() => (elements.dailyDialog._listeners.close || []).forEach(fn => fn())); };
+    for (const id of ['pokerModesView','pokerTablesView','pokerProgressionView','pokerBonusView','pokerTabModes','pokerTabBonus','dailyClaim','dailyProgress','dailyReset','dailySuccess','dailySignIn','dailyDisclaimer']) elements[id] = makeElement(id);
+    elements.pokerBonusView.hidden = true;
+    elements.pokerBonusView.querySelectorAll = () => [];
+    elements.pokerTabModes.dataset.view = 'modes';
+    elements.pokerTabBonus.dataset.view = 'bonus';
   }
   elements.pokerSb.value = '1';
   elements.pokerBb.value = '2';
@@ -354,7 +354,7 @@ function loadLobbyHarness(options = {}){
       readyState: 'complete',
       visibilityState: 'visible',
       querySelector: () => null,
-      querySelectorAll: selector => options.dailyPanel && selector === '[data-panel]' ? [elements.dailyShortcut] : [],
+      querySelectorAll: selector => options.dailyPanel && selector === '[data-view]' ? [elements.pokerTabModes, elements.pokerTabBonus] : [],
       addEventListener: (type, fn) => { registerEvent(documentEvents, type, fn); },
       getElementById: (id) => elements[id] || null,
       createElement: (tag) => makeElement(tag),
@@ -735,6 +735,7 @@ for (const scenario of ['A-B', 'A-B-A', 'logout', 'A-B-reject']){
 
 
 test('mobile lobby destinations use actual auth-gated view and Bonus opening never claims', async () => {
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'poker/index.html'), 'utf8'), /id="dailyDialog"/, 'no hidden Bonus modal may make the lobby inert');
   const settle = () => new Promise(resolve => setImmediate(resolve));
   for (const authenticated of [false, true]) {
     let claims = 0;
@@ -744,11 +745,14 @@ test('mobile lobby destinations use actual auth-gated view and Bonus opening nev
     assert.equal(h.mobileView(), authenticated?'tables':'modes');
     h.navigateMobile('progression');assert.equal(h.mobileView(),authenticated?'progression':'modes');
     h.navigateMobile('bonus');await settle();
-    assert.equal(h.elements.dailyDialog.open,true);assert.equal(h.mobileView(),'bonus');assert.equal(claims,0);
+    assert.equal(h.elements.pokerBonusView.hidden,false,'Bonus view is visible');assert.equal(h.elements.pokerModesView.hidden,true,'Lobby is hidden behind Bonus');
+    assert.equal(h.mobileView(),'bonus');assert.equal(claims,0,'opening Bonus never claims');
     assert.equal(h.elements.dailyClaim.disabled,!authenticated);
     if(authenticated){ h.elements.dailyClaim.click(); await settle(); assert.equal(claims,1); }
     h.navigateMobile(authenticated?'tables':'modes');await settle();assert.equal(h.mobileView(),authenticated?'tables':'modes');
+    h.navigateMobile('bonus');await settle();assert.equal(h.elements.pokerBonusView.hidden,false);
     h.navigateMobile('modes');assert.equal(h.mobileView(),'modes');
+    assert.equal(h.elements.pokerModesView.hidden,false,'return to Lobby shows Lobby');assert.equal(h.elements.pokerBonusView.hidden,true);
     h.navigateMobile('invalid');assert.equal(h.mobileView(),'modes');assert.equal(claims,authenticated?1:0);
   }
 });
@@ -762,10 +766,11 @@ test('WWW Daily Bonus entry reads status; only explicit Claim writes', async()=>
     claimBonusCampaign:()=>{claims++;return new Promise(resolve=>{releaseClaim=resolve;});}
   }});
   await new Promise(resolve=>setImmediate(resolve));
-  h.elements.dailyShortcut.click();await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(h.elements.dailyDialog.open,true);assert.equal(claims,0);assert.equal(h.elements.dailyClaim.disabled,false);
+  h.elements.pokerTabBonus.click();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.elements.pokerBonusView.hidden,false);assert.equal(h.elements.pokerModesView.hidden,true);assert.equal(claims,0);assert.equal(h.elements.dailyClaim.disabled,false);
   h.elements.dailyClaim.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(claims,1);
-  const before=reads;h.elements.dailyDialog.close();h.elements.dailyShortcut.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,before);assert.equal(claims,1);
+  const before=reads;h.elements.pokerTabModes.click();assert.equal(h.elements.pokerModesView.hidden,false);assert.equal(h.elements.pokerBonusView.hidden,true);
+  h.elements.pokerTabBonus.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(reads,before);assert.equal(claims,1);
   releaseClaim({alreadyClaimed:true});await new Promise(resolve=>setImmediate(resolve));
 });
 
@@ -782,7 +787,7 @@ test('guest auth polling preserves Bonus and never republishes unchanged navigat
   const bonusEvents=h.mobileNavEventCount(),beforePolls=authChecks;
   for(let i=0;i<3;i++){h.fireInterval(3000);await settle();}
   assert.equal(authChecks,beforePolls+3,'the real registered auth timer must execute');
-  assert.equal(h.elements.dailyDialog.open,true);assert.equal(h.mobileView(),'bonus');
+  assert.equal(h.elements.pokerBonusView.hidden,false);assert.equal(h.mobileView(),'bonus');
   assert.equal(h.mobileNavEventCount(),bonusEvents,'no event means the shared bar is not rebuilt');
   assert.equal(h.elements.dailyClaim.disabled,true,'guest cannot claim');
   h.navigateMobile('tables');await settle();

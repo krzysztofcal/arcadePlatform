@@ -106,3 +106,5 @@ dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 .chip-ledger__type{overflow:hidden;text-overflow:ellipsis;}
 .chip-ledger li,.chip-ledger__item{padding:10px 12px;}
 [data-admin-only][hidden],.account-links a[hidden]{display:none!important;}
+.account-note a{color:var(--ac);font-weight:700;text-decoration:none;}
+.account-note a:hover{text-decoration:underline;}

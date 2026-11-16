@@ -179,7 +179,7 @@
                 <button class="quick-tier" type="button" data-offline-buy-in="500" aria-pressed="false">500</button>
                 <button class="quick-tier" type="button" data-offline-buy-in="1000" aria-pressed="false">1000</button>
               </div>
-              <button class="tile-action btn gh" id="offlinePlay" type="button">PLAY NOW</button>
+              <button class="tile-action btn gh" id="offlinePlay" type="button" data-i18n="offlinePlayNow">PLAY NOW</button>
               <div class="quick-status sub" style="font-size:13px;margin-top:8px;">
                 <strong data-offline-balance>5,000 Offline Chips</strong> — <span data-i18n="offlineChipsNotice">separate device-local balance not connected to CH.</span>
               </div>
@@ -327,7 +327,6 @@
   <dialog id="offlineConfirm" class="offline-confirm" aria-labelledby="offlineConfirmTitle" aria-describedby="offlineConfirmCopy"><div class="poker-confirm-dialog"><h2 id="offlineConfirmTitle">Offline Chips</h2><p id="offlineConfirmCopy"></p><div class="poker-confirm-actions"><button type="button" class="poker-btn poker-live-btn" id="offlineConfirmCancel">Cancel</button><button type="button" class="poker-btn poker-live-btn poker-live-btn--accent" id="offlineConfirmYes">Confirm</button></div></div></dialog>
   <!-- offline-confirm:end -->
   <dialog id="infoDialog" aria-labelledby="infoTitle"><div class="dialog-top"><span class="eyebrow">COMING SOON · IN DEVELOPMENT</span><button class="close" type="button" data-close aria-label="Close details">×</button></div><h2 id="infoTitle"></h2><p id="infoCopy"></p><p>No launch date, entry fee or reward is announced.</p></dialog>
-  <dialog id="dailyDialog" aria-labelledby="dailyTitle" aria-describedby="dailyDisclaimer" hidden style="display:none;"></dialog>
   <script src="../js/consent-manager.js" defer></script>
 </body>
 </html>
