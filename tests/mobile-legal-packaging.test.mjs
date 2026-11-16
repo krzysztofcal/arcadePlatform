@@ -95,6 +95,26 @@ test('approved legal content, both policy versions and deletion links survive th
     const lobby = await readFile(path.join(fixture, 'mobile/poker/www/poker/index.html'), 'utf8');
     assert.doesNotMatch(lobby, /<nav class="shortcuts"/,'APK must not retain a second navigation source');
     for (const page of [account,lobby]) assert.match(page,/sidebar\.js/, 'Account and Lobby share the same navigation renderer');
+
+    const audioJs = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio.js'), 'utf8');
+    assert.ok(audioJs.includes('MobilePokerAudio'), 'www/mobile/audio.js must be packaged');
+    const audioWav = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio/lobby.wav'));
+    const audioManifest = JSON.parse(await readFile(path.join(root, 'mobile/poker/audio/manifest.json'), 'utf8'));
+    const wavSha256 = createHash('sha256').update(audioWav).digest('hex');
+    assert.equal(wavSha256, audioManifest.sha256, 'packaged wav sha256 must equal the manifest');
+    assert.equal(receipt.audio.files[0].sha256, audioManifest.sha256, 'receipt audio files sha256 must match manifest');
+
+    const table = await readFile(path.join(fixture, 'mobile/poker/www/poker/table-v2.html'), 'utf8');
+    for (const [pageName, pageHtml] of [['poker/index.html', lobby], ['poker/table-v2.html', table], ['account.html', account]]) {
+      const audioIdx = pageHtml.indexOf('<script src="/mobile/audio.js" defer></script>');
+      const runtimeIdx = pageHtml.indexOf('<script src="/mobile/runtime.js" defer></script>');
+      assert.ok(audioIdx !== -1, `${pageName} must contain /mobile/audio.js tag`);
+      assert.ok(runtimeIdx !== -1, `${pageName} must contain /mobile/runtime.js tag`);
+      assert.ok(audioIdx < runtimeIdx, `${pageName} must contain audio.js tag before runtime.js tag`);
+    }
+
+    const offlinePlay = await readFile(path.join(fixture, 'mobile/poker/www/poker/offline/play.html'), 'utf8');
+    assert.doesNotMatch(offlinePlay, /mobile\/audio/, 'packaged poker/offline/play.html has no mobile/audio reference');
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
