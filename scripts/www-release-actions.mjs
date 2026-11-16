@@ -194,15 +194,16 @@ async function candidate(env) {
   checkEnvironment(candidateEnvironment(env.GITHUB_ACTOR), env, true);
   const sha = env.REQUESTED_SHA || env.GITHUB_SHA;
   if (sha !== env.GITHUB_SHA || !SHA.test(sha)) fail('only_current_main_supported');
-  checkCandidateQueue(env.GITHUB_RUN_ID);
   if (env.GITHUB_ACTOR === AGENT) {
+    checkCandidateQueue(env.GITHUB_RUN_ID);
     // Never silently build another unpublished candidate for this SHA; OWNER/agent must reconcile or fully verify reuse.
     await ensureNoExistingCandidate(sha, { verify: p => verifyCandidateSafety(p, env) });
   }
   const api = netlifyApi(env.NETLIFY_AUTH_TOKEN);
   const site = await api.site();
   if (site.id !== SITE.id || site.name !== SITE.name || site.published_deploy?.locked !== true) fail('site_identity_or_lock_missing');
-  const before = await apiGet(`/sites/${SITE.id}/deploys?per_page=100`, env);
+  const before = await apiGet(`/sites/${SITE.id}/deploys?per_page=100${env.GITHUB_ACTOR === AGENT ? '&production=true&branch=main' : ''}`, env);
+  if (env.GITHUB_ACTOR === AGENT) assertCandidateInventoryClear(before, sha);
   const p = { schema: 1, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha, siteId: SITE.id,
     actor: env.GITHUB_ACTOR, triggeringActor: env.GITHUB_TRIGGERING_ACTOR, createdAt: new Date().toISOString(),
     marker: `www-candidate:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:${randomUUID()}`, status: 'hook_not_called',
@@ -319,6 +320,13 @@ function verifyCandidateSafety(candidate, env) {
     throw error;
   }
 }
+export function assertCandidateInventoryClear(deploys, sha) {
+  // A full bounded production/main page cannot prove there is no older orphan. Never paginate without a bound.
+  if (!Array.isArray(deploys) || deploys.length >= 100 || deploys.some(d => d.site_id !== SITE.id
+    || d.context !== 'production' || d.branch !== 'main' || !ID.test(d.id || ''))) fail('candidate_inventory_unknown');
+  if (deploys.some(d => !d.published_at && (String(d.title || '').startsWith('www-candidate:')
+    || d.commit_ref === sha))) fail('unreconciled_candidate_deploy_STOP');
+}
 export async function ensureNoExistingCandidate(sha, options) {
   try { await resolveCandidate('', sha, options); }
   catch (e) { if (e.message === 'no_eligible_candidate') return; throw e; }
@@ -415,7 +423,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const workflow = operation === 'check-candidate' ? 'www-candidate' : 'www-publish';
       checkContext(workflow, env);
       checkEnvironment(operation === 'check-candidate' ? candidateEnvironment(env.GITHUB_ACTOR) : 'www-production', env, false);
-      if (operation === 'check-candidate') checkCandidateQueue(env.GITHUB_RUN_ID);
+      if (operation === 'check-candidate' && env.GITHUB_ACTOR === AGENT) checkCandidateQueue(env.GITHUB_RUN_ID);
     } else if (operation === 'record-chain') return recordChain(env.CHAIN_RUN_ID, env.CHAIN_DESTINATION, env);
     else if (operation === 'candidate-cleanup') return candidateCleanup(env);
     else if (operation === 'candidate') return candidate(env);

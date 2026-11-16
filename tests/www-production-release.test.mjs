@@ -793,3 +793,22 @@ test('T007 combined OWNER/App history keeps the five-run bound and rejects overf
   assert.deepEqual(fx.verified, []);
   assert.ok(fx.routes.every(r => r.startsWith('actions/workflows/')), 'no artifact/Netlify operation starts on overflow');
 });
+
+test('T007 inventory refuses orphaned, failed, building or expired unpublished candidates before another hook', () => {
+  const d = { id, site_id: SITE.id, context: 'production', branch: 'main', title: 'www-candidate:40:1:nonce', commit_ref: ws };
+  assert.doesNotThrow(() => actions.assertCandidateInventoryClear([{ ...d, published_at: '2026-11-14T10:00:00Z' }], sha));
+  assert.doesNotThrow(() => actions.assertCandidateInventoryClear([], sha));
+  for (const state of ['building', 'error', 'ready']) assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, state }], sha), /unreconciled_candidate_deploy_STOP/);
+  assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, title: 'unknown marker', commit_ref: sha }], sha), /unreconciled_candidate_deploy_STOP/);
+  assert.throws(() => actions.assertCandidateInventoryClear(Array(100).fill({ ...d, published_at: 't' }), sha), /candidate_inventory_unknown/);
+  assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, context: 'deploy-preview' }], sha), /candidate_inventory_unknown/);
+});
+test('T007 missing history after discard/artifact expiry remains STOP and requires the supported OWNER path', async () => {
+  const gone = selectionFixture(); gone.options.verify = () => { throw new Error('release_not_published_STOP'); };
+  await assert.rejects(actions.ensureNoExistingCandidate(sha, gone.options), /release_not_published_STOP/);
+  const expired = selectionFixture([{ run: ownerRun(), p: selectionProvenance(), artifacts: [{ name: 'www-candidate-1', expired: true }] }]);
+  await assert.rejects(actions.ensureNoExistingCandidate(sha, expired.options), /candidate_artifact_missing_or_ambiguous/);
+  const wrongActor = selectionFixture(); const read = wrongActor.options.read;
+  wrongActor.options.read = route => route.includes('/workflows/') ? { total_count: 1, workflow_runs: [agentRun()] } : read(route);
+  await assert.rejects(actions.resolveCandidate('', sha, wrongActor.options), /candidate_search_actor_mismatch/);
+});
