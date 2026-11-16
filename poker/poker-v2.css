@@ -785,4 +785,9 @@ html,body{height:100%;min-height:0;overflow:hidden;}
 .poker-top-right-rail > #pokerV2JoinBtn.poker-join-btn--intro-target{opacity:1;pointer-events:auto;}
 .poker-top-right-rail > #pokerV2JoinBtn.poker-join-btn--settled{animation:none;}
 }
-
+/* #1140 Emerald Night boot splash. Both table pages link this file after their inline splash style, so these rules win without changing table-v2.html or the generated Offline files. Visual only: hiding stays on [hidden]. */
+.poker-boot-splash{background:radial-gradient(circle at 50% 30%,rgba(47,224,160,.16),transparent 55%),#0a0f14;color:#f2f6f9}
+.poker-boot-splash__card{position:relative;overflow:hidden;border:1px solid #2a3a4b;background:#131c25;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.poker-boot-splash__card::after{content:"";position:absolute;left:24px;right:24px;bottom:10px;height:3px;border-radius:3px;background:linear-gradient(90deg,transparent,#2fe0a0,transparent);animation:pokerBootPulse 1.2s ease-in-out infinite alternate}
+@keyframes pokerBootPulse{from{opacity:.35}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){.poker-boot-splash__card::after{animation:none}}
