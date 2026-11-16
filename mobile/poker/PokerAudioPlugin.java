@@ -82,8 +82,8 @@ public class PokerAudioPlugin extends Plugin {
             focusHeld = false;
             hold = true;
         } else return;
-        if (!audible()) stopCues();
-        sync(audible());
+        if (!canPlay()) stopCues();
+        sync(canPlay());
     });
 
     private final BroadcastReceiver noisy = new BroadcastReceiver() {
@@ -172,9 +172,9 @@ public class PokerAudioPlugin extends Plugin {
         } catch (RuntimeException error) {
             fail(error);
         }
-        focusPaused = false;
         releaseMusic();
         stopCues();
+        dropFocus();
         if (pool != null) pool.release();
         pool = null;
     }
@@ -196,7 +196,10 @@ public class PokerAudioPlugin extends Plugin {
             if (enabled) {
                 hold = false;
                 unlocked = true; // the toggle is itself a user gesture
-            } else stopCues();
+            } else {
+                focusPaused = false; // a deliberate OFF also gives up a call-interrupted focus request
+                stopCues();
+            }
             sync(enabled);
             return state();
         });
@@ -211,7 +214,7 @@ public class PokerAudioPlugin extends Plugin {
     public void play(PluginCall call) {
         run(call, () -> {
             boolean voice = "voice".equals(call.getString("channel"));
-            Integer id = audible() ? loadCue(call.getString("cue")) : null;
+            Integer id = canPlay() ? loadCue(call.getString("cue")) : null;
             boolean played = id != null && loaded.contains(id) && startCue(id, voice);
             // A cue that is still decoding may start late, but only while it is still relevant.
             if (id != null && !loaded.contains(id)) pending.put(id, new long[] { SystemClock.uptimeMillis(), voice ? 1 : 0 });
@@ -264,30 +267,31 @@ public class PokerAudioPlugin extends Plugin {
         return enabled && unlocked && resumed && !hold && !focusPaused;
     }
 
+    // Music and cues both need the focus that sync() holds for as long as the app may be heard.
+    private boolean canPlay() {
+        return audible() && focusHeld;
+    }
+
     private void fail(Exception error) {
         Log.w(TAG, error.getClass().getSimpleName());
     }
 
-    // The one place that decides whether music plays. fade=false silences immediately.
+    // The one place that decides focus and whether music plays. fade=false silences immediately.
     @SuppressWarnings("deprecation") // one focus API for every supported level (minSdk 24)
     private void sync(boolean fade) {
         try {
-            boolean want = audible() && musicScene;
-            if (want && player == null) {
-                openMusic(); // continues from onPrepared
-                return;
+            if (audible() && !focusHeld) focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            boolean want = canPlay() && musicScene;
+            if (want && player == null) openMusic(); // continues from onPrepared
+            else if (player != null && prepared) {
+                if (want) {
+                    if (!player.isPlaying()) player.start(); // resumes at the kept position
+                    fadeTo(GAIN * (ducked ? DUCK : 1f));
+                } else if (fade && player.isPlaying()) fadeTo(0f);
+                else pauseMusic();
             }
-            if (player == null || !prepared) {
-                if (!want) dropFocus();
-                return;
-            }
-            if (want) {
-                if (!focusHeld) focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-                if (!focusHeld) return;
-                if (!player.isPlaying()) player.start(); // resumes at the kept position
-                fadeTo(GAIN * (ducked ? DUCK : 1f));
-            } else if (fade && player.isPlaying()) fadeTo(0f);
-            else pauseMusic();
+            // Keep the request only during a transient loss, to hear GAIN after e.g. a call.
+            if (!audible() && !focusPaused) dropFocus();
         } catch (RuntimeException error) {
             fail(error);
             releaseMusic();
@@ -308,12 +312,11 @@ public class PokerAudioPlugin extends Plugin {
             if (player.isPlaying()) player.pause();
             player.setVolume(0f, 0f);
         }
-        dropFocus();
     }
 
     @SuppressWarnings("deprecation")
     private void dropFocus() {
-        if (!focusHeld || focusPaused) return; // keep the request during a transient loss to hear GAIN
+        if (!focusHeld) return;
         focusHeld = false;
         ducked = false;
         audioManager.abandonAudioFocus(focus);
@@ -356,7 +359,6 @@ public class PokerAudioPlugin extends Plugin {
         main.removeCallbacks(fadeStep);
         try {
             if (player != null) player.release();
-            dropFocus();
         } catch (RuntimeException error) {
             fail(error);
         }
@@ -386,7 +388,7 @@ public class PokerAudioPlugin extends Plugin {
         loaded.add(id);
         try {
             // Stale cues are dropped rather than played late.
-            if (request != null && audible() && SystemClock.uptimeMillis() - request[0] <= STALE_MS) startCue(id, request[1] == 1);
+            if (request != null && canPlay() && SystemClock.uptimeMillis() - request[0] <= STALE_MS) startCue(id, request[1] == 1);
         } catch (RuntimeException error) {
             fail(error);
         }
@@ -397,19 +399,24 @@ public class PokerAudioPlugin extends Plugin {
         int stream = pool.play(id, 1f, 1f, voice ? 2 : 1, 0, 1f);
         if (stream == 0) return false;
         if (voice) voiceStream = stream;
-        streams.add(stream);
-        if (streams.size() > MAX_STREAMS) streams.remove(); // older streams have already been recycled
+        else {
+            streams.add(stream);
+            if (streams.size() > MAX_STREAMS) pool.stop(streams.remove());
+        }
         return true;
     }
 
     private void stopCues() {
         pending.clear();
-        voiceStream = 0;
         try {
-            if (pool != null) for (int stream : streams) pool.stop(stream);
+            if (pool != null) {
+                if (voiceStream != 0) pool.stop(voiceStream);
+                for (int stream : streams) pool.stop(stream);
+            }
         } catch (RuntimeException error) {
             fail(error);
         }
+        voiceStream = 0;
         streams.clear();
     }
 }

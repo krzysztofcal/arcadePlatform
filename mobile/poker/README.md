@@ -100,6 +100,8 @@ The artifact includes build-receipt.json (PR/source/deploy/origins/app version/C
 | `hold` | headset/Bluetooth unplug, permanent focus loss | silent until the next foreground or Sound ON |
 | `focusPaused` / duck | transient Audio Focus loss (call) / can-duck | pause until focus returns / 30% volume |
 
+Audio Focus is requested whenever the app may be heard (Sound ON, unlocked, foreground) and released otherwise; music and cues play only while it is granted, so table cues respect calls and other focus owners too.
+
 `/mobile/audio.js` exposes `window.MobilePokerAudio`: `available()`, `isEnabled()`, `setEnabled(on)`, `play(cue)`, `voice(cue)`, `preload(cues)`, `stop()`. Every method resolves a boolean and never throws; without the Android plugin (WWW, Deploy Preview, any browser) it is a silent no-op with no listeners. Cues are `SoundPool` samples named by the files in `mobile/poker/audio/` (`[a-z0-9_]`), share the same mute/lifecycle gate, drop when stale and allow one voice line at a time. PR1 ships only the generated test loop `lobby.wav` (see `audio/manifest.json`).
 
 Phone test (pending, OWNER): fresh install is silent until the first tap, then music starts; Lobby → Tables/Progression/Bonus → Profile → Lobby keeps playing without a restart; entering Online or Offline table fades out and returning continues from the same place; the temporary `Sound: On/Off` button under Lobby/Profile mutes at once and stays after force-close; Home, lock, a call and unplugging headphones silence it. Not in PR1: Settings UI, SFX catalogue, dealer voice, bonus cue. CI proves compilation and packaging only; continuity and lifecycle are unverified until that phone test.
