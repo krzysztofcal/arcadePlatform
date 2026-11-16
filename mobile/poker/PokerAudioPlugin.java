@@ -292,8 +292,9 @@ public class PokerAudioPlugin extends Plugin {
     private void sync(boolean fade) {
         try {
             main.removeCallbacks(retryFocus);
-            // Away from the music pages an interrupted request is not worth keeping: it is released below.
-            if (!musicScene) focusPaused = false;
+            // An interrupted request is kept only while GAIN would really resume the lobby music;
+            // otherwise (Sound OFF, background, hold, other page) it is released below.
+            if (!enabled || !resumed || hold || !musicScene) focusPaused = false;
             boolean want = audible() && musicScene;
             if (want && !focusHeld) {
                 focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;

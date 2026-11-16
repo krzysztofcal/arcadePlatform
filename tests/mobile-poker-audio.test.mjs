@@ -218,6 +218,12 @@ test('static guards: root pages contain no mobile/audio references, plugin conta
   assert.ok(!pluginJava.includes('seekTo('), 'PokerAudioPlugin.java must not contain seekTo(');
   assert.ok(!/unlock/i.test(pluginJava), 'native music start must not depend on a user gesture');
   assert.ok(pluginJava.includes('AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK'), 'cues take only brief may-duck focus');
+  // Transient focus loss followed by a headset unplug (hold) must not keep the interrupted request:
+  // the receiver sets hold and syncs, and sync() drops focusPaused before pauseMusic()/dropFocus() run.
+  assert.match(pluginJava, /onReceive\([^)]*\) \{[^}]*hold = true;[^}]*sync\(false\);/, 'headset unplug sets hold and syncs');
+  const syncBody = pluginJava.slice(pluginJava.indexOf('private void sync(boolean fade)'), pluginJava.indexOf('private void fadeTo('));
+  const clear = syncBody.indexOf('if (!enabled || !resumed || hold || !musicScene) focusPaused = false;');
+  assert.ok(clear !== -1 && clear < syncBody.indexOf('boolean want'), 'sync() keeps an interrupted focus request only while music would resume');
   assert.ok(pluginJava.includes('releaseCueFocus = this::stopCues'), 'the cue focus timeout stops cues before releasing focus');
   assert.match(pluginJava, /private void dropFocus\(\) \{[^}]*stopCues\(\);[^}]*abandonAudioFocus\(focus\)/, 'music focus is never abandoned under a playing cue');
 });
