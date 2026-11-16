@@ -58,11 +58,14 @@ const requiredId = cfg.badge?.id || 'xpBadge';
 const requiredClass = (cfg.badge?.selector || 'a.xp-badge').split('.').pop() || 'xp-badge';
 const strict = process.env.STRICT_GUARDS === '1';
 
+// Same scope as the CI guard (scripts/guard-badge.js): only pages selected by guard.config.json badge.include.
+const includedFiles = gitList(cfg.badge?.include?.length ? cfg.badge.include : ['*.html', '**/*.html']);
 const filesToInspect = (() => {
   if (fileArgs.length) {
-    return Array.from(new Set(fileArgs.map(toRelative).filter(f => f.endsWith('.html'))));
+    const included = new Set(includedFiles);
+    return Array.from(new Set(fileArgs.map(toRelative).filter(f => f.endsWith('.html') && included.has(f))));
   }
-  return gitList(['*.html', '**/*.html']);
+  return includedFiles;
 })();
 
 function analyze(source) {
