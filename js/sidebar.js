@@ -240,13 +240,7 @@
 
 
   function bottomNavItems(items){
-    if (window.MOBILE_POKER_CONFIG) return [
-      {id:'modes',labelKey:'mobileNavLobby',fallbackLabel:'Lobby',href:'/poker/index.html#modes',art:'/poker/assets/chips/chip-purple-3.png'},
-      {id:'tables',labelKey:'mobileNavTables',fallbackLabel:'Tables',href:'/poker/index.html#tables',art:'/poker/assets/chips/chip-purple-3.png'},
-      {id:'progression',labelKey:'mobileNavProgression',fallbackLabel:'Progression',href:'/poker/index.html#progression',art:'/poker/assets/chips/chip-green-4.png'},
-      {id:'bonus',labelKey:'mobileNavBonus',fallbackLabel:'Bonus',href:'/poker/index.html#bonus',art:'/poker/assets/lobby/bonus-v2.webp'},
-      {id:'profile',labelKey:'mobileNavProfile',fallbackLabel:'Profile',href:'/account.html',art:'/poker/assets/themes/midnight-sapphire/avatar-frame.svg'}
-    ];
+    if (window.MOBILE_POKER_CONFIG) return items;
     const wanted = ['home', 'poker', 'leaderboard', 'favorites', 'profile'];
     const byId = {};
     items.forEach(function(item){ byId[item.id] = item; });
@@ -266,7 +260,6 @@
       nav.setAttribute('aria-label', 'Mobile navigation');
       doc.body.appendChild(nav);
     }
-    nav.className = mobile ? 'mobile-bottom-nav shortcuts' : 'mobile-bottom-nav';
     if (mobile) { nav.setAttribute('data-poker-navigation', ''); doc.body.classList.add('mobile-poker-navigation'); }
     nav.innerHTML = '';
     bottomNavItems(items).forEach(function(item){
@@ -277,8 +270,6 @@
       const active = mobile ? (window.location.pathname === '/account.html' ? 'profile' : doc.body.dataset.mobileLobbyView || 'modes') === item.id : item.id !== 'search' && item.id !== 'random' && isActive(item.href);
       if (active) { link.classList.add('is-active'); link.setAttribute('aria-current', 'page'); }
       if (mobile) {
-        link.classList.add('shortcut');
-        if (item.id === 'bonus') link.classList.add('shortcut--bonus');
         link.addEventListener('click', function(event){
           if (item.id !== 'profile' && window.location.pathname !== '/account.html' && window.location.hash === '#' + item.id) {
             event.preventDefault();
@@ -293,9 +284,7 @@
       const icon = doc.createElement('span');
       icon.className = 'mobile-bottom-nav__icon';
       icon.setAttribute('aria-hidden', 'true');
-      if (mobile) {
-        const art = doc.createElement('img'); art.className = 'shortcut-art'; art.src = item.art; art.alt = ''; art.width = 30; art.height = 30; icon.appendChild(art);
-      } else if (item.iconSvg) icon.innerHTML = item.iconSvg;
+      if (item.iconSvg) icon.innerHTML = item.iconSvg;
 
       const label = doc.createElement('span');
       label.className = 'mobile-bottom-nav__label';

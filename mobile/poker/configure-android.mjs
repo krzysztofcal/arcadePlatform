@@ -43,7 +43,7 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
     protected void onCreate(Bundle savedInstanceState) {
         SplashScreen.installSplashScreen(this);
         super.onCreate(savedInstanceState);
-        getWindow().getDecorView().setBackgroundColor(android.graphics.Color.rgb(11, 16, 32));
+        getWindow().getDecorView().setBackgroundColor(android.graphics.Color.rgb(10, 15, 20));
         EdgeToEdge.enable(this);
         WindowManager.LayoutParams window = getWindow().getAttributes();
         if (Build.VERSION.SDK_INT >= 30) {
@@ -106,8 +106,8 @@ await writeFile(activityFile, activity);
 const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);
 let styles = await readFile(stylesFile, 'utf8');
 if (!styles.includes('<item name="android:background">@drawable/splash</item>')) throw new Error('Unexpected launch theme template');
-styles = styles.replace('<item name="android:background">@null</item>', '<item name="android:windowBackground">#0b1020</item>');
-styles = styles.replace('<item name="android:background">@drawable/splash</item>', `<item name="windowSplashScreenBackground">#0b1020</item>
+styles = styles.replace('<item name="android:background">@null</item>', '<item name="android:windowBackground">#0a0f14</item>');
+styles = styles.replace('<item name="android:background">@drawable/splash</item>', `<item name="windowSplashScreenBackground">#0a0f14</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/poker_launch_mark</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>`);
 await writeFile(stylesFile, styles);

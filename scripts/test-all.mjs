@@ -34,6 +34,7 @@ run("node", ["tests/xp-server-migration-notice.test.mjs"], "xp-server-migration-
 run("node", ["tests/xp-core-authoritative-reset.test.mjs"], "xp-core-authoritative-reset");
 run("node", ["tests/xp-game-hook.test.mjs"], "xp-game-hook");
 run("node", ["tests/xp-badge.test.mjs"], "xp-badge");
+run("node", ["tests/check-xpbadge.guard.test.mjs"], "check-xpbadge-guard");
 run("node", ["tests/xp-multigame.test.mjs"], "xp-multigame");
 run("node", ["tests/store-upstash.force-memory-test-mode.behavior.test.mjs"], "store-upstash-force-memory-test-mode");
 run("node", ["scripts/check-xp-authoritative-transport.mjs"], "xp-authoritative-transport");
