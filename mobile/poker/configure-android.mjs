@@ -42,6 +42,7 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         SplashScreen.installSplashScreen(this);
+        registerPlugin(PokerAudioPlugin.class);
         super.onCreate(savedInstanceState);
         getWindow().getDecorView().setBackgroundColor(android.graphics.Color.rgb(10, 15, 20));
         EdgeToEdge.enable(this);
@@ -101,6 +102,7 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
     }
 }`);
 await writeFile(activityFile, activity);
+await copyFile(new URL('./PokerAudioPlugin.java', import.meta.url), new URL('./android/app/src/main/java/pl/kcswh/arcadepoker/stage/PokerAudioPlugin.java', import.meta.url));
 
 // Keep the launch window and WebView on the same dark brand surface.
 const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);

@@ -86,3 +86,20 @@ The current APK pins API Preview1141, superseding the historical1095 diagnostics
 Automatic same-repository Draft PR builds wait at most 10 minutes for their own native Deploy Preview at the exact current source SHA. They validate Netlify site, review ID, deploy context and Stage receipt before dependency/Gradle costs, then recheck before packaging and upload. CI never falls back to the static API origin in stage-public.json (local packaging only). Manual dispatch now requires an open Draft PR number and its exact current HEAD SHA; branch-only dispatch is unsupported. No new secret or environment setting is required.
 
 The artifact includes build-receipt.json (PR/source/deploy/origins/app version/CSP/SRI), SHA256SUMS and verified debug signature evidence. Synchronize skips compilation only after read-only Actions evidence confirms a completed successful, nonexpired APK for the same PR whose source is an ancestor with unchanged application inputs. In-progress/cancelled/missing/uncertain artifacts require a new build at the current HEAD, even for docs-only changes. Existing artifacts keep their original source receipts. Installed static APKs retain their bundled endpoint and do not update automatically. Physical installation remains separate from CI acceptance.
+
+## #1146 PR1: Android audio foundation
+
+Local Capacitor plugin `PokerAudioPlugin.java` owns audio state, looping `MediaPlayer` and `SoundPool` on Android's main thread. Music survives document navigation because the Activity/Bridge instance persists while the WebView swaps HTML documents.
+
+| State | Source / Lifecycle | Audio Impact |
+| --- | --- | --- |
+| `enabled` | `poker_audio.sound_on` pref (default ON) | Persisted toggle; `false` silences immediately |
+| `unlocked` | First gesture (`pointerdown`/`keydown`) | Ephemeral; music/cues remain silent until gesture |
+| `musicScene` | URL allowlist (`/poker/`, `/account.html`) | Table/other routes fade out music; resume fades in |
+| `hold`/`focusPaused` | Noisy unplug / focus loss / phone calls | Immediate pause on noisy/loss; duck on transient |
+
+The bridge adapter `/mobile/audio.js` defines `window.MobilePokerAudio` (`available`, `isEnabled`, `setEnabled`, `play`, `voice`, `preload`, `stop`); on Web/WWW all calls resolve safe values without DOM listeners.
+
+Phone test: sideload debug APK, tap anywhere to unlock, verify music loops across Lobby and Account navigation, fades out on entering Table, and toggles via footer `#mobileSoundToggle`.
+
+Out of scope for PR1: Settings UI, SFX catalogue, dealer voice, and bonus cues. Physical device behavior is unverified until OWNER phone test.

@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, cp, access } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, cp, access, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -42,6 +42,7 @@ async function copy(name){
 }
 await put('mobile/config.js', 'window.MOBILE_POKER_CONFIG = ' + JSON.stringify(config) + ';\n');
 await put('mobile/security.js', await readFile(path.join(here, 'security.cjs')));
+await put('mobile/audio.js', await readFile(path.join(here, 'audio.js')));
 await put('mobile/runtime.js', await readFile(path.join(here, 'runtime.js')));
 await put('mobile/mobile.css', await readFile(path.join(here, 'mobile.css')));
 await put('js/auth/supabase-config.js', 'window.SUPABASE_CONFIG = ' + JSON.stringify({ SUPABASE_URL: config.supabaseUrl, SUPABASE_ANON_KEY: config.supabaseAnonKey, AUTH_GOOGLE_ENABLED: true }) + ';\n');
@@ -120,11 +121,28 @@ for (const name of pages) {
   }
   const hashes = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + createHash('sha256').update(m[1]).digest('base64') + "'");
   const csp = `default-src 'self'; script-src 'self' ${hashes.join(' ')} ${name === 'poker/index.html' ? "'" + launch.match(/integrity="([^"]+)"/)[1] + "'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${config.supabaseUrl}; connect-src 'self' ${config.apiOrigin} ${config.supabaseUrl} ${config.wsUrl}; font-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'`;
-  html = html.replace('<head>', '<head>\n<meta http-equiv="Content-Security-Policy" content="' + csp + '">\n<script src="/mobile/config.js"></script>\n<script src="/mobile/security.js"></script>\n<script src="/mobile/runtime.js" defer></script>\n<link rel="stylesheet" href="/mobile/mobile.css">');
+  html = html.replace('<head>', '<head>\n<meta http-equiv="Content-Security-Policy" content="' + csp + '">\n<script src="/mobile/config.js"></script>\n<script src="/mobile/security.js"></script>\n<script src="/mobile/audio.js" defer></script>\n<script src="/mobile/runtime.js" defer></script>\n<link rel="stylesheet" href="/mobile/mobile.css">');
   await put(name, html);
 }
 await cp(path.join(root, 'poker/assets'), path.join(out, 'poker/assets'), { recursive: true });
 await put('index.html', launch);
+const audioDir = path.join(here, 'audio');
+const audioFiles = [];
+const AUDIO_FILE_RE = /^[a-z0-9_]+\.(wav|ogg|mp3|m4a)$/;
+try {
+  const entries = await readdir(audioDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile() && AUDIO_FILE_RE.test(entry.name)) {
+      const data = await readFile(path.join(audioDir, entry.name));
+      const sha256 = createHash('sha256').update(data).digest('hex');
+      await put(path.join('mobile/audio', entry.name), data);
+      audioFiles.push({ name: entry.name, bytes: data.length, sha256 });
+    }
+  }
+} catch (err) {
+  if (err.code !== 'ENOENT') throw err;
+}
+audioFiles.sort((a, b) => a.name.localeCompare(b.name));
 // Validate the composed documents, including isolated Offline, before claiming CSP/SRI PASS.
 for (const name of [...pages, 'index.html']) {
   const html = await readFile(path.join(out, name), 'utf8');
@@ -143,5 +161,5 @@ for (const name of [...pages, 'index.html']) {
   }
 }
 const version = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8')).version;
-await put('build-receipt.json', JSON.stringify({ sha: config.sha, prNumber: binding?.prNumber || null, preview: binding || null, appId: 'pl.kcswh.arcadepoker.stage', version, versionCode: 1, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
+await put('build-receipt.json', JSON.stringify({ sha: config.sha, prNumber: binding?.prNumber || null, preview: binding || null, appId: 'pl.kcswh.arcadepoker.stage', version, versionCode: 1, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, audio: { files: audioFiles }, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
 process.stdout.write('Packaged shared Poker/account assets at SHA ' + config.sha + '\n');

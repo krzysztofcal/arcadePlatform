@@ -101,6 +101,34 @@
         } else client.auth.stopAutoRefresh();
       });
     } catch (_err){ klog('mobile:bridge_unavailable'); notice('Mobile sign-in is unavailable. Please reopen the app.'); }
+    try {
+      var audio = window.MobilePokerAudio;
+      var path = window.location.pathname;
+      var isAudioPage = path === '/poker/index.html' || path === '/poker/' || path === '/account.html';
+      if (audio && typeof audio.available === 'function' && audio.available() && isAudioPage) {
+        var footer = (typeof document.querySelector === 'function' ? document.querySelector('.site-footer') : null) || document.body;
+        if (footer && typeof document.createElement === 'function') {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.id = 'mobileSoundToggle';
+          var soundOn = true;
+          function updateBtn(on) {
+            soundOn = !!on;
+            btn.textContent = soundOn ? 'Sound: On' : 'Sound: Off';
+            if (typeof btn.setAttribute === 'function') {
+              btn.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+            }
+          }
+          audio.isEnabled().then(function(on){ updateBtn(on); }).catch(function(){});
+          btn.addEventListener('click', function(){
+            audio.setEnabled(!soundOn).then(function(res){ updateBtn(res); }).catch(function(){});
+          });
+          footer.appendChild(btn);
+        }
+      }
+    } catch (_audioErr) {
+      klog('mobile:audio_toggle_failed');
+    }
     document.addEventListener('click', function(event){
       var anchor = event.target.closest && event.target.closest('a[href]');
       if (!anchor) return;

@@ -1,0 +1,13 @@
+{
+  "file": "lobby.wav",
+  "cue": "lobby",
+  "durationSeconds": 14,
+  "format": "wav",
+  "bytes": 617444,
+  "sha256": "d01d2a45c6940f210d1d26071d6649a2da03de96912556bc8a3985f6b9827943",
+  "creationMethod": "mobile/poker/audio/generate-lobby-loop.mjs",
+  "creator": "Arcade Platform project — procedurally synthesized, no third-party samples or recordings",
+  "license": "Project-owned original work; same terms as the repository",
+  "targetGain": 0.35,
+  "status": "PR1 test loop — to be replaced/confirmed by OWNER audition in PR2"
+}
