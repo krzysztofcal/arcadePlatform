@@ -281,7 +281,10 @@ public class PokerAudioPlugin extends Plugin {
     @SuppressWarnings("deprecation") // one focus API for every supported level (minSdk 24)
     private void sync(boolean fade) {
         try {
-            if (audible() && !focusHeld) focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            if (audible() && !focusHeld) {
+                focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+                ducked = false; // a fresh request never inherits an earlier duck
+            }
             boolean want = canPlay() && musicScene;
             if (want && player == null) openMusic(); // continues from onPrepared
             else if (player != null && prepared) {
