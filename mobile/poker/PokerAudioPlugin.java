@@ -44,6 +44,7 @@ public class PokerAudioPlugin extends Plugin {
     private static final long FADE_MS = 600;
     private static final long STEP_MS = 50;
     private static final long STALE_MS = 400;
+    private static final long CUE_FOCUS_MS = 3000;
     private static final int MAX_STREAMS = 4;
     private static final Pattern CUE = Pattern.compile("[a-z0-9_]{1,40}");
 
@@ -57,12 +58,12 @@ public class PokerAudioPlugin extends Plugin {
     private MediaPlayer player;
     private SoundPool pool;
     private boolean enabled = true; // persisted; every other flag is per process
-    private boolean unlocked; // a user gesture happened
     private boolean resumed; // Activity is in the foreground
-    private boolean musicScene; // current document is a lobby/profile page
+    private boolean musicScene; // a lobby/profile document is loaded
     private boolean hold; // route or focus was lost; wait for the next foreground or Sound ON
     private boolean focusPaused; // transient focus loss, e.g. a phone call
-    private boolean focusHeld;
+    private boolean focusHeld; // held only while music is wanted
+    private boolean cueFocusHeld; // brief may-duck focus for cues while no music plays
     private boolean ducked;
     private boolean prepared;
     private boolean listening;
@@ -82,10 +83,16 @@ public class PokerAudioPlugin extends Plugin {
             focusHeld = false;
             hold = true;
         } else return;
-        if (!canPlay()) stopCues();
+        if (!audible()) stopCues();
         else duckCues();
-        sync(canPlay());
+        sync(audible());
     });
+
+    private final AudioManager.OnAudioFocusChangeListener cueFocus = change -> main.post(() -> {
+        if (change != AudioManager.AUDIOFOCUS_GAIN) stopCues();
+    });
+
+    private final Runnable releaseCueFocus = this::dropCueFocus;
 
     private final BroadcastReceiver noisy = new BroadcastReceiver() {
         @Override
@@ -137,11 +144,16 @@ public class PokerAudioPlugin extends Plugin {
             bridge.addWebViewListener(new WebViewListener() {
                 @Override
                 public void onPageCommitVisible(WebView view, String url) {
-                    Uri page = Uri.parse(url == null ? "" : url);
-                    String path = page.getPath();
-                    // Positive list: table, Offline, legal and unknown documents never carry music.
-                    musicScene = "https".equals(page.getScheme()) && "localhost".equals(page.getHost())
-                        && ("/poker/index.html".equals(path) || "/poker/".equals(path) || "/account.html".equals(path));
+                    // Leaving the music pages fades out as soon as the next document shows.
+                    if (musicPage(url)) return;
+                    musicScene = false;
+                    sync(true);
+                }
+
+                @Override
+                public void onPageLoaded(WebView view) {
+                    // Music starts by itself once a lobby/profile document has finished loading.
+                    musicScene = musicPage(view.getUrl());
                     sync(true);
                 }
             });
@@ -149,6 +161,14 @@ public class PokerAudioPlugin extends Plugin {
         } catch (RuntimeException error) {
             fail(error);
         }
+    }
+
+    // Positive list: table, Offline, legal and unknown documents never carry music.
+    private boolean musicPage(String url) {
+        Uri page = Uri.parse(url == null ? "" : url);
+        String path = page.getPath();
+        return "https".equals(page.getScheme()) && "localhost".equals(page.getHost())
+            && ("/poker/index.html".equals(path) || "/poker/".equals(path) || "/account.html".equals(path));
     }
 
     @Override
@@ -173,20 +193,11 @@ public class PokerAudioPlugin extends Plugin {
         } catch (RuntimeException error) {
             fail(error);
         }
+        focusPaused = false;
         releaseMusic();
         stopCues();
-        dropFocus();
         if (pool != null) pool.release();
         pool = null;
-    }
-
-    @PluginMethod
-    public void unlock(PluginCall call) {
-        run(call, () -> {
-            unlocked = true;
-            sync(true);
-            return null;
-        });
     }
 
     @PluginMethod
@@ -194,10 +205,8 @@ public class PokerAudioPlugin extends Plugin {
         run(call, () -> {
             enabled = Boolean.TRUE.equals(call.getBoolean("enabled", true));
             getContext().getSharedPreferences("poker_audio", Context.MODE_PRIVATE).edit().putBoolean("sound_on", enabled).apply();
-            if (enabled) {
-                hold = false;
-                unlocked = true; // the toggle is itself a user gesture
-            } else {
+            if (enabled) hold = false;
+            else {
                 focusPaused = false; // a deliberate OFF also gives up a call-interrupted focus request
                 stopCues();
             }
@@ -215,7 +224,7 @@ public class PokerAudioPlugin extends Plugin {
     public void play(PluginCall call) {
         run(call, () -> {
             boolean voice = "voice".equals(call.getString("channel"));
-            Integer id = canPlay() ? loadCue(call.getString("cue")) : null;
+            Integer id = audible() ? loadCue(call.getString("cue")) : null;
             boolean played = id != null && loaded.contains(id) && startCue(id, voice);
             // A cue that is still decoding may start late, but only while it is still relevant.
             if (id != null && !loaded.contains(id)) pending.put(id, new long[] { SystemClock.uptimeMillis(), voice ? 1 : 0 });
@@ -261,31 +270,28 @@ public class PokerAudioPlugin extends Plugin {
         } catch (RuntimeException error) {
             fail(error);
         }
-        return new JSObject().put("enabled", enabled).put("unlocked", unlocked).put("musicPlaying", playing);
+        return new JSObject().put("enabled", enabled).put("musicPlaying", playing);
     }
 
     private boolean audible() {
-        return enabled && unlocked && resumed && !hold && !focusPaused;
-    }
-
-    // Music and cues both need the focus that sync() holds for as long as the app may be heard.
-    private boolean canPlay() {
-        return audible() && focusHeld;
+        return enabled && resumed && !hold && !focusPaused;
     }
 
     private void fail(Exception error) {
         Log.w(TAG, error.getClass().getSimpleName());
     }
 
-    // The one place that decides focus and whether music plays. fade=false silences immediately.
+    // The one place that decides whether music plays. fade=false silences immediately.
+    // Focus is held only while music is wanted, so a silent table never interrupts another app.
     @SuppressWarnings("deprecation") // one focus API for every supported level (minSdk 24)
     private void sync(boolean fade) {
         try {
-            if (audible() && !focusHeld) {
+            boolean want = audible() && musicScene;
+            if (want && !focusHeld) {
                 focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
                 ducked = false; // a fresh request never inherits an earlier duck
             }
-            boolean want = canPlay() && musicScene;
+            want = want && focusHeld;
             if (want && player == null) openMusic(); // continues from onPrepared
             else if (player != null && prepared) {
                 if (want) {
@@ -293,9 +299,7 @@ public class PokerAudioPlugin extends Plugin {
                     fadeTo(GAIN * (ducked ? DUCK : 1f));
                 } else if (fade && player.isPlaying()) fadeTo(0f);
                 else pauseMusic();
-            }
-            // Keep the request only during a transient loss, to hear GAIN after e.g. a call.
-            if (!audible() && !focusPaused) dropFocus();
+            } else if (!want) dropFocus();
         } catch (RuntimeException error) {
             fail(error);
             releaseMusic();
@@ -316,11 +320,12 @@ public class PokerAudioPlugin extends Plugin {
             if (player.isPlaying()) player.pause();
             player.setVolume(0f, 0f);
         }
+        dropFocus();
     }
 
     @SuppressWarnings("deprecation")
     private void dropFocus() {
-        if (!focusHeld) return;
+        if (!focusHeld || focusPaused) return; // keep the request during a transient loss to hear GAIN
         focusHeld = false;
         ducked = false;
         audioManager.abandonAudioFocus(focus);
@@ -363,6 +368,7 @@ public class PokerAudioPlugin extends Plugin {
         main.removeCallbacks(fadeStep);
         try {
             if (player != null) player.release();
+            dropFocus();
         } catch (RuntimeException error) {
             fail(error);
         }
@@ -392,13 +398,38 @@ public class PokerAudioPlugin extends Plugin {
         loaded.add(id);
         try {
             // Stale cues are dropped rather than played late.
-            if (request != null && canPlay() && SystemClock.uptimeMillis() - request[0] <= STALE_MS) startCue(id, request[1] == 1);
+            if (request != null && audible() && SystemClock.uptimeMillis() - request[0] <= STALE_MS) startCue(id, request[1] == 1);
+        } catch (RuntimeException error) {
+            fail(error);
+        }
+    }
+
+    // Cues ride on the music focus when it is held; otherwise they take a short may-duck focus
+    // (another app dips instead of stopping) that is released soon after the last cue.
+    @SuppressWarnings("deprecation")
+    private boolean takeCueFocus() {
+        if (!audible()) return false;
+        if (focusHeld) return true;
+        if (!cueFocusHeld) cueFocusHeld = audioManager.requestAudioFocus(cueFocus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        main.removeCallbacks(releaseCueFocus);
+        if (cueFocusHeld) main.postDelayed(releaseCueFocus, CUE_FOCUS_MS);
+        return cueFocusHeld;
+    }
+
+    @SuppressWarnings("deprecation")
+    private void dropCueFocus() {
+        main.removeCallbacks(releaseCueFocus);
+        if (!cueFocusHeld) return;
+        cueFocusHeld = false;
+        try {
+            audioManager.abandonAudioFocus(cueFocus);
         } catch (RuntimeException error) {
             fail(error);
         }
     }
 
     private boolean startCue(int id, boolean voice) {
+        if (!takeCueFocus()) return false;
         if (voice && voiceStream != 0) pool.stop(voiceStream); // one dealer line at a time
         float level = ducked ? DUCK : 1f;
         int stream = pool.play(id, level, level, voice ? 2 : 1, 0, 1f);
@@ -435,5 +466,6 @@ public class PokerAudioPlugin extends Plugin {
         }
         voiceStream = 0;
         streams.clear();
+        dropCueFocus();
     }
 }

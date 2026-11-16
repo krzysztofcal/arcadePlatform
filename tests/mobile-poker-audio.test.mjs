@@ -67,7 +67,7 @@ test('adapter in node:vm with no Capacitor or getPlatform() === "web" is inactiv
   }
 });
 
-test('adapter with fake android PokerAudio plugin forwards gestures and calls safely', async () => {
+test('adapter with fake android PokerAudio plugin needs no gesture and forwards calls safely', async () => {
   const source = await readFile(new URL('../mobile/poker/audio.js', import.meta.url), 'utf8');
   let unlockCalls = 0;
   const calls = [];
@@ -95,20 +95,9 @@ test('adapter with fake android PokerAudio plugin forwards gestures and calls sa
   const audio = window.MobilePokerAudio;
   assert.equal(audio.available(), true);
 
-  // Gesture unlock listeners registered
-  assert.ok(windowListeners.pointerdown, 'pointerdown listener registered');
-  assert.ok(windowListeners.keydown, 'keydown listener registered');
-
-  // First gesture calls unlock exactly once
-  windowListeners.pointerdown();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(unlockCalls, 1, 'first gesture calls unlock');
-
-  // Second gesture does not call unlock again
-  if (windowListeners.pointerdown) windowListeners.pointerdown();
-  if (windowListeners.keydown) windowListeners.keydown();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(unlockCalls, 1, 'second gesture does not call unlock again');
+  // Music is started natively without a gesture: the adapter listens to nothing and has no unlock call
+  assert.deepEqual(Object.keys(windowListeners), [], 'adapter registers no gesture listeners');
+  assert.equal(unlockCalls, 0);
 
   // setEnabled(false) forwards {enabled:false} and resolves native value
   const enabledRes = await audio.setEnabled(false);
@@ -227,4 +216,6 @@ test('static guards: root pages contain no mobile/audio references, plugin conta
   const pluginJava = await readFile(new URL('../mobile/poker/PokerAudioPlugin.java', import.meta.url), 'utf8');
   assert.ok(pluginJava.includes('getBoolean("sound_on", true)'), 'PokerAudioPlugin.java must contain default-ON getBoolean("sound_on", true)');
   assert.ok(!pluginJava.includes('seekTo('), 'PokerAudioPlugin.java must not contain seekTo(');
+  assert.ok(!/unlock/i.test(pluginJava), 'native music start must not depend on a user gesture');
+  assert.ok(pluginJava.includes('AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK'), 'cues take only brief may-duck focus');
 });

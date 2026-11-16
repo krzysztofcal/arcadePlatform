@@ -2,6 +2,7 @@
   'use strict';
   // Android APK only. The native PokerAudio plugin owns every sound and the music playhead;
   // this adapter is a thin, never-throwing bridge. Browsers and WWW get silent no-ops.
+  // Lobby music starts natively by itself; no page script or user gesture is involved.
   var CUE = /^[a-z0-9_]{1,40}$/;
   function plugin(){
     var cap = window.Capacitor;
@@ -36,13 +37,4 @@
     preload: function(names){ return call('preload', { cues: (Array.isArray(names) ? names : []).filter(function(name){ return typeof name === 'string' && CUE.test(name); }) }); },
     stop: function(){ return call('stop'); }
   };
-  if (!plugin()) return;
-  // Native audio stays silent until the first user gesture of the process.
-  function unlock(){
-    window.removeEventListener('pointerdown', unlock, true);
-    window.removeEventListener('keydown', unlock, true);
-    call('unlock');
-  }
-  window.addEventListener('pointerdown', unlock, true);
-  window.addEventListener('keydown', unlock, true);
 })();
