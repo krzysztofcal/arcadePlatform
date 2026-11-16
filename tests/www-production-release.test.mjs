@@ -743,13 +743,36 @@ test('T007 OWNER selection accepts verified App candidates explicitly and automa
   const both = selectionFixture([bot, { run: ownerRun({ id: 43 }), p: selectionProvenance({ runId: '43', deployId: 'e'.repeat(24) }) }]);
   await assert.rejects(actions.resolveCandidate('', sha, both.options), /ambiguous_candidates/);
 });
-test('T007 queue preflight refuses competing Candidate or Publish runs and incomplete history', () => {
-  const self = { id: 42, path: '.github/workflows/www-candidate.yml' };
-  assert.doesNotThrow(() => actions.checkCandidateQueue('42', () => ({ total_count: 1, workflow_runs: [self] })));
-  for (const path of ['www-candidate', 'www-publish']) {
-    assert.throws(() => actions.checkCandidateQueue('42', () => ({ total_count: 2, workflow_runs: [self, { id: 43, path: '.github/workflows/' + path + '.yml' }] })), /release_queue_conflict/);
+test('T007 queue checks only release workflow endpoints for every active status', () => {
+  const seen = [];
+  actions.checkCandidateQueue('42', endpoint => {
+    seen.push(endpoint);
+    const match = /^actions\/workflows\/(www-candidate|www-publish)\.yml\/runs\?status=(queued|in_progress|waiting|pending|requested)&per_page=100$/.exec(endpoint);
+    assert.ok(match, endpoint);
+    const runs = match[1] === 'www-candidate' && match[2] === 'in_progress'
+      ? [{ id: 42, path: '.github/workflows/www-candidate.yml', status: 'in_progress' }] : [];
+    return { total_count: runs.length, workflow_runs: runs };
+  });
+  assert.equal(new Set(seen).size, 10);
+  for (const workflow of ['www-candidate', 'www-publish']) {
+    for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
+      assert.throws(() => actions.checkCandidateQueue('42', endpoint => {
+        const runs = endpoint.includes(`/${workflow}.yml/`) && endpoint.includes(`status=${status}&`)
+          ? [{ id: 43, path: `.github/workflows/${workflow}.yml`, status }] : [];
+        return { total_count: runs.length, workflow_runs: runs };
+      }), /release_queue_conflict/);
+    }
   }
-  assert.throws(() => actions.checkCandidateQueue('42', () => ({ total_count: 101, workflow_runs: [] })), /release_queue_unknown/);
+});
+test('T007 queue fails closed on incomplete, inconsistent or unknown responses', () => {
+  const self = { id: 42, path: '.github/workflows/www-candidate.yml', status: 'queued' };
+  for (const response of [null, {}, { total_count: 101, workflow_runs: [] },
+    { total_count: 0, workflow_runs: [self] }, { total_count: '1', workflow_runs: [self] },
+    ...[null, { ...self, id: null }, { ...self, status: 'completed' }, { ...self, path: '.github/workflows/other.yml' }]
+      .map(run => ({ total_count: 1, workflow_runs: [run] })),
+    { total_count: 2, workflow_runs: [self, self] }]) {
+    assert.throws(() => actions.checkCandidateQueue('42', () => response), /release_queue_unknown/);
+  }
 });
 
 test('T007 refuses duplicate builds before hook and never turns uncertainty or ambiguity into permission to build', async () => {
