@@ -3,7 +3,7 @@
 Status: the OWNER path has completed Candidate [43873170221](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43873170221)
 and Publish/LIVE/Record [43875913487](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43875913487), recorded by immutable
 [release-20261116-43875913487](https://github.com/krzysztofcal/arcadePlatform/releases/tag/release-20261116-43875913487).
-T007 agent Candidate is implemented but **not activated/tested**; merge is not activation or hook authorization.
+T007 agent Candidate is **activated and first tested successfully**; see the [activation evidence below](#t007--agent-initiated-candidate-1268-activated-first-test-pass). Merge is not authorization for another Candidate or hook call.
 Retain the existing [OWNER manual recovery](../specs/1159-ci-cd-release-safety/pr5-www-production-publish.md); no cleanup
 or removal of that procedure is authorized. Publish remains exclusively OWNER-triggered and OWNER-approved.
 
@@ -246,7 +246,22 @@ and separate OWNER approval under the normal procedure. No SSH code, workflow, s
 is changed by documenting this exception, and no WWW build or publication is authorized.
 
 
-## T007 — Agent-initiated Candidate (#1268), activation BLOCKED pending credential audit
+## T007 — Agent-initiated Candidate (#1268): activated, first test PASS
+
+On 2026-11-16, after separate OWNER activation and explicit conversation GO, the first automatic Candidate
+[43912583845](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43912583845) completed **SUCCESS** for
+`bef79893293c7adb08465db7adcbb7a4a1f8ce5c`, actor and triggering actor `arcade-code-agent[bot]`, attempt **1**.
+The unexpired `www-candidate-1` artifact verified `candidate_ready`, `dry_run_pass` and
+`candidate_static_verified` for deploy `6afb356027c2e5f18f337705`, Environment `www-candidate-agent` and policy
+`t007-agent-candidate-v1`. WS GitHub/VPS evidence agreed; Netlify identity/unpublished/lock, legal/account smoke
+and CSP/HSTS checks passed at handoff. This is historical Candidate evidence, not proof of current eligibility,
+Production publication or a new Release Record. Each later Candidate still requires explicit OWNER GO and fresh checks.
+
+OWNER confirmed `WWW_AGENT_CANDIDATE_ENABLED=true`; its runtime workflow/script gates remain mandatory.
+The [OWNER risk acceptance in #1268](https://github.com/krzysztofcal/arcadePlatform/issues/1268) accepts a dedicated
+one-year PAT under the Netlify Owner account and its potentially broader Production/configuration authority.
+Successful execution does not prove credential confinement; the residual risk and OWNER-only Publish boundary remain.
+
 
 Reuse `www-candidate.yml`, `scripts/www-release-actions.mjs` and the existing restricted WS reader. Only matching
 `krzysztofcal` or `arcade-code-agent[bot]` actor/triggering_actor on main, attempt 1, can create a Candidate. OWNER
@@ -258,7 +273,11 @@ rules use a separate API and require explicit absence verification in the OWNER 
 flag is not runtime proof of their absence.
 No jobs without the selected Environment receive Candidate secrets. No change to `www-production` or Publish gates.
 
-### Read-only credential/security audit (2026-11-16)
+### Historical pre-activation credential/security audit (2026-11-16)
+
+The following findings and NO-GO describe the original implementation-time snapshot, before OWNER risk acceptance,
+separate configuration/activation and the successful run above. They are retained as audit history, not current
+Environment/activation status or a new credential audit.
 
 - Existing isolated `ghx` issues App tokens for this selected repository with `actions:write`, `contents:write`,
   `checks:read`, `issues:write`, `pull_requests:write`, `workflows:write`, metadata read. Prior authorized admin
@@ -295,7 +314,10 @@ exfiltration, broad site/team scope, hook leakage/build side effects, and the fa
 An explicit approval comment in #1268 must name the reviewed credential restrictions or consciously accepted residual
 risk. No approval in this implementation is inferred from GO to write code or review/merge.
 
-### Separate OWNER setup and first-run gates
+### Separate OWNER setup and first-run gates (retained procedure)
+
+Initial activation and the first run are evidenced above. These gates remain applicable to future setup/reactivation;
+operating checks and separate GO still apply to every Candidate. Do not repeat configuration automatically.
 
 1. OWNER reviews/merges this PR. Re-read exact current main and the audit; existing OWNER Candidate still works.
 2. Separate configuration GO only after the credential/risk decision above: create the main-only
@@ -346,5 +368,5 @@ Compatibility: the new Environment/activation flag are additive and required onl
 and old artifacts remain supported. Discovery now makes two bounded actor queries and may hit the same five-run
 limit with a mix of identities; extra read traffic is bounded at operator request frequency, with zero Supabase
 reads/egress. Disabling the opt-in stops new App execution; existing verified App receipts remain inspectable by
-OWNER Publish within normal gates. No unattended Production run is tested by this PR; first activation evidence
-remains outstanding.
+OWNER Publish within normal gates. The first agent Candidate test is evidenced above; it did not publish Production or exercise a new
+OWNER Publish/Record chain.
