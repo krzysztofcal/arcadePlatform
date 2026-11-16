@@ -9,6 +9,7 @@
     xp: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 14h6l-1 7 8-11h-6Z"/></svg>',
     about: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg>',
     settings: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13.5.1-1.5-.1-1.5 2-1.5-2-3.5-2.4 1a7.8 7.8 0 0 0-2.6-1.5L14 2h-4l-.4 2.5A7.8 7.8 0 0 0 7 6L4.6 5 2.6 8.5l2 1.5-.1 1.5.1 1.5-2 1.5 2 3.5 2.4-1a7.8 7.8 0 0 0 2.6 1.5L10 22h4l.4-2.5A7.8 7.8 0 0 0 17 18l2.4 1 2-3.5-2-1.5ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"/></svg>',
+    gift: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8M12 8v13M12 8C10.5 4 7 4 7 6.3 7 8 12 8 12 8Zm0 0c1.5-4 5-4 5-1.7C17 8 12 8 12 8Z"/></svg>',
     random: '<svg class="sb-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h.01M15 15h.01M15 9h.01M9 15h.01M12 12h.01"/></svg>'
   };
 
@@ -33,6 +34,14 @@
     { id: 'profile', labelKey: 'account', fallbackLabel: 'Account', href: '/account.html', iconSvg: icons.profile }
   ];
 
+  const mobileBottomItems = [
+    { id: 'modes', labelKey: 'mobileNavLobby', fallbackLabel: 'Lobby', href: '/poker/index.html#modes', iconSvg: icons.home },
+    { id: 'tables', labelKey: 'mobileNavTables', fallbackLabel: 'Tables', href: '/poker/index.html#tables', iconSvg: icons.poker },
+    { id: 'progression', labelKey: 'mobileNavProgression', fallbackLabel: 'Progression', href: '/poker/index.html#progression', iconSvg: icons.leaderboard },
+    { id: 'bonus', labelKey: 'mobileNavBonus', fallbackLabel: 'Bonus', href: '/poker/index.html#bonus', iconSvg: icons.gift },
+    { id: 'profile', labelKey: 'mobileNavProfile', fallbackLabel: 'Profile', href: '/account.html', iconSvg: icons.profile }
+  ];
+
   function mobileItems(){
     return [
       { id: 'poker', labelKey: 'navPoker', fallbackLabel: 'Poker', href: '/poker/index.html', iconSvg: icons.poker },
@@ -49,7 +58,7 @@
   }
 
   function getBottomNavItems(){
-    if (window.MOBILE_POKER_CONFIG) return mobileItems();
+    if (window.MOBILE_POKER_CONFIG) return mobileBottomItems.slice();
     return bottomItems.slice();
   }
 
