@@ -1635,6 +1635,8 @@
       return bonusCampaignsAreFresh() ? dailyState : null;
     }
 
+    function playBonusCue(){ if (window.MobilePokerAudio) window.MobilePokerAudio.play('bonus_coins'); }
+
     async function claimDailyBonus(){
       if (dailyPending || welcomePending) return;
       clearWelcomeFlyin();
@@ -1656,7 +1658,7 @@
           if (bonusCampaignsState) bonusCampaignsState.dailyBonus = dailyState;
           if (result.claimed) dailyReceipt = result;
           renderDailyBonus();
-          if (result.claimed) showDailyFlyin(result);
+          if (result.claimed === true){ showDailyFlyin(result); playBonusCue(); }
         } else {
           await refreshDailyBonus(true, true);
           message = 'Daily Bonus could not be claimed. Please check its status again.';
@@ -2073,6 +2075,7 @@
           showWelcomeStatus('WELCOME BONUS · +' + formatChips(result.amount) + ' CH · REWARD CLAIMED');
           if (document.activeElement === welcomeBonusClaimBtn && welcomeBonusStatus) welcomeBonusStatus.focus({ preventScroll: true });
           showWelcomeFlyin(result.amount);
+          playBonusCue();
         } else {
           showWelcomeStatus(result && result.alreadyClaimed === true
             ? 'Welcome Bonus was already claimed. No new reward confirmed.'

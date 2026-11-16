@@ -1,13 +1,34 @@
 {
-  "file": "lobby.wav",
-  "cue": "lobby",
-  "durationSeconds": 14,
-  "format": "wav",
-  "bytes": 617444,
-  "sha256": "d01d2a45c6940f210d1d26071d6649a2da03de96912556bc8a3985f6b9827943",
-  "creationMethod": "mobile/poker/audio/generate-lobby-loop.mjs",
-  "creator": "Arcade Platform project — procedurally synthesized, no third-party samples or recordings",
-  "license": "Project-owned original work; same terms as the repository",
-  "targetGain": 0.35,
-  "status": "PR1 test loop — to be replaced/confirmed by OWNER audition in PR2"
+  "assets": [
+    {
+      "file": "lobby.wav",
+      "cue": "lobby",
+      "durationSeconds": 14,
+      "format": "wav",
+      "bytes": 617444,
+      "sha256": "d01d2a45c6940f210d1d26071d6649a2da03de96912556bc8a3985f6b9827943",
+      "creationMethod": "mobile/poker/audio/generate-lobby-loop.mjs",
+      "creator": "Arcade Platform project — procedurally synthesized, no third-party samples or recordings",
+      "license": "Project-owned original work; same terms as the repository",
+      "targetGain": 0.35,
+      "status": "PR1 test loop — to be replaced/confirmed by OWNER audition in PR2"
+    },
+    {
+      "file": "bonus_coins.wav",
+      "cue": "bonus_coins",
+      "channel": "sfx",
+      "trigger": "confirmed new Welcome/Daily Bonus claim only",
+      "durationSeconds": 1.75,
+      "format": "wav",
+      "sampleRate": 44100,
+      "bytes": 154394,
+      "sha256": "970eb06235c7592672a820a94a983730f6485fba195ec38eeb90bc384019e036",
+      "creationMethod": "mobile/poker/audio/generate-bonus-coins.mjs",
+      "creator": "Arcade Platform project — procedurally synthesized (modal synthesis), no third-party samples or recordings",
+      "license": "Project-owned original work; same terms as the repository (MIT, see LICENSE)",
+      "attribution": "none required",
+      "targetPeakDbfs": -8,
+      "status": "PR2 candidate — pending OWNER audition"
+    }
+  ]
 }

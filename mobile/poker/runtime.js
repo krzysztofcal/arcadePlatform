@@ -101,18 +101,6 @@
         } else client.auth.stopAutoRefresh();
       });
     } catch (_err){ klog('mobile:bridge_unavailable'); notice('Mobile sign-in is unavailable. Please reopen the app.'); }
-    // #1146 PR1 demo control only; PR2 moves Sound into the existing Settings/menu UI.
-    var audio = window.MobilePokerAudio;
-    if (audio && audio.available() && ['/poker/', '/poker/index.html', '/account.html'].indexOf(window.location.pathname) !== -1) {
-      var sound = document.createElement('button');
-      var showSound = function(on){ sound.textContent = on ? 'Sound: On' : 'Sound: Off'; sound.setAttribute('aria-pressed', String(on)); };
-      sound.type = 'button';
-      sound.id = 'mobileSoundToggle';
-      sound.hidden = true;
-      sound.addEventListener('click', function(){ audio.setEnabled(sound.getAttribute('aria-pressed') !== 'true').then(showSound); });
-      (document.querySelector('.site-footer') || document.body).appendChild(sound);
-      audio.isEnabled().then(function(on){ showSound(on); sound.hidden = false; });
-    }
     document.addEventListener('click', function(event){
       var anchor = event.target.closest && event.target.closest('a[href]');
       if (!anchor) return;

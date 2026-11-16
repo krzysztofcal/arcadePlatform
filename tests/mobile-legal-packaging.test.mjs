@@ -99,10 +99,19 @@ test('approved legal content, both policy versions and deletion links survive th
     const audioJs = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio.js'), 'utf8');
     assert.ok(audioJs.includes('MobilePokerAudio'), 'www/mobile/audio.js must be packaged');
     const audioWav = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio/lobby.wav'));
+    const bonusWav = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio/bonus_coins.wav'));
     const audioManifest = JSON.parse(await readFile(path.join(root, 'mobile/poker/audio/manifest.json'), 'utf8'));
+    const lobbyEntry = audioManifest.assets.find(a => a.file === 'lobby.wav');
+    const bonusEntry = audioManifest.assets.find(a => a.file === 'bonus_coins.wav');
+    assert.ok(lobbyEntry, 'manifest must contain lobby entry');
+    assert.ok(bonusEntry, 'manifest must contain bonus entry');
     const wavSha256 = createHash('sha256').update(audioWav).digest('hex');
-    assert.equal(wavSha256, audioManifest.sha256, 'packaged wav sha256 must equal the manifest');
-    assert.equal(receipt.audio.files[0].sha256, audioManifest.sha256, 'receipt audio files sha256 must match manifest');
+    assert.equal(wavSha256, lobbyEntry.sha256, 'packaged wav sha256 must equal the manifest');
+    const bonusSha256 = createHash('sha256').update(bonusWav).digest('hex');
+    assert.equal(bonusSha256, bonusEntry.sha256, 'packaged bonus_coins.wav sha256 must equal the manifest');
+    assert.equal(receipt.audio.files.length, 2, 'receipt lists both audio files');
+    assert.ok(receipt.audio.files.some(f => f.name === 'lobby.wav' && f.sha256 === lobbyEntry.sha256), 'receipt includes lobby.wav');
+    assert.ok(receipt.audio.files.some(f => f.name === 'bonus_coins.wav' && f.sha256 === bonusEntry.sha256), 'receipt includes bonus_coins.wav');
 
     const table = await readFile(path.join(fixture, 'mobile/poker/www/poker/table-v2.html'), 'utf8');
     for (const [pageName, pageHtml] of [['poker/index.html', lobby], ['poker/table-v2.html', table], ['account.html', account]]) {
@@ -114,7 +123,27 @@ test('approved legal content, both policy versions and deletion links survive th
     }
 
     const offlinePlay = await readFile(path.join(fixture, 'mobile/poker/www/poker/offline/play.html'), 'utf8');
-    assert.doesNotMatch(offlinePlay, /mobile\/audio/, 'packaged poker/offline/play.html has no mobile/audio reference');
+    const expectedAudioHash = 'sha256-' + createHash('sha256').update(await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio.js'))).digest('base64');
+    const expectedAudioTag = `<script src="/mobile/audio.js" integrity="${expectedAudioHash}" defer></script>`;
+    const audioMatches = offlinePlay.match(/<script src="\/mobile\/audio\.js"[^>]*>/g) || [];
+    assert.equal(audioMatches.length, 1, 'packaged poker/offline/play.html contains exactly one mobile/audio.js script tag');
+    assert.ok(offlinePlay.includes(expectedAudioTag), 'packaged script tag must match expected tag with SRI integrity');
+    const rendererIdx = offlinePlay.indexOf('<script src="/poker/offline/renderer.generated.js"');
+    const offlineAudioIdx = offlinePlay.indexOf(expectedAudioTag);
+    assert.ok(offlineAudioIdx !== -1 && offlineAudioIdx < rendererIdx, 'audio.js placed before the renderer tag');
+    const offlineCsp = offlinePlay.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/i)?.[1] || '';
+    const scriptSrcMatch = offlineCsp.match(/script-src\s+([^;]+)/);
+    assert.ok(scriptSrcMatch, 'offline play CSP must contain script-src');
+    const scriptSrc = scriptSrcMatch[1];
+    assert.ok(scriptSrc.includes(`'${expectedAudioHash}'`), 'script-src must contain audio.js hash');
+    assert.ok(!scriptSrc.includes("'self'"), "script-src has no 'self'");
+    assert.ok(!scriptSrc.includes("'unsafe-inline'"), "script-src has no 'unsafe-inline'");
+    assert.ok(!scriptSrc.includes('https:'), "script-src has no 'https:'");
+    assert.ok(offlineCsp.includes("connect-src 'none'"), "CSP still contains connect-src 'none'");
+    assert.doesNotMatch(offlinePlay, /\/mobile\/runtime\.js/, 'offline play references no /mobile/runtime.js');
+    assert.doesNotMatch(offlinePlay, /\/mobile\/config\.js/, 'offline play references no /mobile/config.js');
+    assert.doesNotMatch(offlinePlay, /\/mobile\/security\.js/, 'offline play references no /mobile/security.js');
+    assert.doesNotMatch(offlinePlay, /supabase/i, 'offline play references no supabase');
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
