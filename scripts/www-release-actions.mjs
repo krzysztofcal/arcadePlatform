@@ -8,6 +8,7 @@ const SHA = /^[a-f0-9]{40}$/;
 const ID = /^[a-f0-9]{24}$/;
 const RUN = /^[1-9][0-9]{0,19}$/;
 const REPO = 'krzysztofcal/arcadePlatform';
+const AGENT = 'arcade-code-agent[bot]';
 const CANDIDATE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const fail = reason => { throw new Error(reason); };
 const command = (cmd, args) => {
@@ -20,30 +21,46 @@ const git = (...args) => command('git', args);
 const currentMain = () => git('ls-remote', 'origin', 'refs/heads/main').split(/\s/)[0];
 const save = (file, data) => fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
 
-export function trustedOwnerRun(run, owner, workflow, completed = true) {
+function trustedRun(run, owner, workflow, completed, actor) {
   if (owner !== 'krzysztofcal' || run?.repository?.full_name !== REPO || run.path !== `.github/workflows/${workflow}.yml`
-    || run.event !== 'workflow_dispatch' || run.head_branch !== 'main' || run.actor?.login !== owner
-    || run.triggering_actor?.login !== owner || !SHA.test(run.head_sha || '') || Number(run.run_attempt) !== 1
+    || run.event !== 'workflow_dispatch' || run.head_branch !== 'main' || run.actor?.login !== actor
+    || run.triggering_actor?.login !== actor || !SHA.test(run.head_sha || '') || Number(run.run_attempt) !== 1
     || (completed && (run.status !== 'completed' || run.conclusion !== 'success'))) fail('untrusted_owner_run');
 }
 
+export function trustedOwnerRun(run, owner, workflow, completed = true) {
+  trustedRun(run, owner, workflow, completed, owner);
+}
+function trustedCandidateRun(run, owner, completed = true) {
+  const actor = run?.actor?.login;
+  if (![owner, AGENT].includes(actor)) fail('untrusted_candidate_run');
+  trustedRun(run, owner, 'www-candidate', completed, actor);
+}
+const candidateEnvironment = actor => actor === AGENT ? 'www-candidate-agent' : 'www-candidate';
+
 export function validateCandidate(run, p, owner, now = Date.now(), allowExpired = false) {
-  trustedOwnerRun(run, owner, 'www-candidate');
+  trustedCandidateRun(run, owner);
   if (p?.schema !== 1 || p.status !== 'candidate_ready' || p.siteId !== SITE.id || !ID.test(p.deployId || '')
     || p.sha !== run.head_sha || String(p.runId) !== String(run.id) || String(p.attempt) !== String(run.run_attempt)
-    || p.actor !== owner || p.triggeringActor !== owner) fail('candidate_provenance_mismatch');
+    || p.actor !== run.actor.login || p.triggeringActor !== run.triggering_actor.login
+    || (p.actor === AGENT && (p.environment !== 'www-candidate-agent'
+      || p.executionPolicy !== 't007-agent-candidate-v1'
+      || p.validation?.status !== 'dry_run_pass' || p.validation.sha !== p.sha || p.validation.deployId !== p.deployId
+      || p.staticValidation?.status !== 'candidate_static_verified' || p.staticValidation.sha !== p.sha
+      || p.staticValidation.deployId !== p.deployId))) fail('candidate_provenance_mismatch');
   const age = now - Date.parse(p.createdAt);
   if (!Number.isFinite(age) || age < 0 || (!allowExpired && age > CANDIDATE_MAX_AGE_MS)) fail('candidate_expired');
 }
 
-export function environmentFailures(settings, branches, owner) {
+export function environmentFailures(settings, branches, owner, agent = false) {
   const rule = settings?.protection_rules?.find(r => r.type === 'required_reviewers');
   const reviewers = rule?.reviewers || [];
   const policies = branches?.branch_policies || [];
   return [
     [settings?.can_admins_bypass === false, 'admin_bypass_enabled_or_unknown'],
-    [rule?.prevent_self_review === false && reviewers.length === 1 && reviewers[0].type === 'User'
-      && reviewers[0].reviewer?.login === owner, 'owner_reviewer_required'],
+    [agent ? Array.isArray(settings?.protection_rules) && settings.protection_rules.every(r => r.type === 'branch_policy')
+      : rule?.prevent_self_review === false && reviewers.length === 1 && reviewers[0].type === 'User'
+        && reviewers[0].reviewer?.login === owner, agent ? 'agent_environment_protection_unknown' : 'owner_reviewer_required'],
     [settings?.deployment_branch_policy?.custom_branch_policies === true
       && settings.deployment_branch_policy.protected_branches === false
       && policies.length === 1 && policies[0].name === 'main' && policies[0].type === 'branch', 'main_only_environment_required']
@@ -76,17 +93,36 @@ const targetFile = (sha, path) => {
   return r.stdout;
 };
 
-function checkContext(workflow, env, requireHead = true) {
+export function trustedDispatch(workflow, env, run) {
+  const candidate = workflow === 'www-candidate';
+  const actor = env.GITHUB_ACTOR;
   if (env.GITHUB_REPOSITORY !== REPO || env.GITHUB_REF !== 'refs/heads/main' || env.GITHUB_EVENT_NAME !== 'workflow_dispatch'
-    || env.GITHUB_ACTOR !== 'krzysztofcal' || env.GITHUB_TRIGGERING_ACTOR !== 'krzysztofcal' || env.GITHUB_RUN_ATTEMPT !== '1'
+    || (actor !== 'krzysztofcal' && !(candidate && actor === AGENT))
+    || env.GITHUB_TRIGGERING_ACTOR !== actor || env.GITHUB_RUN_ATTEMPT !== '1'
     || env.GITHUB_WORKFLOW_REF !== `${REPO}/.github/workflows/${workflow}.yml@refs/heads/main`) fail('owner_main_dispatch_required');
-  trustedOwnerRun(gh(`actions/runs/${env.GITHUB_RUN_ID}`), 'krzysztofcal', workflow, false);
+  if (candidate && actor === AGENT && env.WWW_AGENT_CANDIDATE_ENABLED !== 'true') fail('agent_candidate_disabled');
+  if (candidate) trustedCandidateRun(run, 'krzysztofcal', false);
+  else trustedOwnerRun(run, 'krzysztofcal', workflow, false);
+  if (run.actor.login !== actor || run.triggering_actor.login !== actor || String(run.id) !== env.GITHUB_RUN_ID
+    || run.head_sha !== env.GITHUB_SHA) fail('dispatch_metadata_mismatch');
+}
+function checkContext(workflow, env, requireHead = true) {
+  trustedDispatch(workflow, env, gh(`actions/runs/${env.GITHUB_RUN_ID}`));
   if (requireHead && (git('rev-parse', 'HEAD') !== env.GITHUB_SHA || currentMain() !== env.GITHUB_SHA)) fail('not_current_main_head');
 }
 function checkEnvironment(name, env, approval) {
-  const failures = environmentFailures(gh(`environments/${name}`), gh(`environments/${name}/deployment-branch-policies`), 'krzysztofcal');
+  const agent = name === 'www-candidate-agent';
+  const failures = environmentFailures(gh(`environments/${name}`), gh(`environments/${name}/deployment-branch-policies`), 'krzysztofcal', agent);
   if (failures.length) fail(failures.join(','));
-  if (approval && !ownerApproved(gh(`actions/runs/${env.GITHUB_RUN_ID}/approvals`), name, 'krzysztofcal')) fail('owner_environment_approval_missing');
+  if (approval && !agent && !ownerApproved(gh(`actions/runs/${env.GITHUB_RUN_ID}/approvals`), name, 'krzysztofcal')) fail('owner_environment_approval_missing');
+}
+export function checkCandidateQueue(runId, read = gh) {
+  for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
+    const result = read(`actions/runs?status=${status}&per_page=100`);
+    if (!Array.isArray(result.workflow_runs) || result.total_count !== result.workflow_runs.length) fail('release_queue_unknown');
+    if (result.workflow_runs.some(r => String(r.id) !== runId
+      && ['.github/workflows/www-candidate.yml', '.github/workflows/www-publish.yml'].includes(r.path))) fail('release_queue_conflict');
+  }
 }
 
 async function apiGet(path, env) {
@@ -155,21 +191,28 @@ function summary(text, env) {
 
 async function candidate(env) {
   checkContext('www-candidate', env);
-  checkEnvironment('www-candidate', env, true);
+  checkEnvironment(candidateEnvironment(env.GITHUB_ACTOR), env, true);
   const sha = env.REQUESTED_SHA || env.GITHUB_SHA;
   if (sha !== env.GITHUB_SHA || !SHA.test(sha)) fail('only_current_main_supported');
+  checkCandidateQueue(env.GITHUB_RUN_ID);
+  if (env.GITHUB_ACTOR === AGENT) {
+    // Never silently build another unpublished candidate for this SHA; OWNER/agent must reconcile or fully verify reuse.
+    await ensureNoExistingCandidate(sha, { verify: p => verifyCandidateSafety(p, env) });
+  }
   const api = netlifyApi(env.NETLIFY_AUTH_TOKEN);
   const site = await api.site();
   if (site.id !== SITE.id || site.name !== SITE.name || site.published_deploy?.locked !== true) fail('site_identity_or_lock_missing');
   const before = await apiGet(`/sites/${SITE.id}/deploys?per_page=100`, env);
   const p = { schema: 1, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha, siteId: SITE.id,
     actor: env.GITHUB_ACTOR, triggeringActor: env.GITHUB_TRIGGERING_ACTOR, createdAt: new Date().toISOString(),
-    marker: `www-candidate:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:${randomUUID()}`, status: 'hook_not_called' };
+    marker: `www-candidate:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:${randomUUID()}`, status: 'hook_not_called',
+    ...(env.GITHUB_ACTOR === AGENT ? { environment: 'www-candidate-agent', executionPolicy: 't007-agent-candidate-v1' } : {}) };
   save('.www/candidate.json', p);
   try {
     const hook = new URL(env.NETLIFY_BUILD_HOOK);
     if (hook.origin !== 'https://api.netlify.com' || !/^\/build_hooks\/[a-f0-9]{24}$/.test(hook.pathname)) fail('invalid_build_hook');
     hook.search = new URLSearchParams({ trigger_branch: 'main', trigger_title: p.marker }).toString();
+    if (currentMain() !== sha) fail('not_current_main_head');
     p.status = 'hook_outcome_uncertain_STOP'; save('.www/candidate.json', p);
     // Never retry this POST. Correlate by the documented exact trigger_title, not by the latest deploy or response shape.
     const r = await fetch(hook, { method: 'POST', body: '{}', redirect: 'error', signal: AbortSignal.timeout(20000) });
@@ -218,7 +261,7 @@ function downloadCandidate(runId) {
 function loadCandidate(runId, read, download, now) {
   if (!RUN.test(runId || '')) fail('invalid_candidate_run_id');
   const run = read(`actions/runs/${runId}/attempts/1`);
-  trustedOwnerRun(run, 'krzysztofcal', 'www-candidate');
+  trustedCandidateRun(run, 'krzysztofcal');
   if (String(run.id) !== String(runId)) fail('candidate_run_id_mismatch');
   const result = read(`actions/runs/${run.id}/artifacts?per_page=100`);
   if (!Array.isArray(result.artifacts) || result.total_count !== result.artifacts.length) fail('candidate_artifact_list_incomplete');
@@ -232,15 +275,20 @@ function loadCandidate(runId, read, download, now) {
 export async function resolveCandidate(runId, sha, { read = gh, download = downloadCandidate, verify, now = Date.now } = {}) {
   if (runId) return loadCandidate(runId, read, download, now()); // Keep explicit-ID recovery/discard semantics.
   if (!SHA.test(sha || '')) fail('invalid_main_sha');
-  // Five successful owner runs for this exact main revision, not five arbitrary recent runs/deploys. No creation
-  // date cutoff: an approval wait can be long while the candidate itself is fresh. Overflow is STOP, never guessing.
-  const result = read(`actions/workflows/www-candidate.yml/runs?branch=main&event=workflow_dispatch&status=success&actor=krzysztofcal&head_sha=${sha}&per_page=5`);
-  if (!Array.isArray(result.workflow_runs) || !Number.isInteger(result.total_count) || result.total_count > 5
-    || result.total_count !== result.workflow_runs.length) fail('candidate_search_incomplete');
+  // At most five successful trusted runs in total across both identities, never an arbitrary latest deploy.
+  const runs = [];
+  for (const actor of ['krzysztofcal', AGENT]) {
+    const result = read(`actions/workflows/www-candidate.yml/runs?branch=main&event=workflow_dispatch&status=success&actor=${encodeURIComponent(actor)}&head_sha=${sha}&per_page=5`);
+    if (!Array.isArray(result.workflow_runs) || !Number.isInteger(result.total_count) || result.total_count > 5
+      || result.total_count !== result.workflow_runs.length || runs.length + result.total_count > 5) fail('candidate_search_incomplete');
+    if (result.workflow_runs.some(r => r.actor?.login !== actor)) fail('candidate_search_actor_mismatch');
+    runs.push(...result.workflow_runs);
+  }
+  if (new Set(runs.map(r => String(r.id))).size !== runs.length) fail('candidate_search_incomplete');
   const eligible = [];
-  for (const run of result.workflow_runs) {
+  for (const run of runs) {
     if (Number(run.run_attempt) > 1) continue;
-    trustedOwnerRun(run, 'krzysztofcal', 'www-candidate');
+    trustedCandidateRun(run, 'krzysztofcal');
     if (run.head_sha !== sha) fail('candidate_search_sha_mismatch');
     const p = loadCandidate(String(run.id), read, download, now());
     if (p.sha !== sha) fail('candidate_search_sha_mismatch');
@@ -259,22 +307,29 @@ export async function resolveCandidate(runId, sha, { read = gh, download = downl
   return eligible[0].p;
 }
 
+function verifyCandidateSafety(candidate, env) {
+  try {
+    release(['--sha', candidate.sha, '--deploy', candidate.deployId], `.www/selection-${candidate.runId}.json`, env);
+    return true;
+  } catch (error) {
+    const receipt = error.receipt;
+    // A proven published candidate is simply ineligible; missing/uncertain/other safety failures stop discovery.
+    if (receipt?.status === 'checks_failed' && receipt.failures?.length
+      && receipt.failures.every(code => ['already_published', 'previously_published'].includes(code))) return false;
+    throw error;
+  }
+}
+export async function ensureNoExistingCandidate(sha, options) {
+  try { await resolveCandidate('', sha, options); }
+  catch (e) { if (e.message === 'no_eligible_candidate') return; throw e; }
+  fail('existing_candidate_requires_verified_reuse_or_owner_discard');
+}
+
 async function publish(env) {
   checkContext('www-publish', env);
   checkEnvironment('www-production', env, true);
   // Resolve completely before entering the mutation/discard path. Automatic discovery performs read-only checks.
-  const p = await resolveCandidate(env.CANDIDATE_RUN_ID, env.GITHUB_SHA, { verify: candidate => {
-    try {
-      release(['--sha', candidate.sha, '--deploy', candidate.deployId], `.www/selection-${candidate.runId}.json`, env);
-      return true;
-    } catch (error) {
-      const receipt = error.receipt;
-      // A proven published candidate is simply ineligible; missing/uncertain/other safety failures stop discovery.
-      if (receipt?.status === 'checks_failed' && receipt.failures?.length
-        && receipt.failures.every(code => ['already_published', 'previously_published'].includes(code))) return false;
-      throw error;
-    }
-  } });
+  const p = await resolveCandidate(env.CANDIDATE_RUN_ID, env.GITHUB_SHA, { verify: p => verifyCandidateSafety(p, env) });
   // Expired/stale candidates can only be discarded. Identity/provenance must pass even on cleanup.
   const receipt = { schema: 1, runId: env.GITHUB_RUN_ID, candidateRunId: String(p.runId), sha: p.sha, deployId: p.deployId, status: 'not_published' };
   save('.www/publication.json', receipt);
@@ -315,7 +370,7 @@ async function publish(env) {
 
 async function candidateCleanup(env) {
   checkContext('www-candidate', env, false);
-  checkEnvironment('www-candidate', env, true);
+  checkEnvironment(candidateEnvironment(env.GITHUB_ACTOR), env, true);
   if (!fs.existsSync('.www/candidate.json')) return; // No intent: the hook step never started.
   const p = JSON.parse(fs.readFileSync('.www/candidate.json', 'utf8'));
   if (p.discard?.status === 'discarded' || p.status === 'hook_not_called') return;
@@ -358,7 +413,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   Promise.resolve().then(() => {
     if (operation === 'check-candidate' || operation === 'check-publish') {
       const workflow = operation === 'check-candidate' ? 'www-candidate' : 'www-publish';
-      checkContext(workflow, env); checkEnvironment(operation === 'check-candidate' ? 'www-candidate' : 'www-production', env, false);
+      checkContext(workflow, env);
+      checkEnvironment(operation === 'check-candidate' ? candidateEnvironment(env.GITHUB_ACTOR) : 'www-production', env, false);
+      if (operation === 'check-candidate') checkCandidateQueue(env.GITHUB_RUN_ID);
     } else if (operation === 'record-chain') return recordChain(env.CHAIN_RUN_ID, env.CHAIN_DESTINATION, env);
     else if (operation === 'candidate-cleanup') return candidateCleanup(env);
     else if (operation === 'candidate') return candidate(env);

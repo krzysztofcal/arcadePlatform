@@ -23,7 +23,7 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ### Official Approved Pathways
 - **WS Production Deploy**: `.github/workflows/ws-server-deploy.yml` (exact SHA, GitHub App dispatch, OWNER approval in `ws-production`).
-- **WWW Production Release**: OWNER-only `Create WWW Candidate` → `Publish WWW Production` (`www-production` approval), after separate activation GO and configuration in [WWW release SOP](docs/www-production-release.md). Both reuse `scripts/www-production-release.mjs`; the existing OWNER manual procedure remains until validated cutover.
+- **WWW Production Release**: `Create WWW Candidate` by OWNER or, after T007 activation, `arcade-code-agent[bot]` only following explicit OWNER conversation GO; `Publish WWW Production` stays OWNER-only with `www-production` approval. See [WWW release SOP](docs/www-production-release.md). Both reuse `scripts/www-production-release.mjs`; the existing OWNER manual procedure remains until validated cutover.
 - **VPS Admin Operations**: `.github/workflows/vps-admin-operation.yml` (helper catalog, OWNER approval in `vps-admin`).
 - **DB Stage Migrations**: `.github/workflows/db-stage-apply-pr.yml` (wymaga jawnego `workflow_dispatch` z `main`, operacja `apply` uruchamiana przez OWNERA dla dokładnego zatwierdzonego `sourceSha` i zestawu migracji w środowisku `stage-automation`).
 - **Release Record**: `.github/workflows/release-record.yml` (rejestr wersji; `publish=true` requires direct OWNER dispatch or the verified OWNER WWW publication chain; never deploys).
@@ -300,6 +300,21 @@ Task is complete when:
 ### WWW release automation (#1254)
 
 - Implementation/merge never authorizes activation, a build hook, candidate creation or publication. First activation/run needs separate OWNER GO.
-- Both workflows require OWNER actor and triggering actor, main and attempt 1; protected `www-candidate` and `www-production` Environments require actual OWNER approval and main-only deployment policies. Never put read-only WS evidence keys in unprotected jobs or reuse the WS deployment key.
+- Candidate admits only matching OWNER or `arcade-code-agent[bot]` actor/triggering_actor, exact current main and attempt 1. OWNER uses protected `www-candidate`; the disabled-by-default T007 agent path uses separately audited `www-candidate-agent`, main only, after explicit activation/risk GO. Never reuse deployment SSH keys. `www-production` stays OWNER-only and requires actual OWNER approval; never remove its protection.
 - Failed/cancelled/abandoned/stale candidates use only the existing guarded discard with API + permalink 404 proof. Unknown hook outcomes, interrupted runners or uncertain restore mean explicit STOP and owner reconciliation; never guess, retry restore or delete published candidates.
-- Automatic Release Record is restricted to the successful approved `www-publish.yml` chain, with verified LIVE receipt. Agents cannot dispatch either action or use a generic reusable-workflow bypass. Existing direct Release Record remains OWNER-only for publication.
+- Automatic Release Record is restricted to the successful approved `www-publish.yml` chain, with verified LIVE receipt. Agents may dispatch Candidate only under the T007 operating procedure below; they must never dispatch Publish or use a generic reusable-workflow bypass. Existing direct Release Record remains OWNER-only for publication.
+
+### Agent Candidate operating rule (T007 / #1268)
+
+Codex, Claude Code and Antigravity may request Candidate only after explicit OWNER GO in the current conversation
+and separate activation of the audited main-only agent Environment. No automatic Candidate on merge/CI. Use only
+existing `ghx` as `arcade-code-agent[bot]`; no OWNER credential fallback or local Netlify token/hook call.
+Read current main, active Candidate/Publish runs and existing eligible candidates first; queue conflicts or an
+existing unpublished candidate mean STOP for verified reuse/reconciliation, never silently build a duplicate.
+Dispatch `www-candidate.yml --ref main -f sha=<exact-current-main>` once, wait boundedly for completion and verify
+run identity/SHA/attempt, authentic unexpired artifact, `candidate_ready`, matching `dry_run_pass` and
+`candidate_static_verified`, Netlify target/commit/unpublished/lock and WS evidence before returning its immutable
+permalink plus concise PASS evidence. Recheck current main and current Netlify metadata at handoff; drift means STOP.
+Missing/failed/ambiguous evidence means STOP without guessed URLs or reruns; inspect guarded-discard + 404 receipts.
+Never approve an Environment, dispatch Publish, restore/publish Netlify, or expand credential permissions. Chat GO is
+an operating rule, not cryptographic authorization from GitHub. Audit limitations/activation GO are in the WWW SOP.

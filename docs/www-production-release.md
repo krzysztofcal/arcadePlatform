@@ -1,9 +1,11 @@
 # WWW Production release from GitHub (#1254)
 
-Status: implementation, **not activated or exercised against Production**. This change does not authorize a hook,
-publication, Production secret change or first run. OWNER must separately approve configuration and activation.
-The existing [manual procedure](../specs/1159-ci-cd-release-safety/pr5-www-production-publish.md) remains supported
-until an owner-approved first release proves the replacement. Do not remove its hook/tool or unlock publishing.
+Status: the OWNER path has completed Candidate [43873170221](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43873170221)
+and Publish/LIVE/Record [43875913487](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43875913487), recorded by immutable
+[release-20261116-43875913487](https://github.com/krzysztofcal/arcadePlatform/releases/tag/release-20261116-43875913487).
+T007 agent Candidate is implemented but **not activated/tested**; merge is not activation or hook authorization.
+Retain the existing [OWNER manual recovery](../specs/1159-ci-cd-release-safety/pr5-www-production-publish.md); no cleanup
+or removal of that procedure is authorized. Publish remains exclusively OWNER-triggered and OWNER-approved.
 
 ## Required configuration (OWNER, separate GO)
 
@@ -16,7 +18,7 @@ Create two GitHub Environments: `www-candidate` and `www-production`. Each requi
 `krzysztofcal` as required reviewer, `prevent_self_review=false` (OWNER dispatches and approves),
 `can_admins_bypass=false`, and custom deployment branch policy: **branch main only**, no tag policy/wildcard.
 Protect main with the existing review rules. Candidate approval protects Production credentials and the hook;
-publishing still needs a separate dispatch and approval in `www-production`. Secrets are unavailable until approval.
+publishing still needs a separate OWNER dispatch and approval in `www-production`. Secrets are unavailable until approval.
 
 Environment-scoped secrets in **both** environments:
 
@@ -50,7 +52,7 @@ Use the existing read-only SSH mechanism, not the WS deployment account/key. Eph
    complete safety dry-run before the normal execute path and its immediate rechecks.
 6. Automatic GET-only LIVE verification and immutable Release Record follow publication; no separate dispatch.
 
-Automatic selection reads **at most five successful OWNER/main candidate runs for the exact current main SHA**,
+Automatic selection reads **at most five successful trusted OWNER/App main candidate runs in total (two bounded actor queries) for the exact current main SHA**,
 then requires the API's total count to match the complete returned list. It deliberately does not filter by run
 creation time: a long Environment approval wait must not hide a fresh candidate. Reruns are excluded. Each candidate
 needs an authentic unexpired artifact, matching `candidate_ready` provenance and dry-run/static-check receipts,
@@ -158,7 +160,8 @@ Use only `arcade-www-read` provisioned by `www-ws-read-prepare`, followed by sep
 `www-ws-read-key-sync`. See [VPS Admin enrollment and recovery](vps-admin-operations.md#dedicated-www-evidence-reader-1254).
 The fixed public-key asset starts empty. This code PR neither provisions the account nor installs/generates
 any real key. Both actions retain `vps-admin` OWNER approval; WWW's two separate Environments retain their
-own OWNER approvals and accepted self-approval policy. No WS/VPS Environment is reused for WWW publishing.
+own OWNER approvals and accepted self-approval policy on the legacy OWNER path. The separately gated T007
+agent Candidate Environment is described below. No WS/VPS Environment is reused for WWW publishing.
 
 After successful preparation, reviewed public-key enrollment and explicit read-only SSH acceptance,
 OWNER separately configures these three secrets in **both** `www-candidate` and `www-production`:
@@ -240,3 +243,90 @@ connections must continue to match it. It grants no exception for key rotation, 
 a different address/port, OVH migration or any other host. Those require independent host-key verification
 and separate OWNER approval under the normal procedure. No SSH code, workflow, secret or VPS configuration
 is changed by documenting this exception, and no WWW build or publication is authorized.
+
+
+## T007 — Agent-initiated Candidate (#1268), activation BLOCKED pending credential audit
+
+Reuse `www-candidate.yml`, `scripts/www-release-actions.mjs` and the existing restricted WS reader. Only matching
+`krzysztofcal` or `arcade-code-agent[bot]` actor/triggering_actor on main, attempt 1, can create a Candidate. OWNER
+keeps `www-candidate` and its approval. The App uses **only** `www-candidate-agent`, gated by repository variable
+`WWW_AGENT_CANDIDATE_ENABLED == true` (unset/other values disable it) in both workflow and script. Do not set it in
+this PR. A checked main-only Environment is still required: `can_admins_bypass=false`, custom branch `main` only,
+no tag/wildcard, no reviewers/wait timer/custom protection. Unknown or extra policy is STOP, never a bypass.
+No jobs without the selected Environment receive Candidate secrets. No change to `www-production` or Publish gates.
+
+### Read-only credential/security audit (2026-11-16)
+
+- Existing isolated `ghx` issues App tokens for this selected repository with `actions:write`, `contents:write`,
+  `checks:read`, `issues:write`, `pull_requests:write`, `workflows:write`, metadata read. Prior authorized admin
+  dispatches and run/artifact reads confirm the existing mechanism; no test dispatch is performed here. Minimum
+  GitHub capability for Candidate is `actions:write` plus read access to contents/run/artifacts. No new grant.
+- `www-candidate` is OWNER-reviewed/main-only/no-admin-bypass. `www-candidate-agent` returns 404 (not configured).
+  Environment secret-name listing returns 403 to the App. Names required by the workflow are known, **actual secret
+  presence, equality between Environments, token issuer/role/site access and denial of restore/unlock are UNKNOWN**.
+  No secret values are read, copied or probed; no mutation is used as a permission test.
+- Candidate needs Netlify site/deploy/list/functions metadata reads, the existing Production build hook and guarded
+  DELETE of an identified unpublished candidate. It needs no restore, unlock, direct production publish, arbitrary
+  site/configuration/secret writes. The hook is itself a bearer capability that starts a Production-context build
+  with Production build secrets; the permalink can expose Production functions. A lock is not a credential boundary.
+- [PAT authentication](https://docs.netlify.com/api-and-cli-guides/cli-guides/get-started-with-cli/) documents a token
+  tied to a user, not a verified per-operation/site-only credential for this path. [Roles/project access](https://docs.netlify.com/manage/accounts-and-billing/team-management/roles-and-permissions/)
+  may restrict a separate identity, but the selected plan/identity's read/DELETE versus restore/lock permissions are
+  not verified here. Do not label an ordinary PAT read-only or site-scoped, or assume a differently named token has
+  less authority. Successful OWNER Publish proves its credential has publication authority, not that Candidate's
+  secret is the same credential. The current WWW code does not cryptographically confine a stolen PAT's API scope.
+
+**NO-GO to unattended activation with the current unaudited credential.** OWNER first supplies an auditable
+credential/role capability decision (metadata/policy, never the token): prefer a dedicated identity restricted to
+this site and the required operations, with restore/unlock/publish denied. If that cannot be proven, the remaining
+option is explicit OWNER acceptance that a privileged credential in an unreviewed-per-run Environment could publish
+or change Production if stolen or misused by trusted-main code. A copied OWNER token plus removed reviewers is not
+an acceptable implicit default. If hard separation of publication capability is required, keep T007 disabled until
+a separately reviewed constrained API mechanism exists; this PR adds no new service or privilege escalation.
+
+The accepted threat model must cover trusted-main workflow/code changes, supply-chain/runner compromise, token
+exfiltration, broad site/team scope, hook leakage/build side effects, and the fact that GitHub cannot prove chat GO.
+An explicit approval comment in #1268 must name the reviewed credential restrictions or consciously accepted residual
+risk. No approval in this implementation is inferred from GO to write code or review/merge.
+
+### Separate OWNER setup and first-run gates
+
+1. OWNER reviews/merges this PR. Re-read exact current main and the audit; existing OWNER Candidate still works.
+2. Separate configuration GO only after the credential/risk decision above: create the main-only
+   `www-candidate-agent` Environment with dedicated `NETLIFY_AUTH_TOKEN`, `NETLIFY_BUILD_HOOK`, `WS_PROD_SSH`,
+   `WS_PROD_SSH_KEY`, `WS_PROD_KNOWN_HOSTS`. Use the same approved hook capability, not a new parallel hook; retain
+   only the dedicated read-only SSH identity and verified host pin. No deployment/OWNER SSH keys. OWNER enters values
+   directly; never provide them to the agent. Keep OWNER Candidate/Production Environments and protections unchanged.
+3. Verify Environment policy, exact secret names and credential scope through an authorized read-only OWNER path.
+   Only a further activation GO sets `WWW_AGENT_CANDIDATE_ENABLED=true`. This flag is deliberate opt-in, **not** a
+   proof of credential restrictions. It releases secrets to trusted main jobs without per-run OWNER review.
+4. Separate explicit conversation GO for the first exact-main Candidate. Agent uses existing App `ghx`, reads queue
+   and successful OWNER/App candidates, and dispatches `www-candidate.yml --ref main -f sha=<exact-main>` once.
+   No merge/CI/scheduled creation. Workflow repeats queue checks; any competing Candidate/Publish or incomplete
+   history means STOP. Before a bot calls the hook, complete existing-candidate discovery/safety validation must show
+   none eligible. Existing/ambiguous/unknown evidence means STOP, never a duplicate build or latest-deploy guess.
+5. Agent waits boundedly (up to the workflow deadline; read-only polling), then verifies completed/success attempt 1,
+   genuine run metadata, matching App actor/triggering_actor/SHA, unexpired unique `www-candidate-1`, `candidate_ready`,
+   policy `t007-agent-candidate-v1`/Environment, matching dry-run/static receipts, current main, actual Netlify site/
+   deploy/commit/unpublished/locked identity, and agreeing WS evidence. Static legal/account bytes, versions,
+   deletion anchor, CSP/HSTS and current release safety remain mandatory. Only then return the immutable permalink
+   derived from the verified deploy ID and concise PASS evidence. No Termux or per-run Candidate approval by OWNER.
+6. Failed, uncertain, timed-out or ambiguous evidence means STOP; inspect both Candidate/cleanup artifacts and API +
+   permalink 404 proof. No automatic dispatch retry or guessed link. A previous eligible candidate may be reused only
+   after full fresh provenance/safety checks and an explicit reuse decision; otherwise OWNER reconciles/discards.
+   Never dispatch Publish for cleanup as the agent. OWNER Publish/discard keeps its own dispatch/approval gates.
+
+OWNER Publish accepts legacy OWNER artifacts unchanged and new verified App artifacts. New App receipts bind actor,
+Environment/policy and both safety results to genuine successful main-run metadata; artifact text alone cannot
+change identity. Automatic discovery queries exactly OWNER and App, max five successful runs **combined**, then
+requires one eligible candidate after full safety verification. More than five, mixed-actor ambiguity or incomplete
+results are STOP. Shared Candidate/Publish concurrency, 48-hour lifetime, three-day candidate evidence, no hook
+retry and guarded discard are unchanged. Existing immutable Releases and OWNER-only chained record authority remain
+valid; `www-publish.yml` and `release-record.yml` gain no agent publication capability.
+
+Compatibility: the new Environment/activation flag are additive and required only for App execution. OWNER workflow
+and old artifacts remain supported. Discovery now makes two bounded actor queries and may hit the same five-run
+limit with a mix of identities; extra read traffic is bounded at operator request frequency, with zero Supabase
+reads/egress. Disabling the opt-in stops new App execution; existing verified App receipts remain inspectable by
+OWNER Publish within normal gates. No unattended Production run is tested by this PR; first activation evidence
+remains outstanding.

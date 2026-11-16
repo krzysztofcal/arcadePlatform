@@ -12,9 +12,12 @@ concurrency:
   group: www-production-release
   cancel-in-progress: false
 permissions: {}
+# Deliberate OWNER-controlled activation after credential audit/risk acceptance; unset is disabled.
+env:
+  WWW_AGENT_CANDIDATE_ENABLED: ${{ vars.WWW_AGENT_CANDIDATE_ENABLED }}
 jobs:
   preflight:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && github.run_attempt == 1 }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.triggering_actor == github.actor && (github.actor == github.repository_owner || (github.actor == 'arcade-code-agent[bot]' && vars.WWW_AGENT_CANDIDATE_ENABLED == 'true')) && github.run_attempt == 1 }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -27,13 +30,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Verify owner dispatch and protected Environment before requesting secrets
+      - name: Verify trusted Candidate dispatch and Environment before requesting secrets
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/www-release-actions.mjs check-candidate
   candidate:
     needs: preflight
-    environment: www-candidate
+    environment: ${{ github.actor == 'arcade-code-agent[bot]' && 'www-candidate-agent' || 'www-candidate' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -59,7 +62,7 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
           printf '%s\n' "$HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
-      - name: Validate approval and perform the authorized operation
+      - name: Validate Candidate policy and perform the authorized operation
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
