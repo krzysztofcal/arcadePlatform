@@ -61,8 +61,8 @@ export function render() {
     const ceramicFreqs = [520 + (prng() - 0.5) * 30, 870 + (prng() - 0.5) * 40, 1340 + (prng() - 0.5) * 60];
     const ceramicT60 = 0.090 + prng() * 0.070; // 90-160 ms
     const ceramicDecay = 6.907755 / ceramicT60;
-    const ceramicLevel = 0.316 * coinGain; // -10 dB under coin
-    const ceramicAmps = [0.32, 0.22, 0.14].map(a => a * ceramicLevel);
+    const ceramicLevel = 0.5 * coinGain; // hollow body about -6 dB under the coin, so the bank is clearly heard
+    const ceramicAmps = [1.0, 0.7, 0.45].map(a => a * ceramicLevel);
     const ceramicPhases = [prng() * 2 * Math.PI, prng() * 2 * Math.PI, prng() * 2 * Math.PI];
 
     // Click noise at onset (2-4 ms)

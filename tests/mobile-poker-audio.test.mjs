@@ -422,7 +422,7 @@ test('bonus hook guard on poker/poker.js source text', async () => {
 
   // Once in claimDailyBonus inside result.claimed === true block
   const dailySection = content.slice(content.indexOf('async function claimDailyBonus()'), content.indexOf('async function claimWelcomeBonus()'));
-  assert.match(dailySection, /if\s*\(\s*result\.claimed\s*===\s*true\s*\)\s*\{[^}]*showDailyFlyin\(result\);\s*playBonusCue\(\);/, 'playBonusCue called in claimDailyBonus on confirmed new claim');
+  assert.match(dailySection, /if \(result\.claimed\) showDailyFlyin\(result\);\s*if \(result\.claimed === true\) playBonusCue\(\);/, 'playBonusCue called in claimDailyBonus only on a confirmed new claim');
 
   // Once in claimWelcomeBonus right after showWelcomeFlyin(result.amount)
   const welcomeSection = content.slice(content.indexOf('async function claimWelcomeBonus()'), content.indexOf('async function claimWelcomeBonus()') + 2000);
