@@ -250,7 +250,9 @@ When solving a problem:
 ## WWW release tooling
 
 - `scripts/www-production-release.mjs`: existing validation, exact-main/WS rechecks, locked publication and guarded discard.
-- `scripts/www-release-actions.mjs`: OWNER workflow authorization, Environment/approval/provenance checks, hook correlation, static LIVE verification.
-- `.github/workflows/www-candidate.yml`, `www-publish.yml`: two-phase owner operation; no CI, merge or agent publication.
+- `scripts/www-release-actions.mjs`: Candidate OWNER/App authorization and OWNER-only publication, Environment/approval/provenance checks, hook correlation, static LIVE verification.
+- `.github/workflows/www-candidate.yml`, `www-publish.yml`: two-phase release; T007 permits explicitly requested App Candidate after separate activation, never agent publication or CI/merge-triggered creation.
 - `.github/workflows/release-record.yml`, `scripts/release-manifest.mjs`: direct OWNER record or restricted approved WWW chain.
 - Configuration, activation and retained manual path: [WWW release SOP](docs/www-production-release.md).
+
+- T007 Candidate agents: follow `AGENTS.md` Agent Candidate operating rule, including queue/deduplication checks, wait, receipts and immutable-link handoff; audit/activation remains separate.

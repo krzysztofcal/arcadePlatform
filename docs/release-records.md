@@ -62,9 +62,9 @@ the AAB SHA-256 (the AAB stays with Google Play).
 - A tag or release created with `GITHUB_TOKEN` starts no workflow, and no workflow triggers on tags or releases;
   every `push` trigger is limited to `main` (guarded by `tests/www-production-release.test.mjs`).
 
-## Approved WWW publication chain (#1254, activation requires separate OWNER GO)
+## Approved WWW publication chain (#1254; T007 Candidate first test PASS)
 
-After the two OWNER-only WWW actions in [the WWW SOP](www-production-release.md), successful static LIVE verification
+After a verified OWNER or T007 App Candidate followed by the OWNER-only Publish action in [the WWW SOP](www-production-release.md), successful static LIVE verification
 calls this same workflow for WWW only. The reusable path requires the exact `www-publish.yml@refs/heads/main` caller,
 OWNER actor and triggering actor, first attempt, actual `www-production` OWNER approval, successful publication job
 and immutable `www-publication-1` receipt. It grants no agent/app or arbitrary workflow publication capability and
@@ -84,3 +84,16 @@ before dispatching. This intentionally changes direct rerun behaviour so every i
 first-attempt provenance. Before activation, verify the latest existing record has a successful attempt-1 publish;
 a historical later-attempt record requires OWNER reconciliation rather than deleting or editing an immutable record.
 Read-only check on 2026-11-15: latest `release-20261115-13`, run `43692925552`, attempt 1 publish succeeded.
+
+Successful OWNER chain: Candidate [43873170221](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43873170221),
+Publish/LIVE/Record [43875913487](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43875913487), immutable
+[release-20261116-43875913487](https://github.com/krzysztofcal/arcadePlatform/releases/tag/release-20261116-43875913487).
+T007 expands Candidate provenance only; existing OWNER candidates/records remain valid. `www-publish.yml`,
+`www-production`, LIVE verification and chained Record authority remain OWNER-only and unchanged. No agent may
+publish a record merely because its Candidate was accepted. T007 was separately activated and its first automatic Candidate
+[43912583845](https://github.com/krzysztofcal/arcadePlatform/actions/runs/43912583845) completed SUCCESS on
+2026-11-16: SHA `bef79893293c7adb08465db7adcbb7a4a1f8ce5c`, actor/triggering actor
+`arcade-code-agent[bot]`, attempt 1; `candidate_ready`, `dry_run_pass` and `candidate_static_verified` evidence passed.
+This test created no Production publication or Release Record; it does not prove current Candidate eligibility.
+See [the WWW SOP](www-production-release.md) for activation/audit history and retained risk acceptance.
+Every later Candidate needs explicit OWNER GO; Publish and Record publication retain their existing OWNER gates.
