@@ -117,11 +117,19 @@ function checkEnvironment(name, env, approval) {
   if (approval && !agent && !ownerApproved(gh(`actions/runs/${env.GITHUB_RUN_ID}/approvals`), name, 'krzysztofcal')) fail('owner_environment_approval_missing');
 }
 export function checkCandidateQueue(runId, read = gh) {
-  for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
-    const result = read(`actions/runs?status=${status}&per_page=100`);
-    if (!Array.isArray(result.workflow_runs) || result.total_count !== result.workflow_runs.length) fail('release_queue_unknown');
-    if (result.workflow_runs.some(r => String(r.id) !== runId
-      && ['.github/workflows/www-candidate.yml', '.github/workflows/www-publish.yml'].includes(r.path))) fail('release_queue_conflict');
+  for (const workflow of ['www-candidate.yml', 'www-publish.yml']) {
+    for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
+      const result = read(`actions/workflows/${workflow}/runs?status=${status}&per_page=100`);
+      if (!Array.isArray(result?.workflow_runs) || !Number.isInteger(result.total_count)
+        || result.total_count !== result.workflow_runs.length || result.total_count > 100) fail('release_queue_unknown');
+      const ids = new Set();
+      for (const run of result.workflow_runs) {
+        if (!Number.isSafeInteger(run?.id) || run.id <= 0 || ids.has(run.id)
+          || run.path !== `.github/workflows/${workflow}` || run.status !== status) fail('release_queue_unknown');
+        ids.add(run.id);
+      }
+      if (result.workflow_runs.some(run => String(run.id) !== runId)) fail('release_queue_conflict');
+    }
   }
 }
 
