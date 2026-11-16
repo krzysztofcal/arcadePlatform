@@ -43,8 +43,9 @@ Use the existing read-only SSH mechanism, not the WS deployment account/key. Eph
 2. Approve **`www-candidate`**. The existing hook is called once; complete dry-run and static candidate smoke run.
 3. Open the clickable immutable Netlify candidate permalink in that run's **Summary**. Inspect read-only only:
    candidate functions use Production data; this is not an isolated Stage preview.
-4. Within **30 minutes from candidate creation**, Actions → **Publish WWW Production** → **Run workflow**, branch
-   `main`, leave `candidate_run_id` blank and `discard=false`.
+4. Within **48 hours from candidate creation**, Actions → **Publish WWW Production** → **Run workflow**, branch
+   `main`, leave `candidate_run_id` blank and `discard=false`. Finish approval/publication before expiry;
+   dispatching before the deadline does not reserve the candidate.
 5. Approve **`www-production`**. Empty ID selects only the unique fully eligible candidate, using the existing
    complete safety dry-run before the normal execute path and its immediate rechecks.
 6. Automatic GET-only LIVE verification and immutable Release Record follow publication; no separate dispatch.
@@ -53,8 +54,9 @@ Automatic selection reads **at most five successful OWNER/main candidate runs fo
 then requires the API's total count to match the complete returned list. It deliberately does not filter by run
 creation time: a long Environment approval wait must not hide a fresh candidate. Reruns are excluded. Each candidate
 needs an authentic unexpired artifact, matching `candidate_ready` provenance and dry-run/static-check receipts,
-age at most 30 minutes (rechecked after validation), and the existing Netlify identity/unpublished/lock/function/
-header/WS checks. Proven stale or already-published candidates are ineligible. No eligible candidate, multiple eligible
+age at most 48 hours from provenance `createdAt` (before the build hook, not approval or build completion;
+exactly 48 hours is accepted, greater age is expired, and age is rechecked after validation), and the existing
+Netlify identity/unpublished/lock/function/header/WS checks. Proven stale or already-published candidates are ineligible. No eligible candidate, multiple eligible
 candidates, more than five matching runs, missing/incomplete evidence, or other validation errors mean **STOP before
 restore or discard**. There is no latest-run/latest-deploy fallback and no unbounded pagination. A long-lived main
 revision can hit the five-run bound; reconcile candidates and supply an explicit ID instead of guessing.
@@ -62,7 +64,15 @@ revision can hit the five-run bound; reconcile candidates and supply an explicit
 A nonempty `candidate_run_id` retains the existing explicit-ID validation and recovery/discard path. In particular,
 `discard=true` should use that explicit run ID for an abandoned/expired candidate; blank-ID discovery only accepts
 fresh eligible unpublished candidates. Existing safe discard, lock, uncertain-execute STOP and no automatic rollback
-remain unchanged.
+remain unchanged. Returning the next day works only while the candidate SHA is still the exact current
+`main` and all current Production checks (including WS compatibility and the published Netlify lock) pass.
+The longer lifetime never freezes or bypasses those checks. More successful runs can accumulate over 48 hours;
+the existing five-run completeness bound and ambiguity STOP remain unchanged.
+
+This policy applies to new candidates created after this change is merged. Run `43863728077` was started
+with the old code and retention; do not modify, rerun or reuse it as a new 48-hour candidate. Its cleanup,
+if needed, requires the existing separately approved guarded discard. Create a fresh candidate from the
+then-current main under separate OWNER GO; this PR starts no build or publication.
 
 OWNER self-approval is intentionally accepted **only for the two new WWW Environments** (`prevent_self_review=false`).
 Keep them separate; do not reuse or modify `ws-production`, `vps-admin`, or other existing Environments. Their
@@ -89,7 +99,9 @@ hook response or an ambiguous title is STOP, never permission to pick the latest
 10 minutes (plus an in-flight bounded API request), API requests have deadlines, and the hook POST is never retried.
 
 For an abandoned or expired successful candidate use **Publish WWW Production** with its `candidate_run_id` and
-`discard=true`, then approve the environment. Stale/expired candidates encountered by normal publish are discarded
+`discard=true`, then approve the environment. After 48 hours, blank-ID discovery excludes that candidate;
+use its explicit ID for cleanup while its 3-day artifact is still available. Retention does not extend
+publish eligibility. Stale/expired candidates encountered by explicit-ID normal publish are discarded
 and the job fails asking for a new candidate. Discard still validates trusted provenance and refuses previously
 published/current/building deploys. API 404 **and** permalink 404 are required; otherwise `discard_unverified_STOP`.
 There is no unattended scheduled deletion. Lost/expired artifacts require the retained manual guarded discard path
@@ -99,7 +111,7 @@ After restore, failures are **published_smoke_failed_STOP** or **uncertain_STOP*
 retry, rollback, historical restore or candidate deletion occurs. A killed execute process can leave an uncertain
 receipt: OWNER must inspect the actual site/deploy/lock before any further action. GitHub summaries and sanitized JSON
 receipts distinguish candidate failure, discard, publication, LIVE smoke and record outcome. Candidate artifacts last
-1 day, publication/cleanup artifacts 7 days; download operational evidence promptly. This retention is not automatic
+3 days, publication/cleanup artifacts 7 days; download operational evidence promptly. This retention is not automatic
 deploy deletion. An immutable GitHub Release retains WWW deploy/SHA/publication/candidate run references permanently.
 
 If LIVE passes but Release Record fails, **Production is already published**. The parent run is failed, never a

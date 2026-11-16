@@ -451,9 +451,19 @@ test('candidate provenance rejects agents, reruns, wrong workflow, expired and m
     { path: '.github/workflows/other.yml' }, { event: 'pull_request' }, { run_attempt: 2 }, { head_sha: ws }, { conclusion: 'failure' }]) {
     assert.throws(() => actions.validateCandidate(ownerRun(over), provenance(), 'krzysztofcal', now));
   }
-  for (const over of [{ deployId: 'latest' }, { sha: ws }, { runId: '43' }, { status: 'checks_failed' }, { createdAt: '2026-11-14T10:00:00Z' }]) {
+  for (const over of [{ deployId: 'latest' }, { sha: ws }, { runId: '43' }, { status: 'checks_failed' }, { createdAt: '2026-11-13T10:00:00Z' }]) {
     assert.throws(() => actions.validateCandidate(ownerRun(), { ...provenance(), ...over }, 'krzysztofcal', now));
   }
+});
+test('candidate age permits next-day publication through exactly 48 hours but rejects expired or invalid time', () => {
+  for (const time of ['2026-11-16T10:00:00Z', '2026-11-17T09:59:59.999Z', '2026-11-17T10:00:00Z']) {
+    assert.doesNotThrow(() => actions.validateCandidate(ownerRun(), provenance(), 'krzysztofcal', Date.parse(time)));
+  }
+  assert.throws(() => actions.validateCandidate(ownerRun(), provenance(), 'krzysztofcal', Date.parse('2026-11-17T10:00:00.001Z')), /candidate_expired/);
+  for (const createdAt of ['invalid', '2026-11-17T10:00:00.001Z']) {
+    assert.throws(() => actions.validateCandidate(ownerRun(), { ...provenance(), createdAt }, 'krzysztofcal', Date.parse('2026-11-17T10:00:00Z')), /candidate_expired/);
+  }
+  assert.throws(() => actions.validateCandidate(ownerRun({ head_sha: ws }), provenance(), 'krzysztofcal', Date.parse('2026-11-16T10:00:00Z')), /candidate_provenance_mismatch/);
 });
 test('Environment protection and actual owner approval fail closed', () => {
   const settings = { can_admins_bypass: false, deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
@@ -611,6 +621,7 @@ function selectionFixture(items = [{ run: ownerRun(), p: selectionProvenance() }
 }
 test('automatic candidate selection uses the one validated current-main candidate and a complete bounded query', async () => {
   const fx = selectionFixture();
+  fx.options.now = () => Date.parse('2026-11-16T10:00:00Z'); // next-day publication still needs current-main safety checks.
   assert.equal((await actions.resolveCandidate('', sha, fx.options)).deployId, id);
   assert.deepEqual(fx.verified, [id]);
   assert.match(fx.routes[0], new RegExp(`head_sha=${sha}`));
@@ -622,6 +633,7 @@ test('automatic candidate selection stops on none, ambiguity or incomplete bound
   await assert.rejects(actions.resolveCandidate('', sha, selectionFixture([]).options), /no_eligible_candidate/);
   const second = { run: ownerRun({ id: 43 }), p: selectionProvenance({ runId: '43', deployId: 'e'.repeat(24) }) };
   const two = selectionFixture([{ run: ownerRun(), p: selectionProvenance() }, second]);
+  two.options.now = () => Date.parse('2026-11-16T10:00:00Z');
   await assert.rejects(actions.resolveCandidate('', sha, two.options), /ambiguous_candidates/);
   assert.equal(two.verified.length, 2);
   for (const total of [6, 2, undefined]) {
@@ -638,16 +650,17 @@ test('automatic selection rejects invalid identity/SHA/provenance/time and never
     { ...original, run: ownerRun({ head_sha: ws }) },
     { ...original, p: { ...provenance(), runId: '99' } },
     { ...original, p: { ...provenance(), status: 'checks_failed' } },
-    { ...original, p: { ...provenance(), createdAt: '2026-11-15T09:00:00Z' } },
+    { ...original, p: { ...provenance(), createdAt: '2026-11-13T10:00:00Z' } },
     { ...original, p: { ...provenance(), createdAt: '2026-11-15T10:06:00Z' } },
     { ...original, p: { ...selectionProvenance(), validation: null } }, { ...original, artifacts: [] }, { ...original, run: ownerRun({ run_attempt: 2 }) }
   ]) await assert.rejects(actions.resolveCandidate('', sha, selectionFixture([item]).options));
-  const fx = selectionFixture(); fx.options.verify = () => { throw new Error('netlify_or_ws_identity_STOP'); };
+  const fx = selectionFixture(); fx.options.now = () => Date.parse('2026-11-16T10:00:00Z');
+  fx.options.verify = () => { throw new Error('netlify_or_ws_identity_STOP'); };
   await assert.rejects(actions.resolveCandidate('', sha, fx.options), /netlify_or_ws_identity_STOP/);
   await assert.rejects(actions.resolveCandidate('', sha, selectionFixture([{ ...original, eligible: false }]).options), /no_eligible_candidate/);
 });
 test('explicit candidate ID preserves validated recovery for expired candidates without automatic search', async () => {
-  const p = { ...provenance(), createdAt: '2026-11-14T10:00:00Z' };
+  const p = { ...provenance(), createdAt: '2026-11-12T10:00:00Z' };
   const fx = selectionFixture([{ run: ownerRun(), p }]);
   assert.equal(await actions.resolveCandidate('42', sha, fx.options), p);
   assert.ok(fx.routes.every(route => !route.includes('/workflows/')));
@@ -666,6 +679,17 @@ test('automatic selection skips proven published candidates but stops if validat
   await assert.rejects(actions.resolveCandidate('', sha, unknown.options), /candidate_safety_evidence_incomplete/);
   const expired = selectionFixture(); let now = Date.parse('2026-11-15T10:05:00Z');
   expired.options.now = () => now;
-  expired.options.verify = () => { now = Date.parse('2026-11-15T10:31:00Z'); return true; };
+  expired.options.verify = () => { now = Date.parse('2026-11-17T10:00:00.001Z'); return true; };
   await assert.rejects(actions.resolveCandidate('', sha, expired.options), /candidate_expired/);
+});
+
+test('automatic selection enforces the 48-hour boundary and refuses a changed current main', async () => {
+  const exact = selectionFixture(); exact.options.now = () => Date.parse('2026-11-17T10:00:00Z');
+  assert.equal((await actions.resolveCandidate('', sha, exact.options)).runId, '42');
+  const expired = selectionFixture(); expired.options.now = () => Date.parse('2026-11-17T10:00:00.001Z');
+  await assert.rejects(actions.resolveCandidate('', sha, expired.options), /no_eligible_candidate/);
+  assert.deepEqual(expired.verified, [], 'expired candidates never reach restore safety validation');
+  const changed = selectionFixture(); changed.options.now = () => Date.parse('2026-11-16T10:00:00Z');
+  await assert.rejects(actions.resolveCandidate('', ws, changed.options), /candidate_search_sha_mismatch/);
+  assert.deepEqual(changed.verified, [], 'a longer lifetime does not authorize publishing an older main SHA');
 });

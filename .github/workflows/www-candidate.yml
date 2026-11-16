@@ -75,7 +75,7 @@ jobs:
           name: www-candidate-1
           path: .www/*.json
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 3
           if-no-files-found: error
       - name: Reconcile failed or cancelled candidate without guessing
         if: ${{ failure() || cancelled() }}
