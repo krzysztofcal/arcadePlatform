@@ -89,6 +89,11 @@ Legal documents and account page must exactly match the approved commit; legal v
 and Privacy must contain the account-deletion anchor. Build identity, CSP/HSTS and Netlify locked published deploy
 are checked. It never invokes functions, login, deletion, chips, XP, Redis or other mutating API endpoints.
 
+The root `netlify.toml` disables Pretty URLs HTML post-processing so Netlify does not rewrite anchor
+URLs/serialization after the build. Legal/account comparison remains exact; version and deletion-anchor
+checks are not relaxed. This affects newly built HTML only, not existing deploys. Preserve explicit
+`.html` links and the configured redirects; do not enable HTML rewriting to work around a smoke failure.
+
 ## STOP and cleanup
 
 Candidate permalinks expose Production functions. Do not test mutations there or leave candidates abandoned.
