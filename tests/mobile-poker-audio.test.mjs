@@ -387,6 +387,31 @@ test('adapter mounts exactly one toggle in avatarMenu and table panel, reflects 
     assert.equal(input.checked, false, 'input reflects updated value');
   }
 
+  // A failed native call is never shown as a confirmed OFF: the control re-reads, or hides
+  {
+    let setFails = true, readFails = false, nativeEnabled = true;
+    const fakePlugin = {
+      getState: async () => { if (readFails) throw new Error('read'); return { enabled: nativeEnabled }; },
+      setEnabled: async (opts) => { if (setFails) throw new Error('write'); nativeEnabled = opts.enabled; return { enabled: nativeEnabled }; }
+    };
+    const { window, document, elementsById } = createFakeDOM('avatar');
+    window.Capacitor = { getPlatform() { return 'android'; }, Plugins: { PokerAudio: fakePlugin } };
+    vm.runInNewContext(source, { window, document });
+    await new Promise(r => setTimeout(r, 10));
+    const setting = elementsById.mobileSoundSetting;
+    const input = setting.querySelector('#mobileSoundPreference');
+    input.checked = false;
+    input.dispatchEvent('change');
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(input.checked, true, 'failed write: the toggle returns to the real native value');
+    assert.equal(setting.hidden, false);
+    readFails = true;
+    input.checked = false;
+    input.dispatchEvent('change');
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(setting.hidden, true, 'state unknown: the control is hidden, not shown as OFF');
+  }
+
   // Host #pokerSocialSettingsPanel: mounts directly before first .poker-social-settings__option
   {
     const calls = [];
