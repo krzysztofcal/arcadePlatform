@@ -218,4 +218,6 @@ test('static guards: root pages contain no mobile/audio references, plugin conta
   assert.ok(!pluginJava.includes('seekTo('), 'PokerAudioPlugin.java must not contain seekTo(');
   assert.ok(!/unlock/i.test(pluginJava), 'native music start must not depend on a user gesture');
   assert.ok(pluginJava.includes('AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK'), 'cues take only brief may-duck focus');
+  assert.ok(pluginJava.includes('releaseCueFocus = this::stopCues'), 'the cue focus timeout stops cues before releasing focus');
+  assert.match(pluginJava, /private void dropFocus\(\) \{[^}]*stopCues\(\);[^}]*abandonAudioFocus\(focus\)/, 'music focus is never abandoned under a playing cue');
 });

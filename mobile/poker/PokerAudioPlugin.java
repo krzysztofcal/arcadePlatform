@@ -44,7 +44,8 @@ public class PokerAudioPlugin extends Plugin {
     private static final long FADE_MS = 600;
     private static final long STEP_MS = 50;
     private static final long STALE_MS = 400;
-    private static final long CUE_FOCUS_MS = 3000;
+    private static final long CUE_MAX_MS = 3000; // longest allowed SFX or dealer line; longer cues are cut
+    private static final long FOCUS_RETRY_MS = 3000;
     private static final int MAX_STREAMS = 4;
     private static final Pattern CUE = Pattern.compile("[a-z0-9_]{1,40}");
 
@@ -92,7 +93,10 @@ public class PokerAudioPlugin extends Plugin {
         if (change != AudioManager.AUDIOFOCUS_GAIN) stopCues();
     });
 
-    private final Runnable releaseCueFocus = this::dropCueFocus;
+    // Cues are stopped before their focus is given up, so nothing plays without focus.
+    private final Runnable releaseCueFocus = this::stopCues;
+
+    private final Runnable retryFocus = () -> sync(true);
 
     private final BroadcastReceiver noisy = new BroadcastReceiver() {
         @Override
@@ -193,6 +197,7 @@ public class PokerAudioPlugin extends Plugin {
         } catch (RuntimeException error) {
             fail(error);
         }
+        main.removeCallbacks(retryFocus);
         focusPaused = false;
         releaseMusic();
         stopCues();
@@ -286,10 +291,15 @@ public class PokerAudioPlugin extends Plugin {
     @SuppressWarnings("deprecation") // one focus API for every supported level (minSdk 24)
     private void sync(boolean fade) {
         try {
+            main.removeCallbacks(retryFocus);
+            // Away from the music pages an interrupted request is not worth keeping: it is released below.
+            if (!musicScene) focusPaused = false;
             boolean want = audible() && musicScene;
             if (want && !focusHeld) {
                 focusHeld = audioManager.requestAudioFocus(focus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
                 ducked = false; // a fresh request never inherits an earlier duck
+                // Refused (e.g. during a call): no GAIN will follow, so ask again while music is still wanted.
+                if (!focusHeld) main.postDelayed(retryFocus, FOCUS_RETRY_MS);
             }
             want = want && focusHeld;
             if (want && player == null) openMusic(); // continues from onPrepared
@@ -326,6 +336,7 @@ public class PokerAudioPlugin extends Plugin {
     @SuppressWarnings("deprecation")
     private void dropFocus() {
         if (!focusHeld || focusPaused) return; // keep the request during a transient loss to hear GAIN
+        stopCues(); // cues that relied on the music focus end with it
         focusHeld = false;
         ducked = false;
         audioManager.abandonAudioFocus(focus);
@@ -404,15 +415,15 @@ public class PokerAudioPlugin extends Plugin {
         }
     }
 
-    // Cues ride on the music focus when it is held; otherwise they take a short may-duck focus
-    // (another app dips instead of stopping) that is released soon after the last cue.
+    // Cues share the music focus on the music pages; elsewhere they take a short may-duck focus
+    // (another app dips instead of stopping). stopCues() ends them before either focus is released.
     @SuppressWarnings("deprecation")
     private boolean takeCueFocus() {
         if (!audible()) return false;
-        if (focusHeld) return true;
+        if (focusHeld) return musicScene; // no new cue on a focus that is about to be released (fade-out)
         if (!cueFocusHeld) cueFocusHeld = audioManager.requestAudioFocus(cueFocus, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
         main.removeCallbacks(releaseCueFocus);
-        if (cueFocusHeld) main.postDelayed(releaseCueFocus, CUE_FOCUS_MS);
+        if (cueFocusHeld) main.postDelayed(releaseCueFocus, CUE_MAX_MS);
         return cueFocusHeld;
     }
 
