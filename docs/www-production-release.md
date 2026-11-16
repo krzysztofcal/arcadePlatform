@@ -25,7 +25,7 @@ Environment-scoped secrets in **both** environments:
 | `NETLIFY_AUTH_TOKEN` | Existing authorized site API access for validation/discard; publisher also restores/relocks |
 | `WS_PROD_SSH` | Existing read-only SSH evidence target (`user@host`) |
 | `WS_PROD_SSH_KEY` | Dedicated evidence-only identity, not `WS_PRODUCTION_SSH_KEY` or an OWNER deployment key |
-| `WS_PROD_KNOWN_HOSTS` | Independently verified host-key pin; never runtime `ssh-keyscan` trust |
+| `WS_PROD_KNOWN_HOSTS` | Independently verified host-key pin, or the explicitly approved one-time Hetzner exception below; never runtime `ssh-keyscan` trust |
 
 Only `www-candidate` additionally holds `NETLIFY_BUILD_HOOK`: the existing main Production hook for `playkcswh`.
 Do not create a parallel hook or use CLI production deploys. Keep Netlify auto publishing locked and `[build].ignore`
@@ -149,7 +149,7 @@ OWNER separately configures these three secrets in **both** `www-candidate` and 
 |---|---|
 | `WS_PROD_SSH` | `arcade-www-read@<verified-current-VPS-host>`; never a deployment or OWNER identity |
 | `WS_PROD_SSH_KEY` | Corresponding dedicated private key, entered directly by OWNER from secure off-VPS custody |
-| `WS_PROD_KNOWN_HOSTS` | OpenSSH known_hosts entry for that exact hostname/port, verified against host public key/fingerprint through an independent trusted OWNER console |
+| `WS_PROD_KNOWN_HOSTS` | OpenSSH known_hosts entry for that exact hostname/port, verified against host public key/fingerprint through an independent trusted OWNER console, subject only to the one-time Hetzner exception below |
 
 Do not trust runtime `ssh-keyscan`, disable strict checking or pin a Hetzner IP/host key in code. A future
 OVH migration repeats trusted provisioning, public-key enrollment and independent host-key verification;
@@ -157,10 +157,52 @@ update endpoint/pin only under separate GO. Never copy the private key onto eith
 only the existing exact `VPS_READ`; interactive sessions, arbitrary commands and forwarding stay disabled.
 It returns the existing `vpsWsRelease()` evidence format with only required public metadata fields.
 
-If SSH policy, permissions, identity, manifest, source SHA or host-key provenance is unverified, release
-activation remains BLOCKED. Do not widen WS permissions or borrow the Preview/deployment key. Key revocation
+If SSH policy, permissions, identity, manifest or source SHA is unverified, release activation remains BLOCKED.
+Unverified host-key provenance also blocks activation unless OWNER explicitly accepts the scoped exception below.
+Do not widen WS permissions or borrow the Preview/deployment key. Key revocation
 uses a reviewed empty public-key asset plus separately approved key-sync; partial failure requires protected
 state inspection without automatic retry. A fresh OWNER-approved empty-asset key-sync can revoke a known
 interrupted enrollment slot even when WS/SSH/wrapper health has drifted; it does not resume the failed action. Existing manual WWW release remains available under its own gates.
 No breaking change to WWW/WS runtime or existing release workflows; this additive admin path requires separate
 installation/configuration/acceptance GO before first use.
+
+
+## One-time Hetzner host-key provenance exception (#1254)
+
+**Proposed security exception; pending explicit OWNER approval.** Preparing or merging this documentation
+alone does not approve the exception or authorize activation. The default remains independent host-key
+verification. Only the first WWW SSH activation on the current Hetzner VPS at `91.98.174.191` may use
+this exception, bound to this exact ED25519 host-key fingerprint:
+
+`SHA256:X6pvnIIAu6NWMpnsOguE5D+J/bo+94o0hlnDhRYQTAQ`
+
+Evidence reported by OWNER for this first activation (2026-11-16):
+
+- An existing historical `known_hosts` entry in OWNER's Termux matches the host public key read on the VPS.
+- The matching ED25519 key has the fingerprint above.
+- The dedicated `arcade-www-read` identity passed the exact `VPS_READ` request and denied shell, PTY and
+  forwarding acceptance tests.
+
+These are OWNER-reported results, not tests repeated by this documentation PR. Historical `known_hosts`
+and OWNER's statement are **not independent cryptographic verification of host identity**. Reading a key
+through the existing VPS connection does not establish an independent trust anchor. Agreement and the
+acceptance tests demonstrate continuity and reader restrictions, but cannot exclude an already compromised
+client/server or an interception present when trust was first established. A falsely trusted host could
+forge WS release evidence and undermine WWW release validation; this residual risk is deliberately accepted
+only through the explicit exception approval, not described as equivalent security.
+
+Before using the exception, OWNER must explicitly approve this security weakening in the PR and retain an
+acceptance record linked to that approval: target IP/SSH port, the exact public OpenSSH `known_hosts` entry,
+its matching fingerprint, the reported comparison/test results and their provenance, and acceptance of the
+residual risk. Missing or inconsistent evidence means **STOP**. Keep private keys and tokens out of that
+record. Configuration and first activation still require their separate OWNER GO; all VPS/WWW Environment
+approvals and other activation gates remain mandatory.
+
+`StrictHostKeyChecking=yes` and the exact public-key pin remain mandatory for every connection, using only
+`arcade-www-read` and its dedicated key. A fingerprint mismatch, unavailable pin or unexpected endpoint
+means **STOP**, fail closed: no automatic replacement, `accept-new`, runtime `ssh-keyscan` trust, alternative
+identity or disabled checking. The one-time exception covers only establishing this initial pin; subsequent
+connections must continue to match it. It grants no exception for key rotation, host rebuild/replacement,
+a different address/port, OVH migration or any other host. Those require independent host-key verification
+and separate OWNER approval under the normal procedure. No SSH code, workflow, secret or VPS configuration
+is changed by documenting this exception, and no WWW build or publication is authorized.

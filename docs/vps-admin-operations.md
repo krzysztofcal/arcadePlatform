@@ -624,7 +624,10 @@ protected-state inspection; it is not a reason to expand Production permissions 
    it verifies known preimage, atomically renames/fsyncs authorization and verifies resulting bytes/state.
    Root:root file/parent ownership, modes and single-link rules reuse `SecureFiles`.
 5. Separately configure the WWW Environment secrets per [WWW SOP](www-production-release.md), with an
-   independently verified SSH host-key pin. Verify exact-command success and denied shell/PTY/forwarding
+   independently verified SSH host-key pin, subject only to its [one-time Hetzner provenance exception](www-production-release.md#one-time-hetzner-host-key-provenance-exception-1254)
+   after explicit OWNER approval. That exception weakens provenance only for the first activation on the
+   specified Hetzner IP/key; strict checking, exact pinning and all other gates remain mandatory, and it
+   does not apply to OVH or another host. Verify exact-command success and denied shell/PTY/forwarding
    through an explicitly authorized read-only acceptance. This is not authorization for a release.
 
 Successful repeats verify state and no-op. A protected transition phase is written before any creation
