@@ -794,13 +794,13 @@ test('T007 combined OWNER/App history keeps the five-run bound and rejects overf
   assert.ok(fx.routes.every(r => r.startsWith('actions/workflows/')), 'no artifact/Netlify operation starts on overflow');
 });
 
-test('T007 inventory refuses orphaned, failed, building or expired unpublished candidates before another hook', () => {
+test('T007 inventory refuses orphaned, failed, building or expired unpublished candidates before another hook', async () => {
   const d = { id, site_id: SITE.id, context: 'production', branch: 'main', title: 'www-candidate:40:1:nonce', commit_ref: ws };
   assert.doesNotThrow(() => actions.assertCandidateInventoryClear([{ ...d, published_at: '2026-11-14T10:00:00Z' }], sha));
   assert.doesNotThrow(() => actions.assertCandidateInventoryClear([], sha));
   for (const state of ['building', 'error', 'ready']) assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, state }], sha), /unreconciled_candidate_deploy_STOP/);
   assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, title: 'unknown marker', commit_ref: sha }], sha), /unreconciled_candidate_deploy_STOP/);
-  assert.throws(() => actions.assertCandidateInventoryClear(Array(100).fill({ ...d, published_at: 't' }), sha), /candidate_inventory_unknown/);
+  await assert.rejects(actions.readCandidateInventory(sha, async () => Array(100).fill({ ...d, published_at: 't' })), /candidate_inventory_unknown/);
   assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, context: 'deploy-preview' }], sha), /candidate_inventory_unknown/);
 });
 test('T007 missing history after discard/artifact expiry remains STOP and requires the supported OWNER path', async () => {
@@ -811,4 +811,21 @@ test('T007 missing history after discard/artifact expiry remains STOP and requir
   const wrongActor = selectionFixture(); const read = wrongActor.options.read;
   wrongActor.options.read = route => route.includes('/workflows/') ? { total_count: 1, workflow_runs: [agentRun()] } : read(route);
   await assert.rejects(actions.resolveCandidate('', sha, wrongActor.options), /candidate_search_actor_mismatch/);
+});
+
+test('T007 real Git-ignore shape is not a Candidate, while marker intents stay blocked and inventory paging is bounded', async () => {
+  // Observed read-only on playkcswh deploy 6afb0e47eea72342372705c1 at main 9b4dca8f: skipped is null, not true.
+  const skipped = { id, site_id: SITE.id, context: 'production', branch: 'main', state: 'error', commit_ref: sha,
+    skipped: null, published_at: null, title: 'merged main commit',
+    error_message: "Failed during stage 'checking build content for changes': Canceled build due to no content change" };
+  assert.doesNotThrow(() => actions.assertCandidateInventoryClear([skipped], sha));
+  for (const patch of [{ title: 'www-candidate:42:1:nonce' }, { state: 'ready' }, { error_message: 'another build error' }]) {
+    assert.throws(() => actions.assertCandidateInventoryClear([{ ...skipped, ...patch }], sha), /unreconciled_candidate_deploy_STOP/);
+  }
+  const pages = [];
+  const inventory = await actions.readCandidateInventory(sha, async page => { pages.push(page); return page === 1 ? Array(100).fill(skipped) : [skipped]; });
+  assert.equal(inventory.length, 101); assert.deepEqual(pages, [1, 2]);
+  const bounded = [];
+  await assert.rejects(actions.readCandidateInventory(sha, async page => { bounded.push(page); return Array(100).fill(skipped); }), /candidate_inventory_unknown/);
+  assert.deepEqual(bounded, [1, 2, 3]);
 });

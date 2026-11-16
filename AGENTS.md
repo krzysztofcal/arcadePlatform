@@ -309,7 +309,8 @@ Task is complete when:
 Codex, Claude Code and Antigravity may request Candidate only after explicit OWNER GO in the current conversation
 and separate activation of the audited main-only agent Environment. No automatic Candidate on merge/CI. Use only
 existing `ghx` as `arcade-code-agent[bot]`; no OWNER credential fallback or local Netlify token/hook call.
-Read current main, active Candidate/Publish runs and existing eligible candidates first; queue conflicts or an
+Read current main, the published deploy commit/lock, active Candidate/Publish runs and existing eligible candidates first;
+if exact main is already LIVE, report that fact and STOP unless OWNER explicitly requested a rebuild; queue conflicts or an
 existing unpublished candidate mean STOP for verified reuse/reconciliation, never silently build a duplicate.
 Dispatch `www-candidate.yml --ref main -f sha=<exact-current-main>` once, wait boundedly for completion and verify
 run identity/SHA/attempt, authentic unexpired artifact, `candidate_ready`, matching `dry_run_pass` and

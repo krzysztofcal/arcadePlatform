@@ -16,6 +16,6 @@ Before starting any work in this repository, read and follow:
 
 Follow AGENTS.md's Agent Candidate operating rule and the WWW SOP. After separate activation and explicit OWNER GO
 in conversation, use only `ghx`/`arcade-code-agent[bot]` to dispatch Candidate once for exact current main, wait and
-verify all receipts/current metadata, then return the ready immutable permalink with PASS/STOP evidence. No manual
-Candidate approval is required only for the separately audited/enabled agent Environment. No merge/CI auto-trigger,
+verify all receipts/current metadata, then return the ready immutable permalink with PASS/STOP evidence. Only the separately audited and enabled agent
+Environment runs without manual Candidate approval. No merge/CI auto-trigger,
 OWNER credentials, duplicate/ambiguous candidate, retry or guessed URL. Publish and its approval stay OWNER-only.

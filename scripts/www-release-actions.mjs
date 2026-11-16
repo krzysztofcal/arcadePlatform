@@ -202,8 +202,9 @@ async function candidate(env) {
   const api = netlifyApi(env.NETLIFY_AUTH_TOKEN);
   const site = await api.site();
   if (site.id !== SITE.id || site.name !== SITE.name || site.published_deploy?.locked !== true) fail('site_identity_or_lock_missing');
-  const before = await apiGet(`/sites/${SITE.id}/deploys?per_page=100${env.GITHUB_ACTOR === AGENT ? '&production=true&branch=main' : ''}`, env);
-  if (env.GITHUB_ACTOR === AGENT) assertCandidateInventoryClear(before, sha);
+  const before = env.GITHUB_ACTOR === AGENT
+    ? await readCandidateInventory(sha, page => apiGet(`/sites/${SITE.id}/deploys?production=true&branch=main&per_page=100&page=${page}`, env))
+    : await apiGet(`/sites/${SITE.id}/deploys?per_page=100`, env);
   const p = { schema: 1, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha, siteId: SITE.id,
     actor: env.GITHUB_ACTOR, triggeringActor: env.GITHUB_TRIGGERING_ACTOR, createdAt: new Date().toISOString(),
     marker: `www-candidate:${env.GITHUB_RUN_ID}:${env.GITHUB_RUN_ATTEMPT}:${randomUUID()}`, status: 'hook_not_called',
@@ -321,11 +322,23 @@ function verifyCandidateSafety(candidate, env) {
   }
 }
 export function assertCandidateInventoryClear(deploys, sha) {
-  // A full bounded production/main page cannot prove there is no older orphan. Never paginate without a bound.
-  if (!Array.isArray(deploys) || deploys.length >= 100 || deploys.some(d => d.site_id !== SITE.id
+  if (!Array.isArray(deploys) || deploys.length > 100 || deploys.some(d => d.site_id !== SITE.id
     || d.context !== 'production' || d.branch !== 'main' || !ID.test(d.id || ''))) fail('candidate_inventory_unknown');
+  const ignoredGitBuild = d => d.state === 'error'
+    && d.error_message === "Failed during stage 'checking build content for changes': Canceled build due to no content change";
   if (deploys.some(d => !d.published_at && (String(d.title || '').startsWith('www-candidate:')
-    || d.commit_ref === sha))) fail('unreconciled_candidate_deploy_STOP');
+    || (d.commit_ref === sha && !ignoredGitBuild(d))))) fail('unreconciled_candidate_deploy_STOP');
+}
+export async function readCandidateInventory(sha, readPage) {
+  const deploys = [];
+  // Skipped Git builds remain in Netlify history. Read at most three complete production/main pages.
+  for (let page = 1; page <= 3; page++) {
+    const batch = await readPage(page);
+    assertCandidateInventoryClear(batch, sha);
+    deploys.push(...batch);
+    if (batch.length < 100) return deploys;
+  }
+  fail('candidate_inventory_unknown'); // No complete negative evidence beyond the fixed bound.
 }
 export async function ensureNoExistingCandidate(sha, options) {
   try { await resolveCandidate('', sha, options); }

@@ -309,11 +309,15 @@ risk. No approval in this implementation is inferred from GO to write code or re
    proof of credential restrictions. It releases secrets to trusted main jobs without per-run OWNER review.
 4. Separate explicit conversation GO for the first exact-main Candidate. Agent uses existing App `ghx`, reads queue
    and successful OWNER/App candidates, and dispatches `www-candidate.yml --ref main -f sha=<exact-main>` once.
-   No merge/CI/scheduled creation. The App path repeats queue checks (the legacy OWNER path is unchanged); any competing Candidate/Publish or incomplete
+   If current main is already LIVE, report it and STOP unless OWNER explicitly requested rebuilding it.
+   Both paths now also recheck main immediately before the hook: a stale OWNER run stops with hook not called.
+   No merge/CI/scheduled creation. The App path repeats queue checks (the legacy OWNER queue behavior is unchanged); any competing Candidate/Publish or incomplete
    history means STOP. Before a bot calls the hook, complete existing-candidate discovery/safety validation must show
-   none eligible. A second bounded Netlify production/main inventory (max 100 entries, a full page is STOP)
+   none eligible. A second bounded Netlify production/main inventory (at most three pages of 100 entries; a full final page is STOP)
    refuses unpublished matching-SHA or `www-candidate:` marker deploys, including failed/expired/building orphans
-   from non-successful runs. Existing/ambiguous/unknown evidence means STOP, never a duplicate build or latest-deploy guess.
+   from non-successful runs. Non-marker Git builds in `error` with the exact observed no-content-change ignore
+   error are not candidates; `skipped` is null on the observed live records. All marker intents still block,
+   even if they carry that error. Unknown/error shapes fail closed. Existing/ambiguous/unknown evidence means STOP, never a duplicate build or latest-deploy guess.
 5. Agent waits boundedly (up to the workflow deadline; read-only polling), then verifies completed/success attempt 1,
    genuine run metadata, matching App actor/triggering_actor/SHA, unexpired unique `www-candidate-1`, `candidate_ready`,
    policy `t007-agent-candidate-v1`/Environment, matching dry-run/static receipts, current main, actual Netlify site/
