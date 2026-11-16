@@ -11,6 +11,11 @@
   # Exit 0 skips, 1 builds; unknown metadata skips. Build-hook builds ignore this (OWNER release candidates only).
   ignore = "[ \"$PULL_REQUEST\" = true ] && exit 1; [ -n \"$BRANCH\" ] && [ \"$BRANCH\" != main ] && exit 1; exit 0"
 
+# WWW release smoke compares canonical legal/account HTML byte-for-byte with the approved commit.
+# Pretty URLs rewrites anchor hrefs/serialization after the build; keep the checked-in HTML intact.
+[build.processing.html]
+  pretty_urls = false
+
 [functions]
   # Function bundling settings
   node_bundler = "esbuild"

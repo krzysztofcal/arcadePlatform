@@ -89,6 +89,11 @@ Legal documents and account page must exactly match the approved commit; legal v
 and Privacy must contain the account-deletion anchor. Build identity, CSP/HSTS and Netlify locked published deploy
 are checked. It never invokes functions, login, deletion, chips, XP, Redis or other mutating API endpoints.
 
+The root `netlify.toml` disables Pretty URLs HTML post-processing so Netlify does not rewrite anchor
+URLs/serialization after the build. Legal/account comparison remains exact; version and deletion-anchor
+checks are not relaxed. This affects newly built HTML only, not existing deploys. Preserve explicit
+`.html` links and the configured redirects; do not enable HTML rewriting to work around a smoke failure.
+
 ## STOP and cleanup
 
 Candidate permalinks expose Production functions. Do not test mutations there or leave candidates abandoned.
@@ -131,8 +136,9 @@ Subsequent records validate the immutable asset plus parent owner run, successfu
 approval history; they do not depend on expiring artifacts. Old direct records remain valid. Record creation never
 publishes Netlify or deploys WS.
 
-No runtime, Netlify routing/build-ignore, WS package, DB schema, browser scripts, CSP configuration or financial
-behavior changes. Existing direct release tooling remains supported until validated cutover. New configuration is
+The original automation implementation changed no runtime, Netlify routing/build-ignore, WS package, DB
+schema, browser scripts, CSP configuration or financial behavior. The later Pretty URLs setting above
+changes HTML link serialization for future builds; explicit redirects and build-ignore remain unchanged. Existing direct release tooling remains supported until validated cutover. New configuration is
 additive; missing environments/secrets/approval/API capability blocks the new workflows. No Production configuration
 has been changed by implementation. No new service or dependency. No Supabase egress (only bounded GitHub/Netlify
 metadata and static GETs at owner release frequency). A future cutover/removal requires measured first-run evidence
