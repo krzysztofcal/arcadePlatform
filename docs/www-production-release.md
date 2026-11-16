@@ -158,7 +158,7 @@ only the existing exact `VPS_READ`; interactive sessions, arbitrary commands and
 It returns the existing `vpsWsRelease()` evidence format with only required public metadata fields.
 
 If SSH policy, permissions, identity, manifest or source SHA is unverified, release activation remains BLOCKED.
-Unverified host-key provenance also blocks activation unless OWNER explicitly accepts the scoped exception below.
+Unverified host-key provenance also blocks activation unless the scoped exception below is approved and all its conditions hold.
 Do not widen WS permissions or borrow the Preview/deployment key. Key revocation
 uses a reviewed empty public-key asset plus separately approved key-sync; partial failure requires protected
 state inspection without automatic retry. A fresh OWNER-approved empty-asset key-sync can revoke a known
@@ -169,19 +169,20 @@ installation/configuration/acceptance GO before first use.
 
 ## One-time Hetzner host-key provenance exception (#1254)
 
-**Proposed security exception; pending explicit OWNER approval.** Preparing or merging this documentation
-alone does not approve the exception or authorize activation. The default remains independent host-key
+**Security exception proposal; approval/use status is recorded in issue #1254 as specified below.**
+Absent that record, the exception is not approved: **STOP**. Preparing, approving review of, or merging
+this documentation alone does not approve the exception or authorize activation. The default remains independent host-key
 verification. Only the first WWW SSH activation on the current Hetzner VPS at `91.98.174.191` may use
 this exception, bound to this exact ED25519 host-key fingerprint:
 
 `SHA256:X6pvnIIAu6NWMpnsOguE5D+J/bo+94o0hlnDhRYQTAQ`
 
-Evidence reported by OWNER for this first activation (2026-11-16):
+Evidence reported by OWNER on 2026-11-16 for the proposed first activation:
 
 - An existing historical `known_hosts` entry in OWNER's Termux matches the host public key read on the VPS.
 - The matching ED25519 key has the fingerprint above.
-- The dedicated `arcade-www-read` identity passed the exact `VPS_READ` request and denied shell, PTY and
-  forwarding acceptance tests.
+- For the dedicated `arcade-www-read` identity, the exact `VPS_READ` request succeeded; shell, PTY and
+  forwarding attempts were denied.
 
 These are OWNER-reported results, not tests repeated by this documentation PR. Historical `known_hosts`
 and OWNER's statement are **not independent cryptographic verification of host identity**. Reading a key
@@ -189,13 +190,28 @@ through the existing VPS connection does not establish an independent trust anch
 acceptance tests demonstrate continuity and reader restrictions, but cannot exclude an already compromised
 client/server or an interception present when trust was first established. A falsely trusted host could
 forge WS release evidence and undermine WWW release validation; this residual risk is deliberately accepted
-only through the explicit exception approval, not described as equivalent security.
+only through the explicit exception approval, not described as equivalent security. Although establishment
+of the pin is a one-time action, this residual risk persists for every later candidate/publication using
+that pin until independent verification succeeds or the key is replaced under the normal procedure.
 
-Before using the exception, OWNER must explicitly approve this security weakening in the PR and retain an
-acceptance record linked to that approval: target IP/SSH port, the exact public OpenSSH `known_hosts` entry,
-its matching fingerprint, the reported comparison/test results and their provenance, and acceptance of the
-residual risk. Missing or inconsistent evidence means **STOP**. Keep private keys and tokens out of that
-record. Configuration and first activation still require their separate OWNER GO; all VPS/WWW Environment
+Before use, OWNER must post a distinct written exception-approval comment in
+[issue #1254](https://github.com/krzysztofcal/arcadePlatform/issues/1254), linking this documentation PR.
+An approving PR review or merge alone is insufficient. The comment must explicitly name `91.98.174.191`,
+the actual SSH port and fingerprint, accept the ongoing residual risk above, and retain the exact public
+OpenSSH `known_hosts` entry and the reported comparison/test results with their provenance. The port is
+not established by this documentation; absent its explicit binding in that record means **STOP**.
+Use the IP literal in the SSH endpoint and corresponding exact IP/port `known_hosts` entry. Obtain the
+pin and comparison from OWNER's own historical entry and retained evidence, never by copying a pin from
+this document. Missing or inconsistent evidence means **STOP**; keep private keys and tokens out of the record.
+
+OWNER must append a consumed status to the same issue record once the initial pin is configured, with
+the date and a reference to the separate configuration GO. No record means not approved; an approved
+record without a consumed entry is not proof that configuration completed. Inspect actual configuration
+before further action; never repeat configuration automatically. Initial configuration of this same pin
+in both `www-candidate` and `www-production` is covered as one enrollment, not a new exception per
+Environment. Later re-entry of the identical pin for the identical host/port remains bound to this
+acceptance record and needs separate configuration GO; it does not renew or widen the exception.
+Configuration and first activation still require their separate OWNER GO; all VPS/WWW Environment
 approvals and other activation gates remain mandatory.
 
 `StrictHostKeyChecking=yes` and the exact public-key pin remain mandatory for every connection, using only

@@ -625,8 +625,9 @@ protected-state inspection; it is not a reason to expand Production permissions 
    Root:root file/parent ownership, modes and single-link rules reuse `SecureFiles`.
 5. Separately configure the WWW Environment secrets per [WWW SOP](www-production-release.md), with an
    independently verified SSH host-key pin, subject only to its [one-time Hetzner provenance exception](www-production-release.md#one-time-hetzner-host-key-provenance-exception-1254)
-   after explicit OWNER approval. That exception weakens provenance only for the first activation on the
-   specified Hetzner IP/key; strict checking, exact pinning and all other gates remain mandatory, and it
+   after explicit OWNER approval. That exception permits one-time establishment of the specified Hetzner pin; its residual provenance
+   risk persists in later uses until independent verification or normal replacement. Its approval/use
+   record in issue #1254 is mandatory. Strict checking, exact pinning and all other gates remain mandatory; it
    does not apply to OVH or another host. Verify exact-command success and denied shell/PTY/forwarding
    through an explicitly authorized read-only acceptance. This is not authorization for a release.
 
@@ -639,5 +640,6 @@ public-asset PR and approved key-sync; an empty asset disables only this owned s
 Updating installed wrapper code is intentionally outside these two actions: a staged-code mismatch with
 an existing wrapper blocks preparation/enrollment, but never blocks approved revocation of the known slot. Any future code upgrade needs a separately reviewed approved procedure.
 No existing SSH identities, WS workflows/runtime, financial behavior or manual WWW release path changes.
-The only new installed authority after enrollment is this fixed evidence read. Actual provisioning and
-first SSH acceptance remain pending; this PR alone does not remove the activation blocker.
+The only new installed authority after enrollment is this fixed evidence read. In the original implementation PR, provisioning and first SSH acceptance remained pending;
+that implementation alone did not remove the activation blocker. Consult the WWW SOP and current OWNER
+evidence/approval record for activation status.
