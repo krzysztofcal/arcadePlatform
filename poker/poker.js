@@ -1495,7 +1495,6 @@
     var lobbyAuthenticated = false;
     var lobbyIdentity = null;
     var lobbyIdentityGeneration = 0;
-    var dailyDialog = document.getElementById('dailyDialog');
     var dailyClaimButton = document.getElementById('dailyClaim');
     var dailySignInButton = document.getElementById('dailySignIn');
     var dailyStatusMessage = document.getElementById('dailyDisclaimer');
@@ -1512,6 +1511,11 @@
     var bonusCampaignsFetchedAt = 0;
     var bonusCampaignsExpiresAt = 0;
 
+    function isBonusViewOpen(){
+      var pokerBonusView = document.getElementById('pokerBonusView');
+      return !!(pokerBonusView && !pokerBonusView.hidden);
+    }
+
     function clearDailyFlyin(){
       clearTimeout(dailyFlyinTimer);
       dailyFlyinTimer = null;
@@ -1520,9 +1524,7 @@
 
     function showDailyFlyin(result){
       clearDailyFlyin();
-      var pokerBonusView = document.getElementById('pokerBonusView');
-      var isBonusOpen = (dailyDialog && dailyDialog.open) || (pokerBonusView && !pokerBonusView.hidden);
-      if (!dailyFlyin || !isBonusOpen || document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      if (!dailyFlyin || !isBonusViewOpen() || document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       dailyFlyin.querySelector('strong').textContent = '+' + result.amount + ' CH';
       dailyFlyin.querySelector('span').textContent = 'STREAK DAY ' + result.streakDay;
       dailyFlyin.hidden = false;
@@ -1531,7 +1533,7 @@
 
     function renderDailyBonus(message){
       var pokerBonusView = document.getElementById('pokerBonusView');
-      var bonusContainer = pokerBonusView || dailyDialog;
+      var bonusContainer = pokerBonusView;
       if (!bonusContainer) return;
       var status = dailyState;
       var canClaim = !!(lobbyAuthenticated && status && status.eligible && !status.alreadyClaimed);
@@ -1607,9 +1609,7 @@
     function scheduleDailyReset(){
       clearTimeout(dailyResetTimer);
       dailyResetTimer = null;
-      var pokerBonusView = document.getElementById('pokerBonusView');
-      var isBonusOpen = (dailyDialog && dailyDialog.open) || (pokerBonusView && !pokerBonusView.hidden);
-      if (isBonusOpen && bonusCampaignsFetchedAt){
+      if (isBonusViewOpen() && bonusCampaignsFetchedAt){
         var delay = bonusCampaignsExpiresAt - Date.now();
         if (delay > 0) dailyResetTimer = setTimeout(function(){
           invalidateBonusCampaigns();
@@ -1647,9 +1647,7 @@
       renderDailyBonus();
       try {
         var status = await refreshDailyBonus(true);
-        var pokerBonusView = document.getElementById('pokerBonusView');
-        var isBonusOpen = (dailyDialog && dailyDialog.open) || (pokerBonusView && !pokerBonusView.hidden);
-        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated || !isBonusOpen || !status || !status.eligible || status.alreadyClaimed) return;
+        if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated || !isBonusViewOpen() || !status || !status.eligible || status.alreadyClaimed) return;
         var claimStartedAt = Date.now();
         var result = await window.ChipsClient.claimBonusCampaign(status.code);
         if (identity !== lobbyIdentityGeneration || !lobbyAuthenticated) return;
@@ -1677,12 +1675,8 @@
         }
       }
     }
-    if (dailySignInButton) dailySignInButton.addEventListener('click', function(){
-      if (dailyDialog && typeof dailyDialog.close === 'function') dailyDialog.close();
-      openSignIn();
-    });
+    if (dailySignInButton) dailySignInButton.addEventListener('click', openSignIn);
     if (dailyClaimButton) dailyClaimButton.addEventListener('click', claimDailyBonus);
-    if (dailyDialog) dailyDialog.addEventListener('close', function(){ clearTimeout(dailyResetTimer); clearDailyFlyin(); });
 
     var authCheckGeneration = 0;
     var createBtn = document.getElementById('pokerCreate');
@@ -1740,7 +1734,6 @@
 
     document.querySelectorAll('[data-panel]').forEach(function(button){ button.addEventListener('click', function(){
       var dialog = document.getElementById(button.dataset.panel + 'Dialog');
-      if (button.dataset.panel === 'daily') { openDailyBonus(); return; }
       if (dialog && !dialog.open && dialog.showModal) dialog.showModal();
     }); });
     document.querySelectorAll('[data-close]').forEach(function(button){ button.addEventListener('click', function(){
@@ -1779,30 +1772,16 @@
     var mobileAuthReady = false;
     function setMobileLobbyView(view){
       if (!window.MOBILE_POKER_CONFIG) return;
-      if (view === 'modes' && dailyDialog && dailyDialog.open) view = 'bonus';
       if (document.body.dataset.mobileLobbyView === view) return;
       document.body.dataset.mobileLobbyView = view;
       document.dispatchEvent(new CustomEvent('poker:lobby-view', {detail:{view:view}}));
-    }
-
-    function openDailyBonus(){
-      if (dailyDialog){
-        if (window.MOBILE_POKER_CONFIG) showLobbyView('modes', false);
-        if (!dailyDialog.open && dailyDialog.showModal) dailyDialog.showModal();
-        setMobileLobbyView('bonus');
-        refreshDailyBonus().catch(function(){ dailyLoadError = true; renderDailyBonus(); });
-      } else {
-        showLobbyView('bonus');
-      }
     }
 
     function applyMobileLobbyLink(){
       if (!window.MOBILE_POKER_CONFIG || !mobileAuthReady || !mobileLinkPending) return;
       mobileLinkPending = false;
       var view = (window.location.hash || '').slice(1);
-      if (view === 'bonus') { openDailyBonus(); return; }
-      if (dailyDialog && dailyDialog.open && dailyDialog.close) dailyDialog.close();
-      showLobbyView(['modes','tables','progression'].indexOf(view) !== -1 ? view : 'modes');
+      showLobbyView(['modes','tables','progression','bonus'].indexOf(view) !== -1 ? view : 'modes');
     }
 
     function applyLobbyHash(){
@@ -1819,12 +1798,6 @@
         applyLobbyHash();
       }
     });
-
-    if (dailyDialog && dailyDialog.addEventListener) {
-      dailyDialog.addEventListener('close', function(){
-        if (document.body.dataset.mobileLobbyView === 'bonus') setMobileLobbyView('modes');
-      });
-    }
 
     function updateBonusDot(){
       var dot = document.getElementById('pokerBonusDot');
@@ -1858,6 +1831,10 @@
       if (view === 'progression'){
         if (pokerProgressionLocked) pokerProgressionLocked.hidden = lobbyAuthenticated;
         if (pokerProgressionContent) pokerProgressionContent.hidden = !lobbyAuthenticated;
+      }
+      if (view !== 'bonus'){
+        clearTimeout(dailyResetTimer);
+        clearDailyFlyin();
       }
       if (view === 'bonus'){
         if (lobbyAuthenticated){
@@ -2507,7 +2484,7 @@
         selectedSingleBuyIn = null;
         renderQuickTiers();
         renderSingleTiers();
-        showLobbyView('modes', false);
+        showLobbyView(isBonusViewOpen() ? 'bonus' : 'modes', false);
         stopLobbyWs();
         setWelcomeBonusBannerVisible(false);
         if (authMsg) authMsg.hidden = false;
@@ -2536,7 +2513,7 @@
       stopAuthWatch();
       refreshWelcomeBonusBanner();
       refreshProgression();
-      if (dailyDialog && dailyDialog.open) refreshDailyBonus();
+      if (isBonusViewOpen()) refreshDailyBonus();
       mobileAuthReady = true;
       if (window.MOBILE_POKER_CONFIG){
         applyMobileLobbyLink();
@@ -2640,7 +2617,7 @@
       refreshWelcomeBonusBanner();
       refreshProgression();
       refreshLobby('visibility');
-      if (dailyDialog && dailyDialog.open) refreshDailyBonus();
+      if (isBonusViewOpen()) refreshDailyBonus();
     }
 
     function isCanonicalTableForTier(table, tier){
