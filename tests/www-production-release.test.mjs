@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
+import { runInNewContext } from 'node:vm';
 import path from 'node:path';
 import { SITE, activeWsRelease, candidateFailures, discardCandidate, expectedCsp, githubWsRelease, headerFailures, parseBuildInfo, phrase, publishLocked, vpsWsRelease, wsPackagedPaths, wsSurfaceChanged } from '../scripts/www-production-release.mjs';
 
@@ -608,7 +609,11 @@ function selectionFixture(items = [{ run: ownerRun(), p: selectionProvenance() }
     options: { now: () => Date.parse('2026-11-15T10:05:00Z'),
       read(route) {
         routes.push(route);
-        if (route.startsWith('actions/workflows/www-candidate.yml/runs?')) return { total_count: total, workflow_runs: items.map(x => x.run) };
+        if (route.startsWith('actions/workflows/www-candidate.yml/runs?')) {
+          const actor = new URLSearchParams(route.split('?')[1]).get('actor');
+          const runs = items.map(x => x.run).filter(r => r.actor.login === actor);
+          return { total_count: total === items.length ? runs.length : total, workflow_runs: runs };
+        }
         const match = /actions\/runs\/(\d+)\/(attempts\/1|artifacts\?per_page=100)/.exec(route);
         assert.ok(match, route);
         const item = items.find(x => String(x.run.id) === match[1]); assert.ok(item);
@@ -692,4 +697,135 @@ test('automatic selection enforces the 48-hour boundary and refuses a changed cu
   const changed = selectionFixture(); changed.options.now = () => Date.parse('2026-11-16T10:00:00Z');
   await assert.rejects(actions.resolveCandidate('', ws, changed.options), /candidate_search_sha_mismatch/);
   assert.deepEqual(changed.verified, [], 'a longer lifetime does not authorize publishing an older main SHA');
+});
+
+
+// T007: only Candidate trust expands; Publish/record ownership never does.
+const agentLogin = 'arcade-code-agent[bot]';
+const agentRun = (over = {}) => ownerRun({ actor: { login: agentLogin }, triggering_actor: { login: agentLogin }, ...over });
+const agentProvenance = (over = {}) => selectionProvenance({ actor: agentLogin, triggeringActor: agentLogin,
+  environment: 'www-candidate-agent', executionPolicy: 't007-agent-candidate-v1', ...over });
+test('T007 Candidate accepts only exact OWNER or App actor pairs and binds artifact provenance to the real run', () => {
+  const now = Date.parse('2026-11-15T10:05:00Z');
+  assert.doesNotThrow(() => actions.validateCandidate(agentRun(), agentProvenance(), 'krzysztofcal', now));
+  assert.doesNotThrow(() => actions.validateCandidate(ownerRun(), provenance(), 'krzysztofcal', now));
+  for (const run of [agentRun({ triggering_actor: { login: 'krzysztofcal' } }), agentRun({ actor: { login: 'attacker' } }),
+    agentRun({ run_attempt: 2 }), agentRun({ head_branch: 'feature' }), agentRun({ path: '.github/workflows/www-publish.yml' }),
+    agentRun({ repository: { full_name: 'attacker/arcadePlatform' } })]) {
+    assert.throws(() => actions.validateCandidate(run, agentProvenance(), 'krzysztofcal', now));
+  }
+  for (const p of [provenance(), agentProvenance({ actor: 'krzysztofcal' }), agentProvenance({ environment: 'www-candidate' }),
+    agentProvenance({ executionPolicy: undefined }), { ...agentProvenance(), validation: null }, agentProvenance({ sha: ws })]) {
+    assert.throws(() => actions.validateCandidate(agentRun(), p, 'krzysztofcal', now));
+  }
+  assert.throws(() => actions.trustedOwnerRun(agentRun({ path: '.github/workflows/www-publish.yml' }), 'krzysztofcal', 'www-publish'));
+  assert.throws(() => actions.trustedOwnerRun(agentRun({ path: '.github/workflows/release-record.yml' }), 'krzysztofcal', 'release-record'));
+});
+test('T007 agent environment requires an explicit opt-in and exact main-only policy without reviewers or unknown rules', () => {
+  const settings = { can_admins_bypass: false, protection_rules: [{ type: 'branch_policy' }],
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false } };
+  const branches = { branch_policies: [{ name: 'main', type: 'branch' }] };
+  assert.deepEqual(actions.environmentFailures(settings, branches, 'krzysztofcal', true), []);
+  assert.ok(actions.environmentFailures({ ...settings, protection_rules: [{ type: 'wait_timer' }] }, branches, 'krzysztofcal', true).length);
+  assert.ok(actions.environmentFailures(settings, { branch_policies: [{ name: '*', type: 'branch' }] }, 'krzysztofcal', true).length);
+  const env = { GITHUB_REPOSITORY: 'krzysztofcal/arcadePlatform', GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'workflow_dispatch',
+    GITHUB_ACTOR: agentLogin, GITHUB_TRIGGERING_ACTOR: agentLogin, GITHUB_RUN_ATTEMPT: '1', GITHUB_RUN_ID: '42', GITHUB_SHA: sha,
+    GITHUB_WORKFLOW_REF: 'krzysztofcal/arcadePlatform/.github/workflows/www-candidate.yml@refs/heads/main' };
+  assert.throws(() => actions.trustedDispatch('www-candidate', env, agentRun()), /agent_candidate_disabled/);
+  assert.doesNotThrow(() => actions.trustedDispatch('www-candidate', { ...env, WWW_AGENT_CANDIDATE_ENABLED: 'true' }, agentRun()));
+  assert.throws(() => actions.trustedDispatch('www-candidate', { ...env, WWW_AGENT_CANDIDATE_ENABLED: 'true' }, agentRun({ head_sha: ws })));
+  assert.throws(() => actions.trustedDispatch('www-publish', { ...env, GITHUB_WORKFLOW_REF: 'krzysztofcal/arcadePlatform/.github/workflows/www-publish.yml@refs/heads/main', WWW_AGENT_CANDIDATE_ENABLED: 'true' }, agentRun({ path: '.github/workflows/www-publish.yml' })));
+});
+test('T007 OWNER selection accepts verified App candidates explicitly and automatically, retaining mixed-actor ambiguity STOP', async () => {
+  const bot = { run: agentRun(), p: agentProvenance() };
+  assert.equal((await actions.resolveCandidate('', sha, selectionFixture([bot]).options)).runId, '42');
+  assert.equal((await actions.resolveCandidate('42', sha, selectionFixture([bot]).options)).actor, agentLogin);
+  const both = selectionFixture([bot, { run: ownerRun({ id: 43 }), p: selectionProvenance({ runId: '43', deployId: 'e'.repeat(24) }) }]);
+  await assert.rejects(actions.resolveCandidate('', sha, both.options), /ambiguous_candidates/);
+});
+test('T007 queue preflight refuses competing Candidate or Publish runs and incomplete history', () => {
+  const self = { id: 42, path: '.github/workflows/www-candidate.yml' };
+  assert.doesNotThrow(() => actions.checkCandidateQueue('42', () => ({ total_count: 1, workflow_runs: [self] })));
+  for (const path of ['www-candidate', 'www-publish']) {
+    assert.throws(() => actions.checkCandidateQueue('42', () => ({ total_count: 2, workflow_runs: [self, { id: 43, path: '.github/workflows/' + path + '.yml' }] })), /release_queue_conflict/);
+  }
+  assert.throws(() => actions.checkCandidateQueue('42', () => ({ total_count: 101, workflow_runs: [] })), /release_queue_unknown/);
+});
+
+test('T007 refuses duplicate builds before hook and never turns uncertainty or ambiguity into permission to build', async () => {
+  await assert.doesNotReject(actions.ensureNoExistingCandidate(sha, selectionFixture([]).options));
+  await assert.rejects(actions.ensureNoExistingCandidate(sha, selectionFixture().options), /existing_candidate_requires_verified_reuse_or_owner_discard/);
+  const fx = selectionFixture(); fx.options.verify = () => { throw new Error('ws_or_netlify_unknown'); };
+  await assert.rejects(actions.ensureNoExistingCandidate(sha, fx.options), /ws_or_netlify_unknown/);
+  const mixed = selectionFixture([{ run: agentRun(), p: agentProvenance() },
+    { run: ownerRun({ id: 43 }), p: selectionProvenance({ runId: '43', deployId: 'e'.repeat(24) }) }]);
+  await assert.rejects(actions.ensureNoExistingCandidate(sha, mixed.options), /ambiguous_candidates/);
+  const published = selectionFixture([{ run: ownerRun(), p: selectionProvenance(), eligible: false }]);
+  await assert.doesNotReject(actions.ensureNoExistingCandidate(sha, published.options));
+});
+
+test('T007 workflow gate admits only enabled App Candidate or OWNER, while Publish still rejects the App', () => {
+  const source = name => fs.readFileSync(new URL('../.github/workflows/' + name + '.yml', import.meta.url), 'utf8');
+  const condition = name => /    if: \$\{\{ (.+) \}\}/.exec(source(name))[1];
+  for (const [actor, trigger, enabled, attempt, ref, candidateAllowed, publishAllowed] of [
+    ['krzysztofcal', 'krzysztofcal', '', 1, 'refs/heads/main', true, true],
+    [agentLogin, agentLogin, 'true', 1, 'refs/heads/main', true, false],
+    [agentLogin, agentLogin, '', 1, 'refs/heads/main', false, false],
+    [agentLogin, 'krzysztofcal', 'true', 1, 'refs/heads/main', false, false],
+    ['attacker', 'attacker', 'true', 1, 'refs/heads/main', false, false],
+    [agentLogin, agentLogin, 'true', 2, 'refs/heads/main', false, false],
+    [agentLogin, agentLogin, 'true', 1, 'refs/heads/feature', false, false]
+  ]) {
+    const context = { github: { event_name: 'workflow_dispatch', ref, actor, triggering_actor: trigger, run_attempt: attempt, repository_owner: 'krzysztofcal' }, vars: { WWW_AGENT_CANDIDATE_ENABLED: enabled } };
+    assert.equal(runInNewContext(condition('www-candidate'), context), candidateAllowed);
+    assert.equal(runInNewContext(condition('www-publish'), context), publishAllowed);
+  }
+});
+
+test('T007 combined OWNER/App history keeps the five-run bound and rejects overflow before candidate reads', async () => {
+  const items = Array.from({ length: 6 }, (_, i) => ({
+    run: i < 3 ? ownerRun({ id: 42 + i }) : agentRun({ id: 42 + i }),
+    p: i < 3 ? selectionProvenance({ runId: String(42 + i), deployId: i.toString(16).repeat(24) })
+      : agentProvenance({ runId: String(42 + i), deployId: i.toString(16).repeat(24) })
+  }));
+  const fx = selectionFixture(items);
+  await assert.rejects(actions.resolveCandidate('', sha, fx.options), /candidate_search_incomplete/);
+  assert.deepEqual(fx.verified, []);
+  assert.ok(fx.routes.every(r => r.startsWith('actions/workflows/')), 'no artifact/Netlify operation starts on overflow');
+});
+
+test('T007 inventory refuses orphaned, failed, building or expired unpublished candidates before another hook', async () => {
+  const d = { id, site_id: SITE.id, context: 'production', branch: 'main', title: 'www-candidate:40:1:nonce', commit_ref: ws };
+  assert.doesNotThrow(() => actions.assertCandidateInventoryClear([{ ...d, published_at: '2026-11-14T10:00:00Z' }], sha));
+  assert.doesNotThrow(() => actions.assertCandidateInventoryClear([], sha));
+  for (const state of ['building', 'error', 'ready']) assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, state }], sha), /unreconciled_candidate_deploy_STOP/);
+  assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, title: 'unknown marker', commit_ref: sha }], sha), /unreconciled_candidate_deploy_STOP/);
+  await assert.rejects(actions.readCandidateInventory(sha, async () => Array(100).fill({ ...d, published_at: 't' })), /candidate_inventory_unknown/);
+  assert.throws(() => actions.assertCandidateInventoryClear([{ ...d, context: 'deploy-preview' }], sha), /candidate_inventory_unknown/);
+});
+test('T007 missing history after discard/artifact expiry remains STOP and requires the supported OWNER path', async () => {
+  const gone = selectionFixture(); gone.options.verify = () => { throw new Error('release_not_published_STOP'); };
+  await assert.rejects(actions.ensureNoExistingCandidate(sha, gone.options), /release_not_published_STOP/);
+  const expired = selectionFixture([{ run: ownerRun(), p: selectionProvenance(), artifacts: [{ name: 'www-candidate-1', expired: true }] }]);
+  await assert.rejects(actions.ensureNoExistingCandidate(sha, expired.options), /candidate_artifact_missing_or_ambiguous/);
+  const wrongActor = selectionFixture(); const read = wrongActor.options.read;
+  wrongActor.options.read = route => route.includes('/workflows/') ? { total_count: 1, workflow_runs: [agentRun()] } : read(route);
+  await assert.rejects(actions.resolveCandidate('', sha, wrongActor.options), /candidate_search_actor_mismatch/);
+});
+
+test('T007 real Git-ignore shape is not a Candidate, while marker intents stay blocked and inventory paging is bounded', async () => {
+  // Observed read-only on playkcswh deploy 6afb0e47eea72342372705c1 at main 9b4dca8f: skipped is null, not true.
+  const skipped = { id, site_id: SITE.id, context: 'production', branch: 'main', state: 'error', commit_ref: sha,
+    skipped: null, published_at: null, title: 'merged main commit',
+    error_message: "Failed during stage 'checking build content for changes': Canceled build due to no content change" };
+  assert.doesNotThrow(() => actions.assertCandidateInventoryClear([skipped], sha));
+  for (const patch of [{ title: 'www-candidate:42:1:nonce' }, { state: 'ready' }, { error_message: 'another build error' }]) {
+    assert.throws(() => actions.assertCandidateInventoryClear([{ ...skipped, ...patch }], sha), /unreconciled_candidate_deploy_STOP/);
+  }
+  const pages = [];
+  const inventory = await actions.readCandidateInventory(sha, async page => { pages.push(page); return page === 1 ? Array(100).fill(skipped) : [skipped]; });
+  assert.equal(inventory.length, 101); assert.deepEqual(pages, [1, 2]);
+  const bounded = [];
+  await assert.rejects(actions.readCandidateInventory(sha, async page => { bounded.push(page); return Array(100).fill(skipped); }), /candidate_inventory_unknown/);
+  assert.deepEqual(bounded, [1, 2, 3]);
 });
