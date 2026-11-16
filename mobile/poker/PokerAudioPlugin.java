@@ -83,6 +83,7 @@ public class PokerAudioPlugin extends Plugin {
             hold = true;
         } else return;
         if (!canPlay()) stopCues();
+        else duckCues();
         sync(canPlay());
     });
 
@@ -396,7 +397,8 @@ public class PokerAudioPlugin extends Plugin {
 
     private boolean startCue(int id, boolean voice) {
         if (voice && voiceStream != 0) pool.stop(voiceStream); // one dealer line at a time
-        int stream = pool.play(id, 1f, 1f, voice ? 2 : 1, 0, 1f);
+        float level = ducked ? DUCK : 1f;
+        int stream = pool.play(id, level, level, voice ? 2 : 1, 0, 1f);
         if (stream == 0) return false;
         if (voice) voiceStream = stream;
         else {
@@ -404,6 +406,18 @@ public class PokerAudioPlugin extends Plugin {
             if (streams.size() > MAX_STREAMS) pool.stop(streams.remove());
         }
         return true;
+    }
+
+    // Active cues follow the same duck/restore as the music.
+    private void duckCues() {
+        float level = ducked ? DUCK : 1f;
+        try {
+            if (pool == null) return;
+            if (voiceStream != 0) pool.setVolume(voiceStream, level, level);
+            for (int stream : streams) pool.setVolume(stream, level, level);
+        } catch (RuntimeException error) {
+            fail(error);
+        }
     }
 
     private void stopCues() {
