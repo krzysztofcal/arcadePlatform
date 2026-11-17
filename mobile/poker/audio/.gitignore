@@ -1,0 +1,2 @@
+# #1146: decrypted licensed lobby music exists only inside APK builds; never commit it.
+lobby.mp3

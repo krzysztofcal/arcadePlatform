@@ -98,19 +98,15 @@ test('approved legal content, both policy versions and deletion links survive th
 
     const audioJs = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio.js'), 'utf8');
     assert.ok(audioJs.includes('MobilePokerAudio'), 'www/mobile/audio.js must be packaged');
-    const audioWav = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio/lobby.wav'));
     const bonusWav = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio/bonus_coins.mp3'));
     const audioManifest = JSON.parse(await readFile(path.join(root, 'mobile/poker/audio/manifest.json'), 'utf8'));
-    const lobbyEntry = audioManifest.assets.find(a => a.file === 'lobby.wav');
     const bonusEntry = audioManifest.assets.find(a => a.file === 'bonus_coins.mp3');
-    assert.ok(lobbyEntry, 'manifest must contain lobby entry');
     assert.ok(bonusEntry, 'manifest must contain bonus entry');
-    const wavSha256 = createHash('sha256').update(audioWav).digest('hex');
-    assert.equal(wavSha256, lobbyEntry.sha256, 'packaged wav sha256 must equal the manifest');
     const bonusSha256 = createHash('sha256').update(bonusWav).digest('hex');
     assert.equal(bonusSha256, bonusEntry.sha256, 'packaged bonus_coins.mp3 sha256 must equal the manifest');
-    assert.equal(receipt.audio.files.length, 2, 'receipt lists both audio files');
-    assert.ok(receipt.audio.files.some(f => f.name === 'lobby.wav' && f.sha256 === lobbyEntry.sha256), 'receipt includes lobby.wav');
+    // The licensed lobby track is only decrypted in the APK workflow: the encrypted file is never packaged.
+    assert.ok(!receipt.audio.files.some(f => f.name.endsWith('.enc')), 'encrypted audio is never packaged');
+    await assert.rejects(readFile(path.join(fixture, 'mobile/poker/www/mobile/audio/lobby.mp3.enc')));
     assert.ok(receipt.audio.files.some(f => f.name === 'bonus_coins.mp3' && f.sha256 === bonusEntry.sha256), 'receipt includes bonus_coins.mp3');
 
     const table = await readFile(path.join(fixture, 'mobile/poker/www/poker/table-v2.html'), 'utf8');
