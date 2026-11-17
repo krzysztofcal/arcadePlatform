@@ -1,17 +1,26 @@
 {
   "assets": [
     {
-      "file": "lobby.wav",
+      "file": "lobby.mp3",
+      "encryptedFile": "lobby.mp3.enc",
       "cue": "lobby",
-      "durationSeconds": 14,
-      "format": "wav",
-      "bytes": 617444,
-      "sha256": "d01d2a45c6940f210d1d26071d6649a2da03de96912556bc8a3985f6b9827943",
-      "creationMethod": "mobile/poker/audio/generate-lobby-loop.mjs",
-      "creator": "Arcade Platform project — procedurally synthesized, no third-party samples or recordings",
-      "license": "Project-owned original work; same terms as the repository",
+      "title": "Card Games (Lo-fi Chill)",
+      "author": "snoozybeats",
+      "sourceUrl": "https://pixabay.com/music/beats-card-games-lofi-chill-315489/",
+      "license": "Pixabay Content License (third-party; not CC0, not MIT). Use inside the APK is permitted; the unmodified recording must not be redistributed standalone.",
+      "contentId": "Content ID Registered (Pixabay listing, as reported by OWNER)",
+      "aiGenerated": "AI-generated (Pixabay listing, as reported by OWNER)",
+      "obtained": "Downloaded from Pixabay by OWNER and supplied as snoozybeats-card-games-lofi-chill-315489.mp3 on 2026-11-17 (automated access to Pixabay is blocked by its bot protection)",
+      "storage": "Repository holds only lobby.mp3.enc (AES-256-GCM, file name authenticated). The Android APK workflow decrypts it with the MOBILE_LOBBY_MUSIC_KEY secret and fails if the key, authentication or checksum is wrong.",
+      "transformation": "none: the decrypted file is the supplied MP3 byte-for-byte",
+      "format": "mp3",
+      "codec": "MPEG-1 Layer III, 256 kbps, 48000 Hz, joint stereo",
+      "durationSeconds": 240.0,
+      "peakDbfs": -0.9,
+      "bytes": 7680768,
+      "sha256": "277f149f3d4fe8e6ddd76b38019fdc6e8ca2f8b50a65eb5609f06af19fdf5556",
       "targetGain": 0.35,
-      "status": "PR1 test loop — pending OWNER audition"
+      "status": "OWNER-selected replacement for the rejected synthetic loop; pending OWNER phone test"
     },
     {
       "file": "bonus_coins.mp3",

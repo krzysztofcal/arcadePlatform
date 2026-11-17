@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import security from './security.cjs';
+import { assertLobbyPackaged, lobbyEntry } from './licensed-audio.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const out = path.join(here, 'www');
@@ -139,6 +140,8 @@ for (const name of (await readdir(path.join(here, 'audio'))).filter(name => /^[a
   await put('mobile/audio/' + name, data);
   audioFiles.push({ name, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') });
 }
+// The licensed lobby track is decrypted only in the APK workflow; official CI builds fail without it.
+if (process.env.CI || process.env.GITHUB_ACTIONS) assertLobbyPackaged(audioFiles, await lobbyEntry());
 // Validate the composed documents, including isolated Offline, before claiming CSP/SRI PASS.
 for (const name of [...pages, 'index.html']) {
   const html = await readFile(path.join(out, name), 'utf8');
