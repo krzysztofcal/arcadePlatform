@@ -20,12 +20,23 @@
   // Phase D: only our own avatar bucket is rendered as a photo; anything else falls back to the Arcade catalog.
   var PHOTO_URL_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/sign\/profile-avatar-uploads\/pending\/[0-9a-f-]{36}\?token=[^#]+$/;
 
+  // Expiry is only a display/cache limit; authorization stays on the server.
+  function photoExpiresAt(url){
+    try {
+      var token = new URL(url).searchParams.get('token');
+      var claims = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return typeof claims.exp === 'number' && Number.isFinite(claims.exp) ? claims.exp * 1000 : 0;
+    } catch (_err){ return 0; }
+  }
+
   function applyPhoto(node, profile){
     var avatar = profile && profile.avatar;
     if (!avatar || avatar.type !== 'uploaded' || typeof avatar.url !== 'string' || !PHOTO_URL_RE.test(avatar.url)) return false;
     var storage = window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.SUPABASE_URL;
     if (typeof storage !== 'string' || avatar.url.indexOf(storage.replace(/\/$/, '') + '/storage/v1/object/sign/profile-avatar-uploads/pending/') !== 0) return false;
     var url = avatar.url;
+    var remaining = Math.min(photoExpiresAt(url) - Date.now(), 60000);
+    if (remaining <= 0) return false;
     node.dataset.avatarUrl = url;
     node.classList.add('profile-avatar--uploaded');
     node.style.backgroundSize = 'cover';
@@ -33,7 +44,9 @@
     node.textContent = '';
     var image = new Image();
     image.onload = function(){ if (node.dataset.avatarUrl === url) node.style.backgroundImage = 'url("' + url + '")'; };
-    image.onerror = function(){ if (node.dataset.avatarUrl === url && window.ArcadeAvatars) window.ArcadeAvatars.apply(node, { avatar: { type: 'default', variant: avatar.variant } }); };
+    function fallback(){ if (node.dataset.avatarUrl === url) applyAvatar(node, { avatar: { type: 'default', variant: avatar.variant } }); }
+    image.onerror = fallback;
+    node.profileAvatarExpiry = setTimeout(fallback, remaining);
     image.src = url;
     return true;
   }
@@ -41,6 +54,8 @@
   function applyAvatar(node, profile){
     if (!node) return;
     // Cancel old image callbacks and hide the previous photo before any fallback loads.
+    clearTimeout(node.profileAvatarExpiry);
+    delete node.profileAvatarExpiry;
     delete node.dataset.avatarUrl;
     node.style.backgroundImage = '';
     node.classList.remove('profile-avatar--uploaded');
@@ -101,14 +116,16 @@
   }
 
   async function getMe(force, options){
+    var generation = publicGeneration;
     var includePoker = !!(options && options.includePoker);
     var userId = await currentUserId();
-    if (!userId) throw staleIdentityError();
+    if (!userId || generation !== publicGeneration) throw staleIdentityError();
+    if (cache && cache.profile.avatar && cache.profile.avatar.type === 'uploaded' && photoExpiresAt(cache.profile.avatar.url) <= Date.now()) cache = null;
     if (!force && cache && cache.userId === userId && (!includePoker || cache.includePoker === true)) return cache.profile;
     if (!force && inFlight && inFlight.userId === userId && inFlight.includePoker === includePoker) return inFlight.promise;
     var url = includePoker ? ME_URL + '?includePoker=1' : ME_URL;
     var request = authedFetch(url, { method: 'GET' }).then(parse).then(async function(profile){
-      if (await currentUserId() !== userId) throw staleIdentityError();
+      if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
       cache = { userId: userId, profile: profile, includePoker: includePoker };
       return profile;
     });
