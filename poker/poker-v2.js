@@ -1755,6 +1755,7 @@
       cardSeats: captureCardSeats(),
       communityCards: state.communityCards.map(normalizeCard),
       committedByUserId: Object.assign({}, seatCommittedByUserId),
+      stacks: Object.assign({}, state.stacks || {}),
       lastActionByUserId: Object.assign({}, state.lastBettingRoundActionByUserId || {}),
       settlementPresentation: cloneSettlementPresentation(getCurrentSettlementPresentation())
     };
@@ -4425,6 +4426,13 @@
     return fly;
   }
 
+  function paidThisFrame(previousVisual, nextVisual, userId){
+    if (!previousVisual.handId || previousVisual.handId !== nextVisual.handId || !previousVisual.stacks || !nextVisual.stacks) return false;
+    var before = Number(previousVisual.stacks[userId]);
+    var after = Number(nextVisual.stacks[userId]);
+    return Number.isFinite(before) && Number.isFinite(after) && after < before;
+  }
+
   function resolveBetAnimationUserIds(previousVisual, nextVisual){
     var ids = [];
     var seen = {};
@@ -4433,7 +4441,9 @@
       var beforeCommit = Number(previousVisual.committedByUserId[seat.userId]) || 0;
       var afterCommit = Number(nextVisual.committedByUserId[seat.userId]) || 0;
       var delta = Math.max(0, Math.round(afterCommit - beforeCommit));
-      if (!delta) return;
+      // A same-hand stack drop is authoritative evidence of chips put in, also when the last action
+      // repeats (call after call) or was reset because the call closed the betting round.
+      if (!delta && !paidThisFrame(previousVisual, nextVisual, seat.userId)) return;
       seen[seat.userId] = true;
       ids.push(seat.userId);
     });
@@ -4474,42 +4484,14 @@
     deal: { cues: ['card_deal_1', 'card_deal_2'], gapMs: 120 },
     board: { cues: ['card_board_1', 'card_board_2'], gapMs: 60 },
     fold: { cues: ['card_fold'], gapMs: 150 },
-    bet: { cues: ['chips_bet_1', 'chips_bet_2'], gapMs: 120 },
-    allin: { cues: ['chips_allin'], gapMs: 600 },
+    bet: { cues: ['chips_bet_1', 'chips_bet_2'], gapMs: 50 },
+    allin: { cues: ['chips_allin'], gapMs: 50 },
     pot: { cues: ['chips_pot_1', 'chips_pot_2'], gapMs: 250 },
     payout: { cues: ['chips_payout'], gapMs: 140, settlement: true },
-    win: { cues: ['chips_win'], gapMs: 2000, settlement: true },
-    // Own actions have their own kinds so an opponent's cue a moment earlier never swallows them.
-    heroFold: { cues: ['card_fold'], gapMs: 0 },
-    heroBet: { cues: ['chips_bet_1', 'chips_bet_2'], gapMs: 0 },
-    heroAllin: { cues: ['chips_allin'], gapMs: 0 }
+    win: { cues: ['chips_win'], gapMs: 2000, settlement: true }
   };
   var tableCueAt = {};
   var tableCueTurn = {};
-  // The hero's own act command in flight, carrying the cue its intent deserves (an all-in stays an all-in
-  // although resolveAllInPlan() sends CALL, RAISE or BET). It sounds once: on the accepted command or on
-  // the first live snapshot showing a compatible move, whichever comes first. A snapshot move that does
-  // not match it (e.g. a server timeout fold) sounds as seen and leaves it alone. It belongs to the cue
-  // generation in force when it was sent: resync, reconnect, hiding or a new hand make it stale.
-  var heroActionCue = null;
-  function heroActionKind(actionType, intent){
-    if (intent === 'all_in') return 'heroAllin';
-    if (actionType === 'FOLD') return 'heroFold';
-    return actionType === 'CALL' || actionType === 'RAISE' || actionType === 'BET' ? 'heroBet' : null;
-  }
-  function soundHeroAction(entry){
-    if (entry.sounded) return;
-    entry.sounded = true;
-    playTableCue(entry.kind, 0);
-  }
-  function playHeroSnapshotCue(fold, seenKind, handId){
-    var entry = heroActionCue;
-    if (entry && entry.generation !== tableCueGeneration) entry = heroActionCue = null;
-    if (!entry || entry.handId !== handId || (entry.kind === 'heroFold') !== fold) return playTableCue(seenKind, 0);
-    heroActionCue = null;
-    soundHeroAction(entry);
-  }
-
   // Pending cues die with their visuals: clearCardFx() (status change, hide, new hand) cancels all of
   // them; settlement cues also follow the settlement animation's own generation.
   var tableCueGeneration = 0;
@@ -4522,9 +4504,7 @@
   // Decode every cue up front: a cue that is still decoding is dropped natively after 400 ms.
   function preloadTableCues(){
     var audio = tableAudio();
-    if (audio && typeof audio.preload === 'function') audio.preload(Object.keys(TABLE_CUES).reduce(function(all, kind){
-      return all.concat(TABLE_CUES[kind].cues.filter(function(cue){ return all.indexOf(cue) === -1; }));
-    }, []));
+    if (audio && typeof audio.preload === 'function') audio.preload(Object.keys(TABLE_CUES).reduce(function(all, kind){ return all.concat(TABLE_CUES[kind].cues); }, []));
   }
 
   // Schedules one cue in step with its visual. Repeats of a kind closer than its gap are dropped and
@@ -4561,10 +4541,7 @@
       } else if (transition.kind === 'community'){
         // Each board card lands ~250 ms after its staggered start.
         transition.cards.forEach(function(_card, index){ playTableCue('board', index * 70 + 250); });
-      } else if (transition.kind === 'muck'){
-        if (transition.userId !== state.currentUserId) playTableCue('fold', 0);
-        else playHeroSnapshotCue(true, 'heroFold', state.handId);
-      }
+      } else if (transition.kind === 'muck') playTableCue('fold', 0);
       else if (transition.kind === 'flip') playTableCue('board', 0);
     });
   }
@@ -4574,15 +4551,16 @@
     return Math.min(480, Math.max(150, Math.floor(availableMs / Math.max(1, potCount))));
   }
 
-  // Bets only on live frames of the same hand; payouts once per claimed settlement, as the chips land.
+  // Bets follow the chips that fly to the pot (same users, live frames of the same hand, the hero included);
+  // payouts once per claimed settlement, as the chips land. All-in only on authoritative evidence: the
+  // server's all_in action or a stack emptied in this frame.
   function playChipCues(previousVisual, nextVisual, frame, settlement){
     if (frame && frame.cardFxEligible && nextVisual.handId && nextVisual.handId === previousVisual.handId
       && (nextVisual.potTotal || 0) > (previousVisual.potTotal || 0)){
       var users = resolveBetAnimationUserIds(previousVisual, nextVisual);
       users.forEach(function(userId, index){
-        var allIn = nextVisual.lastActionByUserId[userId] === 'all_in';
-        if (userId !== state.currentUserId) playTableCue(allIn ? 'allin' : 'bet', index * 60);
-        else playHeroSnapshotCue(false, allIn ? 'heroAllin' : 'heroBet', nextVisual.handId);
+        var allIn = nextVisual.lastActionByUserId[userId] === 'all_in' || (paidThisFrame(previousVisual, nextVisual, userId) && Number(nextVisual.stacks[userId]) === 0);
+        playTableCue(allIn ? 'allin' : 'bet', index * 60);
       });
       if (users.length) playTableCue('pot', CHIP_FLY_MS);
     }
@@ -6453,23 +6431,16 @@
     els.leaveConfirmModal.hidden = false;
   }
 
-  function handleAction(actionType, amount, intent){
+  function handleAction(actionType, amount){
     if (!actionType) return Promise.resolve();
     if (state.reconnectGate) return Promise.resolve();
     var payload = { handId: state.handId || null, action: actionType };
     if (Number.isFinite(amount)) payload.amount = Math.trunc(amount);
-    var kind = heroActionKind(actionType, intent);
-    var cue = kind && payload.handId ? { handId: payload.handId, tableId: state.tableId, generation: tableCueGeneration, kind: kind, sounded: false } : null;
-    if (cue) heroActionCue = cue;
     setError('');
     return sendCommand('sendAct', payload).then(function(){
-      // Accepted: sound now unless its snapshot already did. Stale acks stay silent: another hand or table,
-      // recovery in progress, or any cancellation since sending (resync, reconnect, hide) even if already over.
-      if (cue && cue.generation === tableCueGeneration && cue.handId === state.handId && cue.tableId === state.tableId && !state.reconnectGate) soundHeroAction(cue);
       state.statusText = 'Action sent';
       renderInfoPanel();
     }).catch(function(err){
-      if (heroActionCue === cue) heroActionCue = null;
       setError(err && err.message ? err.message : 'Failed to send action');
     });
   }
@@ -6486,7 +6457,6 @@
       amountBounds: resolveAmountBounds(resolveAmountAction(allowed), resolveStack(state.currentUserId))
     };
     var nextAction = resolveQueuedPreactionExecution(liveState);
-    var allInIntent = queuedPreaction && queuedPreaction.slot === 'allIn' ? 'all_in' : undefined;
     if (!nextAction && queuedPreaction && queuedPreaction.slot === 'amount' && queuedPreaction.action === liveState.amountAction && liveState.amountBounds){
       var queuedAmountValue = queuedPreaction.amount;
       if (!Number.isFinite(queuedAmountValue) || queuedAmountValue < liveState.amountBounds.min || (liveState.amountBounds.max != null && queuedAmountValue > liveState.amountBounds.max)){
@@ -6496,7 +6466,7 @@
     clearQueuedPreaction();
     if (!nextAction || !nextAction.action) return;
     queuedPreactionInFlight = true;
-    handleAction(nextAction.action, nextAction.amount == null ? undefined : nextAction.amount, allInIntent).then(function(){
+    handleAction(nextAction.action, nextAction.amount == null ? undefined : nextAction.amount).then(function(){
       queuedPreactionInFlight = false;
       renderControls();
     });
@@ -7104,7 +7074,7 @@
     if (els.allInBtn) els.allInBtn.addEventListener('click', function(){
       var plan = resolveAllInPlan(getAllowedActions());
       if (!plan) return;
-      handleAction(plan.type, plan.amount == null ? undefined : plan.amount, 'all_in');
+      handleAction(plan.type, plan.amount == null ? undefined : plan.amount);
     });
     buildReactionMenu();
     if (els.reactionBtn) els.reactionBtn.addEventListener('click', function(){
