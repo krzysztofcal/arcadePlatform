@@ -4623,8 +4623,9 @@
     if (node.parentNode) node.parentNode.removeChild(node);
   }
 
-  function clearCardFx(resetClaims){
-    tableCueGeneration += 1;
+  // keepCues: only the visuals go (reduced motion switched on); scheduled sounds stay eligible.
+  function clearCardFx(resetClaims, keepCues){
+    if (!keepCues) tableCueGeneration += 1;
     cardFxTimers.forEach(function(timer){ window.clearTimeout(timer); });
     cardFxTimers = [];
     cardFxNodes.forEach(removeCardFxNode);
@@ -7761,7 +7762,7 @@
     if (els.actionBar) els.actionBar.addEventListener('pointerdown', deemphasizeCelebration);
     document.addEventListener('visibilitychange', function(){ if (document.hidden){ clearCardFx(); clearCelebration(); } }); // xp-lifecycle-allow:poker-v2-celebration-visibility(2027-01-01)
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches){ clearCardFx(); clearCelebration(); } });
+    if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches){ clearCardFx(false, true); clearCelebration(); } });
     renderSocialPreferences();
     document.addEventListener('chips:tx-complete', refreshAccountHud);
     if (els.accountHud) els.accountHud.addEventListener('animationend', function(event){

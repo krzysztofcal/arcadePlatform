@@ -103,6 +103,7 @@ function makeElement(id){
 
 function createHarness(options = {}){
   const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
+  const motionQuery = { matches: options.reducedMotion === true, listeners: [], addEventListener(type, fn){ if (type === 'change') motionQuery.listeners.push(fn); } };
   const elements = {};
   [
     'pokerAccountHud',
@@ -289,7 +290,7 @@ function createHarness(options = {}){
           return wsClient;
         }
       },
-      matchMedia(){ return { matches: options.reducedMotion === true }; },
+      matchMedia(){ return motionQuery; },
       MobilePokerAudio: options.audio,
       getComputedStyle(node){ return node.style; },
       setInterval(fn){
@@ -452,7 +453,8 @@ async function flush(){
     getIntervalCount(){ return intervalTimers.length; },
     getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); },
     getLocalStorage(key){ return sandbox.localStorage.getItem(key); },
-    setDocumentHidden(value){ sandbox.document.hidden = value; }
+    setDocumentHidden(value){ sandbox.document.hidden = value; },
+    setReducedMotion(value){ motionQuery.matches = value; motionQuery.listeners.forEach(fn => fn()); }
   };
 }
 
@@ -7042,5 +7044,21 @@ test('table cues: a settlement arriving while the river card is still landing ke
     handSettlement: { handId: 'cue-river', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 30 } } } } });
   harness.advanceTime(3000); await harness.flush();
   assert.deepEqual(audio.plays, ['card_board_1', 'chips_payout', 'chips_win']);
+});
+
+test('table cues: switching reduced motion on while a cue is pending clears visuals but keeps the sound', async () => {
+  const audio = fakeTableAudio();
+  const harness = createHarness({ audio });
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot(communityDealFrame('cue-motion', 1, [], true));
+  harness.advanceTime(1000); await harness.flush();
+  ws.onSnapshot(communityDealFrame('cue-motion', 2, ['As','Ks','Qs']));
+  assert.ok(harness.elements.pokerCardFxLayer.children.length > 0, 'flop visuals are running');
+  assert.deepEqual(audio.plays, [], 'board cues wait for the cards to land');
+  harness.setReducedMotion(true);
+  assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'reduced motion removes running visuals');
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, ['card_board_1', 'card_board_2', 'card_board_1'], 'scheduled sounds still play');
 });
 
