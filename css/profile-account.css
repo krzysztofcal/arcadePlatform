@@ -108,3 +108,6 @@ dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 [data-admin-only][hidden],.account-links a[hidden]{display:none!important;}
 .account-note a{color:var(--ac);font-weight:700;text-decoration:none;}
 .account-note a:hover{text-decoration:underline;}
+.account-support{flex-direction:column;align-items:flex-start;gap:4px;}
+.account-support[hidden]{display:none!important;}
+.account-support .account-note{margin:0;font-size:12px;line-height:1.45;color:var(--mu);}

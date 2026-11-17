@@ -37,6 +37,7 @@
 
   function selectNodes(){
     nodes.status = doc.getElementById('accountStatus');
+    nodes.support = doc.getElementById('accountSupport');
     nodes.forms = doc.getElementById('authForms');
     nodes.authTabSignIn = doc.getElementById('authTabSignIn');
     nodes.authTabSignUp = doc.getElementById('authTabSignUp');
@@ -1534,9 +1535,20 @@
     }
   }
 
+  // #1285: voluntary creator support through Suppi (fixed public URL in account.html). Hidden on WWW
+  // Production until the provider account is verified and the OWNER activates it; visible in the Stage
+  // APK (always bound to a Deploy Preview) and on Deploy Previews for review.
+  var SUPPORT_LIVE = false;
+  function showSupportLink(){
+    if (!nodes.support) return;
+    var host = window.location && window.location.hostname || '';
+    nodes.support.hidden = !(SUPPORT_LIVE || !!window.MOBILE_POKER_CONFIG || /^deploy-preview-[1-9][0-9]*--playkcswh\.netlify\.app$/.test(host));
+  }
+
   function init(){
     auth = (typeof window !== 'undefined' && window.SupabaseAuth) ? window.SupabaseAuth : null;
     selectNodes();
+    showSupportLink();
     try { window.sessionStorage.removeItem('arcade:account-deletion-status'); } catch (_err){}
     setWelcomeBonusVisibility(false);
     wireEvents();

@@ -95,6 +95,8 @@ test('approved legal content, both policy versions and deletion links survive th
     const lobby = await readFile(path.join(fixture, 'mobile/poker/www/poker/index.html'), 'utf8');
     assert.doesNotMatch(lobby, /<nav class="shortcuts"/,'APK must not retain a second navigation source');
     for (const page of [account,lobby]) assert.match(page,/sidebar\.js/, 'Account and Lobby share the same navigation renderer');
+    // #1285: the APK keeps the fixed external support link; runtime.js opens it in the system browser.
+    assert.match(account, /<a class="lk" data-i18n="supportArcadeHub" href="https:\/\/suppi\.pl\/arcadehub" target="_blank" rel="noopener noreferrer">/);
 
     const audioJs = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio.js'), 'utf8');
     assert.ok(audioJs.includes('MobilePokerAudio'), 'www/mobile/audio.js must be packaged');

@@ -40,6 +40,8 @@
 
     about: { en: 'About', pl: 'O serwisie' },
     licenses: { en: 'Licenses', pl: 'Licencje' },
+    supportArcadeHub: { en: 'Support Arcade Hub ↗', pl: 'Wesprzyj Arcade Hub ↗' },
+    supportArcadeHubNote: { en: 'Optional tip for the creator, handled by the independent provider Suppi on its own website. It gives no chips (CH), XP, rewards or other in-game benefits.', pl: 'Dobrowolne wsparcie twórcy, obsługiwane przez niezależny serwis Suppi na jego stronie. Nie daje żetonów (CH), XP, nagród ani innych korzyści w grze.' },
     terms: { en: 'Terms', pl: 'Regulamin' },
     privacy: { en: 'Privacy', pl: 'Prywatność' },
     contact: { en: 'Contact', pl: 'Kontakt' },

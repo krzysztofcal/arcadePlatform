@@ -1313,3 +1313,34 @@ test('external deletion entry is signed-out WWW only and signed-in hash focuses 
  const h=await deletionHarness([],{hash:'#account-deletion'});assert.equal(h.info.hidden,true);assert.equal(h.scrolled(),1);
  h.windowObj.location.hash='';h.hashChange();h.windowObj.location.hash='#account-deletion';h.hashChange();assert.equal(h.scrolled(),2);assert.deepEqual(h.calls,[]);
 });
+
+test("support link (#1285): fixed Suppi URL with disclosure, hidden on WWW Production, shown in the Stage APK and Deploy Previews", async () => {
+  const block = accountHtml.match(/<div class="li account-support" id="accountSupport" hidden>[\s\S]*?<\/div>/);
+  assert.ok(block, "hidden by default in account.html");
+  const anchors = [...block[0].matchAll(/<a\b[^>]*>/g)].map(m => m[0]);
+  assert.equal(anchors.length, 1);
+  assert.match(anchors[0], /href="https:\/\/suppi\.pl\/arcadehub"/, "one fixed HTTPS destination without query or fragment");
+  assert.match(anchors[0], /target="_blank" rel="noopener noreferrer"/);
+  const i18n = await readFile(path.join(repoRoot, "js", "i18n.js"), "utf8");
+  assert.match(i18n, /supportArcadeHub: \{ en: 'Support Arcade Hub ↗', pl: 'Wesprzyj Arcade Hub ↗' \}/);
+  assert.match(i18n, /supportArcadeHubNote: \{ en: '[^']*independent provider Suppi[^']*no chips \(CH\), XP, rewards[^']*', pl: '[^']*niezależny serwis Suppi[^']*Nie daje żetonów \(CH\), XP, nagród[^']*' \}/);
+  for (const [hostname, mobile, visible] of [
+    ["play.kcswh.pl", false, false],
+    ["playkcswh.netlify.app", false, false],
+    ["deploy-preview-1286--playkcswh.netlify.app", false, true],
+    ["deploy-preview-1286--playkcswh.netlify.app.evil.test", false, false],
+    ["localhost", true, true],
+  ]) {
+    const chipsClient = { fetchBalance: () => Promise.resolve({ balance: 0 }), fetchLedger: () => Promise.resolve({ items: [], nextCursor: null }), fetchBonusCampaigns: () => Promise.resolve({ items: [] }) };
+    const { windowObj, document } = buildContext(chipsClient);
+    const support = createElement("div", "accountSupport");
+    support.hidden = true;
+    document.__nodes.set("accountSupport", support);
+    windowObj.location.hostname = hostname;
+    if (mobile) windowObj.MOBILE_POKER_CONFIG = {};
+    vm.runInContext(source, vm.createContext({ window: windowObj, document, requestAnimationFrame: windowObj.requestAnimationFrame, CustomEvent: function() {} }));
+    await flush();
+    assert.equal(support.hidden, !visible, hostname);
+  }
+});
+
