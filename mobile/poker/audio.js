@@ -41,8 +41,9 @@
   };
 
   if (!plugin()) return;
-  // Bonus claims happen on the Lobby document. The once-only Welcome cue must not depend on
-  // on-demand decoding (a first play waits at most 400 ms natively), so decode it ahead of time.
+  // Bonus claims happen on the Lobby document, so start decoding the bonus cue as it loads. This
+  // does not wait for decoding to finish: a claim confirmed before it does still gets only the
+  // native 400 ms pending window (accepted M1 limitation, #1275 review R3).
   if (/^\/poker\/(index\.html)?$/.test(window.location && window.location.pathname || '')) window.MobilePokerAudio.preload(['bonus_coins']);
   // One Sound setting, mounted into the existing menu of each APK screen: Table settings on the
   // Online and Offline tables, the avatar menu on Lobby and Profile. The value lives natively.
