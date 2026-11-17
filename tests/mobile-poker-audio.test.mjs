@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import vm from 'node:vm';
 
@@ -202,48 +202,29 @@ test('generate-lobby-loop reproduces committed lobby.wav byte-for-byte matching 
   assert.ok(dBFS <= -6.0, `peak must be <= -6 dBFS (got ${dBFS.toFixed(2)} dBFS)`);
 });
 
-test('generate-bonus-coins reproduces committed bonus_coins.wav byte-for-byte matching manifest.json', async () => {
-  const { render } = await import('../mobile/poker/audio/generate-bonus-coins.mjs');
-  const rendered = render();
-  assert.ok(Buffer.isBuffer(rendered), 'render() must return a Buffer');
-
-  const committed = await readFile(new URL('../mobile/poker/audio/bonus_coins.wav', import.meta.url));
-  assert.equal(Buffer.compare(rendered, committed), 0, 'rendered buffer must match committed bonus_coins.wav byte-for-byte');
-
+test('bonus cue is the bundled CC0 CapsLok preview, unchanged, recorded in the manifest and under the native cue limit', async () => {
+  const committed = await readFile(new URL('../mobile/poker/audio/bonus_coins.mp3', import.meta.url));
   const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
-  const bonusEntry = manifest.assets.find(a => a.file === 'bonus_coins.wav');
-  assert.ok(bonusEntry, 'manifest must contain bonus_coins.wav entry');
-
-  const sha256 = createHash('sha256').update(rendered).digest('hex');
-  assert.equal(rendered.length, bonusEntry.bytes, 'byte length must match manifest.bytes');
-  assert.equal(sha256, bonusEntry.sha256, 'sha256 must match manifest.sha256');
-
-  // Header check: PCM, mono, 16-bit, 44100
-  assert.equal(rendered.toString('utf8', 0, 4), 'RIFF');
-  assert.equal(rendered.toString('utf8', 8, 12), 'WAVE');
-  assert.equal(rendered.toString('utf8', 12, 16), 'fmt ');
-  assert.equal(rendered.readUInt16LE(20), 1, 'AudioFormat must be 1 (PCM)');
-  assert.equal(rendered.readUInt16LE(22), 1, 'NumChannels must be 1 (mono)');
-  assert.equal(rendered.readUInt32LE(24), 44100, 'SampleRate must be 44100');
-  assert.equal(rendered.readUInt16LE(34), 16, 'BitsPerSample must be 16');
-
-  // Duration between 1.5 and 2.0 s (< 3 s)
-  const duration = (rendered.length - 44) / (44100 * 2);
-  assert.ok(duration >= 1.5 && duration <= 2.0 && duration < 3.0, `duration must be 1.5-2.0s and <3s (got ${duration.toFixed(3)}s)`);
-
-  // Peak check <= -6 dBFS
-  let maxInt = 0;
-  for (let i = 44; i < rendered.length; i += 2) {
-    const v = Math.abs(rendered.readInt16LE(i));
-    if (v > maxInt) maxInt = v;
-  }
-  const peakNorm = maxInt / 32768;
-  const dBFS = 20 * Math.log10(peakNorm);
-  assert.ok(dBFS <= -6.0, `peak must be <= -6 dBFS (got ${dBFS.toFixed(2)} dBFS)`);
-
-  // Last sample must be 0
-  const lastSample = rendered.readInt16LE(rendered.length - 2);
-  assert.equal(lastSample, 0, 'last sample must be 0');
+  const bonusEntries = manifest.assets.filter(a => a.cue === 'bonus_coins');
+  assert.equal(bonusEntries.length, 1, 'exactly one bonus_coins asset');
+  const entry = bonusEntries[0];
+  assert.equal(entry.file, 'bonus_coins.mp3');
+  assert.equal(committed.length, entry.bytes);
+  assert.equal(createHash('sha256').update(committed).digest('hex'), entry.sha256);
+  // MPEG-1 Layer III frame header, 44.1 kHz: a format SoundPool decodes natively.
+  const header = committed.readUInt32BE(0);
+  assert.equal(header >>> 21, 0x7ff, 'MP3 frame sync');
+  assert.equal((header >>> 19) & 3, 3, 'MPEG-1');
+  assert.equal((header >>> 17) & 3, 1, 'Layer III');
+  assert.equal((header >>> 10) & 3, 0, '44100 Hz');
+  assert.ok(entry.durationSeconds > 0 && entry.durationSeconds < 3, 'below the native 3 s cue limit');
+  assert.equal(entry.author, 'CapsLok');
+  assert.equal(entry.sourceUrl, 'https://freesound.org/people/CapsLok/sounds/184438/');
+  assert.match(entry.license, /^CC0 1\.0/);
+  assert.doesNotMatch(JSON.stringify(entry), /\bMIT\b|project-owned|procedurally/i, 'third-party audio is not labelled project work');
+  // One file per cue: a second bonus_coins.* would make the native base-name lookup ambiguous.
+  const files = (await readdir(new URL('../mobile/poker/audio/', import.meta.url))).filter(name => name.startsWith('bonus_coins.'));
+  assert.deepEqual(files, ['bonus_coins.mp3']);
 });
 
 test('adapter mounts exactly one toggle in avatarMenu and table panel, reflects native state, and handles change', async () => {

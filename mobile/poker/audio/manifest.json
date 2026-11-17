@@ -14,21 +14,26 @@
       "status": "PR1 test loop — pending OWNER audition"
     },
     {
-      "file": "bonus_coins.wav",
+      "file": "bonus_coins.mp3",
       "cue": "bonus_coins",
       "channel": "sfx",
       "trigger": "confirmed new Welcome/Daily Bonus claim only",
-      "durationSeconds": 1.75,
-      "format": "wav",
-      "sampleRate": 44100,
-      "bytes": 154394,
-      "sha256": "7b67a528bae6aafa95ca53e9bde20d87daa6f82bebe04fef7038c4e5e8254aa2",
-      "creationMethod": "mobile/poker/audio/generate-bonus-coins.mjs",
-      "creator": "Arcade Platform project — procedurally synthesized (modal synthesis), no third-party samples or recordings",
-      "license": "Project-owned original work; same terms as the repository (MIT, see LICENSE)",
-      "attribution": "none required",
-      "targetPeakDbfs": -8,
-      "status": "PR2 candidate — pending OWNER audition"
+      "title": "Cash Register Fake.wav",
+      "author": "CapsLok",
+      "sourceUrl": "https://freesound.org/people/CapsLok/sounds/184438/",
+      "sourceFile": "https://cdn.freesound.org/previews/184/184438_850742-hq.mp3",
+      "sourceNote": "Freesound public HQ preview (MP3 transcode made by Freesound) of sound 184438, not the original 24-bit WAV, which requires a Freesound login. OWNER approved this source on 2026-11-17.",
+      "license": "CC0 1.0 Universal (public domain dedication), https://creativecommons.org/publicdomain/zero/1.0/; commercial use and modification permitted",
+      "attribution": "not required by CC0; credited here and in docs/provenance-audit.md",
+      "transformation": "none: bundled byte-for-byte as served by Freesound (no trimming, gain change or re-encoding)",
+      "retrieved": "2026-11-17",
+      "format": "mp3",
+      "codec": "MPEG-1 Layer III, 128 kbps, 44100 Hz, joint stereo",
+      "durationSeconds": 2.196,
+      "peakDbfs": -4.8,
+      "bytes": 31686,
+      "sha256": "efd380e06aa7abbf2e779462281f37ad3b862c44309145d60e9dcca76c1637b2",
+      "status": "OWNER-selected replacement for the rejected synthetic cue; pending OWNER device test"
     }
   ]
 }
