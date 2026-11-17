@@ -4456,7 +4456,6 @@
   }
 
   function cancelSettlementAnimations(){
-    tableCueGeneration += 1;
     settlementAnimationGeneration += 1;
     settlementAnimationTimers.forEach(function(timerId){
       try { window.clearTimeout(timerId); } catch (_err){}
@@ -4478,12 +4477,13 @@
     bet: { cues: ['chips_bet_1', 'chips_bet_2'], gapMs: 120 },
     allin: { cues: ['chips_allin'], gapMs: 600 },
     pot: { cues: ['chips_pot_1', 'chips_pot_2'], gapMs: 250 },
-    payout: { cues: ['chips_payout'], gapMs: 140 },
-    win: { cues: ['chips_win'], gapMs: 2000 }
+    payout: { cues: ['chips_payout'], gapMs: 140, settlement: true },
+    win: { cues: ['chips_win'], gapMs: 2000, settlement: true }
   };
   var tableCueAt = {};
   var tableCueTurn = {};
-  // Bumped wherever in-flight visuals are cancelled (status change, hide, new hand, new settlement).
+  // Pending cues die with their visuals: clearCardFx() (status change, hide, new hand) cancels all of
+  // them; settlement cues also follow the settlement animation's own generation.
   var tableCueGeneration = 0;
 
   function tableAudio(){
@@ -4512,8 +4512,10 @@
     var handId = state.handId;
     var cueTableId = state.tableId;
     var generation = tableCueGeneration;
+    var settlementGeneration = spec.settlement ? settlementAnimationGeneration : null;
     var fire = function(){
-      if (generation !== tableCueGeneration || state.handId !== handId || state.tableId !== cueTableId || state.reconnectGate || document.hidden) return;
+      if (generation !== tableCueGeneration || (spec.settlement && settlementGeneration !== settlementAnimationGeneration)) return;
+      if (state.handId !== handId || state.tableId !== cueTableId || state.reconnectGate || document.hidden) return;
       audio.play(cue);
     };
     if (delay) window.setTimeout(fire, delay);

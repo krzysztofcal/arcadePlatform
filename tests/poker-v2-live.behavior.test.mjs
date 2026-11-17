@@ -7028,3 +7028,19 @@ test('table cues: cues already scheduled are dropped when reconnect, resync or h
   }
 });
 
+test('table cues: a settlement arriving while the river card is still landing keeps the river sound', async () => {
+  const audio = fakeTableAudio();
+  const harness = createHarness({ audio });
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  const board = ['As','Ks','Qs','7d','2c'];
+  ws.onSnapshot(communityDealFrame('cue-river', 1, board.slice(0, 4), true));
+  harness.advanceTime(1000); await harness.flush();
+  ws.onSnapshot(communityDealFrame('cue-river', 2, board));
+  ws.onSnapshot({ kind: 'stateSnapshot', payload: { tableId: 'table-1', stateVersion: 3, public: { hand: { handId: 'cue-river', status: 'SETTLED' }, board, pot: { total: 0 },
+    showdown: { handId: 'cue-river', reason: 'computed', winners: ['user-1'], potAwardedTotal: 30, potsAwarded: [{ amount: 30, winners: ['user-1'], eligibleUserIds: ['user-1', 'villain-1'] }] },
+    handSettlement: { handId: 'cue-river', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 30 } } } } });
+  harness.advanceTime(3000); await harness.flush();
+  assert.deepEqual(audio.plays, ['card_board_1', 'chips_payout', 'chips_win']);
+});
+
