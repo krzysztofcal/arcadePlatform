@@ -6953,7 +6953,7 @@ for (const freshPending of [false, true]) test(`inactivity pending keeps authori
 
 // #1146 PR3: table sound cues follow live presentation claims only, independent of reduced motion.
 function fakeTableAudio(){
-  const audio = { plays: [], preloads: [], play(cue){ audio.plays.push(cue); return Promise.resolve(true); }, preload(cues){ audio.preloads.push(cues.slice()); return Promise.resolve(true); } };
+  const audio = { plays: [], voices: [], preloads: [], play(cue){ audio.plays.push(cue); return Promise.resolve(true); }, voice(cue){ audio.voices.push(cue); return Promise.resolve(true); }, preload(cues){ audio.preloads.push(cues.slice()); return Promise.resolve(true); } };
   return audio;
 }
 
@@ -7161,3 +7161,57 @@ test('actions: a delayed ack after a resync in the same hand adds no sound', asy
   harness.advanceTime(1000); await harness.flush();
   assert.deepEqual(audio.plays, [], 'recovery shows the call silently and the ack never sounds');
 });
+
+// #1146 PR4: the English dealer voice follows the same presentation claims as the table cues.
+test('dealer voice: names each live street once and stays silent on initial, recovery and duplicate frames', async () => {
+  for (const mode of ['live', 'reduced', 'initial', 'resync']) {
+    const audio = fakeTableAudio();
+    const harness = createHarness({ reducedMotion: mode === 'reduced', audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    if (mode === 'live') assert.ok(['dealer_flop', 'dealer_all_in', 'dealer_next_hand'].every(cue => audio.preloads[0].includes(cue)), 'voice lines are preloaded');
+    const ws = harness.getCreateOptions();
+    const board = ['As','Ks','Qs','7d','2c'];
+    ws.onSnapshot(communityDealFrame('voice-board', 1, [], true));
+    harness.advanceTime(1000); await harness.flush();
+    if (mode === 'resync') ws.onStatus('resync', {});
+    ws.onSnapshot(communityDealFrame('voice-board', 2, board.slice(0, 3), mode === 'initial'));
+    ws.onSnapshot(communityDealFrame('voice-board', 3, board.slice(0, 3)));
+    ws.onSnapshot(communityDealFrame('voice-board', 4, board.slice(0, 4)));
+    ws.onSnapshot(communityDealFrame('voice-board', 5, board));
+    harness.advanceTime(1000); await harness.flush();
+    // Initial and recovered flops are silent; the turn and river that follow live are named.
+    const expected = mode === 'live' || mode === 'reduced' ? ['dealer_flop', 'dealer_turn', 'dealer_river'] : ['dealer_turn', 'dealer_river'];
+    assert.deepEqual(audio.voices, expected, mode);
+  }
+});
+
+test('dealer voice: dealing, all-in and next hand follow their presentation; a stale next-hand line is dropped', async () => {
+  {
+    const { audio, harness, ws } = await heroTableHarness();
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 130, stacks: { 'user-1': 0, 'villain-1': 100 }, bets: { 'user-1': 100 }, lastActions: { 'user-1': 'all_in' }, turnUserId: 'villain-1' }));
+    ws.onSnapshot(heroActionFrame('hero-hand', 3, { potTotal: 230, stacks: { 'user-1': 0, 'villain-1': 0 }, bets: { 'user-1': 100, 'villain-1': 100 }, lastActions: { 'user-1': 'all_in', 'villain-1': 'all_in' } }));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.voices, ['dealer_all_in'], 'one all-in line, not one per player within a few seconds');
+    ws.onSnapshot(heroActionFrame('hero-next', 4));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.voices, ['dealer_all_in', 'dealer_dealing_cards'], 'a new live hand is dealt with a line');
+  }
+  async function settle(interruptAfterMs){
+    const audio = fakeTableAudio();
+    const harness = createHarness({ audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    const ws = harness.getCreateOptions();
+    ws.onSnapshot(communityDealFrame('voice-settle', 1, ['As','Ks','Qs','7d'], true));
+    harness.advanceTime(1000); await harness.flush();
+    ws.onSnapshot({ kind: 'stateSnapshot', payload: { tableId: 'table-1', stateVersion: 2, public: { hand: { handId: 'voice-settle', status: 'SETTLED' }, board: ['As','Ks','Qs','7d','2c'], pot: { total: 0 },
+      showdown: { handId: 'voice-settle', reason: 'computed', winners: ['villain-1'], potAwardedTotal: 30, potsAwarded: [{ amount: 30, winners: ['villain-1'], eligibleUserIds: ['user-1', 'villain-1'] }] },
+      handSettlement: { handId: 'voice-settle', settledAt: new Date(Date.now()).toISOString(), payouts: { 'villain-1': 30 } } } } });
+    if (interruptAfterMs != null) { harness.advanceTime(interruptAfterMs); await harness.flush(); ws.onStatus('resync', {}); }
+    harness.advanceTime(3000); await harness.flush();
+    return audio.voices.filter(cue => cue === 'dealer_next_hand').length;
+  }
+  // The next hand's snapshot is deferred until the 3.5 s winner reveal ends, so +2 s is never ahead of the table.
+  assert.equal(await settle(null), 1, '“Next hand” once the payout has landed');
+  assert.equal(await settle(500), 0, 'a recovery during the reveal drops the pending line');
+});
+

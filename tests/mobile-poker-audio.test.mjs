@@ -477,11 +477,11 @@ test('static guards: root pages contain no mobile/audio references, plugin conta
   assert.match(pluginJava, /private void dropFocus\(\) \{[^}]*stopCues\(\);[^}]*abandonAudioFocus\(focus\)/, 'music focus is never abandoned under a playing cue');
 });
 
-test('table cues: every cue named in poker-v2.js is a bundled CC0 Kenney WAV under the native 3 s limit; WWW never reaches native', async () => {
+test('table cues: every cue named in poker-v2.js is a bundled WAV under the native 3 s limit with recorded provenance; WWW never reaches native', async () => {
   const source = await readFile(new URL('../poker/poker-v2.js', import.meta.url), 'utf8');
   const block = source.slice(source.indexOf('var TABLE_CUES = {'), source.indexOf('var tableCueAt'));
   const cues = [...new Set([...block.matchAll(/'([a-z0-9_]+)'/g)].map(m => m[1]))];
-  assert.equal(cues.length, 13, 'thirteen table cues');
+  assert.equal(cues.length, 19, 'thirteen Kenney table cues and six dealer lines');
   const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
   for (const cue of cues) {
     const entries = manifest.assets.filter(a => a.cue === cue);
@@ -494,6 +494,13 @@ test('table cues: every cue named in poker-v2.js is a bundled CC0 Kenney WAV und
     assert.equal(file.readUInt16LE(20), 1, cue + ' PCM');
     const seconds = file.readUInt32LE(40) / file.readUInt32LE(28);
     assert.ok(seconds > 0 && seconds < 3, cue + ' below the native cue limit');
+    if (cue.startsWith('dealer_')) {
+      // #1146 PR4: project-generated voice; the pinned open-weight model is recorded, never bundled.
+      assert.equal(entry.channel, 'voice', cue);
+      assert.match(entry.creationMethod, /Kokoro-82M-v1\.0-ONNX revision 1939ad2a8e416c0acfeecc08a694d14ef25f2231/);
+      assert.match(entry.license, /Apache-2\.0/);
+      continue;
+    }
     assert.match(entry.license, /^CC0 1\.0/);
     assert.equal(entry.sourceUrl, 'https://kenney.nl/assets/casino-audio');
     assert.match(entry.sourceSha256, /^[a-f0-9]{64}$/);
@@ -501,5 +508,16 @@ test('table cues: every cue named in poker-v2.js is a bundled CC0 Kenney WAV und
   // Only the guarded helper touches the adapter, which exists solely in the Android APK.
   assert.equal(source.match(/window\.MobilePokerAudio\b(?!\s+exists)/g).length, 1, 'one code reference, inside tableAudio()');
   assert.match(source, /function tableAudio\(\)\{\s*var audio = window\.MobilePokerAudio;\s*return audio && typeof audio\.play === 'function' \? audio : null;/);
+});
+
+test('dealer voice ducking: music and cues dip for at least the longest line and return on stop', async () => {
+  const java = await readFile(new URL('../mobile/poker/PokerAudioPlugin.java', import.meta.url), 'utf8');
+  const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
+  const longest = Math.max(...manifest.assets.filter(a => a.channel === 'voice').map(a => a.durationSeconds));
+  const voiceMs = Number(java.match(/VOICE_MS = (\d+);/)[1]);
+  assert.ok(voiceMs > longest * 1000, 'the duck outlasts every dealer line');
+  assert.match(java, /if \(voice\) \{\s*voiceStream = stream;\s*startVoiceDuck\(\);/, 'a started line ducks');
+  assert.match(java, /private void stopCues\(\) \{[\s\S]*?endVoiceDuck\(\);[\s\S]*?\n    \}/, 'mute, background and stop restore the levels');
+  assert.match(java, /fadeTo\(musicLevel\(\)\)/, 'music follows the ducked level');
 });
 

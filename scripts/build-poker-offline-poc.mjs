@@ -9,6 +9,7 @@ let renderer = await readFile('poker/poker-v2.js', 'utf8');
 const replacements = {
   init: `
     selectElements();
+    preloadTableCues();
     try {
     var offline = window.PokerOffline;
     var session = offline.read().session;
