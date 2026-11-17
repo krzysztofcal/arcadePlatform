@@ -194,6 +194,7 @@ test('licensed lobby music: committed only encrypted, decrypts to the manifest c
   // Official packaging refuses a missing or altered lobby track.
   assert.throws(() => assertLobbyPackaged([{ name: 'bonus_coins.mp3', sha256: 'x' }], entry), /refusing/);
   assert.throws(() => assertLobbyPackaged([{ name: 'lobby.mp3', sha256: '0'.repeat(64) }], entry), /refusing/);
+  assert.throws(() => assertLobbyPackaged([{ name: 'lobby.wav', sha256: 'x' }, { name: 'lobby.mp3', sha256: entry.sha256 }], entry), /refusing/, 'a second lobby file is refused');
   assert.doesNotThrow(() => assertLobbyPackaged([{ name: 'lobby.mp3', sha256: entry.sha256 }], entry));
 });
 

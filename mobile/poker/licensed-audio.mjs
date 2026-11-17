@@ -40,9 +40,11 @@ export function decryptAsset(blob, key, name, expectedSha256) {
   return plain;
 }
 
-// Official CI packaging must contain the exact licensed lobby track.
+// Official CI packaging must contain exactly one lobby file: the licensed track (the native player
+// looks cues up by base name, so a second lobby.* would make the choice ambiguous).
 export function assertLobbyPackaged(audioFiles, entry) {
-  if (!entry || !audioFiles.some(file => file.name === entry.file && file.sha256 === entry.sha256)) throw new Error('Licensed lobby music missing or altered: refusing to package the APK');
+  const lobby = audioFiles.filter(file => file.name.replace(/\.[^.]+$/, '') === 'lobby');
+  if (!entry || lobby.length !== 1 || lobby[0].name !== entry.file || lobby[0].sha256 !== entry.sha256) throw new Error('Licensed lobby music missing or altered: refusing to package the APK');
 }
 
 export async function lobbyEntry() {
