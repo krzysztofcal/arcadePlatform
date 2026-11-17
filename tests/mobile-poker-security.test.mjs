@@ -106,3 +106,28 @@ test('verified binding pins own PR/SHA/site and never reuses parent or Productio
     assert.throws(() => security.forPreview(config, { ...binding, ...patch }, 1160, sha));
   }
 });
+
+test('#1285 support link: a tap opens the exact Suppi URL once in the system browser, never in the WebView', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const source = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
+  let ready;
+  const documentListeners = {};
+  const opened = [];
+  const ok = async () => {};
+  const document = { addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; else documentListeners[name] = fn; }, getElementById() { return null; } };
+  const window = {
+    MobilePokerSecurity: security, MOBILE_POKER_CONFIG: { ...config, sha: '12345678' },
+    Capacitor: { Plugins: { Browser: { open: async ({ url }) => { opened.push(url); }, close: ok }, SystemBars: { hide: ok, show: ok }, App: { addListener() {}, getLaunchUrl: async () => null } } },
+    location: { pathname: '/account.html', origin: 'https://localhost', href: 'https://localhost/account.html', replace() {} }, addEventListener() {}, dispatchEvent() {}
+  };
+  vm.runInNewContext(source, { window, document, URL, Event, navigator: { onLine: true }, sessionStorage: { getItem() { return null; }, setItem() {}, removeItem() {} } });
+  ready();
+  let prevented = 0;
+  const anchor = { href: 'https://suppi.pl/arcadehub', target: '_blank' };
+  documentListeners.click({ target: { closest: selector => selector === 'a[href]' ? anchor : null }, preventDefault() { prevented++; } });
+  await Promise.resolve();
+  assert.equal(prevented, 1, 'the WebView does not navigate or open a window');
+  assert.deepEqual(opened, ['https://suppi.pl/arcadehub'], 'one system-browser open with the exact URL');
+});
+

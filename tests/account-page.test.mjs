@@ -1324,12 +1324,16 @@ test("support link (#1285): fixed Suppi URL with disclosure, hidden on WWW Produ
   const i18n = await readFile(path.join(repoRoot, "js", "i18n.js"), "utf8");
   assert.match(i18n, /supportArcadeHub: \{ en: 'Support Arcade Hub ↗', pl: 'Wesprzyj Arcade Hub ↗' \}/);
   assert.match(i18n, /supportArcadeHubNote: \{ en: '[^']*independent provider Suppi[^']*no chips \(CH\), XP, rewards[^']*', pl: '[^']*niezależny serwis Suppi[^']*Nie daje żetonów \(CH\), XP, nagród[^']*' \}/);
+  const security = (await import("node:module")).createRequire(import.meta.url)("../mobile/poker/security.cjs");
+  const stage = JSON.parse(await readFile(path.join(repoRoot, "mobile", "poker", "stage-public.json"), "utf8"));
   for (const [hostname, mobile, visible] of [
-    ["play.kcswh.pl", false, false],
-    ["playkcswh.netlify.app", false, false],
-    ["deploy-preview-1286--playkcswh.netlify.app", false, true],
-    ["deploy-preview-1286--playkcswh.netlify.app.evil.test", false, false],
-    ["localhost", true, true],
+    ["play.kcswh.pl", null, false],
+    ["playkcswh.netlify.app", null, false],
+    ["deploy-preview-1286--playkcswh.netlify.app", null, true],
+    ["deploy-preview-1286--playkcswh.netlify.app.evil.test", null, false],
+    ["localhost", stage, true],
+    ["localhost", {}, false],
+    ["localhost", { ...stage, apiOrigin: "https://play.kcswh.pl" }, false],
   ]) {
     const chipsClient = { fetchBalance: () => Promise.resolve({ balance: 0 }), fetchLedger: () => Promise.resolve({ items: [], nextCursor: null }), fetchBonusCampaigns: () => Promise.resolve({ items: [] }) };
     const { windowObj, document } = buildContext(chipsClient);
@@ -1337,10 +1341,10 @@ test("support link (#1285): fixed Suppi URL with disclosure, hidden on WWW Produ
     support.hidden = true;
     document.__nodes.set("accountSupport", support);
     windowObj.location.hostname = hostname;
-    if (mobile) windowObj.MOBILE_POKER_CONFIG = {};
+    if (mobile) { windowObj.MOBILE_POKER_CONFIG = mobile; windowObj.MobilePokerSecurity = security; }
     vm.runInContext(source, vm.createContext({ window: windowObj, document, requestAnimationFrame: windowObj.requestAnimationFrame, CustomEvent: function() {} }));
     await flush();
-    assert.equal(support.hidden, !visible, hostname);
+    assert.equal(support.hidden, !visible, hostname + (mobile ? " " + JSON.stringify(mobile).slice(0, 40) : ""));
   }
 });
 
