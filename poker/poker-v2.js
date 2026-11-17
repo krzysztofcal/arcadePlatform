@@ -4486,22 +4486,26 @@
   };
   var tableCueAt = {};
   var tableCueTurn = {};
-  // Pairs each confirmed own action (accepted command) with its live snapshot: whichever arrives first
-  // sounds and the other stays silent. Timeout folds without an ack still sound from the snapshot.
-  var heroCueLedger = { handId: null, acked: 0, seen: 0 };
-  function claimHeroCue(source, handId){
-    if (heroCueLedger.handId !== handId) heroCueLedger = { handId: handId, acked: 0, seen: 0 };
-    heroCueLedger[source] += 1;
-    return heroCueLedger[source] > heroCueLedger[source === 'acked' ? 'seen' : 'acked'];
+  // The hero's own act command in flight, carrying the cue its intent deserves (an all-in stays an all-in
+  // although resolveAllInPlan() sends CALL, RAISE or BET). It sounds once: on the accepted command or on
+  // the first live snapshot showing a compatible move, whichever comes first. A snapshot move that does
+  // not match it (e.g. a server timeout fold) sounds as seen and leaves it alone.
+  var heroActionCue = null;
+  function heroActionKind(actionType, intent){
+    if (intent === 'all_in') return 'heroAllin';
+    if (actionType === 'FOLD') return 'heroFold';
+    return actionType === 'CALL' || actionType === 'RAISE' || actionType === 'BET' ? 'heroBet' : null;
   }
-
-  // Called once the server accepted the hero's act command. intent 'all_in' survives resolveAllInPlan()
-  // encoding the all-in as CALL, RAISE or BET. Stale acks (another hand/table, recovery) stay silent.
-  function playHeroActionCue(actionType, intent, handId, tableId){
-    var kind = intent === 'all_in' ? 'heroAllin' : actionType === 'FOLD' ? 'heroFold'
-      : actionType === 'CALL' || actionType === 'RAISE' || actionType === 'BET' ? 'heroBet' : null;
-    if (!kind || !handId || handId !== state.handId || tableId !== state.tableId || state.reconnectGate) return;
-    if (claimHeroCue('acked', handId)) playTableCue(kind, 0);
+  function soundHeroAction(entry){
+    if (entry.sounded) return;
+    entry.sounded = true;
+    playTableCue(entry.kind, 0);
+  }
+  function playHeroSnapshotCue(fold, seenKind, handId){
+    var entry = heroActionCue;
+    if (!entry || entry.handId !== handId || (entry.kind === 'heroFold') !== fold) return playTableCue(seenKind, 0);
+    heroActionCue = null;
+    soundHeroAction(entry);
   }
 
   // Pending cues die with their visuals: clearCardFx() (status change, hide, new hand) cancels all of
@@ -4557,7 +4561,7 @@
         transition.cards.forEach(function(_card, index){ playTableCue('board', index * 70 + 250); });
       } else if (transition.kind === 'muck'){
         if (transition.userId !== state.currentUserId) playTableCue('fold', 0);
-        else if (claimHeroCue('seen', state.handId)) playTableCue('heroFold', 0);
+        else playHeroSnapshotCue(true, 'heroFold', state.handId);
       }
       else if (transition.kind === 'flip') playTableCue('board', 0);
     });
@@ -4576,7 +4580,7 @@
       users.forEach(function(userId, index){
         var allIn = nextVisual.lastActionByUserId[userId] === 'all_in';
         if (userId !== state.currentUserId) playTableCue(allIn ? 'allin' : 'bet', index * 60);
-        else if (claimHeroCue('seen', nextVisual.handId)) playTableCue(allIn ? 'heroAllin' : 'heroBet', 0);
+        else playHeroSnapshotCue(false, allIn ? 'heroAllin' : 'heroBet', nextVisual.handId);
       });
       if (users.length) playTableCue('pot', CHIP_FLY_MS);
     }
@@ -6452,13 +6456,17 @@
     if (state.reconnectGate) return Promise.resolve();
     var payload = { handId: state.handId || null, action: actionType };
     if (Number.isFinite(amount)) payload.amount = Math.trunc(amount);
-    var sentTableId = state.tableId;
+    var kind = heroActionKind(actionType, intent);
+    var cue = kind && payload.handId ? { handId: payload.handId, tableId: state.tableId, kind: kind, sounded: false } : null;
+    if (cue) heroActionCue = cue;
     setError('');
     return sendCommand('sendAct', payload).then(function(){
-      playHeroActionCue(actionType, intent, payload.handId, sentTableId);
+      // Accepted: sound now unless its snapshot already did; stale acks (other hand/table, recovery) stay silent.
+      if (cue && cue.handId === state.handId && cue.tableId === state.tableId && !state.reconnectGate) soundHeroAction(cue);
       state.statusText = 'Action sent';
       renderInfoPanel();
     }).catch(function(err){
+      if (heroActionCue === cue) heroActionCue = null;
       setError(err && err.message ? err.message : 'Failed to send action');
     });
   }

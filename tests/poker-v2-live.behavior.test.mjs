@@ -7168,3 +7168,33 @@ test('own actions: a Call seen in a snapshot before its ack, an ack under reduce
   }
 });
 
+test('own actions: a snapshot-first All-in sent as CALL sounds as all-in', async () => {
+  {
+    let accept;
+    const { audio, harness, ws } = await heroTableHarness({ sendAct: () => new Promise(resolve => { accept = resolve; }) });
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { stacks: { 'user-1': 8, 'villain-1': 100 }, actions: ['FOLD','CALL'], constraints: { toCall: 10 } }));
+    await harness.flush();
+    harness.elements.pokerV2AllInBtn.click(); await harness.flush();
+    assert.equal(harness.actPayloads[0].action, 'CALL');
+    ws.onSnapshot(heroActionFrame('hero-hand', 3, { potTotal: 38, bets: { 'user-1': 8 }, stacks: { 'user-1': 0, 'villain-1': 100 }, lastActions: { 'user-1': 'call' }, turnUserId: 'villain-1' }));
+    harness.advanceTime(1000); await harness.flush();
+    accept({ ok: true }); await harness.flush();
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays.filter(cue => cue !== 'chips_pot_1'), ['chips_allin'], 'snapshot first: the all-in intent wins, once');
+  }
+});
+
+test('own actions: an earlier accepted action without a snapshot cue never silences a later timeout fold', async () => {
+  {
+    const { audio, harness, ws } = await heroTableHarness();
+    harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+    assert.deepEqual(audio.plays, ['chips_bet_1'], 'accepted Call');
+    // Its snapshot shows the bet but no pot increase, so no snapshot cue claims the Call.
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { bets: { 'user-1': 10 }, lastActions: { 'user-1': 'call' }, turnUserId: 'villain-1' }));
+    harness.advanceTime(1000); await harness.flush();
+    ws.onSnapshot(heroActionFrame('hero-hand', 3, { bets: { 'user-1': 10 }, folded: ['user-1'], lastActions: { 'user-1': 'fold' }, turnUserId: 'villain-1' }));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, ['chips_bet_1', 'card_fold'], 'the later timeout fold still sounds');
+  }
+});
+
