@@ -510,3 +510,14 @@ test('table cues: every cue named in poker-v2.js is a bundled WAV under the nati
   assert.match(source, /function tableAudio\(\)\{\s*var audio = window\.MobilePokerAudio;\s*return audio && typeof audio\.play === 'function' \? audio : null;/);
 });
 
+test('dealer voice ducking: music and cues dip for at least the longest line and return on stop', async () => {
+  const java = await readFile(new URL('../mobile/poker/PokerAudioPlugin.java', import.meta.url), 'utf8');
+  const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
+  const longest = Math.max(...manifest.assets.filter(a => a.channel === 'voice').map(a => a.durationSeconds));
+  const voiceMs = Number(java.match(/VOICE_MS = (\d+);/)[1]);
+  assert.ok(voiceMs > longest * 1000, 'the duck outlasts every dealer line');
+  assert.match(java, /if \(voice\) \{\s*voiceStream = stream;\s*startVoiceDuck\(\);/, 'a started line ducks');
+  assert.match(java, /private void stopCues\(\) \{[\s\S]*?endVoiceDuck\(\);[\s\S]*?\n    \}/, 'mute, background and stop restore the levels');
+  assert.match(java, /fadeTo\(musicLevel\(\)\)/, 'music follows the ducked level');
+});
+
