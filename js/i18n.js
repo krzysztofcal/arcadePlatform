@@ -318,6 +318,7 @@ homeBonusLoadError: { en: 'Could not load available bonuses.', pl: 'Nie udało s
     googlePhotoWithdrawn: { en: 'Your Google photo is no longer used and our copy was deleted.', pl: 'Twoje zdjęcie Google nie jest już używane, a nasza kopia została usunięta.' },
     googlePhotoCopyPending: { en: 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.', pl: 'Twoje zdjęcie Google nie jest już wyświetlane, ale usunięcie naszej kopii nie jest jeszcze potwierdzone. Spróbuj ponownie później.' },
     googlePhotoImported: { en: 'Your Google photo is now your avatar.', pl: 'Twoje zdjęcie Google jest teraz Twoim awatarem.' },
+    googlePhotoWithdrawConfirmAction: { en: 'Stop using Google photo', pl: 'Przestań używać zdjęcia Google' },
     googlePhotoWithdrawConfirm: { en: 'Stop using your Google photo? Your Arcade avatar will be shown and our copy will be deleted.', pl: 'Przestać używać zdjęcia Google? Twój awatar Arcade będzie wyświetlany, a nasza kopia zostanie usunięta.' },
     leaderboardSettingsTitle: { en: 'Leaderboard settings', pl: 'Ustawienia rankingu' },
     hideFromLeaderboard: { en: 'Hide my profile from the leaderboard', pl: 'Ukryj mój profil w rankingu' },

@@ -75,10 +75,12 @@
 .account-danger-zone{border-color:rgba(255,123,123,.45);background:transparent;border-radius:20px;padding:20px;margin-top:20px;scroll-margin-top:80px;}
 @keyframes accountDangerPulse{0%{box-shadow:0 0 0 0 rgba(255,123,123,.5);}70%{box-shadow:0 0 0 10px rgba(255,123,123,0);}100%{box-shadow:0 0 0 0 rgba(255,123,123,0);}}
 .account-danger-highlight{animation:accountDangerPulse 1.5s ease-out 2;border-color:var(--red)!important;}
-dialog#accountDeletionDialog{border:1px solid var(--bd);border-radius:22px;background:var(--sf);color:var(--tx);padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.7);max-width:440px;width:calc(100% - 32px);}
-dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filter:blur(4px);}
+dialog.account-delete-dialog{border:1px solid var(--bd);border-radius:22px;background:var(--sf);color:var(--tx);padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.7);max-width:440px;width:calc(100% - 32px);}
+dialog.account-delete-dialog::backdrop{background:rgba(0,0,0,.75);backdrop-filter:blur(4px);}
 .account-delete-dialog__content{display:flex;flex-direction:column;gap:14px;}
 .account-delete-dialog__actions{display:flex;gap:10px;margin-top:6px;}
+#googlePhotoWithdrawDialog .account-delete-dialog__actions{flex-direction:column;}
+#googlePhotoWithdrawDialog .btn{white-space:normal;}
 .public-profile-editor__identity{display:flex;align-items:center;gap:12px;}
 .public-profile-editor__avatar{position:relative;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 16px/1 Poppins,sans-serif;}
 .public-profile-editor__avatar.profile-avatar--uploaded{background-position:center;background-size:cover;}

@@ -12,6 +12,10 @@ Before starting any work in this repository, read and follow:
 - **Approved Procedures Only**: Deployments and administrative tasks must use only official approved paths (`WS Server Deploy`, `scripts/www-production-release.mjs`, `VPS Admin Operation`, `DB Stage Apply PR`, `Release Record`). Never bypass via manual SSH, sudo, root, or direct restart (does not preclude OWNER emergency recovery C7).
 - **Platform Rules**: JSP-compatible JS (no browser modules/imports), CSS 1-line-per-selector, logging strictly via `klog(...)` (never `console.log`), and only fundamental tests.
 
+## Application dialogs
+
+Claude Code MUST follow `AGENTS.md` → Application dialogs (mandatory), including the ban on `window.alert()`, `window.confirm()` and `window.prompt()` for new or modified application UX. Reuse the dialog pattern mapped in `skills.md`; native browser/OS security and permission prompts are exempt.
+
 ## WWW Candidate (T007)
 
 Follow AGENTS.md's Agent Candidate operating rule and the WWW SOP. After separate activation and explicit OWNER GO

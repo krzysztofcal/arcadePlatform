@@ -9,6 +9,7 @@
   var owner = null;
   var status = null;
   var busy = false;
+  var closeWithdrawalConfirmation = null;
 
   function t(key, fallback){
     try {
@@ -159,7 +160,60 @@
     }
   }
 
+  // Same accessible confirmation pattern as accountDeletionDialog; no native WebView prompt.
+  function confirmWithdrawal(){
+    return new Promise(function(resolve){
+      var dialog = node('googlePhotoWithdrawDialog');
+      var cancelButton = node('googlePhotoWithdrawCancel');
+      var confirmButton = node('googlePhotoWithdrawConfirmButton');
+      var closeButton = node('googlePhotoWithdrawClose');
+      if (!dialog || !dialog.showModal || !cancelButton || !confirmButton || !closeButton){
+        klog('google_photo:dialog_unavailable', {});
+        resolve(false);
+        return;
+      }
+      var previousFocus = document.activeElement;
+      var settled = false;
+      function finish(confirmed){
+        if (settled) return;
+        settled = true;
+        dialog.removeEventListener('cancel', cancel);
+        dialog.removeEventListener('close', cancel);
+        dialog.removeEventListener('click', backdrop);
+        dialog.removeEventListener('keydown', keyboard);
+        cancelButton.removeEventListener('click', cancel);
+        closeButton.removeEventListener('click', cancel);
+        confirmButton.removeEventListener('click', accept);
+        window.removeEventListener('popstate', cancel);
+        closeWithdrawalConfirmation = null;
+        if (dialog.open) dialog.close();
+        try { if (previousFocus && previousFocus.isConnected) previousFocus.focus(); } catch (_err){}
+        resolve(confirmed);
+      }
+      function cancel(event){ if (event && event.cancelable) event.preventDefault(); finish(false); }
+      function accept(){ finish(true); }
+      function backdrop(event){ if (event.target === dialog) finish(false); }
+      function keyboard(event){
+        if (event.key === 'Escape'){ event.preventDefault(); finish(false); return; }
+        if (event.key !== 'Tab') return;
+        if (event.shiftKey && document.activeElement === closeButton){ event.preventDefault(); confirmButton.focus(); }
+        else if (!event.shiftKey && document.activeElement === confirmButton){ event.preventDefault(); closeButton.focus(); }
+      }
+      closeWithdrawalConfirmation = cancel;
+      dialog.addEventListener('cancel', cancel);
+      dialog.addEventListener('close', cancel);
+      dialog.addEventListener('click', backdrop);
+      dialog.addEventListener('keydown', keyboard);
+      cancelButton.addEventListener('click', cancel);
+      closeButton.addEventListener('click', cancel);
+      confirmButton.addEventListener('click', accept);
+      window.addEventListener('popstate', cancel);
+      try { dialog.showModal(); cancelButton.focus(); } catch (_err){ finish(false); }
+    });
+  }
+
   async function load(){
+    if (closeWithdrawalConfirmation) closeWithdrawalConfirmation();
     var current = ++generation;
     render(null);
     var auth = window.SupabaseAuth;
@@ -189,9 +243,11 @@
       run('import');
     });
     var withdraw = node('googlePhotoWithdraw');
-    if (withdraw) withdraw.addEventListener('click', function(){
-      if (!window.confirm(t('googlePhotoWithdrawConfirm', 'Stop using your Google photo? Your Arcade avatar will be shown and our copy will be deleted.'))) return;
-      run('withdraw');
+    if (withdraw) withdraw.addEventListener('click', async function(){
+      if (busy || closeWithdrawalConfirmation || !owner || !status || !(status.copyStored || (status.consent && status.consent.decision === 'granted'))) return;
+      var expectedUser = owner;
+      var expectedGeneration = generation;
+      if (await confirmWithdrawal() && owner === expectedUser && generation === expectedGeneration) run('withdraw');
     });
     var reconnect = node('googlePhotoReconnect');
     if (reconnect) reconnect.addEventListener('click', function(){

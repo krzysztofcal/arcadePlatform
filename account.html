@@ -50,7 +50,7 @@
   <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/account-page.js" defer></script>
-  <script src="js/profile-google-photo.js" integrity="sha256-ZPbYUAneYyfoGGEqGCT4S1UWxAJCZGQq3DOd+P0wFOk=" crossorigin="anonymous" defer></script>
+  <script src="js/profile-google-photo.js" integrity="sha256-Rp4tP6mR6VBwYxL3SY887lQNztF6ae/sltSpYXcTD7Y=" crossorigin="anonymous" defer></script>
   <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
   <script src="js/klaro-config.js" defer></script>
   <script src="js/vendor/klaro/klaro.js" defer></script>
@@ -250,7 +250,7 @@
                     <button type="button" class="btn sm gh" id="googlePhotoImport" disabled data-i18n="googlePhotoImport">Use my Google photo</button>
                     <button type="button" class="btn sm gh" id="googlePhotoReconnect" hidden data-i18n="googlePhotoReconnect">Confirm with Google</button>
                   </div>
-                  <button type="button" class="btn sm gh" id="googlePhotoWithdraw" hidden data-i18n="googlePhotoWithdraw">Stop using my Google photo</button>
+                  <button type="button" class="btn sm gh" id="googlePhotoWithdraw" aria-haspopup="dialog" aria-controls="googlePhotoWithdrawDialog" hidden data-i18n="googlePhotoWithdraw">Stop using my Google photo</button>
                 </fieldset>
                 <form class="account-form" id="publicProfileForm">
                   <fieldset class="public-profile-editor__privacy" style="border:0;padding:0;margin:0;"><label style="display:flex;align-items:center;gap:8px;font-weight:600;"><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note sub" style="margin-top:4px;" data-i18n="profileRemainsPublic">This does not hide your player profile from signed-in users.</p></fieldset>
@@ -352,6 +352,20 @@
       </article>
     </main>
   </div>
+
+  <dialog class="account-delete-dialog" id="googlePhotoWithdrawDialog" aria-labelledby="googlePhotoWithdrawDialogTitle" aria-describedby="googlePhotoWithdrawDialogWarning">
+    <div class="account-delete-dialog__content">
+      <div class="sh">
+        <h2 id="googlePhotoWithdrawDialogTitle" class="h2" data-i18n="googlePhotoTitle">Google profile photo</h2>
+        <button type="button" class="close" id="googlePhotoWithdrawClose" data-i18n-aria="accountDeletionClose" aria-label="Cancel and close">×</button>
+      </div>
+      <p id="googlePhotoWithdrawDialogWarning" class="sub" data-i18n="googlePhotoWithdrawConfirm">Stop using your Google photo? Your Arcade avatar will be shown and our copy will be deleted.</p>
+      <div class="account-delete-dialog__actions">
+        <button type="button" class="btn gh" id="googlePhotoWithdrawCancel" data-i18n="cancel" autofocus>Cancel</button>
+        <button type="button" class="btn dg" id="googlePhotoWithdrawConfirmButton" data-i18n="googlePhotoWithdrawConfirmAction">Stop using Google photo</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog class="account-delete-dialog" id="accountDeletionDialog" aria-labelledby="accountDeletionDialogTitle" aria-describedby="accountDeletionDialogWarning">
     <div class="account-delete-dialog__content">
