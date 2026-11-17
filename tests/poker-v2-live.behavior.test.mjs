@@ -103,6 +103,7 @@ function makeElement(id){
 
 function createHarness(options = {}){
   const source = fs.readFileSync(path.join(process.cwd(), 'poker', 'poker-v2.js'), 'utf8');
+  const motionQuery = { matches: options.reducedMotion === true, listeners: [], addEventListener(type, fn){ if (type === 'change') motionQuery.listeners.push(fn); } };
   const elements = {};
   [
     'pokerAccountHud',
@@ -196,7 +197,7 @@ function createHarness(options = {}){
       if (typeof options.sendJoin === 'function') return options.sendJoin(payload, { attempt: joinPayloads.length, requestId: requestId || null });
       return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 });
     },
-    sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
+    sendAct(payload){ actPayloads.push(payload); return typeof options.sendAct === 'function' ? options.sendAct(payload) : Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendRebuy(payload, requestId){
       rebuyPayloads.push(payload);
@@ -289,7 +290,8 @@ function createHarness(options = {}){
           return wsClient;
         }
       },
-      matchMedia(){ return { matches: options.reducedMotion === true }; },
+      matchMedia(){ return motionQuery; },
+      MobilePokerAudio: options.audio,
       getComputedStyle(node){ return node.style; },
       setInterval(fn){
         intervalTimers.push(fn);
@@ -450,7 +452,9 @@ async function flush(){
     },
     getIntervalCount(){ return intervalTimers.length; },
     getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); },
-    getLocalStorage(key){ return sandbox.localStorage.getItem(key); }
+    getLocalStorage(key){ return sandbox.localStorage.getItem(key); },
+    setDocumentHidden(value){ sandbox.document.hidden = value; },
+    setReducedMotion(value){ motionQuery.matches = value; motionQuery.listeners.forEach(fn => fn()); }
   };
 }
 
@@ -4799,7 +4803,6 @@ test('poker v2 closes menu on link click and outside click', async () => {
   assert.equal(seated.leavePayloads.length, 1);
   assert.equal(seated.windowLocation.href, '/poker/');
 
-
 });
 
 test('poker v2 keeps secondary landscape actions in the hamburger and gates join on an actionable snapshot', async () => {
@@ -6287,7 +6290,6 @@ test('bot-only all-in loss reaction catalog entries resolve emoji/labels, humanS
   }
 });
 
-
 test('Poker account projection sums every authoritative table stack and rejects unavailable values', () => {
   const source = fs.readFileSync(path.resolve('poker/poker-v2.js'), 'utf8');
   const functionSource = source.slice(source.indexOf('  function sumPokerTableStacks('), source.indexOf('  function accountHudContext('));
@@ -6463,7 +6465,6 @@ test('active-table Back to lobby Yes sends leave and navigates only after leave 
   completeLeave({ ok: true }); await harness.flush();
   assert.equal(harness.windowLocation.href, '/poker/');
 });
-
 
 test('automatic table themes agree across clients and reload for the same immutable ID', async () => {
   const fixtures = [
@@ -6819,7 +6820,6 @@ test('poker v2 does not trigger spectator join intro for full table and cancels 
   assert.equal(activeHarness.elements.pokerV2JoinBtn.hidden, false, 'standard join button remains visible');
 });
 
-
 for (const ended of [true, false]) test('reconnect preserves seat only for transient rejection: ended=' + ended, async () => {
   let accessReads = 0;
   const code = ended ? 'single_player_participation_ended' : 'temporarily_unavailable';
@@ -6851,7 +6851,6 @@ for (const ended of [true, false]) test('reconnect preserves seat only for trans
     assert.equal(harness.joinPayloads.length, 1, 'ended participation must not retry');
   }
 });
-
 
 for (const exitStatus of ['pending', 'removed']) test(`inactivity identity isolation preserves same-account reconnect and clears logout/account switches, status=${exitStatus}`, async () => {
   const tokenFor = (user, suffix) => 'aaa.' + Buffer.from(JSON.stringify({ sub: user })).toString('base64') + '.' + suffix;
@@ -6950,4 +6949,215 @@ for (const freshPending of [false, true]) test(`inactivity pending keeps authori
   assert.equal(harness.getReconnect().inactivity, 'removed');
   for (let i=0;i<5;i++){ harness.advanceTime(1000); await harness.flush(); }
   assert.equal(harness.windowLocation.href, '/poker/');
+});
+
+// #1146 PR3: table sound cues follow live presentation claims only, independent of reduced motion.
+function fakeTableAudio(){
+  const audio = { plays: [], preloads: [], play(cue){ audio.plays.push(cue); return Promise.resolve(true); }, preload(cues){ audio.preloads.push(cues.slice()); return Promise.resolve(true); } };
+  return audio;
+}
+
+test('table cues: board cards sound once per live street, never on initial, reconnect, resync or duplicate frames', async () => {
+  for (const mode of ['live', 'reduced', 'initial', 'reconnecting', 'resync']) {
+    const audio = fakeTableAudio();
+    const harness = createHarness({ reducedMotion: mode === 'reduced', audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    if (mode === 'live') {
+      assert.equal(audio.preloads.length, 1, 'cues are preloaded once at init');
+      assert.ok(['card_shuffle','card_board_1','chips_bet_1','chips_payout','chips_win'].every(cue => audio.preloads[0].includes(cue)));
+    }
+    const ws = harness.getCreateOptions();
+    const board = ['As','Ks','Qs','7d','2c'];
+    ws.onSnapshot(communityDealFrame('cue-board', 1, [], true));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, [], mode + ': initial snapshot is silent');
+    if (mode === 'reconnecting' || mode === 'resync') ws.onStatus(mode, {});
+    ws.onSnapshot(communityDealFrame('cue-board', 2, board.slice(0, 3), mode === 'initial'));
+    harness.advanceTime(1000); await harness.flush();
+    const expected = mode === 'live' || mode === 'reduced' ? ['card_board_1','card_board_2','card_board_1'] : [];
+    assert.deepEqual(audio.plays, expected, mode + ': flop');
+    ws.onSnapshot(communityDealFrame('cue-board', 3, board.slice(0, 3)));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, expected, mode + ': a duplicate frame never replays');
+  }
+});
+
+test('table cues: settlement pays out once per hand with a discreet hero win; resync and duplicates stay silent', async () => {
+  async function settle(statusBeforeSettlement){
+    const audio = fakeTableAudio();
+    const harness = createHarness({ audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    const ws = harness.getCreateOptions();
+    ws.onSnapshot({ kind: 'stateSnapshot', initial: true, payload: { tableId: 'table-1',
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'player-b', seat: 2 }] },
+      public: { hand: { handId: 'hand-cue', status: 'RIVER' }, pot: { total: 20 }, stacks: { 'user-1': 90, 'player-b': 90 } }, you: { seat: 1 } } });
+    await harness.flush();
+    if (statusBeforeSettlement) { ws.onStatus(statusBeforeSettlement, {}); await harness.flush(); }
+    const payload = { tableId: 'table-1', public: { hand: { handId: 'hand-cue', status: 'SETTLED' }, pot: { total: 0 },
+      showdown: { handId: 'hand-cue', reason: 'computed', winners: ['user-1'], potAwardedTotal: 20, potsAwarded: [{ amount: 20, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b'] }] },
+      handSettlement: { handId: 'hand-cue', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 20 } } } };
+    ws.onSnapshot({ kind: 'stateSnapshot', payload });
+    harness.advanceTime(2000); await harness.flush();
+    const first = audio.plays.slice();
+    ws.onSnapshot({ kind: 'statePatch', payload });
+    harness.advanceTime(2000); await harness.flush();
+    assert.deepEqual(audio.plays, first, 'a duplicate settlement never replays');
+    return first;
+  }
+  assert.deepEqual(await settle(), ['chips_payout', 'chips_win']);
+  assert.deepEqual(await settle('resync'), [], 'a settlement seen through resync is silent');
+});
+
+test('table cues: cues already scheduled are dropped when reconnect, resync or hiding starts before they fire', async () => {
+  for (const interrupt of ['none', 'reconnecting', 'resync', 'hidden']) {
+    const audio = fakeTableAudio();
+    const harness = createHarness({ audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    const ws = harness.getCreateOptions();
+    ws.onSnapshot(communityDealFrame('cue-cancel', 1, [], true));
+    harness.advanceTime(1000); await harness.flush();
+    ws.onSnapshot(communityDealFrame('cue-cancel', 2, ['As','Ks','Qs']));
+    assert.deepEqual(audio.plays, [], 'board cues wait for the cards to land');
+    if (interrupt === 'hidden') { harness.setDocumentHidden(true); harness.fireDocumentEvent('visibilitychange'); }
+    else if (interrupt !== 'none') ws.onStatus(interrupt, {});
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, interrupt === 'none' ? ['card_board_1','card_board_2','card_board_1'] : [], interrupt);
+  }
+});
+
+test('table cues: a settlement arriving while the river card is still landing keeps the river sound', async () => {
+  const audio = fakeTableAudio();
+  const harness = createHarness({ audio });
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  const board = ['As','Ks','Qs','7d','2c'];
+  ws.onSnapshot(communityDealFrame('cue-river', 1, board.slice(0, 4), true));
+  harness.advanceTime(1000); await harness.flush();
+  ws.onSnapshot(communityDealFrame('cue-river', 2, board));
+  ws.onSnapshot({ kind: 'stateSnapshot', payload: { tableId: 'table-1', stateVersion: 3, public: { hand: { handId: 'cue-river', status: 'SETTLED' }, board, pot: { total: 0 },
+    showdown: { handId: 'cue-river', reason: 'computed', winners: ['user-1'], potAwardedTotal: 30, potsAwarded: [{ amount: 30, winners: ['user-1'], eligibleUserIds: ['user-1', 'villain-1'] }] },
+    handSettlement: { handId: 'cue-river', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 30 } } } } });
+  harness.advanceTime(3000); await harness.flush();
+  assert.deepEqual(audio.plays, ['card_board_1', 'chips_payout', 'chips_win']);
+});
+
+test('table cues: switching reduced motion on while a cue is pending clears visuals but keeps the sound', async () => {
+  const audio = fakeTableAudio();
+  const harness = createHarness({ audio });
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot(communityDealFrame('cue-motion', 1, [], true));
+  harness.advanceTime(1000); await harness.flush();
+  ws.onSnapshot(communityDealFrame('cue-motion', 2, ['As','Ks','Qs']));
+  assert.ok(harness.elements.pokerCardFxLayer.children.length > 0, 'flop visuals are running');
+  assert.deepEqual(audio.plays, [], 'board cues wait for the cards to land');
+  harness.setReducedMotion(true);
+  assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'reduced motion removes running visuals');
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, ['card_board_1', 'card_board_2', 'card_board_1'], 'scheduled sounds still play');
+});
+
+// #1146 PR3: own (hero) and opponent actions sound with their presentation (chips to the pot, muck),
+// never on click or command acknowledgement.
+function heroActionFrame(handId, version, { initial = false, potTotal = 30, bets = {}, folded = [], lastActions = {}, stacks, actions = ['FOLD','CALL','RAISE'], constraints = { toCall: 10, minRaiseTo: 20, maxRaiseTo: 100 }, turnUserId = 'user-1', projectedActions = null, board = ['As','Ks','Qs'] } = {}){
+  const frame = amountSnapshot({ handId, phase: board.length === 4 ? 'TURN' : 'FLOP', board, potTotal, actions, constraints, stateVersion: version, turnUserId, projectedActions,
+    stacks: stacks || { 'user-1': 100, 'villain-1': 100 }, holeCards: ['Js','Ts'],
+    members: [{ userId: 'user-1', seat: 1, status: folded.includes('user-1') ? 'FOLDED' : 'ACTIVE' }, { userId: 'villain-1', seat: 2, status: folded.includes('villain-1') ? 'FOLDED' : 'ACTIVE' }] });
+  frame.initial = initial;
+  frame.payload.public.betThisRoundByUserId = { 'user-1': 0, 'villain-1': 10, ...bets };
+  frame.payload.public.foldedByUserId = Object.fromEntries(folded.map(id => [id, true]));
+  frame.payload.public.lastBettingRoundActionByUserId = lastActions;
+  return frame;
+}
+
+async function heroTableHarness(options = {}){
+  const audio = fakeTableAudio();
+  const harness = createHarness({ audio, ...options });
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot(heroActionFrame('hero-hand', 1, { initial: true }));
+  harness.advanceTime(1000); await harness.flush();
+  return { audio, harness, ws };
+}
+
+test('actions: a Call sounds with its chips, not on click or ack, identically for ack-first and snapshot-first', async () => {
+  const runs = [];
+  for (const order of ['ack-first', 'snapshot-first']) {
+    let accept;
+    const { audio, harness, ws } = await heroTableHarness(order === 'ack-first' ? {} : { sendAct: () => new Promise(resolve => { accept = resolve; }) });
+    harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+    assert.equal(harness.actPayloads[0].action, 'CALL');
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, [], order + ': click and ack are silent');
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 40, stacks: { 'user-1': 90, 'villain-1': 100 }, bets: { 'user-1': 10 }, lastActions: { 'user-1': 'call' }, turnUserId: 'villain-1' }));
+    if (accept) accept({ ok: true });
+    harness.advanceTime(1000); await harness.flush();
+    ws.onSnapshot(heroActionFrame('hero-hand', 3, { potTotal: 70, stacks: { 'user-1': 90, 'villain-1': 70 }, bets: { 'user-1': 10, 'villain-1': 40 }, lastActions: { 'user-1': 'call', 'villain-1': 'raise' } }));
+    harness.advanceTime(1000); await harness.flush();
+    runs.push(audio.plays.slice());
+  }
+  assert.deepEqual(runs[0], ['chips_bet_1', 'chips_pot_1', 'chips_bet_2', 'chips_pot_2'], 'hero call, then an opponent raise');
+  assert.deepEqual(runs[1], runs[0], 'event order does not change the sound');
+});
+
+test('actions: a repeated call and a call that closes the betting round still sound (stack drop is the evidence)', async () => {
+  const { audio, harness, ws } = await heroTableHarness();
+  ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 40, stacks: { 'user-1': 90, 'villain-1': 100 }, bets: { 'user-1': 10 }, lastActions: { 'user-1': 'call' } }));
+  harness.advanceTime(1000); await harness.flush();
+  ws.onSnapshot(heroActionFrame('hero-hand', 3, { potTotal: 80, stacks: { 'user-1': 60, 'villain-1': 100 }, bets: { 'user-1': 40 }, lastActions: { 'user-1': 'call' } }));
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays.filter(cue => cue.startsWith('chips_bet')), ['chips_bet_1', 'chips_bet_2'], 'call after call');
+  ws.onSnapshot(heroActionFrame('hero-hand', 4, { potTotal: 110, stacks: { 'user-1': 60, 'villain-1': 70 }, bets: { 'user-1': 0, 'villain-1': 0 }, lastActions: {}, board: ['As','Ks','Qs','7d'] }));
+  harness.advanceTime(1000); await harness.flush();
+  assert.equal(audio.plays.filter(cue => cue.startsWith('chips_bet')).length, 3, 'the opponent call that closed the round and dealt the turn');
+  assert.ok(audio.plays.includes('card_board_1'), 'with the turn card');
+});
+
+test('actions: All-in sounds only on authoritative evidence; recovery frames never invent one', async () => {
+  {
+    const { audio, harness, ws } = await heroTableHarness();
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 130, stacks: { 'user-1': 0, 'villain-1': 100 }, bets: { 'user-1': 100 }, lastActions: { 'user-1': 'all_in' }, turnUserId: 'villain-1' }));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, ['chips_allin', 'chips_pot_1'], 'server all_in');
+  }
+  {
+    const { audio, harness, ws } = await heroTableHarness();
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 130, stacks: { 'user-1': 0, 'villain-1': 100 }, bets: {}, lastActions: {}, board: ['As','Ks','Qs','7d'] }));
+    harness.advanceTime(1000); await harness.flush();
+    assert.ok(audio.plays.includes('chips_allin'), 'an emptied stack is an all-in even when the round already moved on');
+  }
+  for (const status of ['resync', 'reconnecting']) {
+    const { audio, harness, ws } = await heroTableHarness();
+    ws.onStatus(status, {});
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 130, stacks: { 'user-1': 0, 'villain-1': 100 }, bets: { 'user-1': 100 }, lastActions: { 'user-1': 'all_in' } }));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, [], status + ': the recovery frame is silent');
+  }
+});
+
+test('actions: Fold sounds with its muck, also under reduced motion; a rejected command is silent', async () => {
+  for (const reducedMotion of [false, true]) {
+    const { audio, harness, ws } = await heroTableHarness({ reducedMotion });
+    harness.elements.pokerV2FoldBtn.click(); await harness.flush();
+    assert.deepEqual(audio.plays, [], 'the click is silent');
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { folded: ['user-1'], lastActions: { 'user-1': 'fold' }, turnUserId: 'villain-1' }));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, ['card_fold'], 'reduced motion ' + reducedMotion);
+  }
+  const { audio, harness } = await heroTableHarness({ sendAct: () => Promise.reject(new Error('not_your_turn')) });
+  harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, [], 'no state transition, no sound');
+});
+
+test('actions: a delayed ack after a resync in the same hand adds no sound', async () => {
+  let accept;
+  const { audio, harness, ws } = await heroTableHarness({ sendAct: () => new Promise(resolve => { accept = resolve; }) });
+  harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+  ws.onStatus('resync', {});
+  ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 40, stacks: { 'user-1': 90, 'villain-1': 100 }, bets: { 'user-1': 10 }, lastActions: { 'user-1': 'call' }, turnUserId: 'villain-1' }));
+  await harness.flush();
+  accept({ ok: true }); await harness.flush();
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, [], 'recovery shows the call silently and the ack never sounds');
 });

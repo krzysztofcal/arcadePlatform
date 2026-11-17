@@ -104,6 +104,12 @@ test('approved legal content, both policy versions and deletion links survive th
     assert.ok(bonusEntry, 'manifest must contain bonus entry');
     const bonusSha256 = createHash('sha256').update(bonusWav).digest('hex');
     assert.equal(bonusSha256, bonusEntry.sha256, 'packaged bonus_coins.mp3 sha256 must equal the manifest');
+    // #1146 PR3: every table cue is packaged unchanged and listed in the receipt.
+    for (const entry of audioManifest.assets.filter(a => /^(card|chips)_/.test(a.cue))) {
+      const packaged = await readFile(path.join(fixture, 'mobile/poker/www/mobile/audio', entry.file));
+      assert.equal(createHash('sha256').update(packaged).digest('hex'), entry.sha256, 'packaged ' + entry.file);
+      assert.ok(receipt.audio.files.some(f => f.name === entry.file && f.sha256 === entry.sha256), 'receipt lists ' + entry.file);
+    }
     // The licensed lobby track is only decrypted in the APK workflow: the encrypted file is never packaged.
     assert.ok(!receipt.audio.files.some(f => f.name.endsWith('.enc')), 'encrypted audio is never packaged');
     await assert.rejects(readFile(path.join(fixture, 'mobile/poker/www/mobile/audio/lobby.mp3.enc')));
