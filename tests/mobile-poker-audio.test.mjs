@@ -434,6 +434,21 @@ test('adapter mounts exactly one toggle in avatarMenu and table panel, reflects 
   }
 });
 
+test('bonus cue is decoded ahead of time on the Lobby only, never without the Android plugin', async () => {
+  const source = await readFile(new URL('../mobile/poker/audio.js', import.meta.url), 'utf8');
+  const run = (pathname, android) => {
+    const preloads = [];
+    const window = { location: { pathname }, addEventListener() {} };
+    if (android) window.Capacitor = { getPlatform: () => 'android', Plugins: { PokerAudio: { preload: async o => { preloads.push(JSON.stringify(o.cues)); }, getState: async () => ({ enabled: true }) } } };
+    vm.runInNewContext(source, { window, document: { readyState: 'loading', addEventListener() {} } });
+    return preloads;
+  };
+  assert.deepEqual(run('/poker/index.html', true), ['["bonus_coins"]']);
+  assert.deepEqual(run('/poker/', true), ['["bonus_coins"]']);
+  for (const page of ['/account.html', '/poker/table-v2.html', '/poker/offline/play.html']) assert.deepEqual(run(page, true), [], page);
+  assert.deepEqual(run('/poker/index.html', false), [], 'WWW/browser never calls native');
+});
+
 test('bonus hook guard on poker/poker.js source text', async () => {
   const content = await readFile(new URL('../poker/poker.js', import.meta.url), 'utf8');
 
