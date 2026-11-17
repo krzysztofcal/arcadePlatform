@@ -1317,7 +1317,7 @@
     {
       "version": "20261107140000",
       "file": "20261107140000_google_photo_consent.sql",
-      "sha256": "d8946fba1340e9c5a22495c51cf83f893cb1d8d9c34ea03cde64ad96403a7fdd",
+      "sha256": "c3549077a36de0f96dfb9265ba9d218cfcd9a6339eec89915cae4e7998a89330",
       "category": "needs-production-equivalent",
       "purpose": "#1140 voluntary Google photo consent; prepared Stage schema only; separate OWNER Stage apply and Production equivalent/review/GO required; no activation"
     }

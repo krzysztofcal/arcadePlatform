@@ -15,7 +15,7 @@ create table private.profile_photo_consents (
   consent_revision integer not null default 1 check (consent_revision between 1 and 2147483646),
   granted_at timestamptz not null,
   withdrawn_at timestamptz,
-  imported_avatar_key text check (imported_avatar_key ~ '^[0-9a-f-]{36}\.webp$'),
+  imported_avatar_key text check (imported_avatar_key ~ '^[0-9a-f-]{36}[.]webp$'),
   -- After a withdrawal the key stays only until our copy is deleted from Storage (a failed deletion is retried).
   check ((decision = 'withdrawn') = (withdrawn_at is not null))
 );
@@ -24,7 +24,7 @@ create table private.profile_photo_consents (
 -- only by a successful attach or a confirmed deletion, so a withdrawal can always find and delete it.
 create table private.profile_photo_pending_deletions (
   user_id uuid not null references auth.users(id) on delete cascade,
-  avatar_key text not null check (avatar_key ~ '^[0-9a-f-]{36}\.webp$'),
+  avatar_key text not null check (avatar_key ~ '^[0-9a-f-]{36}[.]webp$'),
   created_at timestamptz not null default now(),
   -- While the write may still land (from listing until its outcome is known, or for a lost or 5xx response) a
   -- confirmed deletion does not unlist it. Same horizon as the avatar manifest capability (2 h).
