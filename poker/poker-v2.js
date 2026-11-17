@@ -4488,8 +4488,16 @@
     allin: { cues: ['chips_allin'], gapMs: 50 },
     pot: { cues: ['chips_pot_1', 'chips_pot_2'], gapMs: 250 },
     payout: { cues: ['chips_payout'], gapMs: 140, settlement: true },
-    win: { cues: ['chips_win'], gapMs: 2000, settlement: true }
+    win: { cues: ['chips_win'], gapMs: 2000, settlement: true },
+    // #1146 PR4: English dealer voice. One line at a time natively; a newer line replaces an older one.
+    dealerNextHand: { cues: ['dealer_next_hand'], gapMs: 2000, settlement: true, voice: true },
+    dealerDeal: { cues: ['dealer_dealing_cards'], gapMs: 2000, voice: true },
+    dealerFlop: { cues: ['dealer_flop'], gapMs: 1000, voice: true },
+    dealerTurn: { cues: ['dealer_turn'], gapMs: 1000, voice: true },
+    dealerRiver: { cues: ['dealer_river'], gapMs: 1000, voice: true },
+    dealerAllIn: { cues: ['dealer_all_in'], gapMs: 4000, voice: true }
   };
+  var DEALER_STREET = { 0: 'dealerFlop', 3: 'dealerTurn', 4: 'dealerRiver' };
   var tableCueAt = {};
   var tableCueTurn = {};
   // Pending cues die with their visuals: clearCardFx() (status change, hide, new hand) cancels all of
@@ -4526,7 +4534,8 @@
     var fire = function(){
       if (generation !== tableCueGeneration || (spec.settlement && settlementGeneration !== settlementAnimationGeneration)) return;
       if (state.handId !== handId || state.tableId !== cueTableId || state.reconnectGate || document.hidden) return;
-      audio.play(cue);
+      if (!spec.voice) audio.play(cue);
+      else if (typeof audio.voice === 'function') audio.voice(cue);
     };
     if (delay) window.setTimeout(fire, delay);
     else fire();
@@ -4535,11 +4544,13 @@
   function playCardCues(transitions){
     transitions.forEach(function(transition){
       if (transition.kind === 'deal'){
+        playTableCue('dealerDeal', 0);
         playTableCue('shuffle', 0);
         playTableCue('deal', 250);
         playTableCue('deal', 400);
       } else if (transition.kind === 'community'){
-        // Each board card lands ~250 ms after its staggered start.
+        // The dealer names the street as she deals; each card lands ~250 ms after its staggered start.
+        if (DEALER_STREET[transition.start]) playTableCue(DEALER_STREET[transition.start], 0);
         transition.cards.forEach(function(_card, index){ playTableCue('board', index * 70 + 250); });
       } else if (transition.kind === 'muck') playTableCue('fold', 0);
       else if (transition.kind === 'flip') playTableCue('board', 0);
@@ -4561,6 +4572,7 @@
       users.forEach(function(userId, index){
         var allIn = nextVisual.lastActionByUserId[userId] === 'all_in' || (paidThisFrame(previousVisual, nextVisual, userId) && Number(nextVisual.stacks[userId]) === 0);
         playTableCue(allIn ? 'allin' : 'bet', index * 60);
+        if (allIn) playTableCue('dealerAllIn', index * 60);
       });
       if (users.length) playTableCue('pot', CHIP_FLY_MS);
     }
@@ -4572,6 +4584,8 @@
       pot.recipients.forEach(function(recipient){ if (recipient.userId === state.currentUserId) heroWon = true; });
     });
     if (heroWon) playTableCue('win', (settlement.pots.length - 1) * stepGapMs + SETTLEMENT_CHIP_FLY_MS + 150);
+    // Announced once the payout has landed; dropped if the next hand has already begun.
+    playTableCue('dealerNextHand', 2000);
   }
 
   // One settlement presentation per hand, claimed only from a live transition into SETTLED.
