@@ -1537,11 +1537,12 @@
 
   // #1285: voluntary creator support through Suppi (fixed public URL in account.html). Hidden on WWW
   // Production until the provider account is verified and the OWNER activates it; visible on Deploy
-  // Previews and in the Stage APK, whose config the mobile security module accepts only when it is
-  // bound to a Deploy Preview of the pinned Stage project.
+  // Previews and in the native Android Stage APK, whose config the mobile security module accepts only
+  // when it is bound to a Deploy Preview of the pinned Stage project.
   var SUPPORT_LIVE = false;
   function stageApk(){
-    try { return !!(window.MOBILE_POKER_CONFIG && window.MobilePokerSecurity && window.MobilePokerSecurity.validate(window.MOBILE_POKER_CONFIG)); }
+    var cap = window.Capacitor;
+    try { return !!(cap && typeof cap.getPlatform === 'function' && cap.getPlatform() === 'android' && window.MOBILE_POKER_CONFIG && window.MobilePokerSecurity && window.MobilePokerSecurity.validate(window.MOBILE_POKER_CONFIG)); }
     catch (_err){ return false; }
   }
   function showSupportLink(){
