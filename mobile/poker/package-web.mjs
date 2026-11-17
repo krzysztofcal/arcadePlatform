@@ -68,7 +68,7 @@ for(const variant of (await import('../../shared/profile-avatar-projection.mjs')
 for (const name of pages) {
   let html = await readFile(path.join(root, name), 'utf8');
   if (name === 'poker/offline/play.html') {
-    // Preserve isolated CSP/SRI: no auth, online mobile bootstrap or remote config.
+    // Preserve isolated CSP/SRI: local audio adapter only; no auth, online bootstrap, config or network.
     await copy('poker/offline/avatar-catalog.generated.js');
     await copy('poker/offline/game.generated.js');
     await copy('poker/offline/renderer.generated.js');
@@ -79,6 +79,12 @@ for (const name of pages) {
     const sourceHash = hash(await readFile(path.join(root, rendererPath)));
     const packagedHash = hash(await readFile(path.join(out, rendererPath)));
     html = html.replaceAll(sourceHash, packagedHash);
+    const audioHash = hash(await readFile(path.join(out, 'mobile/audio.js')));
+    if (!html.includes('script-src ')) throw new Error('Missing script-src anchor in poker/offline/play.html');
+    html = html.replace('script-src ', `script-src '${audioHash}' `);
+    const rendererTag = '<script src="/poker/offline/renderer.generated.js"';
+    if (!html.includes(rendererTag)) throw new Error('Missing renderer script tag in poker/offline/play.html');
+    html = html.replace(rendererTag, `<script src="/mobile/audio.js" integrity="${audioHash}" defer></script>` + rendererTag);
     html = html.replace('</head>', '<link rel="stylesheet" href="/mobile/mobile.css"></head>');
     await put(name, html);
     continue;

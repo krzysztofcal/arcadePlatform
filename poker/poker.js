@@ -1635,6 +1635,9 @@
       return bonusCampaignsAreFresh() ? dailyState : null;
     }
 
+    // #1146: Android APK only (the adapter exists nowhere else); only a confirmed new claim may call this.
+    function playBonusCue(){ if (window.MobilePokerAudio) window.MobilePokerAudio.play('bonus_coins'); }
+
     async function claimDailyBonus(){
       if (dailyPending || welcomePending) return;
       clearWelcomeFlyin();
@@ -1657,6 +1660,7 @@
           if (result.claimed) dailyReceipt = result;
           renderDailyBonus();
           if (result.claimed) showDailyFlyin(result);
+          if (result.claimed === true) playBonusCue();
         } else {
           await refreshDailyBonus(true, true);
           message = 'Daily Bonus could not be claimed. Please check its status again.';
@@ -2073,6 +2077,7 @@
           showWelcomeStatus('WELCOME BONUS · +' + formatChips(result.amount) + ' CH · REWARD CLAIMED');
           if (document.activeElement === welcomeBonusClaimBtn && welcomeBonusStatus) welcomeBonusStatus.focus({ preventScroll: true });
           showWelcomeFlyin(result.amount);
+          playBonusCue();
         } else {
           showWelcomeStatus(result && result.alreadyClaimed === true
             ? 'Welcome Bonus was already claimed. No new reward confirmed.'

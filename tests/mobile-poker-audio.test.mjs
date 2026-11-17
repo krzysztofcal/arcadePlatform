@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import vm from 'node:vm';
 
@@ -170,9 +170,11 @@ test('generate-lobby-loop reproduces committed lobby.wav byte-for-byte matching 
   assert.equal(Buffer.compare(rendered, committed), 0, 'rendered buffer must match committed lobby.wav byte-for-byte');
 
   const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
+  const lobbyEntry = manifest.assets.find(a => a.file === 'lobby.wav');
+  assert.ok(lobbyEntry, 'manifest must contain lobby.wav entry');
   const sha256 = createHash('sha256').update(rendered).digest('hex');
-  assert.equal(rendered.length, manifest.bytes, 'byte length must match manifest.bytes');
-  assert.equal(sha256, manifest.sha256, 'sha256 must match manifest.sha256');
+  assert.equal(rendered.length, lobbyEntry.bytes, 'byte length must match manifest.bytes');
+  assert.equal(sha256, lobbyEntry.sha256, 'sha256 must match manifest.sha256');
 
   // WAV header check: PCM, mono, 16-bit, 22050
   assert.equal(rendered.toString('utf8', 0, 4), 'RIFF');
@@ -198,6 +200,257 @@ test('generate-lobby-loop reproduces committed lobby.wav byte-for-byte matching 
   const peakNorm = maxInt / 32768;
   const dBFS = 20 * Math.log10(peakNorm);
   assert.ok(dBFS <= -6.0, `peak must be <= -6 dBFS (got ${dBFS.toFixed(2)} dBFS)`);
+});
+
+test('bonus cue is the bundled CC0 CapsLok preview, unchanged, recorded in the manifest and under the native cue limit', async () => {
+  const committed = await readFile(new URL('../mobile/poker/audio/bonus_coins.mp3', import.meta.url));
+  const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
+  const bonusEntries = manifest.assets.filter(a => a.cue === 'bonus_coins');
+  assert.equal(bonusEntries.length, 1, 'exactly one bonus_coins asset');
+  const entry = bonusEntries[0];
+  assert.equal(entry.file, 'bonus_coins.mp3');
+  assert.equal(committed.length, entry.bytes);
+  assert.equal(createHash('sha256').update(committed).digest('hex'), entry.sha256);
+  // MPEG-1 Layer III frame header, 44.1 kHz: a format SoundPool decodes natively.
+  const header = committed.readUInt32BE(0);
+  assert.equal(header >>> 21, 0x7ff, 'MP3 frame sync');
+  assert.equal((header >>> 19) & 3, 3, 'MPEG-1');
+  assert.equal((header >>> 17) & 3, 1, 'Layer III');
+  assert.equal((header >>> 10) & 3, 0, '44100 Hz');
+  assert.ok(entry.durationSeconds > 0 && entry.durationSeconds < 3, 'below the native 3 s cue limit');
+  assert.equal(entry.author, 'CapsLok');
+  assert.equal(entry.sourceUrl, 'https://freesound.org/people/CapsLok/sounds/184438/');
+  assert.match(entry.license, /^CC0 1\.0/);
+  assert.doesNotMatch(JSON.stringify(entry), /\bMIT\b|project-owned|procedurally/i, 'third-party audio is not labelled project work');
+  // One file per cue: a second bonus_coins.* would make the native base-name lookup ambiguous.
+  const files = (await readdir(new URL('../mobile/poker/audio/', import.meta.url))).filter(name => name.startsWith('bonus_coins.'));
+  assert.deepEqual(files, ['bonus_coins.mp3']);
+});
+
+test('adapter mounts exactly one toggle in avatarMenu and table panel, reflects native state, and handles change', async () => {
+  const source = await readFile(new URL('../mobile/poker/audio.js', import.meta.url), 'utf8');
+
+  function createFakeDOM(hostType) {
+    const docListeners = {};
+    const winListeners = {};
+    const elementsById = {};
+
+    function makeElement(tag, id = '', className = '') {
+      const listeners = {};
+      const children = [];
+      const el = {
+        tagName: tag.toUpperCase(),
+        id,
+        className,
+        hidden: false,
+        checked: false,
+        parentNode: null,
+        children,
+        get firstChild() { return children[0] || null; },
+        addEventListener(event, fn) {
+          if (!listeners[event]) listeners[event] = [];
+          listeners[event].push(fn);
+        },
+        dispatchEvent(event) {
+          const type = typeof event === 'string' ? event : event.type;
+          for (const fn of (listeners[type] || [])) fn.call(el, typeof event === 'string' ? { type: event, target: el } : event);
+        },
+        appendChild(child) {
+          child.parentNode = el;
+          children.push(child);
+          if (child.id) elementsById[child.id] = child;
+          return child;
+        },
+        insertBefore(child, ref) {
+          const idx = children.indexOf(ref);
+          if (idx === -1) return el.appendChild(child);
+          child.parentNode = el;
+          children.splice(idx, 0, child);
+          if (child.id) elementsById[child.id] = child;
+          return child;
+        },
+        querySelector(selector) {
+          function match(node) {
+            if (selector.startsWith('#') && node.id === selector.slice(1)) return true;
+            if (selector.startsWith('.') && (node.className || '').split(/\s+/).includes(selector.slice(1))) return true;
+            if (node.tagName && node.tagName.toLowerCase() === selector.toLowerCase()) return true;
+            return false;
+          }
+          for (const child of children) {
+            if (match(child)) return child;
+            if (child.querySelector) {
+              const res = child.querySelector(selector);
+              if (res) return res;
+            }
+          }
+          return null;
+        }
+      };
+      if (id) elementsById[id] = el;
+      return el;
+    }
+
+    const document = {
+      readyState: 'complete',
+      createElement: makeElement,
+      createTextNode: (text) => ({ nodeType: 3, textContent: text }),
+      getElementById: (id) => elementsById[id] || null,
+      addEventListener(event, fn) {
+        if (!docListeners[event]) docListeners[event] = [];
+        docListeners[event].push(fn);
+      },
+      dispatchEvent(event) {
+        const type = typeof event === 'string' ? event : event.type;
+        for (const fn of (docListeners[type] || [])) fn(typeof event === 'string' ? { type: event } : event);
+      }
+    };
+
+    const window = {
+      addEventListener(event, fn) {
+        if (!winListeners[event]) winListeners[event] = [];
+        winListeners[event].push(fn);
+      },
+      dispatchEvent(event) {
+        const type = typeof event === 'string' ? event : event.type;
+        for (const fn of (winListeners[type] || [])) fn(typeof event === 'string' ? { type: event } : event);
+      }
+    };
+
+    if (hostType === 'avatar') {
+      const avatarMenu = makeElement('div', 'avatarMenu', 'avatar-menu');
+      document.body = makeElement('body');
+      document.body.appendChild(avatarMenu);
+    } else if (hostType === 'table') {
+      const panel = makeElement('section', 'pokerSocialSettingsPanel', 'poker-social-settings');
+      const firstOpt = makeElement('label', 'reactionBubbles', 'poker-social-settings__option');
+      panel.appendChild(firstOpt);
+      document.body = makeElement('body');
+      document.body.appendChild(panel);
+    }
+
+    return { window, document, elementsById };
+  }
+
+  // Host #avatarMenu: mounts exactly one toggle, initially hidden, shown with native value
+  {
+    const calls = [];
+    let stateEnabled = true;
+    const fakePlugin = {
+      getState: async () => { calls.push('getState'); return { enabled: stateEnabled }; },
+      setEnabled: async (opts) => { calls.push({ setEnabled: opts }); stateEnabled = opts.enabled; return { enabled: opts.enabled }; }
+    };
+    const { window, document, elementsById } = createFakeDOM('avatar');
+    window.Capacitor = {
+      getPlatform() { return 'android'; },
+      Plugins: { PokerAudio: fakePlugin }
+    };
+
+    vm.runInNewContext(source, { window, document });
+    const setting = elementsById.mobileSoundSetting;
+    assert.ok(setting, '#mobileSoundSetting must be mounted in #avatarMenu');
+    assert.equal(setting.className, 'avatar-menu__sound');
+    assert.equal(elementsById.avatarMenu.children[elementsById.avatarMenu.children.length - 1], setting, 'must be last child of avatarMenu');
+
+    // Wait for isEnabled() promise to resolve and reveal the toggle
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(setting.hidden, false, 'setting must be visible after isEnabled() resolves');
+    const input = setting.querySelector('#mobileSoundPreference');
+    assert.ok(input, 'must contain input checkbox #mobileSoundPreference');
+    assert.equal(input.checked, true, 'input reflects native state (default enabled)');
+
+    // Changing checkbox calls setEnabled once and reflects returned value
+    input.checked = false;
+    input.dispatchEvent('change');
+    await new Promise(r => setTimeout(r, 10));
+    const setEnabledCalls = calls.filter(c => c.setEnabled);
+    assert.equal(setEnabledCalls.length, 1, 'setEnabled must be called once on change');
+    assert.equal(setEnabledCalls[0].setEnabled.enabled, false, 'setEnabled passed {enabled: false}');
+    assert.equal(input.checked, false, 'input reflects updated value');
+  }
+
+  // A failed native call is never shown as a confirmed OFF: the control re-reads, or hides
+  {
+    let setFails = true, readFails = false, nativeEnabled = true;
+    const fakePlugin = {
+      getState: async () => { if (readFails) throw new Error('read'); return { enabled: nativeEnabled }; },
+      setEnabled: async (opts) => { if (setFails) throw new Error('write'); nativeEnabled = opts.enabled; return { enabled: nativeEnabled }; }
+    };
+    const { window, document, elementsById } = createFakeDOM('avatar');
+    window.Capacitor = { getPlatform() { return 'android'; }, Plugins: { PokerAudio: fakePlugin } };
+    vm.runInNewContext(source, { window, document });
+    await new Promise(r => setTimeout(r, 10));
+    const setting = elementsById.mobileSoundSetting;
+    const input = setting.querySelector('#mobileSoundPreference');
+    input.checked = false;
+    input.dispatchEvent('change');
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(input.checked, true, 'failed write: the toggle returns to the real native value');
+    assert.equal(setting.hidden, false);
+    readFails = true;
+    input.checked = false;
+    input.dispatchEvent('change');
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(setting.hidden, true, 'state unknown: the control is hidden, not shown as OFF');
+  }
+
+  // Host #pokerSocialSettingsPanel: mounts directly before first .poker-social-settings__option
+  {
+    const calls = [];
+    const fakePlugin = {
+      getState: async () => { calls.push('getState'); return { enabled: true }; },
+      setEnabled: async (opts) => { calls.push({ setEnabled: opts }); return { enabled: opts.enabled }; }
+    };
+    const { window, document, elementsById } = createFakeDOM('table');
+    window.Capacitor = {
+      getPlatform() { return 'android'; },
+      Plugins: { PokerAudio: fakePlugin }
+    };
+
+    vm.runInNewContext(source, { window, document });
+    const setting = elementsById.mobileSoundSetting;
+    assert.ok(setting, '#mobileSoundSetting must be mounted in #pokerSocialSettingsPanel');
+    assert.equal(setting.className, 'poker-social-settings__option');
+    const panel = elementsById.pokerSocialSettingsPanel;
+    assert.equal(panel.children[0], setting, 'must be inserted before first .poker-social-settings__option');
+  }
+});
+
+test('bonus cue is decoded ahead of time on the Lobby only, never without the Android plugin', async () => {
+  const source = await readFile(new URL('../mobile/poker/audio.js', import.meta.url), 'utf8');
+  const run = (pathname, android) => {
+    const preloads = [];
+    const window = { location: { pathname }, addEventListener() {} };
+    if (android) window.Capacitor = { getPlatform: () => 'android', Plugins: { PokerAudio: { preload: async o => { preloads.push(JSON.stringify(o.cues)); }, getState: async () => ({ enabled: true }) } } };
+    vm.runInNewContext(source, { window, document: { readyState: 'loading', addEventListener() {} } });
+    return preloads;
+  };
+  assert.deepEqual(run('/poker/index.html', true), ['["bonus_coins"]']);
+  assert.deepEqual(run('/poker/', true), ['["bonus_coins"]']);
+  for (const page of ['/account.html', '/poker/table-v2.html', '/poker/offline/play.html']) assert.deepEqual(run(page, true), [], page);
+  assert.deepEqual(run('/poker/index.html', false), [], 'WWW/browser never calls native');
+});
+
+test('bonus hook guard on poker/poker.js source text', async () => {
+  const content = await readFile(new URL('../poker/poker.js', import.meta.url), 'utf8');
+
+  // playBonusCue() definition
+  assert.match(content, /function\s+playBonusCue\s*\(\)\s*\{[^}]*window\.MobilePokerAudio\.play\('bonus_coins'\)[^}]*\}/, 'playBonusCue helper must be defined');
+
+  // Outside its definition, playBonusCue() is called exactly twice
+  const bodyWithoutDef = content.replace(/function\s+playBonusCue\s*\(\)\s*\{[^}]*\}/, '');
+  const callsOutsideDef = [...bodyWithoutDef.matchAll(/\bplayBonusCue\s*\(\s*\)/g)];
+  assert.equal(callsOutsideDef.length, 2, 'playBonusCue() must be called exactly twice outside definition');
+
+  // Once in claimDailyBonus inside result.claimed === true block
+  const dailySection = content.slice(content.indexOf('async function claimDailyBonus()'), content.indexOf('async function claimWelcomeBonus()'));
+  assert.match(dailySection, /if \(result\.claimed\) showDailyFlyin\(result\);\s*if \(result\.claimed === true\) playBonusCue\(\);/, 'playBonusCue called in claimDailyBonus only on a confirmed new claim');
+
+  // Once in claimWelcomeBonus right after showWelcomeFlyin(result.amount)
+  const welcomeSection = content.slice(content.indexOf('async function claimWelcomeBonus()'), content.indexOf('async function claimWelcomeBonus()') + 2000);
+  assert.match(welcomeSection, /if\s*\(\s*result\s*&&\s*result\.claimed\s*===\s*true\s*&&\s*Number\.isSafeInteger\(result\.amount\)[\s\S]*?showWelcomeFlyin\(result\.amount\);\s*playBonusCue\(\);/, 'playBonusCue called in claimWelcomeBonus after showWelcomeFlyin');
+
+  // No other MobilePokerAudio references in poker/poker.js outside playBonusCue definition
+  assert.doesNotMatch(bodyWithoutDef, /MobilePokerAudio/, 'no MobilePokerAudio reference anywhere else in poker/poker.js');
 });
 
 test('static guards: root pages contain no mobile/audio references, plugin contains default-ON and no seekTo', async () => {
