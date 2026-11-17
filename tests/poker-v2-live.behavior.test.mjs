@@ -7198,3 +7198,19 @@ test('own actions: an earlier accepted action without a snapshot cue never silen
   }
 });
 
+test('own actions: an accepted Call arriving after a resync that completed in the same hand stays silent', async () => {
+  let accept;
+  const { audio, harness, ws } = await heroTableHarness({ sendAct: () => new Promise(resolve => { accept = resolve; }) });
+  harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+  assert.equal(harness.actPayloads[0].action, 'CALL');
+  ws.onStatus('resync', {});
+  ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 40, bets: { 'user-1': 10 }, lastActions: { 'user-1': 'call' }, turnUserId: 'villain-1' }));
+  await harness.flush();
+  accept({ ok: true }); await harness.flush();
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, [], 'the recovery already showed the call; its late ack is stale');
+  ws.onSnapshot(heroActionFrame('hero-hand', 3, { potTotal: 70, bets: { 'user-1': 10, 'villain-1': 40 }, lastActions: { 'user-1': 'call', 'villain-1': 'raise' } }));
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, ['chips_bet_1', 'chips_pot_1'], 'live play after recovery still sounds');
+});
+

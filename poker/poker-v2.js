@@ -4489,7 +4489,8 @@
   // The hero's own act command in flight, carrying the cue its intent deserves (an all-in stays an all-in
   // although resolveAllInPlan() sends CALL, RAISE or BET). It sounds once: on the accepted command or on
   // the first live snapshot showing a compatible move, whichever comes first. A snapshot move that does
-  // not match it (e.g. a server timeout fold) sounds as seen and leaves it alone.
+  // not match it (e.g. a server timeout fold) sounds as seen and leaves it alone. It belongs to the cue
+  // generation in force when it was sent: resync, reconnect, hiding or a new hand make it stale.
   var heroActionCue = null;
   function heroActionKind(actionType, intent){
     if (intent === 'all_in') return 'heroAllin';
@@ -4503,6 +4504,7 @@
   }
   function playHeroSnapshotCue(fold, seenKind, handId){
     var entry = heroActionCue;
+    if (entry && entry.generation !== tableCueGeneration) entry = heroActionCue = null;
     if (!entry || entry.handId !== handId || (entry.kind === 'heroFold') !== fold) return playTableCue(seenKind, 0);
     heroActionCue = null;
     soundHeroAction(entry);
@@ -6457,12 +6459,13 @@
     var payload = { handId: state.handId || null, action: actionType };
     if (Number.isFinite(amount)) payload.amount = Math.trunc(amount);
     var kind = heroActionKind(actionType, intent);
-    var cue = kind && payload.handId ? { handId: payload.handId, tableId: state.tableId, kind: kind, sounded: false } : null;
+    var cue = kind && payload.handId ? { handId: payload.handId, tableId: state.tableId, generation: tableCueGeneration, kind: kind, sounded: false } : null;
     if (cue) heroActionCue = cue;
     setError('');
     return sendCommand('sendAct', payload).then(function(){
-      // Accepted: sound now unless its snapshot already did; stale acks (other hand/table, recovery) stay silent.
-      if (cue && cue.handId === state.handId && cue.tableId === state.tableId && !state.reconnectGate) soundHeroAction(cue);
+      // Accepted: sound now unless its snapshot already did. Stale acks stay silent: another hand or table,
+      // recovery in progress, or any cancellation since sending (resync, reconnect, hide) even if already over.
+      if (cue && cue.generation === tableCueGeneration && cue.handId === state.handId && cue.tableId === state.tableId && !state.reconnectGate) soundHeroAction(cue);
       state.statusText = 'Action sent';
       renderInfoPanel();
     }).catch(function(err){
