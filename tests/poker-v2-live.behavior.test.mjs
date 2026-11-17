@@ -290,6 +290,7 @@ function createHarness(options = {}){
         }
       },
       matchMedia(){ return { matches: options.reducedMotion === true }; },
+      MobilePokerAudio: options.audio,
       getComputedStyle(node){ return node.style; },
       setInterval(fn){
         intervalTimers.push(fn);
@@ -6951,3 +6952,61 @@ for (const freshPending of [false, true]) test(`inactivity pending keeps authori
   for (let i=0;i<5;i++){ harness.advanceTime(1000); await harness.flush(); }
   assert.equal(harness.windowLocation.href, '/poker/');
 });
+
+// #1146 PR3: table sound cues follow live presentation claims only, independent of reduced motion.
+function fakeTableAudio(){
+  const audio = { plays: [], preloads: [], play(cue){ audio.plays.push(cue); return Promise.resolve(true); }, preload(cues){ audio.preloads.push(cues.slice()); return Promise.resolve(true); } };
+  return audio;
+}
+
+test('table cues: board cards sound once per live street, never on initial, reconnect, resync or duplicate frames', async () => {
+  for (const mode of ['live', 'reduced', 'initial', 'reconnecting', 'resync']) {
+    const audio = fakeTableAudio();
+    const harness = createHarness({ reducedMotion: mode === 'reduced', audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    if (mode === 'live') {
+      assert.equal(audio.preloads.length, 1, 'cues are preloaded once at init');
+      assert.ok(['card_shuffle','card_board_1','chips_bet_1','chips_payout','chips_win'].every(cue => audio.preloads[0].includes(cue)));
+    }
+    const ws = harness.getCreateOptions();
+    const board = ['As','Ks','Qs','7d','2c'];
+    ws.onSnapshot(communityDealFrame('cue-board', 1, [], true));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, [], mode + ': initial snapshot is silent');
+    if (mode === 'reconnecting' || mode === 'resync') ws.onStatus(mode, {});
+    ws.onSnapshot(communityDealFrame('cue-board', 2, board.slice(0, 3), mode === 'initial'));
+    harness.advanceTime(1000); await harness.flush();
+    const expected = mode === 'live' || mode === 'reduced' ? ['card_board_1','card_board_2','card_board_1'] : [];
+    assert.deepEqual(audio.plays, expected, mode + ': flop');
+    ws.onSnapshot(communityDealFrame('cue-board', 3, board.slice(0, 3)));
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, expected, mode + ': a duplicate frame never replays');
+  }
+});
+
+test('table cues: settlement pays out once per hand with a discreet hero win; resync and duplicates stay silent', async () => {
+  async function settle(statusBeforeSettlement){
+    const audio = fakeTableAudio();
+    const harness = createHarness({ audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    const ws = harness.getCreateOptions();
+    ws.onSnapshot({ kind: 'stateSnapshot', initial: true, payload: { tableId: 'table-1',
+      table: { tableId: 'table-1', status: 'OPEN', maxSeats: 6, members: [{ userId: 'user-1', seat: 1 }, { userId: 'player-b', seat: 2 }] },
+      public: { hand: { handId: 'hand-cue', status: 'RIVER' }, pot: { total: 20 }, stacks: { 'user-1': 90, 'player-b': 90 } }, you: { seat: 1 } } });
+    await harness.flush();
+    if (statusBeforeSettlement) { ws.onStatus(statusBeforeSettlement, {}); await harness.flush(); }
+    const payload = { tableId: 'table-1', public: { hand: { handId: 'hand-cue', status: 'SETTLED' }, pot: { total: 0 },
+      showdown: { handId: 'hand-cue', reason: 'computed', winners: ['user-1'], potAwardedTotal: 20, potsAwarded: [{ amount: 20, winners: ['user-1'], eligibleUserIds: ['user-1', 'player-b'] }] },
+      handSettlement: { handId: 'hand-cue', settledAt: new Date(Date.now()).toISOString(), payouts: { 'user-1': 20 } } } };
+    ws.onSnapshot({ kind: 'stateSnapshot', payload });
+    harness.advanceTime(2000); await harness.flush();
+    const first = audio.plays.slice();
+    ws.onSnapshot({ kind: 'statePatch', payload });
+    harness.advanceTime(2000); await harness.flush();
+    assert.deepEqual(audio.plays, first, 'a duplicate settlement never replays');
+    return first;
+  }
+  assert.deepEqual(await settle(), ['chips_payout', 'chips_win']);
+  assert.deepEqual(await settle('resync'), [], 'a settlement seen through resync is silent');
+});
+

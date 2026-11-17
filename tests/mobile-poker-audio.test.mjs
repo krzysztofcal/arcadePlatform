@@ -476,3 +476,30 @@ test('static guards: root pages contain no mobile/audio references, plugin conta
   assert.ok(pluginJava.includes('releaseCueFocus = this::stopCues'), 'the cue focus timeout stops cues before releasing focus');
   assert.match(pluginJava, /private void dropFocus\(\) \{[^}]*stopCues\(\);[^}]*abandonAudioFocus\(focus\)/, 'music focus is never abandoned under a playing cue');
 });
+
+test('table cues: every cue named in poker-v2.js is a bundled CC0 Kenney WAV under the native 3 s limit; WWW never reaches native', async () => {
+  const source = await readFile(new URL('../poker/poker-v2.js', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('var TABLE_CUES = {'), source.indexOf('var tableCueAt'));
+  const cues = [...block.matchAll(/'([a-z0-9_]+)'/g)].map(m => m[1]);
+  assert.equal(cues.length, 13, 'thirteen table cues');
+  const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
+  for (const cue of cues) {
+    const entries = manifest.assets.filter(a => a.cue === cue);
+    assert.equal(entries.length, 1, cue);
+    const [entry] = entries;
+    const file = await readFile(new URL('../mobile/poker/audio/' + entry.file, import.meta.url));
+    assert.equal(createHash('sha256').update(file).digest('hex'), entry.sha256, cue);
+    assert.equal(file.length, entry.bytes, cue);
+    assert.equal(file.toString('ascii', 0, 4) + file.toString('ascii', 8, 12), 'RIFFWAVE', cue);
+    assert.equal(file.readUInt16LE(20), 1, cue + ' PCM');
+    const seconds = file.readUInt32LE(40) / file.readUInt32LE(28);
+    assert.ok(seconds > 0 && seconds < 3, cue + ' below the native cue limit');
+    assert.match(entry.license, /^CC0 1\.0/);
+    assert.equal(entry.sourceUrl, 'https://kenney.nl/assets/casino-audio');
+    assert.match(entry.sourceSha256, /^[a-f0-9]{64}$/);
+  }
+  // Only the guarded helper touches the adapter, which exists solely in the Android APK.
+  assert.equal(source.match(/window\.MobilePokerAudio\b(?!\s+exists)/g).length, 1, 'one code reference, inside tableAudio()');
+  assert.match(source, /function tableAudio\(\)\{\s*var audio = window\.MobilePokerAudio;\s*return audio && typeof audio\.play === 'function' \? audio : null;/);
+});
+

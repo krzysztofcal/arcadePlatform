@@ -4467,21 +4467,108 @@
     settlementAnimationNodes = [];
   }
 
-  function animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame){
-    var presentation = nextVisual && nextVisual.settlementPresentation;
-    if (!presentation || !presentation.valid || !Array.isArray(presentation.pots) || !presentation.pots.length) return;
-    if (!frame || frame.initial || frame.suppressSettlementAnimation) return;
-    if (frame.kind !== 'statePatch' && frame.kind !== 'stateSnapshot') return;
-    if (!previousVisual || previousVisual.phase === 'SETTLED' || nextVisual.phase !== 'SETTLED') return;
-    if (!nextVisual.handId || previousVisual.handId !== nextVisual.handId || presentation.handId !== nextVisual.handId) return;
-    if (lastAnimatedSettlementHandId === presentation.handId || prefersReducedMotion()) return;
+  // #1146 PR3: table sound cues. window.MobilePokerAudio exists only in the Android APK, so WWW stays
+  // silent. Cues follow the same live-frame claims as the visuals but never depend on reduced motion.
+  var TABLE_CUES = {
+    shuffle: { cues: ['card_shuffle'], gapMs: 2000 },
+    deal: { cues: ['card_deal_1', 'card_deal_2'], gapMs: 120 },
+    board: { cues: ['card_board_1', 'card_board_2'], gapMs: 60 },
+    fold: { cues: ['card_fold'], gapMs: 150 },
+    bet: { cues: ['chips_bet_1', 'chips_bet_2'], gapMs: 120 },
+    allin: { cues: ['chips_allin'], gapMs: 600 },
+    pot: { cues: ['chips_pot_1', 'chips_pot_2'], gapMs: 250 },
+    payout: { cues: ['chips_payout'], gapMs: 140 },
+    win: { cues: ['chips_win'], gapMs: 2000 }
+  };
+  var tableCueAt = {};
+  var tableCueTurn = {};
+
+  function tableAudio(){
+    var audio = window.MobilePokerAudio;
+    return audio && typeof audio.play === 'function' ? audio : null;
+  }
+
+  // Decode every cue up front: a cue that is still decoding is dropped natively after 400 ms.
+  function preloadTableCues(){
+    var audio = tableAudio();
+    if (audio && typeof audio.preload === 'function') audio.preload(Object.keys(TABLE_CUES).reduce(function(all, kind){ return all.concat(TABLE_CUES[kind].cues); }, []));
+  }
+
+  // Schedules one cue in step with its visual. Repeats of a kind closer than its gap are dropped and
+  // variants alternate; a cue whose hand or table is gone by then stays silent.
+  function playTableCue(kind, delayMs){
+    var audio = tableAudio();
+    var spec = TABLE_CUES[kind];
+    if (!audio || !spec) return;
+    var delay = Math.max(0, delayMs || 0);
+    var at = Date.now() + delay;
+    if (tableCueAt[kind] != null && Math.abs(at - tableCueAt[kind]) < spec.gapMs) return;
+    tableCueAt[kind] = at;
+    var cue = spec.cues[tableCueTurn[kind] || 0];
+    tableCueTurn[kind] = ((tableCueTurn[kind] || 0) + 1) % spec.cues.length;
+    var handId = state.handId;
+    var cueTableId = state.tableId;
+    var fire = function(){ if (state.handId === handId && state.tableId === cueTableId && !document.hidden) audio.play(cue); };
+    if (delay) window.setTimeout(fire, delay);
+    else fire();
+  }
+
+  function playCardCues(transitions){
+    transitions.forEach(function(transition){
+      if (transition.kind === 'deal'){
+        playTableCue('shuffle', 0);
+        playTableCue('deal', 250);
+        playTableCue('deal', 400);
+      } else if (transition.kind === 'community'){
+        // Each board card lands ~250 ms after its staggered start.
+        transition.cards.forEach(function(_card, index){ playTableCue('board', index * 70 + 250); });
+      } else if (transition.kind === 'muck') playTableCue('fold', 0);
+      else if (transition.kind === 'flip') playTableCue('board', 0);
+    });
+  }
+
+  function settlementStepGapMs(potCount){
+    var availableMs = Math.max(200, WINNER_REVEAL_MS - SETTLEMENT_CHIP_FLY_MS - 240);
+    return Math.min(480, Math.max(150, Math.floor(availableMs / Math.max(1, potCount))));
+  }
+
+  // Bets only on live frames of the same hand; payouts once per claimed settlement, as the chips land.
+  function playChipCues(previousVisual, nextVisual, frame, settlement){
+    if (frame && frame.cardFxEligible && nextVisual.handId && nextVisual.handId === previousVisual.handId
+      && (nextVisual.potTotal || 0) > (previousVisual.potTotal || 0)){
+      var users = resolveBetAnimationUserIds(previousVisual, nextVisual);
+      users.forEach(function(userId, index){ playTableCue(nextVisual.lastActionByUserId[userId] === 'all_in' ? 'allin' : 'bet', index * 60); });
+      if (users.length) playTableCue('pot', CHIP_FLY_MS);
+    }
+    if (!settlement) return;
+    var stepGapMs = settlementStepGapMs(settlement.pots.length);
+    var heroWon = false;
+    settlement.pots.forEach(function(pot, potIndex){
+      playTableCue('payout', potIndex * stepGapMs + SETTLEMENT_CHIP_FLY_MS);
+      pot.recipients.forEach(function(recipient){ if (recipient.userId === state.currentUserId) heroWon = true; });
+    });
+    if (heroWon) playTableCue('win', (settlement.pots.length - 1) * stepGapMs + SETTLEMENT_CHIP_FLY_MS + 150);
+  }
+
+  // One settlement presentation per hand, claimed only from a live transition into SETTLED.
+  function claimSettlementPresentation(previousVisual, nextVisual, frame){
+    var presentation = nextVisual.settlementPresentation;
+    if (!presentation || !presentation.valid || !Array.isArray(presentation.pots) || !presentation.pots.length) return null;
+    if (!frame || frame.initial || frame.suppressSettlementAnimation) return null;
+    if (frame.kind !== 'statePatch' && frame.kind !== 'stateSnapshot') return null;
+    if (previousVisual.phase === 'SETTLED' || nextVisual.phase !== 'SETTLED') return null;
+    if (!nextVisual.handId || previousVisual.handId !== nextVisual.handId || presentation.handId !== nextVisual.handId) return null;
+    if (lastAnimatedSettlementHandId === presentation.handId) return null;
     lastAnimatedSettlementHandId = presentation.handId;
+    return presentation;
+  }
+
+  function animateSettlementAwards(presentation, sceneRect, potFrom){
     cancelSettlementAnimations();
     var generation = settlementAnimationGeneration;
     var seatByUserId = {};
     state.seats.forEach(function(seat){ if (seat && seat.userId) seatByUserId[seat.userId] = seat; });
-    var availableMs = Math.max(200, WINNER_REVEAL_MS - SETTLEMENT_CHIP_FLY_MS - 240);
-    var stepGapMs = Math.min(480, Math.max(150, Math.floor(availableMs / Math.max(1, presentation.pots.length))));
+    var stepGapMs = settlementStepGapMs(presentation.pots.length);
     presentation.pots.forEach(function(pot, potIndex){
       var timerId = window.setTimeout(function(){
         if (generation !== settlementAnimationGeneration || state.handId !== presentation.handId) return;
@@ -4630,8 +4717,10 @@
 
   function animateCardDiff(previous, next, frame){
     if (isClosedTableStatus(state.tableStatus) || closedTableRedirectRemaining > 0){ clearCardFx(true); return; }
-    var transitions = claimCardTransitions(previous, next, !!frame.cardFxEligible && !prefersReducedMotion());
-    if (!els.scene || !els.cardFxLayer) return;
+    // Claims are consumed on every frame. Sound follows live eligibility; visuals also respect reduced motion.
+    var transitions = claimCardTransitions(previous, next, !!frame.cardFxEligible);
+    playCardCues(transitions);
+    if (prefersReducedMotion() || !els.scene || !els.cardFxLayer) return;
     transitions.forEach(function(transition){
       if (transition.kind === 'deal' || transition.kind === 'community'){
         if (!els.roomDealer) return;
@@ -4680,7 +4769,10 @@
   }
 
   function animateChipDiff(previousVisual, nextVisual, frame){
-    if (!previousVisual || !nextVisual || !els.scene || !els.chipFxLayer) return;
+    if (!previousVisual || !nextVisual) return;
+    var settlement = claimSettlementPresentation(previousVisual, nextVisual, frame);
+    playChipCues(previousVisual, nextVisual, frame, settlement);
+    if (!els.scene || !els.chipFxLayer) return;
     if (prefersReducedMotion()) return;
     if (typeof els.scene.getBoundingClientRect !== 'function') return;
     var sceneRect = els.scene.getBoundingClientRect();
@@ -4706,7 +4798,7 @@
         sent += chips;
       });
     }
-    animateSettlementAwards(previousVisual, nextVisual, sceneRect, potFrom, frame);
+    if (settlement) animateSettlementAwards(settlement, sceneRect, potFrom);
   }
 
   function appendShowdownHandSummary(container, seat){
@@ -7640,6 +7732,7 @@
 
   function init(){
     selectElements();
+    preloadTableCues();
     applyTableTheme(resolveTableThemeId(tableId));
     if (els.sceneViewport && typeof window.ResizeObserver === 'function'){
       new window.ResizeObserver(scheduleLayoutPresentationRefresh).observe(els.sceneViewport);
