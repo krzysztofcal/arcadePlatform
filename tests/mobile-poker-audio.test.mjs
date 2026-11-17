@@ -480,7 +480,7 @@ test('static guards: root pages contain no mobile/audio references, plugin conta
 test('table cues: every cue named in poker-v2.js is a bundled CC0 Kenney WAV under the native 3 s limit; WWW never reaches native', async () => {
   const source = await readFile(new URL('../poker/poker-v2.js', import.meta.url), 'utf8');
   const block = source.slice(source.indexOf('var TABLE_CUES = {'), source.indexOf('var tableCueAt'));
-  const cues = [...block.matchAll(/'([a-z0-9_]+)'/g)].map(m => m[1]);
+  const cues = [...new Set([...block.matchAll(/'([a-z0-9_]+)'/g)].map(m => m[1]))];
   assert.equal(cues.length, 13, 'thirteen table cues');
   const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
   for (const cue of cues) {

@@ -4478,10 +4478,32 @@
     allin: { cues: ['chips_allin'], gapMs: 600 },
     pot: { cues: ['chips_pot_1', 'chips_pot_2'], gapMs: 250 },
     payout: { cues: ['chips_payout'], gapMs: 140, settlement: true },
-    win: { cues: ['chips_win'], gapMs: 2000, settlement: true }
+    win: { cues: ['chips_win'], gapMs: 2000, settlement: true },
+    // Own actions have their own kinds so an opponent's cue a moment earlier never swallows them.
+    heroFold: { cues: ['card_fold'], gapMs: 0 },
+    heroBet: { cues: ['chips_bet_1', 'chips_bet_2'], gapMs: 0 },
+    heroAllin: { cues: ['chips_allin'], gapMs: 0 }
   };
   var tableCueAt = {};
   var tableCueTurn = {};
+  // Pairs each confirmed own action (accepted command) with its live snapshot: whichever arrives first
+  // sounds and the other stays silent. Timeout folds without an ack still sound from the snapshot.
+  var heroCueLedger = { handId: null, acked: 0, seen: 0 };
+  function claimHeroCue(source, handId){
+    if (heroCueLedger.handId !== handId) heroCueLedger = { handId: handId, acked: 0, seen: 0 };
+    heroCueLedger[source] += 1;
+    return heroCueLedger[source] > heroCueLedger[source === 'acked' ? 'seen' : 'acked'];
+  }
+
+  // Called once the server accepted the hero's act command. intent 'all_in' survives resolveAllInPlan()
+  // encoding the all-in as CALL, RAISE or BET. Stale acks (another hand/table, recovery) stay silent.
+  function playHeroActionCue(actionType, intent, handId, tableId){
+    var kind = intent === 'all_in' ? 'heroAllin' : actionType === 'FOLD' ? 'heroFold'
+      : actionType === 'CALL' || actionType === 'RAISE' || actionType === 'BET' ? 'heroBet' : null;
+    if (!kind || !handId || handId !== state.handId || tableId !== state.tableId || state.reconnectGate) return;
+    if (claimHeroCue('acked', handId)) playTableCue(kind, 0);
+  }
+
   // Pending cues die with their visuals: clearCardFx() (status change, hide, new hand) cancels all of
   // them; settlement cues also follow the settlement animation's own generation.
   var tableCueGeneration = 0;
@@ -4494,7 +4516,9 @@
   // Decode every cue up front: a cue that is still decoding is dropped natively after 400 ms.
   function preloadTableCues(){
     var audio = tableAudio();
-    if (audio && typeof audio.preload === 'function') audio.preload(Object.keys(TABLE_CUES).reduce(function(all, kind){ return all.concat(TABLE_CUES[kind].cues); }, []));
+    if (audio && typeof audio.preload === 'function') audio.preload(Object.keys(TABLE_CUES).reduce(function(all, kind){
+      return all.concat(TABLE_CUES[kind].cues.filter(function(cue){ return all.indexOf(cue) === -1; }));
+    }, []));
   }
 
   // Schedules one cue in step with its visual. Repeats of a kind closer than its gap are dropped and
@@ -4531,7 +4555,10 @@
       } else if (transition.kind === 'community'){
         // Each board card lands ~250 ms after its staggered start.
         transition.cards.forEach(function(_card, index){ playTableCue('board', index * 70 + 250); });
-      } else if (transition.kind === 'muck') playTableCue('fold', 0);
+      } else if (transition.kind === 'muck'){
+        if (transition.userId !== state.currentUserId) playTableCue('fold', 0);
+        else if (claimHeroCue('seen', state.handId)) playTableCue('heroFold', 0);
+      }
       else if (transition.kind === 'flip') playTableCue('board', 0);
     });
   }
@@ -4546,7 +4573,11 @@
     if (frame && frame.cardFxEligible && nextVisual.handId && nextVisual.handId === previousVisual.handId
       && (nextVisual.potTotal || 0) > (previousVisual.potTotal || 0)){
       var users = resolveBetAnimationUserIds(previousVisual, nextVisual);
-      users.forEach(function(userId, index){ playTableCue(nextVisual.lastActionByUserId[userId] === 'all_in' ? 'allin' : 'bet', index * 60); });
+      users.forEach(function(userId, index){
+        var allIn = nextVisual.lastActionByUserId[userId] === 'all_in';
+        if (userId !== state.currentUserId) playTableCue(allIn ? 'allin' : 'bet', index * 60);
+        else if (claimHeroCue('seen', nextVisual.handId)) playTableCue(allIn ? 'heroAllin' : 'heroBet', 0);
+      });
       if (users.length) playTableCue('pot', CHIP_FLY_MS);
     }
     if (!settlement) return;
@@ -6416,13 +6447,15 @@
     els.leaveConfirmModal.hidden = false;
   }
 
-  function handleAction(actionType, amount){
+  function handleAction(actionType, amount, intent){
     if (!actionType) return Promise.resolve();
     if (state.reconnectGate) return Promise.resolve();
     var payload = { handId: state.handId || null, action: actionType };
     if (Number.isFinite(amount)) payload.amount = Math.trunc(amount);
+    var sentTableId = state.tableId;
     setError('');
     return sendCommand('sendAct', payload).then(function(){
+      playHeroActionCue(actionType, intent, payload.handId, sentTableId);
       state.statusText = 'Action sent';
       renderInfoPanel();
     }).catch(function(err){
@@ -6442,6 +6475,7 @@
       amountBounds: resolveAmountBounds(resolveAmountAction(allowed), resolveStack(state.currentUserId))
     };
     var nextAction = resolveQueuedPreactionExecution(liveState);
+    var allInIntent = queuedPreaction && queuedPreaction.slot === 'allIn' ? 'all_in' : undefined;
     if (!nextAction && queuedPreaction && queuedPreaction.slot === 'amount' && queuedPreaction.action === liveState.amountAction && liveState.amountBounds){
       var queuedAmountValue = queuedPreaction.amount;
       if (!Number.isFinite(queuedAmountValue) || queuedAmountValue < liveState.amountBounds.min || (liveState.amountBounds.max != null && queuedAmountValue > liveState.amountBounds.max)){
@@ -6451,7 +6485,7 @@
     clearQueuedPreaction();
     if (!nextAction || !nextAction.action) return;
     queuedPreactionInFlight = true;
-    handleAction(nextAction.action, nextAction.amount == null ? undefined : nextAction.amount).then(function(){
+    handleAction(nextAction.action, nextAction.amount == null ? undefined : nextAction.amount, allInIntent).then(function(){
       queuedPreactionInFlight = false;
       renderControls();
     });
@@ -7059,7 +7093,7 @@
     if (els.allInBtn) els.allInBtn.addEventListener('click', function(){
       var plan = resolveAllInPlan(getAllowedActions());
       if (!plan) return;
-      handleAction(plan.type, plan.amount == null ? undefined : plan.amount);
+      handleAction(plan.type, plan.amount == null ? undefined : plan.amount, 'all_in');
     });
     buildReactionMenu();
     if (els.reactionBtn) els.reactionBtn.addEventListener('click', function(){

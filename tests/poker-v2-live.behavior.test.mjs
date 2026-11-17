@@ -197,7 +197,7 @@ function createHarness(options = {}){
       if (typeof options.sendJoin === 'function') return options.sendJoin(payload, { attempt: joinPayloads.length, requestId: requestId || null });
       return Promise.resolve({ ok: true, seatNo: payload.seatNo || payload.preferredSeatNo || 1 });
     },
-    sendAct(payload){ actPayloads.push(payload); return Promise.resolve({ ok: true }); },
+    sendAct(payload){ actPayloads.push(payload); return typeof options.sendAct === 'function' ? options.sendAct(payload) : Promise.resolve({ ok: true }); },
     sendStartHand(payload){ startPayloads.push(payload); return Promise.resolve({ ok: true }); },
     sendRebuy(payload, requestId){
       rebuyPayloads.push(payload);
@@ -7060,5 +7060,111 @@ test('table cues: switching reduced motion on while a cue is pending clears visu
   assert.equal(harness.elements.pokerCardFxLayer.children.length, 0, 'reduced motion removes running visuals');
   harness.advanceTime(1000); await harness.flush();
   assert.deepEqual(audio.plays, ['card_board_1', 'card_board_2', 'card_board_1'], 'scheduled sounds still play');
+});
+
+// #1146 PR3 follow-up: own (hero) actions sound once when the server accepts them.
+function heroActionFrame(handId, version, { initial = false, potTotal = 30, bets = {}, folded = [], lastActions = {}, stacks, actions = ['FOLD','CALL','RAISE'], constraints = { toCall: 10, minRaiseTo: 20, maxRaiseTo: 100 }, turnUserId = 'user-1', projectedActions = null } = {}){
+  const frame = amountSnapshot({ handId, phase: 'FLOP', board: ['As','Ks','Qs'], potTotal, actions, constraints, stateVersion: version, turnUserId, projectedActions,
+    stacks: stacks || { 'user-1': 100, 'villain-1': 100 }, holeCards: ['Js','Ts'],
+    members: [{ userId: 'user-1', seat: 1, status: folded.includes('user-1') ? 'FOLDED' : 'ACTIVE' }, { userId: 'villain-1', seat: 2, status: folded.includes('villain-1') ? 'FOLDED' : 'ACTIVE' }] });
+  frame.initial = initial;
+  frame.payload.public.betThisRoundByUserId = { 'user-1': 0, 'villain-1': 10, ...bets };
+  frame.payload.public.foldedByUserId = Object.fromEntries(folded.map(id => [id, true]));
+  frame.payload.public.lastBettingRoundActionByUserId = lastActions;
+  return frame;
+}
+
+async function heroTableHarness(options = {}){
+  const audio = fakeTableAudio();
+  const harness = createHarness({ audio, ...options });
+  harness.fireDomContentLoaded(); await harness.flush();
+  const ws = harness.getCreateOptions();
+  ws.onSnapshot(heroActionFrame('hero-hand', 1, { initial: true }));
+  harness.advanceTime(1000); await harness.flush();
+  return { audio, harness, ws };
+}
+
+test('own actions: an accepted Call sounds once even when its snapshot follows (ack before snapshot); opponents keep their cue', async () => {
+  const { audio, harness, ws } = await heroTableHarness();
+  harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+  assert.equal(harness.actPayloads[0].action, 'CALL');
+  assert.deepEqual(audio.plays, ['chips_bet_1'], 'the accepted Call sounds at once');
+  ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 40, bets: { 'user-1': 10 }, lastActions: { 'user-1': 'call' }, turnUserId: 'villain-1' }));
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, ['chips_bet_1', 'chips_pot_1'], 'its snapshot adds only the chips landing in the pot, no second action cue');
+  ws.onSnapshot(heroActionFrame('hero-hand', 3, { potTotal: 70, bets: { 'user-1': 10, 'villain-1': 40 }, lastActions: { 'user-1': 'call', 'villain-1': 'raise' } }));
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, ['chips_bet_1', 'chips_pot_1', 'chips_bet_1', 'chips_pot_2'], 'an opponent raise still sounds');
+});
+
+test('own actions: a Fold whose snapshot arrives before the ack sounds once (snapshot before ack)', async () => {
+  let accept;
+  const { audio, harness, ws } = await heroTableHarness({ sendAct: () => new Promise(resolve => { accept = resolve; }) });
+  harness.elements.pokerV2FoldBtn.click(); await harness.flush();
+  assert.deepEqual(audio.plays, [], 'a click alone is silent');
+  ws.onSnapshot(heroActionFrame('hero-hand', 2, { folded: ['user-1'], lastActions: { 'user-1': 'fold' }, turnUserId: 'villain-1' }));
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, ['card_fold'], 'the snapshot sounds the fold');
+  accept({ ok: true }); await harness.flush();
+  harness.advanceTime(1000); await harness.flush();
+  assert.deepEqual(audio.plays, ['card_fold'], 'the later ack does not replay it');
+});
+
+test('own actions: All-in keeps its intent when sent as CALL; rejected, stale and recovery acks stay silent', async () => {
+  {
+    const { audio, harness } = await heroTableHarness();
+    const { ws } = { ws: harness.getCreateOptions() };
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { stacks: { 'user-1': 8, 'villain-1': 100 }, actions: ['FOLD','CALL'], constraints: { toCall: 10 } }));
+    await harness.flush();
+    harness.elements.pokerV2AllInBtn.click(); await harness.flush();
+    assert.equal(harness.actPayloads[0].action, 'CALL', 'the all-in is encoded as CALL');
+    assert.deepEqual(audio.plays, ['chips_allin'], 'but sounds as an all-in');
+  }
+  {
+    const { audio, harness } = await heroTableHarness({ sendAct: () => Promise.reject(new Error('not_your_turn')) });
+    harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+    assert.deepEqual(audio.plays, [], 'a rejected command is silent');
+  }
+  for (const interrupt of ['next-hand', 'resync']) {
+    let accept;
+    const { audio, harness, ws } = await heroTableHarness({ sendAct: () => new Promise(resolve => { accept = resolve; }) });
+    harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+    if (interrupt === 'next-hand') ws.onSnapshot(heroActionFrame('hero-next', 2));
+    else ws.onStatus('resync', {});
+    accept({ ok: true }); await harness.flush();
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays.filter(cue => cue.startsWith('chips_bet')), [], interrupt + ': a stale ack stays silent');
+  }
+});
+
+test('own actions: a Call seen in a snapshot before its ack, an ack under reduced motion and a queued All-in each sound once', async () => {
+  {
+    let accept;
+    const { audio, harness, ws } = await heroTableHarness({ sendAct: () => new Promise(resolve => { accept = resolve; }) });
+    harness.elements.pokerV2PrimaryBtn.click(); await harness.flush();
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { potTotal: 40, bets: { 'user-1': 10 }, lastActions: { 'user-1': 'call' }, turnUserId: 'villain-1' }));
+    harness.advanceTime(1000); await harness.flush();
+    accept({ ok: true }); await harness.flush();
+    harness.advanceTime(1000); await harness.flush();
+    assert.equal(audio.plays.filter(cue => cue.startsWith('chips_bet')).length, 1, 'snapshot first: one action cue');
+  }
+  {
+    const { audio, harness } = await heroTableHarness({ reducedMotion: true });
+    harness.elements.pokerV2FoldBtn.click(); await harness.flush();
+    assert.deepEqual(audio.plays, ['card_fold'], 'reduced motion does not silence an accepted action');
+  }
+  {
+    const { audio, harness, ws } = await heroTableHarness();
+    ws.onSnapshot(heroActionFrame('hero-hand', 2, { turnUserId: 'villain-1', actions: [], projectedActions: ['FOLD','CALL','RAISE'] }));
+    await harness.flush();
+    harness.elements.pokerV2AllInPreaction.click(); await harness.flush();
+    assert.equal(harness.actPayloads.length, 0, 'queued, not sent');
+    assert.deepEqual(audio.plays, [], 'a queued preaction is silent');
+    ws.onSnapshot(heroActionFrame('hero-hand', 3));
+    await harness.flush();
+    assert.equal(harness.actPayloads.length, 1);
+    assert.equal(harness.actPayloads[0].action, 'RAISE', 'the queued all-in is sent as a max RAISE');
+    assert.deepEqual(audio.plays, ['chips_allin'], 'and sounds as an all-in once accepted');
+  }
 });
 
