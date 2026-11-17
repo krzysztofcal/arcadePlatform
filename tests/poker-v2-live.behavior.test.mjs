@@ -451,7 +451,8 @@ async function flush(){
     },
     getIntervalCount(){ return intervalTimers.length; },
     getSessionStorage(key){ return sandbox.sessionStorage.getItem(key); },
-    getLocalStorage(key){ return sandbox.localStorage.getItem(key); }
+    getLocalStorage(key){ return sandbox.localStorage.getItem(key); },
+    setDocumentHidden(value){ sandbox.document.hidden = value; }
   };
 }
 
@@ -7008,5 +7009,22 @@ test('table cues: settlement pays out once per hand with a discreet hero win; re
   }
   assert.deepEqual(await settle(), ['chips_payout', 'chips_win']);
   assert.deepEqual(await settle('resync'), [], 'a settlement seen through resync is silent');
+});
+
+test('table cues: cues already scheduled are dropped when reconnect, resync or hiding starts before they fire', async () => {
+  for (const interrupt of ['none', 'reconnecting', 'resync', 'hidden']) {
+    const audio = fakeTableAudio();
+    const harness = createHarness({ audio });
+    harness.fireDomContentLoaded(); await harness.flush();
+    const ws = harness.getCreateOptions();
+    ws.onSnapshot(communityDealFrame('cue-cancel', 1, [], true));
+    harness.advanceTime(1000); await harness.flush();
+    ws.onSnapshot(communityDealFrame('cue-cancel', 2, ['As','Ks','Qs']));
+    assert.deepEqual(audio.plays, [], 'board cues wait for the cards to land');
+    if (interrupt === 'hidden') { harness.setDocumentHidden(true); harness.fireDocumentEvent('visibilitychange'); }
+    else if (interrupt !== 'none') ws.onStatus(interrupt, {});
+    harness.advanceTime(1000); await harness.flush();
+    assert.deepEqual(audio.plays, interrupt === 'none' ? ['card_board_1','card_board_2','card_board_1'] : [], interrupt);
+  }
 });
 

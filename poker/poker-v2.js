@@ -4456,6 +4456,7 @@
   }
 
   function cancelSettlementAnimations(){
+    tableCueGeneration += 1;
     settlementAnimationGeneration += 1;
     settlementAnimationTimers.forEach(function(timerId){
       try { window.clearTimeout(timerId); } catch (_err){}
@@ -4482,6 +4483,8 @@
   };
   var tableCueAt = {};
   var tableCueTurn = {};
+  // Bumped wherever in-flight visuals are cancelled (status change, hide, new hand, new settlement).
+  var tableCueGeneration = 0;
 
   function tableAudio(){
     var audio = window.MobilePokerAudio;
@@ -4508,7 +4511,11 @@
     tableCueTurn[kind] = ((tableCueTurn[kind] || 0) + 1) % spec.cues.length;
     var handId = state.handId;
     var cueTableId = state.tableId;
-    var fire = function(){ if (state.handId === handId && state.tableId === cueTableId && !document.hidden) audio.play(cue); };
+    var generation = tableCueGeneration;
+    var fire = function(){
+      if (generation !== tableCueGeneration || state.handId !== handId || state.tableId !== cueTableId || state.reconnectGate || document.hidden) return;
+      audio.play(cue);
+    };
     if (delay) window.setTimeout(fire, delay);
     else fire();
   }
@@ -4564,7 +4571,6 @@
   }
 
   function animateSettlementAwards(presentation, sceneRect, potFrom){
-    cancelSettlementAnimations();
     var generation = settlementAnimationGeneration;
     var seatByUserId = {};
     state.seats.forEach(function(seat){ if (seat && seat.userId) seatByUserId[seat.userId] = seat; });
@@ -4616,6 +4622,7 @@
   }
 
   function clearCardFx(resetClaims){
+    tableCueGeneration += 1;
     cardFxTimers.forEach(function(timer){ window.clearTimeout(timer); });
     cardFxTimers = [];
     cardFxNodes.forEach(removeCardFxNode);
@@ -4771,6 +4778,7 @@
   function animateChipDiff(previousVisual, nextVisual, frame){
     if (!previousVisual || !nextVisual) return;
     var settlement = claimSettlementPresentation(previousVisual, nextVisual, frame);
+    if (settlement) cancelSettlementAnimations();
     playChipCues(previousVisual, nextVisual, frame, settlement);
     if (!els.scene || !els.chipFxLayer) return;
     if (prefersReducedMotion()) return;
