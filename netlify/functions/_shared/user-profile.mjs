@@ -37,8 +37,10 @@ const PHOTO_KEY_RE = /^[0-9a-f-]{36}\.webp$/;
 function profileAvatar(profile) {
   const base = String(process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "").replace(/\/$/, "");
   const key = profile.avatarKey;
-  if (profile.publishedPhotoKey && profile.publishedPhotoKey === key && PHOTO_KEY_RE.test(key) && STORAGE_ORIGIN_RE.test(base)) {
-    return { type: "uploaded", variant: profile.avatarVariant, url: `${base}/storage/v1/object/public/profile-avatars/${encodeURIComponent(key)}` };
+  if (profile.publishedPhotoKey===key && PHOTO_KEY_RE.test(key||'') && STORAGE_ORIGIN_RE.test(base)
+    && typeof profile.publishedPhotoUrl==='string'
+    && profile.publishedPhotoUrl.startsWith(`${base}/storage/v1/object/sign/profile-avatar-uploads/pending/${key.slice(0,-5)}?token=`)) {
+    return {type:'uploaded',variant:profile.avatarVariant,url:profile.publishedPhotoUrl};
   }
   return projectPublicAvatar({
     avatarKey: profile.avatarKey,

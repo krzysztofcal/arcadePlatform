@@ -8,7 +8,7 @@ import sharp from "sharp";
 // #1140 UGC phase D: voluntary Google photo against the real phase D migration in an in-process Postgres.
 // The fixture stands in for #1155 (profile columns, Terms policy), account deletion and phase C (avatar holds).
 const photo = await import("../netlify/functions/_shared/profile-google-photo.mjs");
-const { publishedPhotoKeys } = await import("../netlify/functions/_shared/profile-photo-publication.mjs");
+const { publishedPhotoKeys, attachPublishedPhotos } = await import("../netlify/functions/_shared/profile-photo-publication.mjs");
 const { publicProfile } = await import("../netlify/functions/_shared/user-profile.mjs");
 const { createProfileGooglePhotoHandler } = await import("../netlify/functions/profile-google-photo.mjs");
 const migration = await readFile(new URL("../supabase/migrations/20261107140000_google_photo_consent.sql", import.meta.url), "utf8");
@@ -16,7 +16,7 @@ const migration = await readFile(new URL("../supabase/migrations/20261107140000_
 const NOTICE = photo.GOOGLE_PHOTO_NOTICE_VERSION;
 const TOKEN = "ya29.test-provider-token-0000";
 const PICTURE = "https://lh3.googleusercontent.com/a/ACg8ocTestPhoto=s96-c";
-const PNG = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#c33" } }).png().toBuffer();
+const PNG = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#c33" } }).withMetadata({orientation:6}).png().toBuffer();
 // A valid image that is larger than 1 MiB: only the stream limit can refuse it.
 const LARGE_PNG = await sharp(randomBytes(1000 * 1000 * 3), { raw: { width: 1000, height: 1000, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer();
 
@@ -26,7 +26,7 @@ afterEach(async () => { for (const db of databases) await db.close(); databases.
 async function database({ holds = true, guard = false } = {}) {
   const db = new PGlite();
   databases.add(db);
-  await db.exec(`create role anon; create role authenticated; create role service_role; create schema auth; create schema private;
+  await db.exec(`create role anon; create role authenticated; create role service_role; create schema auth; create schema private; create schema storage; create table storage.buckets(id text primary key,public boolean); insert into storage.buckets values('profile-avatar-uploads',false);
   grant usage on schema private to service_role;
   create table auth.users(id uuid primary key);
   create table auth.identities(id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, provider text not null, provider_id text not null);
@@ -69,7 +69,7 @@ async function database({ holds = true, guard = false } = {}) {
 function network(env, { sub = "google-sub-1", picture = PICTURE, image = PNG, userinfoStatus = 200, imageHeaders = {}, onUserinfo, onImage, onStorage, deleteStatus = 200, tracking = true } = {}) {
   const calls = [];
   const fetch = async (url, options = {}) => {
-    const call = { url: String(url), method: options.method || "GET", headers: { ...(options.headers || {}) }, redirect: options.redirect, body: typeof options.body === "string" ? options.body : null };
+    const call = { url: String(url), method: options.method || "GET", headers: { ...(options.headers || {}) }, redirect: options.redirect, body: typeof options.body === "string" ? options.body : null, bytes:Buffer.isBuffer(options.body)?Buffer.from(options.body):null };
     calls.push(call);
     if (call.url === "https://openidconnect.googleapis.com/v1/userinfo") {
       if (onUserinfo) await onUserinfo();
@@ -81,6 +81,10 @@ function network(env, { sub = "google-sub-1", picture = PICTURE, image = PNG, us
     }
     if (call.url.startsWith("https://test.supabase.co/storage/")) {
       if (onStorage) await onStorage(call);
+      if (call.url.endsWith('/object/sign/profile-avatar-uploads')) {
+        const payload=JSON.parse(call.body);
+        return new Response(JSON.stringify(payload.paths.map(path=>({path,signedURL:'/object/sign/profile-avatar-uploads/'+path+'?token=synthetic'}))));
+      }
       return new Response("{}", { status: call.method === "DELETE" ? deleteStatus : 200 });
     }
     throw new Error(`unexpected fetch ${call.url}`);
@@ -89,6 +93,7 @@ function network(env, { sub = "google-sub-1", picture = PICTURE, image = PNG, us
   return { calls, deps };
 }
 
+const privatePath=key=>'pending/'+key.slice(0,-5);
 const input = (over = {}) => ({ action: "import", consent: true, noticeVersion: NOTICE, providerToken: TOKEN, ...over });
 const profileRow = async (env, id) => (await env.executeSql("select avatar_key, avatar_revision, google_photo_suppressed from public.user_profiles where user_id=$1", [id]))[0];
 const consentRow = async (env, id) => (await env.executeSql("select decision, notice_version, consent_revision, withdrawn_at, imported_avatar_key from private.profile_photo_consents where user_id=$1", [id]))[0];
@@ -110,9 +115,9 @@ test("an explicit import proves the Google account, stores a normalized copy tra
   assert.match(profile.avatar_key, /^[0-9a-f-]{36}\.webp$/);
   assert.deepEqual([profile.avatar_revision, profile.google_photo_suppressed], [2, false]);
   assert.deepEqual(await consentRow(env, id), { decision: "granted", notice_version: NOTICE, consent_revision: 1, withdrawn_at: null, imported_avatar_key: profile.avatar_key });
-  assert.deepEqual(atWrite, { output_path: profile.avatar_key, tracking_version: 3, signed: true, horizon: true, started: true, open: true, no_source: true }, "the write is an open V3 manifest intent while it runs");
-  assert.equal((await env.executeSql("select count(*)::int n from public.profile_avatar_uploads where user_id=$1 and output_write_finished_at is not null", [id]))[0].n, 1, "and confirmed after it");
-  assert.equal((await env.executeSql("select count(*)::int n from private.account_avatar_objects where user_id=$1 and output_path=$2", [id, profile.avatar_key]))[0].n, 1);
+  assert.deepEqual(atWrite, { output_path: null, tracking_version: 3, signed: true, horizon: true, started: false, open: true, no_source: false }, "the write is an open V3 manifest intent while it runs");
+  assert.equal((await env.executeSql("select count(*)::int n from public.profile_avatar_uploads where user_id=$1 and signing_finished_at is not null", [id]))[0].n, 1, "the private-source capability stays covered after the POST");
+  assert.equal((await env.executeSql("select count(*)::int n from private.account_avatar_objects where user_id=$1 and output_path=$2", [id, profile.avatar_key]))[0].n, 0);
 
   const legacy = await database();
   const lid = await legacy.user();
@@ -126,15 +131,20 @@ test("an explicit import proves the Google account, stores a normalized copy tra
   assert.equal(download.url, "https://lh3.googleusercontent.com/a/ACg8ocTestPhoto=s256-c");
   assert.equal(download.redirect, "error");
   assert.equal(Object.keys(download.headers).some((h) => /authorization|apikey/i.test(h)), false, "no credentials to the image host");
-  assert.equal(upload.url, `https://test.supabase.co/storage/v1/object/profile-avatars/${profile.avatar_key}`);
+  assert.equal(upload.url, `https://test.supabase.co/storage/v1/object/profile-avatar-uploads/pending/${profile.avatar_key.slice(0,-5)}`);
   assert.deepEqual([upload.headers["content-type"], upload.headers["cache-control"], upload.headers["x-upsert"]], ["image/webp", "0", "false"]);
+  const normalized=await sharp(upload.bytes).metadata();
+  assert.deepEqual([normalized.format,normalized.width,normalized.height,normalized.orientation,normalized.exif],['webp',256,256,undefined,undefined]);
 
   const keys = await publishedPhotoKeys([id], net.deps);
   assert.equal(keys.get(id), profile.avatar_key);
   assert.equal((await publishedPhotoKeys([id], { ...net.deps, env: {} })).size, 0, "nothing is published while the flag is off");
   process.env.SUPABASE_URL = "https://test.supabase.co";
   const base = { userId: id, handle: "player-1", displayName: "Player 1", avatarKey: profile.avatar_key, avatarVariant: "fox-blue" };
-  assert.deepEqual(publicProfile({ ...base, publishedPhotoKey: profile.avatar_key }).avatar, { type: "uploaded", variant: "fox-blue", url: `https://test.supabase.co/storage/v1/object/public/profile-avatars/${profile.avatar_key}` });
+  const [decorated]=await attachPublishedPhotos([base],net.deps);
+  assert.deepEqual(publicProfile(decorated).avatar,{type:'uploaded',variant:'fox-blue',url:`https://test.supabase.co/storage/v1/object/sign/profile-avatar-uploads/${privatePath(profile.avatar_key)}?token=synthetic`});
+  const sign=net.calls.find(call=>call.url.endsWith('/object/sign/profile-avatar-uploads'));
+  assert.deepEqual(JSON.parse(sign.body),{expiresIn:60,paths:[privatePath(profile.avatar_key)]});
   assert.deepEqual(publicProfile(base).avatar, { type: "default", variant: "fox-blue" }, "an avatar key without consent stays unpublished");
 
   // Choosing an Arcade avatar later (phase A detaches the key and suppresses) stops publication.
@@ -214,7 +224,7 @@ test("a change during the import (new avatar choice or a moderator hold) wins: t
     assert.ok(posted && removed, `${label}: the written copy is deleted`);
     assert.equal((await profileRow(env, id)).avatar_key, null);
     assert.equal(await consentRow(env, id), undefined);
-    assert.equal((await env.executeSql("select count(*)::int n from public.profile_avatar_uploads where user_id=$1 and output_path is not null and output_deleted_at is null", [id]))[0].n, 1, `${label}: stays in the manifest for the purge`);
+    assert.equal((await env.executeSql("select count(*)::int n from public.profile_avatar_uploads where user_id=$1 and signing_finished_at is not null", [id]))[0].n, 1, `${label}: stays in the manifest for the purge`);
   }
 });
 
@@ -223,17 +233,17 @@ test("an account deletion during the write never loses the object: it stays in t
   const id = await env.user();
   const net = network(env, { deleteStatus: 500, onStorage: async (call) => { if (call.method === "POST") await env.executeSql("insert into public.account_deletion_requests values($1)", [id]); } });
   await assert.rejects(photo.importGooglePhoto(id, input(), net.deps), (e) => e.code === "account_not_active");
-  const [row] = await env.executeSql("select output_path, output_write_finished_at is not null as finished, output_deleted_at from public.profile_avatar_uploads where user_id=$1", [id]);
+  const [row] = await env.executeSql("select source_path,signing_finished_at is not null as finished,source_deleted_at from public.profile_avatar_uploads where user_id=$1", [id]);
   assert.ok(net.calls.some((c) => c.method === "DELETE"), "compensating delete attempted");
-  assert.deepEqual([!!row.output_path, row.finished, row.output_deleted_at], [true, true, null], "a failed compensation leaves a confirmed manifest output for the purge");
+  assert.deepEqual([!!row.source_path, row.finished, row.source_deleted_at], [true, true, null], "a failed compensation leaves a confirmed manifest output for the purge");
   assert.equal((await profileRow(env, id)).avatar_key, null);
 
   const lost = await database();
   const lid = await lost.user();
   const lnet = network(lost, { onStorage: async (call) => { if (call.method === "POST") throw new Error("response lost"); } });
   await assert.rejects(photo.importGooglePhoto(lid, input(), lnet.deps));
-  const [uncertain] = await lost.executeSql("select output_write_started_at is not null as started, output_write_finished_at from public.profile_avatar_uploads where user_id=$1", [lid]);
-  assert.deepEqual([uncertain.started, uncertain.output_write_finished_at], [true, null], "a lost write response stays uncertain for the deletion reconciliation");
+  const [uncertain] = await lost.executeSql("select signing_finished_at is not null as started,source_deleted_at from public.profile_avatar_uploads where user_id=$1", [lid]);
+  assert.deepEqual([uncertain.started, uncertain.source_deleted_at], [true, null], "a lost write response stays uncertain for the deletion reconciliation");
 });
 
 test("a copy from a failed or uncertain import stays listed until deleted: it blocks a new import and the next withdrawal deletes it", async () => {
@@ -284,7 +294,7 @@ test("a write with a lost response stays listed as uncertain: deletions are repe
   const later = await photo.withdrawGooglePhoto(id, final.deps);
   const deletes = final.calls.filter((c) => c.method === "DELETE");
   assert.equal(deletes.length, 1);
-  assert.deepEqual(JSON.parse(deletes[0].body), { prefixes: [lostKey] }, "the final DELETE targets the listed key");
+  assert.deepEqual(JSON.parse(deletes[0].body), { prefixes: [privatePath(lostKey)] }, "the final DELETE targets the listed key");
   assert.deepEqual([later.copyDeleted, later.copyStored], [true, false]);
   assert.equal((await env.executeSql("select count(*)::int n from private.profile_photo_pending_deletions", []))[0].n, 0);
 
@@ -464,7 +474,11 @@ test("the endpoint is signed-in only, dark by default, rate limited and never lo
   const original = console.log;
   console.log = (...args) => { logs.push(args.join(" ")); };
   try {
-    assert.equal((await make()(ev("OPTIONS"))).statusCode, 204);
+    const preflight=await make()(ev("OPTIONS"));
+    assert.equal(preflight.statusCode,204);
+    assert.match(preflight.headers['access-control-allow-methods'],/POST/);
+    assert.match(preflight.headers['access-control-allow-headers'],/authorization/i);
+    assert.match(preflight.headers['access-control-allow-headers'],/content-type/i);
     assert.equal((await make()(ev("PUT"))).statusCode, 405);
     assert.equal((await make({ verifySupabaseJwt: async () => ({ valid: false }) })(ev("GET"))).statusCode, 401);
     assert.equal((await make({ env: {} })(ev("GET"))).statusCode, 404);
@@ -497,7 +511,7 @@ test("disabling new imports preserves withdrawal and existing-copy status withou
  const event=(method,body)=>({httpMethod:method,headers:{origin:'https://arcade.test',authorization:'Bearer token'},body:JSON.stringify(body)});
  const status=await handler(event('GET'));assert.equal(status.statusCode,200);assert.equal(JSON.parse(status.body).importEnabled,false);
  assert.equal((await handler(event('POST',{action:'import'}))).statusCode,404);
- assert.equal((await handler(event('POST',{action:'withdraw'}))).statusCode,200);assert.equal(withdrawals,1);
+ const withdrawn=await handler(event('POST',{action:'withdraw'}));assert.equal(withdrawn.statusCode,200);assert.equal(JSON.parse(withdrawn.body).importEnabled,false);assert.equal(withdrawals,1);
 });
 
 
@@ -511,6 +525,36 @@ test('Google import obeys the real enabled V3 manifest guard, not only a simplif
  const env=await database({guard:true});const id=await env.user();const net=network(env);
  const status=await photo.importGooglePhoto(id,input(),net.deps);assert.equal(status.photoInUse,true);
  const rows=await env.executeSql('select tracking_version,output_path,output_write_finished_at,source_deleted_at from public.profile_avatar_uploads where user_id=$1',[id]);
- assert.equal(rows.length,1);assert.equal(rows[0].tracking_version,3);assert.ok(rows[0].output_write_finished_at);assert.ok(rows[0].source_deleted_at);
+ assert.equal(rows.length,1);assert.equal(rows[0].tracking_version,3);assert.equal(rows[0].output_path,null);assert.equal(rows[0].source_deleted_at,null);
  assert.equal((await photo.withdrawGooglePhoto(id,net.deps)).photoInUse,false);
+});
+
+test('private copies issue only bounded signed reads and stop issuing them after catalog choice, hold, deletion or OFF', async()=>{
+ const env=await database();const id=await env.user();const net=network(env);
+ await photo.importGooglePhoto(id,input(),net.deps);
+ const key=(await profileRow(env,id)).avatar_key;
+ const profile={userId:id,avatarKey:key,avatarVariant:'fox-blue'};
+ const read=async deps=>(await attachPublishedPhotos([profile],deps))[0];
+ assert.ok((await read(net.deps)).publishedPhotoUrl.includes('/object/sign/profile-avatar-uploads/pending/'));
+ assert.equal((await read({...net.deps,env:{}})).publishedPhotoUrl,undefined);
+ const during=network(env,{onStorage:async call=>{if(call.url.endsWith('/object/sign/profile-avatar-uploads'))await env.executeSql('insert into private.ugc_avatar_holds values($1,$2)',[id,randomUUID()]);}});
+ assert.equal((await read(during.deps)).publishedPhotoUrl,undefined,'a hold during signing wins before response');
+ await env.executeSql('delete from private.ugc_avatar_holds where user_id=$1',[id]);
+ await env.executeSql('insert into private.ugc_avatar_holds values($1,$2)',[id,randomUUID()]);
+ assert.equal((await read(net.deps)).publishedPhotoUrl,undefined);
+ await env.executeSql('delete from private.ugc_avatar_holds where user_id=$1',[id]);
+ await env.executeSql('insert into public.account_deletion_requests values($1)',[id]);
+ assert.equal((await read(net.deps)).publishedPhotoUrl,undefined);
+ await env.executeSql('delete from public.account_deletion_requests where old_user_id=$1',[id]);
+ const invalid={...net.deps,fetch:async()=>new Response(JSON.stringify([{path:privatePath(key),signedURL:'https://evil.invalid/photo?token=x'}]))};
+ assert.equal((await read(invalid)).publishedPhotoUrl,undefined,'untrusted signed URL falls back');
+ await env.executeSql("update storage.buckets set public=true where id='profile-avatar-uploads'");
+ assert.equal((await read(net.deps)).publishedPhotoUrl,undefined);
+ const other=await env.user();const blocked=network(env);
+ await assert.rejects(photo.importGooglePhoto(other,input(),blocked.deps),e=>e.code==='photo_import_unavailable');
+ assert.equal(blocked.calls.length,0,'public bucket fails before Google or Storage I/O');
+ await env.executeSql("update storage.buckets set public=false where id='profile-avatar-uploads'");
+ await env.executeSql('update public.user_profiles set avatar_key=null,google_photo_suppressed=true where user_id=$1',[id]);
+ assert.equal((await read(net.deps)).publishedPhotoUrl,undefined);
+ assert.ok(net.calls.every(call=>!call.url.includes('/object/profile-avatars/')),'no permanent public write');
 });

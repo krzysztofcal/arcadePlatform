@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 import { requireCurrentTerms } from "../../../shared/profile-terms.mjs";
-import { CAPABILITY_MS, PUBLIC_BUCKET, deleteStorageObject, normalizeAvatarImage, writeTrackedOutput } from "./profile-avatar.mjs";
+import { CAPABILITY_MS, deleteTrackedPhoto, normalizeAvatarImage, writeTrackedOutput } from "./profile-avatar.mjs";
 import { googlePhotoEnabled } from "./profile-photo-publication.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 
@@ -10,7 +10,7 @@ import { beginSql, executeSql } from "./supabase-admin.mjs";
 // - Proof: the current Google provider token must return, from Google's fixed userinfo endpoint, the same `sub` as
 //   the account's server-side Google identity. user_metadata, e-mail or a client URL are never trusted.
 // - The photo is downloaded once from a fixed Google image host, re-encoded by the existing avatar normalizer and
-//   stored in our public avatar bucket. The provider token, the Google URL and the image are never logged or stored.
+//   stored in the existing private avatar-source bucket. The provider token, Google URL and original image are never persisted or logged.
 // - A moderator avatar hold (phase C) refuses the import; without the phase C table the import fails closed.
 export { googlePhotoEnabled };
 export const GOOGLE_PHOTO_NOTICE_VERSION = "2026-11-17-g2";
@@ -48,6 +48,8 @@ async function importChecks(tx, userId, ownKey = null) {
   await assertAccountActive(tx, userId);
   await requireCurrentTerms(tx, { kind: "account", id: userId });
   await assertNoModeratorHold(tx, userId);
+  const [bucket]=await tx.unsafe("select exists(select 1 from storage.buckets where id='profile-avatar-uploads' and public=false) as private;",[]);
+  if (bucket?.private!==true) throw photoError('photo_import_unavailable');
   const sub = await googleSubject(tx, userId);
   const [consent] = await tx.unsafe("select imported_avatar_key from private.profile_photo_consents where user_id = $1 for update;", [userId]);
   const [pending] = await tx.unsafe("select exists(select 1 from private.profile_photo_pending_deletions where user_id = $1 and avatar_key is distinct from $2) as any;", [userId, ownKey]);
@@ -68,7 +70,7 @@ async function deletePendingCopies(userId, deps, keys) {
   let all = true;
   for (const { avatar_key: key, uncertain } of rows || []) {
     try {
-      await deleteStorageObject(PUBLIC_BUCKET, key, deps);
+      await deleteTrackedPhoto(userId, key, deps);
       if (uncertain) {
         all = false;
         continue;
@@ -217,7 +219,7 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
       const [profile] = await tx.unsafe("select avatar_key, avatar_revision from public.user_profiles where user_id = $1 for update;", [user]);
       if (!profile) throw photoError("profile_not_found", 404);
       if (Number(profile.avatar_revision) !== before.revision) throw photoError("stale_avatar_revision");
-      for (const tracked of new Set([profile.avatar_key, key].filter(Boolean))) {
+      for (const tracked of new Set([profile.avatar_key].filter(Boolean))) {
         await tx.unsafe("insert into private.account_avatar_objects (user_id, output_path) values ($1, $2) on conflict (user_id, output_path) do nothing;", [user, tracked]);
       }
       await tx.unsafe(
@@ -291,7 +293,7 @@ export async function withdrawGooglePhoto(userId, deps = {}) {
   let copyDeleted = await deletePendingCopies(user, deps, pendingKeys).catch(() => false);
   if (imported) {
     try {
-      await deleteStorageObject(PUBLIC_BUCKET, imported, deps);
+      await deleteTrackedPhoto(user, imported, deps);
       await (deps.executeSql || executeSql)(
         "update private.profile_photo_consents set imported_avatar_key = null where user_id = $1 and decision = 'withdrawn' and imported_avatar_key = $2;",
         [user, imported],

@@ -1,7 +1,8 @@
--- #1140 UGC phase D: voluntary Google profile photo. Additive and dark (the endpoint and the readers act only with
--- GOOGLE_PHOTO_IMPORT_ENABLED=1). One row per account: the current decision with its notice version and times.
--- No row means no consent. The photo is imported once into the existing public avatar bucket (no hot-linking) and
--- shown only while the decision is "granted" and the imported key is still the profile's avatar_key.
+-- #1140 UGC phase D: voluntary Google profile photo. Additive/dark: new import and read issuance require both
+-- GOOGLE_PHOTO_IMPORT_ENABLED=1 and UGC_SAFETY_ENABLED=1. Existing withdrawal remains available when OFF.
+-- One row per account: the current decision with its notice version and times.
+-- No row means no consent. The photo is imported once into the existing private avatar-source bucket (no hot-linking) and
+-- served via short-lived signed reads only while the decision is "granted" and the imported key is still the profile's avatar_key.
 -- No job, scheduler or notification. The row follows account deletion.
 begin;
 set local lock_timeout='2s';

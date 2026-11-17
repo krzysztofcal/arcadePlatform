@@ -1,6 +1,5 @@
 import { accountDeletionEnabled, assertAccountActive } from "../../../shared/account-deletion.mjs";
 import crypto from "node:crypto";
-import sharp from "sharp";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { ensureUserProfile, updateUserAvatarKey } from "./user-profile.mjs";
 
@@ -173,7 +172,7 @@ async function deleteStorageObject(bucket, path, deps = {}) {
 // Shared by the retired upload path and the phase D Google photo import: JPEG/PNG/WebP only, a single frame,
 // at most 1024x1024, re-encoded to a 256x256 WebP without the source metadata.
 async function normalizeAvatarImage(source, deps = {}) {
-  const image = (deps.sharp || sharp)(source, { failOn: "error", limitInputPixels: MAX_DIMENSION * MAX_DIMENSION });
+  const image = (deps.sharp || (await import("sharp")).default)(source, { failOn: "error", limitInputPixels: MAX_DIMENSION * MAX_DIMENSION });
   const metadata = await image.metadata();
   const actualMime = FORMAT_MIME[metadata.format];
   if (!actualMime || !ALLOWED_MIME.has(actualMime) || Number(metadata.pages || 1) > 1) throw avatarError("invalid_avatar_file");
@@ -228,50 +227,53 @@ and output_write_finished_at is null returning id;`, [uploadId,userId]);
   }
 }
 
-// Phase D: a server-produced avatar (no browser upload) written under the same V3 manifest protocol as finalize:
-// the intent and output path are recorded while the account is active, before the Storage write, and the write is
-// confirmed afterwards, so an account deletion waits for or reconciles an in-flight write instead of purging early.
-// Import requires V3 tracking even when account deletion is not enabled.
-async function writeTrackedOutput(userId, body, deps = {}, outputPath = `${crypto.randomUUID()}.webp`) {
-  if (!/^[0-9a-f-]{36}\.webp$/.test(outputPath)) throw avatarError("invalid_avatar_key");
-  const runSql = deps.executeSql || executeSql;
-  let id = null;
-  if (enabled(deps)) {
-    id = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + PENDING_TTL_MS).toISOString();
-    await activeTransaction(userId, deps, (tx) => tx.unsafe(`insert into public.profile_avatar_uploads
-      (id,user_id,source_path,declared_mime_type,declared_size,expires_at,tracking_version)
-      values ($1,$2,$3,'image/webp',$4,$5::timestamptz,3);`, [id, userId, `pending/${id}`, body.length, expiresAt]));
-    await finishSigning(userId, id, deps);
-    const rows = await activeTransaction(userId, deps, (tx) => tx.unsafe(`update public.profile_avatar_uploads
-      set consumed_at=timezone('utc', now()), output_path=$3, output_write_started_at=clock_timestamp(), source_deleted_at=clock_timestamp()
-      where id=$1 and user_id=$2 and consumed_at is null and tracking_version=3 returning id;`, [id, userId, outputPath]));
-    if (rows?.length !== 1) throw avatarError("avatar_tracking_unavailable", 503);
-  } else throw avatarError('avatar_tracking_unavailable',503);
-  let attempted = false;
-  let confirmed = false;
+// Google copies reuse the private source bucket and its V3 intent. No permanent public object is created.
+function photoPath(key) {
+  if (!/^[0-9a-f-]{36}\.webp$/.test(key)) throw avatarError('invalid_avatar_key');
+  return 'pending/' + key.slice(0,-5);
+}
+async function writeTrackedOutput(userId, body, deps = {}, key = `${crypto.randomUUID()}.webp`) {
+  if (!enabled(deps)) throw avatarError('avatar_tracking_unavailable',503);
+  const sourcePath = photoPath(key), id = key.slice(0,-5);
+  const expiresAt = new Date(Date.now()+PENDING_TTL_MS).toISOString();
+  await activeTransaction(userId,deps,tx=>tx.unsafe(`insert into public.profile_avatar_uploads
+    (id,user_id,source_path,declared_mime_type,declared_size,expires_at,tracking_version)
+    values ($1,$2,$3,'image/webp',$4,$5::timestamptz,3);`,[id,userId,sourcePath,body.length,expiresAt]));
+  // The existing private-source protocol keeps an uncertain write covered through the capability horizon.
+  await finishSigning(userId,id,deps);
+  await activeTransaction(userId,deps,async()=>{});
   try {
-    attempted = true;
-    await storageRequest(storagePath(PUBLIC_BUCKET, outputPath, null), {
-      method: "POST",
-      headers: { "content-type": "image/webp", "cache-control": "0", "x-upsert": "false" },
-      body,
-    }, deps);
-    confirmed = true;
-  } catch (error) {
-    // Only a 4xx answer (storage_error with status 400) proves Storage refused the write. A 5xx answer, a network
-    // error or a timeout leaves the outcome unknown.
-    if (!(error?.code === "storage_error" && error?.status === 400)) error.writeUncertain = true;
+    await storageRequest(storagePath(UPLOAD_BUCKET,sourcePath,null),{method:'POST',
+      headers:{'content-type':'image/webp','cache-control':'0','x-upsert':'false'},body},deps);
+  } catch(error) {
+    if (!(error?.code==='storage_error' && error?.status===400)) error.writeUncertain=true;
     throw error;
-  } finally {
-    // A lost POST response stays uncertain (finished_at null) for the deletion reconciliation, as in finalize.
-    if (id && (confirmed || !attempted)) {
-      const rows = await runSql(`update public.profile_avatar_uploads set output_write_finished_at=clock_timestamp()
-where id=$1 and user_id=$2 and output_write_started_at is not null and output_write_finished_at is null returning id;`, [id, userId]);
-      if (rows?.length !== 1) throw avatarError("avatar_tracking_unavailable", 503);
-    }
   }
-  return outputPath;
+  return key;
+}
+async function deleteTrackedPhoto(userId,key,deps={}) {
+  // Keys are taken from this user's locked consent/pending snapshot. Leave V3 absence evidence to its purge.
+  await deleteStorageObject(UPLOAD_BUCKET,photoPath(key),deps);
+}
+
+async function signedPhotoUrls(keys,deps={}) {
+  if (!keys.length) return new Map();
+  if (keys.length>100) throw avatarError('photo_signing_unavailable',503);
+  const paths=keys.map(photoPath);
+  const {response,config}=await storageRequest(`/storage/v1/object/sign/${UPLOAD_BUCKET}`,{
+    method:'POST',signal:AbortSignal.timeout(5000),headers:{'content-type':'application/json'},body:JSON.stringify({expiresIn:60,paths})},deps);
+  const rows=await response.json();
+  if (!Array.isArray(rows)||rows.length!==paths.length) throw avatarError('photo_signing_unavailable',503);
+  const urls=new Map();
+  for (const row of rows) {
+    const index=paths.indexOf(row.path), relative=row.signedURL||row.signedUrl;
+    if (index<0||row.error||urls.has(keys[index])||typeof relative!=='string') throw avatarError('photo_signing_unavailable',503);
+    const url=new URL(relative.startsWith('/storage/v1/') ? relative : '/storage/v1'+relative,config.baseUrl);
+    if (url.origin!==config.baseUrl||url.pathname!==`/storage/v1/object/sign/${UPLOAD_BUCKET}/${row.path}`
+      ||!url.searchParams.get('token')||[...url.searchParams.keys()].some(key=>key!=='token')||url.hash) throw avatarError('photo_signing_unavailable',503);
+    urls.set(keys[index],url.href);
+  }
+  return urls;
 }
 
 async function removeAvatar(userId, deps = {}) {
@@ -283,8 +285,8 @@ async function removeAvatar(userId, deps = {}) {
 export {
   CAPABILITY_MS,
   MAX_SOURCE_BYTES,
-  PUBLIC_BUCKET,
-  deleteStorageObject,
+  deleteTrackedPhoto,
+  signedPhotoUrls,
   normalizeAvatarImage,
   cleanupExpiredUploads,
   createPendingUpload,

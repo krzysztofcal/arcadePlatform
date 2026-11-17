@@ -36,12 +36,17 @@ No files or behavior from #1275/audio are changed.
 - Catalog choice, moderator hide and withdrawal win over an in-flight import. Account Deletion finds every attempted
   Storage write in the existing V3 manifest before I/O; consent/pending rows cascade with Auth deletion. No cross-user
   bucket scan or alternate deletion implementation. Account/leaderboard/profile endpoints keep JWT privacy gates.
-- Public avatar bucket is an existing architectural boundary: the profile API remains authenticated, but anyone
-  with an image link can read/copy that image. The separate consent explicitly discloses this. Withdrawal removes
-  current application publication and requests deletion of our copy; downloaded/browser/CDN copies cannot be recalled.
-  New Google copies use cache-control 0 rather than the legacy one-year upload cache. This is not private Storage
-  or an instantaneous guarantee to erase all caches. OWNER must approve this exact disclosure before activation;
-  a requirement for authenticated object access needs a separately reviewed private-storage design.
+- Google copies use the existing **private** `profile-avatar-uploads/pending/<random-id>` source slot, never
+  a permanent public avatar object. A V3 source manifest is committed and the capability horizon recorded before
+  Storage I/O; the existing Account Deletion source purge owns this slot. Source-only intents remain conservative
+  through that horizon; no new bucket or parallel purge is introduced. Bucket privacy is checked before import and
+  read issuance; a public/missing bucket fails closed. Legacy public-upload behavior remains untouched.
+- Authenticated projections batch-sign matching consented keys for 60 seconds. Eligibility is rechecked after signing. Fresh links are refused after
+  catalog choice, moderator hold, deletion start or either rollout flag OFF. A previously issued link can remain
+  usable until expiry, and copies saved by recipients cannot be recalled; consent PL/EN discloses this bounded
+  read capability. Cache-control is 0. Choosing a catalog avatar or moderator hide stops new access without leaving
+  a permanently public copy. The private stored copy remains covered by consent/status until explicit withdrawal
+  or Account Deletion. Signed links and provider tokens are never logged.
 - WWW image rendering accepts only the configured project's bucket URL and clears stale image callbacks/background
   before fallback. Google originals are never hot-linked. APK requests use the existing ArcadeApi origin mechanism;
   packaging already follows account script/CSS references, with no change to its audio/runtime configuration.
@@ -63,7 +68,8 @@ Terms, catalog fallback, moderator hold, failed deletion messaging and sign-out;
 ## Later OWNER gates and impact
 
 1. Review this replacement, migration hash/manifest and consent wording. Do not apply old #1217 as a dependency.
-2. Separate OWNER Stage apply of the reviewed SQL; separate approved Preview deployment and opt-in flag context.
+2. Verify private bucket/RLS and service-role read/sign access on the actual target (Production is not inferred from Stage).
+   Separate OWNER Stage apply of the reviewed SQL; separate approved Preview deployment and opt-in flag context.
    No auto Stage apply on push/PR; Production equivalent/identity review has its own GO. Keep public import OFF elsewhere.
 3. Exact-build WWW + Android acceptance and independent review before Ready. Separately update/approve Privacy,
    Data Safety and moderation procedures if needed before public rollout. A WWW change never upgrades installed APKs.
@@ -74,5 +80,10 @@ No intentional breaking change while OFF. When enabled, approved photos may repl
 existing WWW projections; WS/table avatar projection stays catalog-only. Withdrawal needs no provider login and
 preserves existing game/ledger/settlement behavior. Provider-token expiry may require an explicit Google re-login.
 Egress: one userinfo + at most 1 MiB image per allowed import (5/account/hour), one normalized Storage write;
-publication reads batch the existing bounded leaderboard/profile IDs; withdrawal reads only that account's pending
+publication uses two bounded eligibility reads of the existing leaderboard/profile IDs and one Storage signing request (max100 paths, TTL60s); withdrawal reads only that account's pending
 copies, which block subsequent import until reconciled. No polling, bucket listing or scheduled workload is added.
+
+Review round2 found P2 OFF-response state and permanent public objects. Both are addressed: every mutation response
+includes the current import gate, and Google copies now use existing private source slots/short read capabilities.
+No OWNER risk waiver is inferred. See Supabase [bucket access](https://supabase.com/docs/guides/storage/buckets/fundamentals)
+and [batch signed URLs](https://supabase.com/docs/reference/javascript/storage-from-createsignedurls), checked 2026-11-17.

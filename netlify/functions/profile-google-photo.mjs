@@ -59,7 +59,7 @@ function createProfileGooglePhotoHandler(deps = {}) {
         if (Object.keys(body).length !== 1) return json(400, cors, { error: "invalid_request" });
         const result = await withdraw(auth.userId);
         klog("google_photo_withdrawn", {});
-        return json(200, cors, result);
+        return json(200, cors, {...result,importEnabled});
       }
       if (!importEnabled) return json(404, cors, { error: "not_found" });
       if (body.action !== "import") return json(400, cors, { error: "invalid_request" });
@@ -75,8 +75,9 @@ function createProfileGooglePhotoHandler(deps = {}) {
       if (!allowed) return json(429, cors, { error: "rate_limit_exceeded" });
       const result = await importPhoto(auth.userId, body);
       klog("google_photo_imported", {});
-      return json(200, cors, result);
+      return json(200, cors, {...result,importEnabled});
     } catch (error) {
+      if (error?.code==='account_not_active') return json(409,cors,{error:'account_not_active'});
       if (error?.status && error.status < 500) return json(error.status, cors, { error: error.code });
       klog("google_photo_failed", { code: error?.status === 503 ? error.code : "server_error" });
       return json(error?.status === 503 ? 503 : 500, cors, { error: error?.status === 503 ? error.code : "server_error" });

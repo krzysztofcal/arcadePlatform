@@ -18,13 +18,13 @@
   }
 
   // Phase D: only our own avatar bucket is rendered as a photo; anything else falls back to the Arcade catalog.
-  var PHOTO_URL_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/profile-avatars\/[0-9a-f-]{36}\.webp$/;
+  var PHOTO_URL_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/sign\/profile-avatar-uploads\/pending\/[0-9a-f-]{36}\?token=[^#]+$/;
 
   function applyPhoto(node, profile){
     var avatar = profile && profile.avatar;
     if (!avatar || avatar.type !== 'uploaded' || typeof avatar.url !== 'string' || !PHOTO_URL_RE.test(avatar.url)) return false;
     var storage = window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.SUPABASE_URL;
-    if (typeof storage !== 'string' || avatar.url.indexOf(storage.replace(/\/$/, '') + '/storage/v1/object/public/profile-avatars/') !== 0) return false;
+    if (typeof storage !== 'string' || avatar.url.indexOf(storage.replace(/\/$/, '') + '/storage/v1/object/sign/profile-avatar-uploads/pending/') !== 0) return false;
     var url = avatar.url;
     node.dataset.avatarUrl = url;
     node.classList.add('profile-avatar--uploaded');
