@@ -1313,6 +1313,13 @@
       "sha256": "61d775531704a61a24d7beb6ee8460c34ccdc27435023f85d398a04e7e9f30f5",
       "category": "needs-production-equivalent",
       "purpose": "#1157 Stage NULL-execute dry-run guard for the two settled retention functions; Production equivalent already in 20261105160500 (p_execute IS NOT TRUE), no new Production migration; no data change"
+    },
+    {
+      "version": "20261107140000",
+      "file": "20261107140000_google_photo_consent.sql",
+      "sha256": "ec2f8bab872e13932bed7d3c69a31b27efe574dd8ec2e62db7cbb7ab1034b514",
+      "category": "needs-production-equivalent",
+      "purpose": "#1140 voluntary Google photo consent; prepared Stage schema only; separate OWNER Stage apply and Production equivalent/review/GO required; no activation"
     }
   ]
 }

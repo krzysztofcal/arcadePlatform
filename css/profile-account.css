@@ -108,3 +108,8 @@ dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 [data-admin-only][hidden],.account-links a[hidden]{display:none!important;}
 .account-note a{color:var(--ac);font-weight:700;text-decoration:none;}
 .account-note a:hover{text-decoration:underline;}
+
+.google-photo{display:grid;gap:8px;margin:12px 0;padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;}
+.google-photo[hidden]{display:none;}
+.google-photo legend{padding:0 6px;font-weight:700;}
+.google-photo__consent{display:flex;gap:8px;align-items:flex-start;}
