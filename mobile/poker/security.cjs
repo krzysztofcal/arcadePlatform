@@ -8,6 +8,23 @@
     }
     return config;
   }
+  function validateProduction(config){
+    if (!config || config.apiOrigin !== 'https://play.kcswh.pl' ||
+        config.supabaseUrl !== 'https://otbqfijerkieoxwpxjnm.supabase.co' || config.wsUrl !== 'wss://ws.kcswh.pl/ws') {
+      throw new Error('Invalid public Production configuration');
+    }
+    return config;
+  }
+  function channel(config){
+    try {
+      validate(config);
+      return 'stage';
+    } catch (_e) {
+      // Not stage, try production
+    }
+    validateProduction(config);
+    return 'production';
+  }
   function forPreview(config, binding, prNumber, sourceSha){
     var origin = 'https://deploy-preview-' + prNumber + '--playkcswh.netlify.app';
     var deploy = binding && binding.netlify;
@@ -30,7 +47,7 @@
         url.searchParams.getAll('code').length !== 1 || !url.searchParams.get('code')) throw new Error('Invalid auth callback');
     return url.searchParams.get('code');
   }
-  var api = { validate: validate, forPreview: forPreview, publicProfileUrl: publicProfileUrl, callbackCode: callbackCode, redirectTo: redirectTo };
+  var api = { validate: validate, validateProduction: validateProduction, channel: channel, forPreview: forPreview, publicProfileUrl: publicProfileUrl, callbackCode: callbackCode, redirectTo: redirectTo };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MobilePokerSecurity = api;
 })(typeof window !== 'undefined' ? window : globalThis);

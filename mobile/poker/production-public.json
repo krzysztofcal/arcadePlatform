@@ -1,0 +1,6 @@
+{
+  "apiOrigin": "https://play.kcswh.pl",
+  "supabaseUrl": "https://otbqfijerkieoxwpxjnm.supabase.co",
+  "wsUrl": "wss://ws.kcswh.pl/ws",
+  "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90YnFmaWplcmtpZW94d3B4am5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxMTkxNzgsImV4cCI6MjA3OTY5NTE3OH0.ZdM-WuKY5IYyrPwd8s2KtlrjMpAZ6z6buqIYCCSh-CQ"
+}

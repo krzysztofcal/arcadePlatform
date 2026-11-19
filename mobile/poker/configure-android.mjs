@@ -15,8 +15,14 @@ let gradle = await readFile(gradleFile, 'utf8');
 if (!gradle.includes('versionName "1.0"') || !gradle.includes('versionCode 1')) throw new Error('Unexpected Android template version');
 gradle = gradle.replace('versionName "1.0"', 'versionName "0.0.1"');
 await writeFile(gradleFile, gradle);
+const capacitorConfig = JSON.parse(await readFile(new URL('./capacitor.config.json', import.meta.url), 'utf8'));
+const appId = capacitorConfig?.appId;
+if (!appId || !/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(appId)) {
+  throw new Error('Invalid appId in capacitor.config.json');
+}
+const packagePath = appId.split('.').join('/');
 // One inset owner: full table background, safe content; native margins elsewhere.
-const activityFile = new URL('./android/app/src/main/java/pl/kcswh/arcadepoker/stage/MainActivity.java', import.meta.url);
+const activityFile = new URL(`./android/app/src/main/java/${packagePath}/MainActivity.java`, import.meta.url);
 let activity = await readFile(activityFile, 'utf8');
 if (!activity.includes('public class MainActivity extends BridgeActivity {}')) throw new Error('Unexpected Android activity template');
 activity = activity.replace('import com.getcapacitor.BridgeActivity;', `import android.net.Uri;
@@ -102,7 +108,7 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
     }
 }`);
 await writeFile(activityFile, activity);
-await copyFile(new URL('./PokerAudioPlugin.java', import.meta.url), new URL('./android/app/src/main/java/pl/kcswh/arcadepoker/stage/PokerAudioPlugin.java', import.meta.url));
+await copyFile(new URL('./PokerAudioPlugin.java', import.meta.url), new URL(`./android/app/src/main/java/${packagePath}/PokerAudioPlugin.java`, import.meta.url));
 
 // Keep the launch window and WebView on the same dark brand surface.
 const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);
