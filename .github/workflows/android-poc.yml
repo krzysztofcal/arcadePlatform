@@ -71,7 +71,7 @@ jobs:
           echo "MOBILE_PREVIEW_BINDING=$RUNNER_TEMP/mobile-preview-binding.json" >> "$GITHUB_ENV"
       # These tests run only here, so test-only synchronize must not skip them.
       - name: Fundamental security checks
-        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs tests/mobile-poker-audio.test.mjs
+        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs tests/mobile-poker-audio.test.mjs tests/mobile-poker-channel.test.mjs
       - name: Resolve matching native Preview before build costs
         id: preview
         env:
