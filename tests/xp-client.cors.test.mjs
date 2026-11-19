@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { buildApiCorsPolicy, buildCorsHeaders } from '../netlify/functions/_shared/api-cors.mjs';
 
+process.env.XP_TEST_MODE = '1';
 process.env.XP_DAILY_SECRET = 'test-secret-for-sessions-32chars!';
 
 const normalizedPolicy = buildApiCorsPolicy({
@@ -17,6 +18,63 @@ assert.equal(buildCorsHeaders({ origin: 'https://allowed.test', policy: normaliz
 assert.equal(buildCorsHeaders({ origin: 'https://allowed.test', policy: normalizedPolicy, baseHeaders: { vary: 'Accept-Encoding, origin' } }).vary, 'Accept-Encoding, origin');
 assert.equal(buildCorsHeaders({ origin: 'https://other-preview.netlify.app', policy: normalizedPolicy }), null);
 assert.equal(buildCorsHeaders({ origin: 'https://allowed.test/path', policy: normalizedPolicy }), null);
+
+// Production-only native CORS origin tests (#1140 T2b)
+const prodFunctionsPolicy = buildApiCorsPolicy({
+  buildContext: 'production',
+  buildArtifactIdentity: 'netlify-functions',
+  buildDeployOrigin: 'https://main--playkcswh.netlify.app',
+  configuredOrigins: '',
+});
+assert.ok(prodFunctionsPolicy.origins.includes('https://localhost'), 'production netlify-functions includes https://localhost');
+
+const prodWsPolicy = buildApiCorsPolicy({
+  buildContext: 'production',
+  buildArtifactIdentity: 'ws-server',
+  buildDeployOrigin: 'https://main--playkcswh.netlify.app',
+  configuredOrigins: '',
+});
+assert.ok(!prodWsPolicy.origins.includes('https://localhost'), 'production ws-server does not include https://localhost');
+
+const previewNonStagePolicy = buildApiCorsPolicy({
+  buildContext: 'deploy-preview',
+  buildArtifactIdentity: 'netlify-functions',
+  buildDeployOrigin: 'https://deploy-preview-999--other.netlify.app',
+  configuredOrigins: '',
+});
+assert.ok(!previewNonStagePolicy.origins.includes('https://localhost'), 'deploy-preview non-Stage does not include https://localhost');
+
+const branchNonStagePolicy = buildApiCorsPolicy({
+  buildContext: 'branch-deploy',
+  buildArtifactIdentity: 'netlify-functions',
+  buildDeployOrigin: 'https://other-branch--playkcswh.netlify.app',
+  configuredOrigins: '',
+});
+assert.ok(!branchNonStagePolicy.origins.includes('https://localhost'), 'branch-deploy non-Stage does not include https://localhost');
+
+const devPolicy = buildApiCorsPolicy({
+  buildContext: 'dev',
+  buildArtifactIdentity: 'netlify-functions',
+  buildDeployOrigin: 'http://localhost:8888',
+  configuredOrigins: '',
+});
+assert.ok(!devPolicy.origins.includes('https://localhost'), 'dev does not include https://localhost');
+
+const unknownPolicy = buildApiCorsPolicy({
+  buildContext: 'unknown',
+  buildArtifactIdentity: 'netlify-functions',
+  buildDeployOrigin: null,
+  configuredOrigins: '',
+});
+assert.ok(!unknownPolicy.origins.includes('https://localhost'), 'unknown does not include https://localhost');
+
+const stagePreviewPolicy = buildApiCorsPolicy({
+  buildContext: 'deploy-preview',
+  buildArtifactIdentity: 'netlify-functions',
+  buildDeployOrigin: 'https://deploy-preview-123--playkcswh.netlify.app',
+  configuredOrigins: '',
+});
+assert.ok(stagePreviewPolicy.origins.includes('https://localhost'), 'stage deploy-preview includes https://localhost');
 
 async function createHandler(ns = 'test:cors') {
   process.env.XP_DEBUG = '0';

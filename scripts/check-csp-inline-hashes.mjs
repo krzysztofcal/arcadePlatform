@@ -3,8 +3,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROUTES = ["/*", "/games-open/*", "/game*.html", "/poker/*", "/games-open/freedoom/*"];
-const PUBLIC_DIRS = ["about", "games", "games-open", "landing", "legal", "poker"];
+const ROUTES = ["/*", "/app/auth/callback", "/app/auth/callback.html", "/games-open/*", "/game*.html", "/poker/*", "/games-open/freedoom/*"];
+const PUBLIC_DIRS = ["about", "app", "games", "games-open", "landing", "legal", "poker"];
 
 export function hashInlineScript(source) {
   return `sha256-${createHash("sha256").update(source).digest("base64")}`;
@@ -12,6 +12,7 @@ export function hashInlineScript(source) {
 
 function routeFor(documentPath) {
   const urlPath = `/${documentPath.replaceAll(path.sep, "/")}`;
+  if (urlPath === "/app/auth/callback.html") return "/app/auth/callback.html";
   if (urlPath.startsWith("/games-open/freedoom/")) return "/games-open/freedoom/*";
   if (urlPath.startsWith("/games-open/")) return "/games-open/*";
   if (/^\/game.*\.html$/i.test(urlPath)) return "/game*.html";

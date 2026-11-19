@@ -9,4 +9,7 @@ function isStageNetlifyContext(context, origin, identity) {
   }
   return context === 'branch-deploy' && identity === 'netlify-stage-parent' && origin === STAGE_PARENT_ORIGIN;
 }
-module.exports = { STAGE_WS_URL, STAGE_PROJECT_REF, STAGE_PARENT_BRANCH, STAGE_PARENT_ORIGIN, isStageNetlifyContext };
+function isProductionNetlifyContext(context, identity) {
+  return context === 'production' && identity === 'netlify-functions';
+}
+module.exports = { STAGE_WS_URL, STAGE_PROJECT_REF, STAGE_PARENT_BRANCH, STAGE_PARENT_ORIGIN, isStageNetlifyContext, isProductionNetlifyContext };
