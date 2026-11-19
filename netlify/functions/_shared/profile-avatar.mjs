@@ -54,7 +54,7 @@ async function storageRequest(path, options = {}, deps = {}) {
   const config = deps.storageConfig || storageConfig(deps.env);
   const fetchImpl = deps.fetch || fetch;
   const headers = { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, ...(options.headers || {}) };
-  const response = await fetchImpl(config.baseUrl + path, { ...options, headers, ...(enabled(deps) ? { signal: AbortSignal.timeout(30000) } : {}) });
+  const response = await fetchImpl(config.baseUrl + path, { ...options, headers, ...(enabled(deps) && !options.signal ? { signal: AbortSignal.timeout(30000) } : {}) });
   if (!response.ok) {
     const message = await response.text().catch(() => "");
     const error = avatarError("storage_error", response.status >= 500 ? 503 : 400);

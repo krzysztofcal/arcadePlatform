@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import sharp from "sharp";
-import { cleanupExpiredUploads, createPendingUpload, finalizeAvatar, validateUploadRequest } from "../netlify/functions/_shared/profile-avatar.mjs";
+import { cleanupExpiredUploads, createPendingUpload, finalizeAvatar, validateUploadRequest, signedPhotoUrls, deleteTrackedPhoto } from "../netlify/functions/_shared/profile-avatar.mjs";
 import { createAvatarUploadUrlHandler } from "../netlify/functions/profile-avatar-upload-url.mjs";
 
 const USER_ID = "00000000-0000-4000-8000-000000000003";
@@ -146,4 +146,27 @@ test("finalization removes a newly published avatar when profile update fails", 
   }), /database unavailable/);
   assert.ok(deleted.some((path) => /^[0-9a-f-]{36}\.webp$/.test(path)));
   assert.ok(deleted.includes(`pending/${uploadId}`));
+});
+
+
+test('photo signing keeps its 5s signal while tracked deletion keeps its 30s default', async t => {
+  const five = new AbortController().signal, thirty = new AbortController().signal, timeouts = [];
+  t.mock.method(AbortSignal, 'timeout', ms => { timeouts.push(ms); return ms === 5000 ? five : thirty; });
+  const key = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.webp', signals = [];
+  const deps = { env: { ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED: '1' }, storageConfig: { baseUrl: 'https://test.supabase.co', serviceKey: 'fake' },
+    fetch: async (url, options) => { signals.push(options.signal); return new Response(JSON.stringify(url.includes('/object/sign/') ? [{path:'pending/'+key.slice(0,-5),signedURL:'/object/sign/profile-avatar-uploads/pending/'+key.slice(0,-5)+'?token=fake'}] : {})); }
+  };
+  await signedPhotoUrls([key], deps); assert.equal(signals[0], five); assert.deepEqual(timeouts, [5000]);
+  await deleteTrackedPhoto(USER_ID, key, deps); assert.equal(signals[1], thirty); assert.deepEqual(timeouts, [5000,30000]);
+  await deleteTrackedPhoto(USER_ID, key, {...deps,env:{}}); assert.equal(signals[2], undefined);
+});
+
+test('a signing timeout falls back to the existing catalog projection', async () => {
+  const {attachPublishedPhotos} = await import('../netlify/functions/_shared/profile-photo-publication.mjs');
+  const input = { userId: USER_ID, avatarKey:'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.webp',avatarVariant:'wizard-indigo' };
+  const [result] = await attachPublishedPhotos([input], { env:{GOOGLE_PHOTO_IMPORT_ENABLED:'1',UGC_SAFETY_ENABLED:'1',ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED:'1'},
+    executeSql:async()=>[{user_id:USER_ID,avatar_key:input.avatarKey}],storageConfig:{baseUrl:'https://test.supabase.co',serviceKey:'fake'},
+    fetch:async()=>{throw Object.assign(new Error('timeout'),{name:'TimeoutError'});}
+  });
+  assert.equal(result.publishedPhotoUrl,undefined);assert.equal(result.avatarVariant,'wizard-indigo');assert.equal(input.publishedPhotoUrl,undefined);
 });

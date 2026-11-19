@@ -112,6 +112,7 @@ dialog.account-delete-dialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 .account-note a:hover{text-decoration:underline;}
 
 .google-photo{display:grid;gap:8px;margin:12px 0;padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;}
-.google-photo[hidden]{display:none;}
+.google-photo[hidden]{display:none!important;}
+.google-photo [hidden]{display:none!important;}
 .google-photo legend{padding:0 6px;font-weight:700;}
 .google-photo__consent{display:flex;gap:8px;align-items:flex-start;}

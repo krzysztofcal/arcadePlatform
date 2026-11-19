@@ -13,6 +13,7 @@
   var avatarSaving = null;
   var avatarMessage = '';
   var publicProfileGeneration = 0;
+  var profileLoadState = 'idle';
   var publicProfileSaveResetTimer = null;
   var passwordRecoveryActive = false;
   var signupConfirmationPending = false;
@@ -151,11 +152,15 @@
     node.style.display = isVisible ? '' : 'none';
   }
 
-  function setStatus(message, tone){
+  function setStatus(message, tone, source){
     if (!nodes.status) return;
+    // A repeated Auth success must not replace a pending or failed profile read.
+    if (source === 'auth' && currentUser && !deletionReceivedOwnerId && tone === 'success' && (profileLoadState === 'loading' || profileLoadState === 'error')) return;
     if (deletionReceivedOwnerId){ message = deletionReceivedMessage(); tone = 'success'; }
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
+    nodes.status.dataset.source = source || 'general';
+    nodes.status.dataset.profileState = profileLoadState;
     nodes.status.hidden = !message;
   }
 
@@ -273,6 +278,7 @@
       renderPublicProfile(null);
       renderAvatarGallery();
       publicProfileGeneration += 1;
+      profileLoadState = 'idle';
       publicProfileInFlight = null;
     }
 
@@ -506,10 +512,14 @@
     if (publicProfileInFlight) return publicProfileInFlight;
     var requestedUserKey = getUserKey(currentUser);
     var requestedGeneration = publicProfileGeneration;
+    profileLoadState = 'loading';
+    setStatus(t('profileLoading', 'Loading your profile…'), 'info', 'profile');
     var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
       if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
       renderPublicProfile(profile);
       renderPokerProjection(profile);
+      profileLoadState = 'success';
+      if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus(t('signedIn', 'Signed in.'), 'success', 'profile');
       return profile;
     }).catch(function(error){
       if (error && error.code === 'stale_identity'){
@@ -518,13 +528,18 @@
           if (publicProfileInFlight === request) publicProfileInFlight = null;
           return loadPublicProfile(true, true);
         }
+        if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
+          profileLoadState = 'idle';
+          if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus('', '', 'profile');
+        }
         return null;
       }
       klog('profile:account_load_failed', { code: error && error.code ? error.code : 'request_failed' });
       if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
         setBlockVisibility(nodes.publicProfileEditor, false);
         clearPokerProjection();
-        setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error');
+        profileLoadState = 'error';
+        setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error', 'profile');
       }
       return null;
     }).finally(function(){ if (publicProfileInFlight === request) publicProfileInFlight = null; });
@@ -1154,10 +1169,10 @@
     auth.signIn(email, password).then(function(res){
       var user = res && res.data && res.data.user ? res.data.user : null;
       if (user){
-        setStatus(t('signedInSuccessfully', 'Signed in successfully.'), 'success');
+        setStatus(t('signedInSuccessfully', 'Signed in successfully.'), 'success', 'auth');
         openAccountPanel(user);
       } else {
-        setStatus(t('signedInRedirecting', 'Signed in. Redirecting...'), 'success');
+        setStatus(t('signedInRedirecting', 'Signed in. Redirecting...'), 'success', 'auth');
       }
     }).catch(function(err){
       var msg = err && err.message ? String(err.message) : t('signInError', 'Could not sign in. Please try again.');
@@ -1504,12 +1519,12 @@
     }
 
     if (typeof auth.isPasswordRecoveryPending === 'function' && auth.isPasswordRecoveryPending()) showPasswordRecovery();
-    setStatus(passwordRecoveryActive ? '' : t('checkingSession', 'Checking session...'), passwordRecoveryActive ? '' : 'info');
+    setStatus(passwordRecoveryActive ? '' : t('checkingSession', 'Checking session...'), passwordRecoveryActive ? '' : 'info', 'auth');
     auth.getCurrentUser().then(function(user){
       if (passwordRecoveryActive || authRevision !== 0) return;
       renderUser(user);
       var googleError = auth.getAuthCallbackError && auth.getAuthCallbackError();
-      setStatus(googleError ? googleErrorMessage(googleError) : (user ? t('signedIn', 'Signed in.') : ''), googleError ? 'error' : (user ? 'success' : ''));
+      setStatus(googleError ? googleErrorMessage(googleError) : (user ? t('signedIn', 'Signed in.') : ''), googleError ? 'error' : (user ? 'success' : ''), 'auth');
       if (user){
         loadChips();
         refreshWelcomeBonus(user);
@@ -1532,7 +1547,7 @@
         }
         renderUser(user);
         if (user){
-          setStatus(t('signedIn', 'Signed in.'), 'success');
+          setStatus(t('signedIn', 'Signed in.'), 'success', 'auth');
           loadChips();
           refreshWelcomeBonus(user);
         } else {

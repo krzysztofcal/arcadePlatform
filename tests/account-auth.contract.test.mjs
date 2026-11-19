@@ -248,11 +248,12 @@ async function accountReadFixture(getMe) {
   // Exercise the actual private async coordinator without a DOM-rendering suite.
   const start = source.indexOf('  function loadPublicProfile(');
   const end = source.indexOf('\n  function handlePublicProfileSave', start);
-  const events = { rendered: [], hidden: 0, errors: 0, logs: [] };
+  const events = { rendered: [], hidden: 0, errors: 0, logs: [], states: [] };
+  const statusNode = { dataset: { source: 'profile' } };
   const context = vm.createContext({ currentUser: { id: 'user-a' }, publicProfileGeneration: 1, publicProfileInFlight: null,
-    window: { ProfileClient: { getMe } }, nodes: {}, getUserKey: user => user?.id,
+    window: { ProfileClient: { getMe } }, profileLoadState: 'idle', nodes: { status: statusNode }, getUserKey: user => user?.id,
     renderPublicProfile: profile => events.rendered.push(profile), renderPokerProjection(){}, clearPokerProjection(){},
-    setBlockVisibility(){ events.hidden++; }, setStatus(){ events.errors++; },
+    setBlockVisibility(){ events.hidden++; }, setStatus(message,tone,source){ if(tone==='error')events.errors++;events.states.push(context.profileLoadState);statusNode.dataset.source=source||'auth'; },
     t: (_, fallback) => fallback, klog: (kind, data) => events.logs.push({ kind, data }), Promise
   });
   vm.runInContext(source.slice(start, end), context);
@@ -297,4 +298,55 @@ test('ProfileClient rejects old responses even after switching A to B and back t
   userId = 'user-b'; window.ProfileClient.clear(); userId = 'user-a'; window.ProfileClient.clear(); release();
   await assert.rejects(pending, error => error.code === 'stale_identity');
   const profile = await window.ProfileClient.getMe(); assert.equal(profile.displayName, 'Fresh A'); assert.equal(calls, 2);
+});
+
+
+test('profile read states clear an old error after a new successful read', async () => {
+  let fail = true; const f = await accountReadFixture(async()=>{if(fail)throw new Error('server_error');return {avatar:{variant:'wizard-indigo'}};});
+  await f.load(); fail=false;await f.load();assert.deepEqual(f.events.states,['loading','error','loading','success']);
+});
+
+test('Auth success cannot overwrite a pending or failed profile status', async () => {
+  const source=await read('js/account-page.js'),start=source.indexOf('  function setStatus('),end=source.indexOf('\n  function ',start+10);
+  const status={textContent:'Profile failed',dataset:{source:'profile',tone:'error'},hidden:false};
+  const c=vm.createContext({nodes:{status},currentUser:{id:'user-a'},profileLoadState:'error',deletionReceivedOwnerId:''});vm.runInContext(source.slice(start,end),c);
+  vm.runInContext("setStatus('Signed in','success','auth')",c);assert.equal(status.textContent,'Profile failed');
+  c.profileLoadState='success';vm.runInContext("setStatus('Signed in','success','profile')",c);assert.equal(status.textContent,'Signed in');
+  c.profileLoadState='error';vm.runInContext("setStatus('Other action completed','success')",c);assert.equal(status.textContent,'Other action completed');
+});
+
+async function googlePanelFixture() {
+  const items = new Map(); const node = id => { if(!items.has(id))items.set(id,{hidden:true,disabled:false,checked:false,textContent:''});return items.get(id); };
+  const state={importEnabled:true,googleLinked:true,copyStored:false,photoInUse:false,noticeVersion:'g2'};
+  const session={access_token:'fake',user:{id:'user-a'}};
+  const server={copyConflict:false,reads:0,posts:0};
+  const window={SupabaseAuth:{getCurrentUser:async()=>session.user,getClient:()=>({auth:{getSession:async()=>({data:{session}})}})}};
+  const document={readyState:'loading',getElementById:node,addEventListener(){}};
+  const source=(await read('js/profile-google-photo.js')).replace('window.ProfileGooglePhoto = { load: load };','window.ProfileGooglePhoto = { load: load, renderForTest: render, runForTest: run };');
+  vm.runInNewContext(source,{window,document,Promise,fetch:async(_url,options)=>{
+    if(options.method==='POST'){
+      server.posts++;
+      if(server.copyConflict){state.copyStored=true;return {ok:false,status:409,json:async()=>({error:'photo_copy_exists'})};}
+    }else server.reads++;
+    return {ok:true,json:async()=>JSON.parse(JSON.stringify(state))};
+  }});
+  return {api:window.ProfileGooglePhoto,node,state,session,server};
+}
+
+test('Google photo offers, active photos and pending deletion have exclusive actions', async()=>{
+  const f=await googlePanelFixture();f.api.renderForTest(f.state);assert.equal(f.node('googlePhotoOffer').hidden,false);assert.equal(f.node('googlePhotoWithdraw').hidden,true);assert.equal(f.node('googlePhotoReconnect').hidden,true);
+  f.api.renderForTest({...f.state,photoInUse:true,consent:{decision:'granted'}});assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoWithdraw').hidden,false);
+  f.api.renderForTest({...f.state,copyStored:true,consent:{decision:'withdrawn'}});assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoWithdraw').hidden,false);assert.equal(f.node('googlePhotoReconnect').hidden,true);
+});
+
+test('Google reauthentication is offered only after a failed import and hides the import form',async()=>{
+  const f=await googlePanelFixture();await f.api.load();assert.equal(f.node('googlePhotoReconnect').hidden,true);
+  await f.api.runForTest('import');assert.equal(f.node('googlePhotoReconnect').hidden,false);assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoWithdraw').hidden,true);
+});
+
+
+test('an import copy conflict refreshes status once and offers withdrawal without retrying import', async()=>{
+  const f=await googlePanelFixture();await f.api.load();f.session.provider_token='fake-proof';f.server.copyConflict=true;
+  await f.api.runForTest('import');assert.equal(f.server.posts,1);assert.equal(f.server.reads,2);
+  assert.equal(f.node('googlePhotoWithdraw').hidden,false);assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoReconnect').hidden,true);
 });

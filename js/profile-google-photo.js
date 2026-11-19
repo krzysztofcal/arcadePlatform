@@ -82,8 +82,8 @@
 
   function errorText(code){
     var messages = {
-      google_proof_required: t('googlePhotoReconnectNeeded', 'To confirm this is your Google account, sign in with Google again, then choose "Use my Google photo".'),
-      google_proof_invalid: t('googlePhotoReconnectNeeded', 'To confirm this is your Google account, sign in with Google again, then choose "Use my Google photo".'),
+      google_proof_required: t('googlePhotoReconnectNeeded', 'Google needs to confirm your identity again. Choose "Confirm with Google", then review the consent and choose "Use my Google photo" again.'),
+      google_proof_invalid: t('googlePhotoReconnectNeeded', 'Google needs to confirm your identity again. Choose "Confirm with Google", then review the consent and choose "Use my Google photo" again.'),
       google_photo_unavailable: t('googlePhotoUnavailable', 'Your Google account has no photo we can use. Your Arcade avatar stays.'),
       photo_copy_exists: t('googlePhotoNotInUse', 'Your Arcade avatar is shown. To use your Google photo again, first delete the stored copy.'),
       photo_import_blocked: t('googlePhotoBlocked', 'A moderator has hidden your photo, so a Google photo cannot be used. Your Arcade avatar stays.'),
@@ -93,23 +93,29 @@
     return messages[code] || t('googlePhotoError', 'Something went wrong. Your avatar was not changed.');
   }
 
-  function render(next){
+  function render(next, needsProof){
     status = next || null;
     var consent = node('googlePhotoConsent');
     if (consent) consent.checked = false;
     var importButton = node('googlePhotoImport');
     if (importButton) importButton.disabled = true;
+    show('googlePhotoOffer', false);
+    show('googlePhotoWithdraw', false);
     show('googlePhotoReconnect', false);
     var granted = !!(status && status.consent && status.consent.decision === 'granted');
     var stored = !!(status && status.copyStored === true);
+    var active = !!(status && status.photoInUse === true);
+    var hasPhoto = granted || stored || active;
     // Withdrawal stays available without a linked Google identity; only a new import needs one.
-    if (!status || (status.importEnabled === false && !granted && !stored) || (status.googleLinked !== true && !granted && !stored)){
+    if (!status || (!hasPhoto && (status.importEnabled === false || status.googleLinked !== true))){
       show('googlePhotoPanel', false);
       return;
     }
     show('googlePhotoPanel', true);
-    show('googlePhotoOffer', status.importEnabled !== false && status.googleLinked === true && !stored);
-    show('googlePhotoWithdraw', granted || stored);
+    var offer = !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
+    show('googlePhotoOffer', offer && !needsProof);
+    show('googlePhotoReconnect', offer && !!needsProof);
+    show('googlePhotoWithdraw', hasPhoto);
     if (status.photoInUse === true) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
     else if (!granted && stored) setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
     else if (granted) setState(t('googlePhotoNotInUse', 'Your Arcade avatar is shown. To use your Google photo again, first delete the stored copy.'));
@@ -137,9 +143,9 @@
         : await request('POST', { action: 'import', consent: true, noticeVersion: status && status.noticeVersion }, expectedUser, true);
       if (expectedGeneration !== generation) return;
       render(result);
-      if (action !== 'withdraw') setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
-      else if (result && result.copyDeleted === true) setState(t('googlePhotoWithdrawn', 'Your Google photo is no longer used and our copy was deleted.'));
-      else setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
+      if (action !== 'withdraw' && result.photoInUse === true) setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
+      else if (action === 'withdraw' && result && result.copyDeleted === true) setState(t('googlePhotoWithdrawn', 'Your Google photo is no longer used and our copy was deleted.'));
+      else if (action === 'withdraw') setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
       if (action === 'withdraw' && window.ProfileClient){
         window.ProfileClient.clear();
         if (window.ProfileClient.applyAvatar) ['publicProfileAvatar','accountSummaryAvatar'].forEach(function(id){
@@ -151,10 +157,9 @@
       if (expectedGeneration !== generation) return;
       var code = error && error.code ? error.code : 'request_failed';
       klog('google_photo:action_failed', { action: action, code: code });
-      if (code === 'stale_identity') return load();
-      render(status);
+      if (code === 'stale_identity' || code === 'photo_copy_exists') return load();
+      render(status, action === 'import' && (code === 'google_proof_required' || code === 'google_proof_invalid'));
       setState(errorText(code));
-      if (code === 'google_proof_required' || code === 'google_proof_invalid') show('googlePhotoReconnect', true);
     } finally {
       busy = false;
     }
