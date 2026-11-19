@@ -18,6 +18,7 @@ assert.throws(() => verifyInlineScriptHashes({ documents: [{ path: "app/auth/cal
 assert.equal(verifyInlineScriptHashes({ documents: [{ path: "app/auth/callback.html", content: `<script>${source}</script>` }], headersText: headers([hashInlineScript(source)]) }), true);
 assert.throws(() => verifyInlineScriptHashes({ documents: [{ path: "app/auth/callback.html", content: `<script>${source}</script>` }], headersText: headers([], { "/app/auth/callback.html": `script-src 'self' '${hashInlineScript(source)}'` }) }), /missing 'sha256-[^']+' in \/app\/auth\/callback$/, "the extensionless rewrite route must carry the same hashes");
 assert.throws(() => verifyInlineScriptHashes({ documents: [{ path: "poker/index.html", content: `<script>${source}</script>` }], headersText: "/*\n  Content-Security-Policy: script-src 'self'\n", routes: ["/*"] }), /missing CSP route \/poker\/\*/, "a document whose route has no policy must fail");
+assert.throws(() => verifyInlineScriptHashes({ documents: [{ path: "app/auth/callback.html", content: "<p>static</p>" }], headersText: "/app/auth/callback.html\n  Content-Security-Policy: script-src 'self'\n", routes: ["/app/auth/callback.html"] }), /missing CSP route \/app\/auth\/callback$/, "the rewrite alias needs its own policy");
 
 const combinedFixture = `
 <!-- <script>ignoredComment()</script> -->

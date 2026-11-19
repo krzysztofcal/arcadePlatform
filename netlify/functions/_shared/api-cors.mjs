@@ -36,7 +36,7 @@ export function buildApiCorsPolicy({
     const normalizedDeployOrigin = normalizeCorsOrigin(buildDeployOrigin);
     if (normalizedDeployOrigin) origins.add(normalizedDeployOrigin);
   }
-  // Native WebView origin is Stage-only and cannot be enabled by removable runtime flags.
+  // Native WebView origin for recognized Stage builds; not removable by runtime flags.
   if (stageContext.isStageNetlifyContext(buildContext, buildDeployOrigin, buildArtifactIdentity)) origins.add('https://localhost');
   // Production Android WebView origin, code-pinned, not a runtime flag; bearer/JWT still required.
   if (stageContext.isProductionNetlifyContext(buildContext, buildArtifactIdentity)) origins.add('https://localhost');
