@@ -268,10 +268,10 @@ function treeSnapshot(dir) {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) walk(full);
-      else out[path.relative(dir, full)] = readFileSync(full, 'utf8');
+      else out[path.relative(dir, full)] = readFileSync(full).toString('base64');
     }
   };
-  walk(path.join(dir, 'android'));
+  walk(dir);
   return out;
 }
 function runConfigure(dir, channel) {
