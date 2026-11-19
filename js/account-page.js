@@ -270,11 +270,10 @@
       deletionLinkFocused = false;
       if (nextUserKey && deletionAttempt && nextUserKey !== deletionAttempt.ownerId) resetDeletionAttempt();
       avatarSelection = null; avatarSaving = null; avatarMessage = '';
-      publicProfile = null;
+      renderPublicProfile(null);
       renderAvatarGallery();
       publicProfileGeneration += 1;
       publicProfileInFlight = null;
-      if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
     }
 
     // Toggle panels
@@ -332,7 +331,10 @@
     publicProfile = profile || null;
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
     if (nodes.publicProfileBrowserHint) nodes.publicProfileBrowserHint.hidden = !window.MobilePoker;
-    if (!profile) return;
+    if (!profile){
+      if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(doc.getElementById('accountSummaryAvatar'), {avatar:{type:'default'}});
+      return;
+    }
     if (window.ProfileClient && window.ProfileClient.applyAvatar){
       window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
       var summaryAv = doc.getElementById('accountSummaryAvatar');
@@ -499,7 +501,7 @@
     }finally{if(active()){avatarSaving=null;renderAvatarGallery();}}
   }
 
-  function loadPublicProfile(force){
+  function loadPublicProfile(force, retried){
     if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
     if (publicProfileInFlight) return publicProfileInFlight;
     var requestedUserKey = getUserKey(currentUser);
@@ -510,6 +512,14 @@
       renderPokerProjection(profile);
       return profile;
     }).catch(function(error){
+      if (error && error.code === 'stale_identity'){
+        // Cancellation is not a failed profile. One fresh read, only for this identity.
+        if (!retried && requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
+          if (publicProfileInFlight === request) publicProfileInFlight = null;
+          return loadPublicProfile(true, true);
+        }
+        return null;
+      }
       klog('profile:account_load_failed', { code: error && error.code ? error.code : 'request_failed' });
       if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
         setBlockVisibility(nodes.publicProfileEditor, false);
@@ -1487,6 +1497,7 @@
   }
 
   function hydrateUser(){
+    var authRevision = 0;
     if (!auth || !auth.getCurrentUser){
       setStatus(t('authNotConfigured', 'Authentication is not configured yet.'), 'error');
       return;
@@ -1495,7 +1506,7 @@
     if (typeof auth.isPasswordRecoveryPending === 'function' && auth.isPasswordRecoveryPending()) showPasswordRecovery();
     setStatus(passwordRecoveryActive ? '' : t('checkingSession', 'Checking session...'), passwordRecoveryActive ? '' : 'info');
     auth.getCurrentUser().then(function(user){
-      if (passwordRecoveryActive) return;
+      if (passwordRecoveryActive || authRevision !== 0) return;
       renderUser(user);
       var googleError = auth.getAuthCallbackError && auth.getAuthCallbackError();
       setStatus(googleError ? googleErrorMessage(googleError) : (user ? t('signedIn', 'Signed in.') : ''), googleError ? 'error' : (user ? 'success' : ''));
@@ -1514,6 +1525,7 @@
 
     if (auth.onAuthChange){
       auth.onAuthChange(function(event, user){
+        authRevision += 1;
         if (event === 'PASSWORD_RECOVERY'){
           showPasswordRecovery();
           return;

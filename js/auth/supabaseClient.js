@@ -401,6 +401,9 @@
   function applyResolvedUser(user){
     var previousUserId = state.user && state.user.id ? String(state.user.id) : null;
     var ui = userUiState();
+    var nextUserId = user && user.id ? String(user.id) : null;
+    // Token refresh and repeated sign-in events do not change the profile owner.
+    if (previousUserId !== nextUserId && window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
     if (!user || !user.id){
       if (ui && previousUserId) ui.clearUser(previousUserId);
       if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
@@ -536,14 +539,15 @@
   }
 
   function hydrateSession(){
+    var authRevision = 0;
     renderUser(null, null);
 
     getCurrentUser().then(function(user){
-      applyResolvedUser(user);
+      if (authRevision === 0) applyResolvedUser(user);
     });
 
     onAuthChange(function(_event, user){
-      if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
+      authRevision += 1;
       applyResolvedUser(user);
     });
   }

@@ -207,3 +207,94 @@ test('Failed password login preserves callback failure until a successful retry'
   await auth.signIn('password@example.test', 'invalid-password');
   assert.equal(auth.getAuthCallbackError(), 'auth_failed');
 });
+
+async function sessionRaceFixture(deferred = false) {
+  let user = { id: 'user-a' }, callback, resolveInitial, reads = 0, clears = 0, profileReads = 0;
+  const document = { readyState: 'complete', getElementById: () => null, querySelector: () => null, addEventListener() {}, documentElement: { dataset: {} } };
+  const window = { document, location: { origin: 'https://arcade.test', protocol: 'https:', search: '', hash: '' },
+    SUPABASE_CONFIG: { SUPABASE_URL: 'https://stage.supabase.co', SUPABASE_ANON_KEY: 'anon' },
+    ProfileClient: { clear(){ clears++; }, getMe: async () => { profileReads++; return { displayName: 'Player', avatar: { variant: 'wizard-indigo' } }; } },
+    supabase: { createClient: () => ({ auth: {
+      getSession(){ if (deferred && reads++ === 0) return new Promise(resolve => { resolveInitial = resolve; }); return Promise.resolve({ data: { session: user ? { user } : null } }); },
+      onAuthStateChange(fn){ callback = fn; return { data: { subscription: { unsubscribe(){} } } }; }
+    } }) }
+  };
+  vm.runInNewContext(await read('js/auth/supabaseClient.js'), { window, document, Promise, console });
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  await flush();
+  return { flush, get clears(){ return clears; }, get profileReads(){ return profileReads; },
+    emit(event, next = user){ user = next; callback(event, user ? { user } : null); },
+    resolveInitial(){ resolveInitial({ data: { session: { user: { id: 'user-a' } } } }); }
+  };
+}
+
+test('Auth session refreshes preserve same-user reads and invalidate identity changes', async () => {
+  const f = await sessionRaceFixture();
+  const baseline = f.clears;
+  for (const event of ['INITIAL_SESSION', 'TOKEN_REFRESHED', 'SIGNED_IN']) { f.emit(event); await f.flush(); }
+  assert.equal(f.clears, baseline);
+  f.emit('SIGNED_IN', { id: 'user-b' }); await f.flush(); assert.equal(f.clears, baseline + 1);
+  f.emit('SIGNED_OUT', null); await f.flush(); assert.equal(f.clears, baseline + 2);
+});
+
+test('An initial session read cannot overwrite a newer Auth event', async () => {
+  const f = await sessionRaceFixture(true);
+  f.emit('SIGNED_IN', { id: 'user-b' }); await f.flush(); const reads = f.profileReads;
+  f.resolveInitial(); await f.flush(); assert.equal(f.profileReads, reads);
+});
+
+async function accountReadFixture(getMe) {
+  const source = await read('js/account-page.js');
+  // Exercise the actual private async coordinator without a DOM-rendering suite.
+  const start = source.indexOf('  function loadPublicProfile(');
+  const end = source.indexOf('\n  function handlePublicProfileSave', start);
+  const events = { rendered: [], hidden: 0, errors: 0, logs: [] };
+  const context = vm.createContext({ currentUser: { id: 'user-a' }, publicProfileGeneration: 1, publicProfileInFlight: null,
+    window: { ProfileClient: { getMe } }, nodes: {}, getUserKey: user => user?.id,
+    renderPublicProfile: profile => events.rendered.push(profile), renderPokerProjection(){}, clearPokerProjection(){},
+    setBlockVisibility(){ events.hidden++; }, setStatus(){ events.errors++; },
+    t: (_, fallback) => fallback, klog: (kind, data) => events.logs.push({ kind, data }), Promise
+  });
+  vm.runInContext(source.slice(start, end), context);
+  return { context, events, load: () => vm.runInContext('loadPublicProfile(true)', context) };
+}
+const cancelledRead = () => Object.assign(new Error('stale_identity'), { code: 'stale_identity' });
+
+test('A cancelled profile read retries once and preserves the saved avatar', async () => {
+  let calls = 0;
+  const f = await accountReadFixture(async () => { if (++calls === 1) throw cancelledRead(); return { avatar: { type: 'default', variant: 'wizard-indigo' } }; });
+  await f.load(); assert.equal(calls, 2); assert.equal(f.events.rendered[0].avatar.variant, 'wizard-indigo');
+  assert.equal(f.events.hidden, 0); assert.equal(f.events.errors, 0); assert.equal(f.events.logs.length, 0);
+});
+
+test('The cancel retry is bounded and genuine profile failures are not retried', async () => {
+  let calls = 0; const f = await accountReadFixture(async () => { calls++; throw cancelledRead(); });
+  await f.load(); assert.equal(calls, 2); assert.equal(f.events.errors, 0); assert.equal(f.events.hidden, 0);
+  let failures = 0; const g = await accountReadFixture(async () => { failures++; throw new Error('server_error'); });
+  await g.load(); assert.equal(failures, 1); assert.equal(g.events.errors, 1); assert.equal(g.events.hidden, 1);
+});
+
+test('An identity-changed profile request cannot retry or repaint another account', async () => {
+  let reject, calls = 0; const f = await accountReadFixture(() => { calls++; return new Promise((_, fail) => { reject = fail; }); });
+  const pending = f.load(); f.context.currentUser = { id: 'user-b' }; f.context.publicProfileGeneration++;
+  reject(cancelledRead()); await pending; assert.equal(calls, 1); assert.equal(f.events.rendered.length, 0); assert.equal(f.events.errors, 0);
+});
+
+test('Account summary starts with a neutral placeholder, never a bot or saved-user guess', async () => {
+  const html = await read('account.html'); const avatar = html.match(/<div[^>]*id="accountSummaryAvatar"[^>]*>[\s\S]*?<\/div>/)[0];
+  assert.doesNotMatch(avatar, /background-image|bot-female|wizard-indigo/); assert.match(avatar, />AH<\/div>/);
+});
+
+test('ProfileClient rejects old responses even after switching A to B and back to A', async () => {
+  let userId = 'user-a', release, calls = 0;
+  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: userId }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
+  const document = { dispatchEvent(){} };
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document, Promise, URL, Date, CustomEvent: class {},
+    fetch: async () => { if (++calls === 1) await new Promise(resolve => { release = resolve; }); return { ok: true, json: async () => ({ displayName: calls === 1 ? 'Old A' : 'Fresh A' }) }; }
+  });
+  const pending = window.ProfileClient.getMe();
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  userId = 'user-b'; window.ProfileClient.clear(); userId = 'user-a'; window.ProfileClient.clear(); release();
+  await assert.rejects(pending, error => error.code === 'stale_identity');
+  const profile = await window.ProfileClient.getMe(); assert.equal(profile.displayName, 'Fresh A'); assert.equal(calls, 2);
+});
