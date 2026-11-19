@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, copyFileSync, mkdirSync, writeFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   callbackIntentFilter,
   configureManifest,
@@ -242,14 +243,84 @@ test('assertChannelIdentity: stage with Stage id passes, mismatches throw, produ
   }
 });
 
-test('importing configure-android.mjs performs no file writes', async (t) => {
-  // 6. Importing configure-android.mjs in the test performs no file writes
-  const androidPath = path.join(rootDir, 'mobile/poker/android');
-  if (existsSync(androidPath)) {
-    t.skip('mobile/poker/android already exists; skipping to avoid deletion or interference');
-    return;
+// Minimal writable copy of the generated Android tree; never touches mobile/poker itself.
+function androidFixture() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'configure-android-'));
+  for (const name of ['configure-android.mjs', 'capacitor.config.json', 'PokerAudioPlugin.java', 'launch-mark.xml']) {
+    copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(dir, name));
   }
-  assert.equal(existsSync(androidPath), false);
-  await import(`../mobile/poker/configure-android.mjs?importCheck=${Date.now()}`);
-  assert.equal(existsSync(androidPath), false);
+  const files = {
+    'android/app/src/main/AndroidManifest.xml': '<manifest><application><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN" /></intent-filter></activity></application></manifest>\n',
+    'android/app/build.gradle': 'defaultConfig {\n  versionCode 1\n  versionName "1.0"\n}\n',
+    'android/app/src/main/java/pl/kcswh/arcadepoker/stage/MainActivity.java': 'package pl.kcswh.arcadepoker.stage;\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {}\n',
+    'android/app/src/main/res/values/styles.xml': '<style><item name="android:background">@null</item><item name="android:background">@drawable/splash</item></style>\n',
+  };
+  for (const [name, value] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    writeFileSync(path.join(dir, name), value);
+  }
+  mkdirSync(path.join(dir, 'android/app/src/main/res/drawable'), { recursive: true });
+  return dir;
+}
+function treeSnapshot(dir) {
+  const out = {};
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else out[path.relative(dir, full)] = readFileSync(full, 'utf8');
+    }
+  };
+  walk(path.join(dir, 'android'));
+  return out;
+}
+function runConfigure(dir, channel) {
+  const env = { ...process.env };
+  delete env.MOBILE_CHANNEL;
+  if (channel !== undefined) env.MOBILE_CHANNEL = channel;
+  return spawnSync(process.execPath, ['configure-android.mjs'], { cwd: dir, env, encoding: 'utf8' });
+}
+
+test('configure script: Production and empty/unknown channels fail before any file write', () => {
+  const dir = androidFixture();
+  try {
+    const before = treeSnapshot(dir);
+    for (const [channel, message] of [['production', /Production applicationId not approved/], ['', /Empty MOBILE_CHANNEL/], ['bogus', /Unknown MOBILE_CHANNEL/]]) {
+      const run = runConfigure(dir, channel);
+      assert.notEqual(run.status, 0);
+      assert.match(run.stderr, message);
+      assert.deepEqual(treeSnapshot(dir), before);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('configure script: unset channel configures Stage, also through a symlinked entry point', () => {
+  for (const viaLink of [false, true]) {
+    const dir = androidFixture();
+    try {
+      if (viaLink) symlinkSync(path.join(dir, 'configure-android.mjs'), path.join(dir, 'configure-link.mjs'));
+      const env = { ...process.env };
+      delete env.MOBILE_CHANNEL;
+      const run = spawnSync(process.execPath, [viaLink ? 'configure-link.mjs' : 'configure-android.mjs'], { cwd: dir, env, encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const manifest = readFileSync(path.join(dir, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+      assert.ok(manifest.includes(callbackIntentFilter('stage') + '\n</activity>'));
+      assert.ok(!manifest.includes('play.kcswh.pl'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('importing configure-android.mjs performs no file writes', async () => {
+  const dir = androidFixture();
+  try {
+    const before = treeSnapshot(dir);
+    await import(pathToFileURL(path.join(dir, 'configure-android.mjs')).href);
+    assert.deepEqual(treeSnapshot(dir), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

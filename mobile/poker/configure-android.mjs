@@ -1,4 +1,5 @@
 import { readFile, writeFile, copyFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -72,7 +73,13 @@ export function assertChannelIdentity(channel, appId) {
   throw new Error('Unknown MOBILE_CHANNEL');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Compare canonical paths so a symlinked invocation still configures (never a silent no-op).
+function isDirectRun() {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+}
+
+if (isDirectRun()) {
   const channel = resolveChannel(process.env);
   const capacitorConfig = JSON.parse(await readFile(new URL('./capacitor.config.json', import.meta.url), 'utf8'));
   const appId = capacitorConfig?.appId;
