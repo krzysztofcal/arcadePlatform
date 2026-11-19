@@ -3,8 +3,10 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROUTES = ["/*", "/games-open/*", "/game*.html", "/poker/*", "/games-open/freedoom/*"];
-const PUBLIC_DIRS = ["about", "games", "games-open", "landing", "legal", "poker"];
+const ROUTES = ["/*", "/app/auth/callback", "/app/auth/callback.html", "/games-open/*", "/game*.html", "/poker/*", "/games-open/freedoom/*"];
+const PUBLIC_DIRS = ["about", "app", "games", "games-open", "landing", "legal", "poker"];
+// A document served under several URLs (200 rewrite) must match every route policy.
+const ROUTE_ALIASES = { "/app/auth/callback.html": ["/app/auth/callback"] };
 
 export function hashInlineScript(source) {
   return `sha256-${createHash("sha256").update(source).digest("base64")}`;
@@ -12,6 +14,7 @@ export function hashInlineScript(source) {
 
 function routeFor(documentPath) {
   const urlPath = `/${documentPath.replaceAll(path.sep, "/")}`;
+  if (urlPath === "/app/auth/callback.html") return "/app/auth/callback.html";
   if (urlPath.startsWith("/games-open/freedoom/")) return "/games-open/freedoom/*";
   if (urlPath.startsWith("/games-open/")) return "/games-open/*";
   if (/^\/game.*\.html$/i.test(urlPath)) return "/game*.html";
@@ -84,11 +87,15 @@ export function verifyInlineScriptHashes({ documents, headersText, routes = ROUT
   for (const document of documents) {
     if (routes.length === 1 && /<[^>]+\son[a-z]+\s*=/i.test(document.content)) throw new Error(`${document.path}: inline event handler is not allowed`);
     const route = routeFor(document.path);
-    const csp = policies.get(route);
     if (route === "/games-open/freedoom/*") continue;
-    for (const source of inlineScripts(document.content)) {
-      const hash = hashInlineScript(source);
-      if (!csp.includes(`'${hash}'`)) missing.push(`${document.path}: missing '${hash}' in ${route}`);
+    const servedRoutes = [route, ...(ROUTE_ALIASES[route] || [])];
+    for (const name of servedRoutes) if (!policies.has(name)) throw new Error(`${document.path}: missing CSP route ${name}`);
+    for (const servedRoute of servedRoutes) {
+      const csp = policies.get(servedRoute);
+      for (const source of inlineScripts(document.content)) {
+        const hash = hashInlineScript(source);
+        if (!csp.includes(`'${hash}'`)) missing.push(`${document.path}: missing '${hash}' in ${servedRoute}`);
+      }
     }
   }
   if (missing.length) throw new Error(missing.join("\n"));

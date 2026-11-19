@@ -91,9 +91,9 @@ test('trusted native parent branch uses Stage alias and unknown branch never fal
 });
 
 
-test('Stage CORS adds exact WebView origin only for immutable recognized Netlify identities',async()=>{
+test('native CORS adds exact WebView origin only for immutable Stage identities and the Production functions build (#1140 T2b)',async()=>{
  const {buildApiCorsPolicy,buildCorsHeaders}=await import('../netlify/functions/_shared/api-cors.mjs');
- const cases=[['deploy-preview',origin,'netlify-functions',true],['branch-deploy','https://feat-1114-profiles-phase-a--playkcswh.netlify.app','netlify-stage-parent',true],['production','https://play.kcswh.pl','netlify-functions',false],['branch-deploy','https://other--playkcswh.netlify.app','netlify-stage-parent',false],['deploy-preview',null,'ws-preview',false],['deploy-preview',origin,'ws-server',false]];
+ const cases=[['deploy-preview',origin,'netlify-functions',true],['branch-deploy','https://feat-1114-profiles-phase-a--playkcswh.netlify.app','netlify-stage-parent',true],['production','https://play.kcswh.pl','netlify-functions',true],['production','https://play.kcswh.pl','ws-server',false],['branch-deploy','https://other--playkcswh.netlify.app','netlify-stage-parent',false],['deploy-preview',null,'ws-preview',false],['deploy-preview',origin,'ws-server',false]];
  for(const [buildContext,buildDeployOrigin,buildArtifactIdentity,allowed] of cases){
   const policy=buildApiCorsPolicy({configuredOrigins:'https://play.kcswh.pl,http://localhost:4173',buildContext,buildDeployOrigin,buildArtifactIdentity});
   assert.equal(new Set(policy.origins).has('https://localhost'),allowed);assert.ok(new Set(policy.origins).has('https://play.kcswh.pl'));
