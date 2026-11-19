@@ -16,6 +16,7 @@ assert.throws(() => verifyInlineScriptHashes({ documents: [{ path: "index.html",
 assert.equal(verifyInlineScriptHashes({ documents: [{ path: "index.html", content: `<script>${source}</script>` }], headersText: headers([hashInlineScript(source)]) }), true);
 assert.throws(() => verifyInlineScriptHashes({ documents: [{ path: "app/auth/callback.html", content: `<script>${source}</script>` }], headersText: headers() }), /missing 'sha256-/);
 assert.equal(verifyInlineScriptHashes({ documents: [{ path: "app/auth/callback.html", content: `<script>${source}</script>` }], headersText: headers([hashInlineScript(source)]) }), true);
+assert.throws(() => verifyInlineScriptHashes({ documents: [{ path: "app/auth/callback.html", content: `<script>${source}</script>` }], headersText: headers([], { "/app/auth/callback.html": `script-src 'self' '${hashInlineScript(source)}'` }) }), /missing 'sha256-[^']+' in \/app\/auth\/callback$/, "the extensionless rewrite route must carry the same hashes");
 
 const combinedFixture = `
 <!-- <script>ignoredComment()</script> -->

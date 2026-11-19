@@ -5,6 +5,6 @@
       window.history.replaceState(null, '', window.location.pathname);
     }
   } catch (e) {
-    // Fail closed without logging or exposing location/token state.
+    // Best effort only: if replaceState throws, the address stays unchanged; nothing is logged or sent.
   }
 })();
