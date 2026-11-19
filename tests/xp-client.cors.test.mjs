@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildApiCorsPolicy, buildCorsHeaders } from '../netlify/functions/_shared/api-cors.mjs';
 
-process.env.XP_TEST_MODE = '1';
 process.env.XP_DAILY_SECRET = 'test-secret-for-sessions-32chars!';
 
 const normalizedPolicy = buildApiCorsPolicy({
