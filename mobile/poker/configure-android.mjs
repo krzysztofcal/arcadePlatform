@@ -1,31 +1,107 @@
 import { readFile, writeFile, copyFile } from 'node:fs/promises';
-const file = new URL('./android/app/src/main/AndroidManifest.xml', import.meta.url);
-let xml = await readFile(file, 'utf8');
-if (xml.includes('arcadepoker-stage')) throw new Error('Callback already configured');
-xml = xml.replace('</activity>', `<intent-filter>
+import { realpathSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Set only after OWNER approval of the Play Console application ID (D1, T3).
+export const APPROVED_PRODUCTION_APP_ID = null;
+
+export function callbackIntentFilter(channel) {
+  if (channel === 'stage') {
+    return `<intent-filter>
   <action android:name="android.intent.action.VIEW" />
   <category android:name="android.intent.category.DEFAULT" />
   <category android:name="android.intent.category.BROWSABLE" />
   <data android:scheme="arcadepoker-stage" android:host="auth" android:path="/callback" />
-</intent-filter>\n</activity>`);
-if (!xml.includes('arcadepoker-stage')) throw new Error('Android template activity missing');
-await writeFile(file, xml);
-const gradleFile = new URL('./android/app/build.gradle', import.meta.url);
-let gradle = await readFile(gradleFile, 'utf8');
-if (!gradle.includes('versionName "1.0"') || !gradle.includes('versionCode 1')) throw new Error('Unexpected Android template version');
-gradle = gradle.replace('versionName "1.0"', 'versionName "0.0.1"');
-await writeFile(gradleFile, gradle);
-const capacitorConfig = JSON.parse(await readFile(new URL('./capacitor.config.json', import.meta.url), 'utf8'));
-const appId = capacitorConfig?.appId;
-if (!appId || !/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(appId)) {
-  throw new Error('Invalid appId in capacitor.config.json');
+</intent-filter>`;
+  }
+  if (channel === 'production') {
+    return `<intent-filter android:autoVerify="true">
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="https" android:host="play.kcswh.pl" android:path="/app/auth/callback" />
+</intent-filter>`;
+  }
+  throw new Error('Unknown MOBILE_CHANNEL');
 }
-const packagePath = appId.split('.').join('/');
-// One inset owner: full table background, safe content; native margins elsewhere.
-const activityFile = new URL(`./android/app/src/main/java/${packagePath}/MainActivity.java`, import.meta.url);
-let activity = await readFile(activityFile, 'utf8');
-if (!activity.includes('public class MainActivity extends BridgeActivity {}')) throw new Error('Unexpected Android activity template');
-activity = activity.replace('import com.getcapacitor.BridgeActivity;', `import android.net.Uri;
+
+export function configureManifest(xml, channel) {
+  if (xml.includes('arcadepoker-stage') || xml.includes('android:host="play.kcswh.pl"')) {
+    throw new Error('Callback already configured');
+  }
+  const filter = callbackIntentFilter(channel);
+  if (!xml.includes('</activity>')) {
+    throw new Error('Android template activity missing');
+  }
+  return xml.replace('</activity>', `${filter}\n</activity>`);
+}
+
+export function resolveChannel(env = process.env) {
+  const channel = env?.MOBILE_CHANNEL;
+  if (channel === undefined) {
+    return 'stage';
+  }
+  if (typeof channel === 'string' && channel.trim() === '') {
+    throw new Error('Empty MOBILE_CHANNEL');
+  }
+  if (channel === 'stage' || channel === 'production') {
+    return channel;
+  }
+  throw new Error('Unknown MOBILE_CHANNEL');
+}
+
+export function assertChannelIdentity(channel, appId) {
+  if (!appId || typeof appId !== 'string' || !/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(appId)) {
+    throw new Error('Invalid appId in capacitor.config.json');
+  }
+  if (channel === 'stage') {
+    if (appId !== 'pl.kcswh.arcadepoker.stage') {
+      throw new Error('Stage appId mismatch');
+    }
+    return;
+  }
+  if (channel === 'production') {
+    if (APPROVED_PRODUCTION_APP_ID === null) {
+      throw new Error('Production applicationId not approved');
+    }
+    if (appId !== APPROVED_PRODUCTION_APP_ID || appId === 'pl.kcswh.arcadepoker.stage') {
+      throw new Error('Production appId mismatch');
+    }
+    return;
+  }
+  throw new Error('Unknown MOBILE_CHANNEL');
+}
+
+// Compare canonical paths so a symlinked invocation still configures (never a silent no-op).
+function isDirectRun() {
+  if (!process.argv[1]) return false;
+  try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+}
+
+if (isDirectRun()) {
+  const channel = resolveChannel(process.env);
+  const capacitorConfig = JSON.parse(await readFile(new URL('./capacitor.config.json', import.meta.url), 'utf8'));
+  const appId = capacitorConfig?.appId;
+  assertChannelIdentity(channel, appId);
+  const packagePath = appId.split('.').join('/');
+
+  const file = new URL('./android/app/src/main/AndroidManifest.xml', import.meta.url);
+  let xml = await readFile(file, 'utf8');
+  xml = configureManifest(xml, channel);
+  await writeFile(file, xml);
+
+  const gradleFile = new URL('./android/app/build.gradle', import.meta.url);
+  let gradle = await readFile(gradleFile, 'utf8');
+  if (!gradle.includes('versionName "1.0"') || !gradle.includes('versionCode 1')) throw new Error('Unexpected Android template version');
+  gradle = gradle.replace('versionName "1.0"', 'versionName "0.0.1"');
+  await writeFile(gradleFile, gradle);
+
+  // One inset owner: full table background, safe content; native margins elsewhere.
+  const activityFile = new URL(`./android/app/src/main/java/${packagePath}/MainActivity.java`, import.meta.url);
+  let activity = await readFile(activityFile, 'utf8');
+  if (!activity.includes('public class MainActivity extends BridgeActivity {}')) throw new Error('Unexpected Android activity template');
+  activity = activity.replace('import com.getcapacitor.BridgeActivity;', `import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
@@ -40,7 +116,7 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;`);
-activity = activity.replace('public class MainActivity extends BridgeActivity {}', `public class MainActivity extends BridgeActivity {
+  activity = activity.replace('public class MainActivity extends BridgeActivity {}', `public class MainActivity extends BridgeActivity {
     private boolean tableMode;
     private boolean keyboardVisible;
     private String safeAreaScript = "";
@@ -107,16 +183,17 @@ activity = activity.replace('public class MainActivity extends BridgeActivity {}
         ViewCompat.requestApplyInsets(bridge.getWebView());
     }
 }`);
-await writeFile(activityFile, activity);
-await copyFile(new URL('./PokerAudioPlugin.java', import.meta.url), new URL(`./android/app/src/main/java/${packagePath}/PokerAudioPlugin.java`, import.meta.url));
+  await writeFile(activityFile, activity);
+  await copyFile(new URL('./PokerAudioPlugin.java', import.meta.url), new URL(`./android/app/src/main/java/${packagePath}/PokerAudioPlugin.java`, import.meta.url));
 
-// Keep the launch window and WebView on the same dark brand surface.
-const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);
-let styles = await readFile(stylesFile, 'utf8');
-if (!styles.includes('<item name="android:background">@drawable/splash</item>')) throw new Error('Unexpected launch theme template');
-styles = styles.replace('<item name="android:background">@null</item>', '<item name="android:windowBackground">#0a0f14</item>');
-styles = styles.replace('<item name="android:background">@drawable/splash</item>', `<item name="windowSplashScreenBackground">#0a0f14</item>
+  // Keep the launch window and WebView on the same dark brand surface.
+  const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);
+  let styles = await readFile(stylesFile, 'utf8');
+  if (!styles.includes('<item name="android:background">@drawable/splash</item>')) throw new Error('Unexpected launch theme template');
+  styles = styles.replace('<item name="android:background">@null</item>', '<item name="android:windowBackground">#0a0f14</item>');
+  styles = styles.replace('<item name="android:background">@drawable/splash</item>', `<item name="windowSplashScreenBackground">#0a0f14</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/poker_launch_mark</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>`);
-await writeFile(stylesFile, styles);
-await copyFile(new URL('./launch-mark.xml', import.meta.url), new URL('./android/app/src/main/res/drawable/poker_launch_mark.xml', import.meta.url));
+  await writeFile(stylesFile, styles);
+  await copyFile(new URL('./launch-mark.xml', import.meta.url), new URL('./android/app/src/main/res/drawable/poker_launch_mark.xml', import.meta.url));
+}

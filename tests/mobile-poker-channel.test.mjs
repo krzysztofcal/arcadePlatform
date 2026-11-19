@@ -1,10 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, copyFileSync, mkdirSync, writeFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  callbackIntentFilter,
+  configureManifest,
+  resolveChannel,
+  APPROVED_PRODUCTION_APP_ID,
+  assertChannelIdentity
+} from '../mobile/poker/configure-android.mjs';
 
 const require = createRequire(import.meta.url);
 const security = require('../mobile/poker/security.cjs');
@@ -133,4 +141,186 @@ test('stage regression: capacitor appId, redirectTo, and configure-android path 
 
   const derivedPath = capConfig.appId.split('.').join('/');
   assert.equal(derivedPath, 'pl/kcswh/arcadepoker/stage');
+});
+
+const stageFilterLiteral = `<intent-filter>
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="arcadepoker-stage" android:host="auth" android:path="/callback" />
+</intent-filter>`;
+
+const prodFilterLiteral = `<intent-filter android:autoVerify="true">
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="https" android:host="play.kcswh.pl" android:path="/app/auth/callback" />
+</intent-filter>`;
+
+test('callbackIntentFilter: stage matches exact literal, production matches expected App Link filter, unknown throws', () => {
+  // 1. callbackIntentFilter('stage') equals the exact current literal
+  assert.equal(callbackIntentFilter('stage'), stageFilterLiteral);
+
+  // 2. callbackIntentFilter('production') equals the exact expected Production filter string
+  const prodFilter = callbackIntentFilter('production');
+  assert.equal(prodFilter, prodFilterLiteral);
+  assert.equal(prodFilter.includes('android:autoVerify="true"'), true);
+  assert.equal(prodFilter.includes('android:scheme="https"'), true);
+  assert.equal(prodFilter.includes('android:host="play.kcswh.pl"'), true);
+  assert.equal(prodFilter.includes('android:path="/app/auth/callback"'), true);
+  assert.equal(prodFilter.includes('android.intent.action.VIEW'), true);
+  assert.equal(prodFilter.includes('android.intent.category.DEFAULT'), true);
+  assert.equal(prodFilter.includes('android.intent.category.BROWSABLE'), true);
+  assert.equal(prodFilter.includes('arcadepoker-stage'), false);
+  assert.equal(prodFilter.includes('pathPrefix'), false);
+  assert.equal(prodFilter.includes('pathPattern'), false);
+
+  // Unknown throws
+  assert.throws(() => callbackIntentFilter('bogus'), /Unknown MOBILE_CHANNEL/);
+});
+
+test('configureManifest: stage byte-identical, production App Link, idempotent guard, activity missing guard', () => {
+  const minimalTemplate = `<manifest><application><activity android:name=".MainActivity">\n    <intent-filter>MAIN/LAUNCHER</intent-filter>\n</activity></application></manifest>`;
+
+  // 3. Stage output equals the template with the old replacement applied
+  const expectedStage = minimalTemplate.replace('</activity>', `${stageFilterLiteral}\n</activity>`);
+  const stageOutput = configureManifest(minimalTemplate, 'stage');
+  assert.equal(stageOutput, expectedStage);
+
+  // Production output contains the App Link filter and no Stage scheme
+  const prodOutput = configureManifest(minimalTemplate, 'production');
+  assert.equal(prodOutput.includes(prodFilterLiteral), true);
+  assert.equal(prodOutput.includes('android:autoVerify="true"'), true);
+  assert.equal(prodOutput.includes('arcadepoker-stage'), false);
+
+  // Re-running on configured xml throws Callback already configured
+  assert.throws(() => configureManifest(stageOutput, 'stage'), /Callback already configured/);
+  assert.throws(() => configureManifest(stageOutput, 'production'), /Callback already configured/);
+  assert.throws(() => configureManifest(prodOutput, 'stage'), /Callback already configured/);
+  assert.throws(() => configureManifest(prodOutput, 'production'), /Callback already configured/);
+
+  // Template without </activity> throws
+  const templateNoActivity = '<manifest><application></application></manifest>';
+  assert.throws(() => configureManifest(templateNoActivity, 'stage'), /Android template activity missing/);
+  assert.throws(() => configureManifest(templateNoActivity, 'production'), /Android template activity missing/);
+});
+
+test('resolveChannel: undefined defaults to stage, empty/whitespace throws, valid channels preserved, unknown throws', () => {
+  // 4. resolveChannel: undefined → stage; '' and '  ' → throw; 'bogus', 'Production', 'prod' → throw
+  assert.equal(resolveChannel({}), 'stage');
+  assert.equal(resolveChannel({ MOBILE_CHANNEL: undefined }), 'stage');
+  assert.equal(resolveChannel({ MOBILE_CHANNEL: 'stage' }), 'stage');
+  assert.equal(resolveChannel({ MOBILE_CHANNEL: 'production' }), 'production');
+
+  assert.throws(() => resolveChannel({ MOBILE_CHANNEL: '' }), /Empty MOBILE_CHANNEL/);
+  assert.throws(() => resolveChannel({ MOBILE_CHANNEL: '  ' }), /Empty MOBILE_CHANNEL/);
+  assert.throws(() => resolveChannel({ MOBILE_CHANNEL: '\t\n' }), /Empty MOBILE_CHANNEL/);
+
+  assert.throws(() => resolveChannel({ MOBILE_CHANNEL: 'bogus' }), /Unknown MOBILE_CHANNEL/);
+  assert.throws(() => resolveChannel({ MOBILE_CHANNEL: 'Production' }), /Unknown MOBILE_CHANNEL/);
+  assert.throws(() => resolveChannel({ MOBILE_CHANNEL: 'prod' }), /Unknown MOBILE_CHANNEL/);
+});
+
+test('assertChannelIdentity: stage with Stage id passes, mismatches throw, production fail-closed', () => {
+  assert.equal(APPROVED_PRODUCTION_APP_ID, null);
+
+  // 5. assertChannelIdentity: Stage with the Stage id passes
+  assert.doesNotThrow(() => assertChannelIdentity('stage', 'pl.kcswh.arcadepoker.stage'));
+
+  // Stage with another id throws Stage appId mismatch
+  assert.throws(() => assertChannelIdentity('stage', 'pl.kcswh.arcadepoker.other'), /Stage appId mismatch/);
+  assert.throws(() => assertChannelIdentity('stage', 'pl.kcswh.arcadepoker'), /Stage appId mismatch/);
+
+  // Production throws Production applicationId not approved (with Stage id and with pl.kcswh.arcadepoker)
+  assert.throws(() => assertChannelIdentity('production', 'pl.kcswh.arcadepoker.stage'), /Production applicationId not approved/);
+  assert.throws(() => assertChannelIdentity('production', 'pl.kcswh.arcadepoker'), /Production applicationId not approved/);
+
+  // Invalid ids throw Invalid appId in capacitor.config.json
+  const invalidIds = ['', ' ', 'pl', '123.app.id', 'pl.kcswh.ArcadePoker', 'pl..kcswh', 'pl.kcswh/poker'];
+  for (const invalidId of invalidIds) {
+    assert.throws(() => assertChannelIdentity('stage', invalidId), /Invalid appId in capacitor\.config\.json/);
+    assert.throws(() => assertChannelIdentity('production', invalidId), /Invalid appId in capacitor\.config\.json/);
+  }
+});
+
+// Minimal writable copy of the generated Android tree; never touches mobile/poker itself.
+function androidFixture() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'configure-android-'));
+  for (const name of ['configure-android.mjs', 'capacitor.config.json', 'PokerAudioPlugin.java', 'launch-mark.xml']) {
+    copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(dir, name));
+  }
+  const files = {
+    'android/app/src/main/AndroidManifest.xml': '<manifest><application><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN" /></intent-filter></activity></application></manifest>\n',
+    'android/app/build.gradle': 'defaultConfig {\n  versionCode 1\n  versionName "1.0"\n}\n',
+    'android/app/src/main/java/pl/kcswh/arcadepoker/stage/MainActivity.java': 'package pl.kcswh.arcadepoker.stage;\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {}\n',
+    'android/app/src/main/res/values/styles.xml': '<style><item name="android:background">@null</item><item name="android:background">@drawable/splash</item></style>\n',
+  };
+  for (const [name, value] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    writeFileSync(path.join(dir, name), value);
+  }
+  mkdirSync(path.join(dir, 'android/app/src/main/res/drawable'), { recursive: true });
+  return dir;
+}
+function treeSnapshot(dir) {
+  const out = {};
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else out[path.relative(dir, full)] = readFileSync(full).toString('base64');
+    }
+  };
+  walk(dir);
+  return out;
+}
+function runConfigure(dir, channel) {
+  const env = { ...process.env };
+  delete env.MOBILE_CHANNEL;
+  if (channel !== undefined) env.MOBILE_CHANNEL = channel;
+  return spawnSync(process.execPath, ['configure-android.mjs'], { cwd: dir, env, encoding: 'utf8' });
+}
+
+test('configure script: Production and empty/unknown channels fail before any file write', () => {
+  const dir = androidFixture();
+  try {
+    const before = treeSnapshot(dir);
+    for (const [channel, message] of [['production', /Production applicationId not approved/], ['', /Empty MOBILE_CHANNEL/], ['bogus', /Unknown MOBILE_CHANNEL/]]) {
+      const run = runConfigure(dir, channel);
+      assert.notEqual(run.status, 0);
+      assert.match(run.stderr, message);
+      assert.deepEqual(treeSnapshot(dir), before);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('configure script: unset channel configures Stage, also through a symlinked entry point', () => {
+  for (const viaLink of [false, true]) {
+    const dir = androidFixture();
+    try {
+      if (viaLink) symlinkSync(path.join(dir, 'configure-android.mjs'), path.join(dir, 'configure-link.mjs'));
+      const env = { ...process.env };
+      delete env.MOBILE_CHANNEL;
+      const run = spawnSync(process.execPath, [viaLink ? 'configure-link.mjs' : 'configure-android.mjs'], { cwd: dir, env, encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const manifest = readFileSync(path.join(dir, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+      assert.ok(manifest.includes(callbackIntentFilter('stage') + '\n</activity>'));
+      assert.ok(!manifest.includes('play.kcswh.pl'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('importing configure-android.mjs performs no file writes', async () => {
+  const dir = androidFixture();
+  try {
+    const before = treeSnapshot(dir);
+    await import(pathToFileURL(path.join(dir, 'configure-android.mjs')).href);
+    assert.deepEqual(treeSnapshot(dir), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
