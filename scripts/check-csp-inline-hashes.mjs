@@ -88,6 +88,7 @@ export function verifyInlineScriptHashes({ documents, headersText, routes = ROUT
     if (routes.length === 1 && /<[^>]+\son[a-z]+\s*=/i.test(document.content)) throw new Error(`${document.path}: inline event handler is not allowed`);
     const route = routeFor(document.path);
     if (route === "/games-open/freedoom/*") continue;
+    if (!policies.has(route)) throw new Error(`${document.path}: missing CSP route ${route}`);
     for (const servedRoute of [route, ...(ROUTE_ALIASES[route] || [])].filter((name) => policies.has(name))) {
       const csp = policies.get(servedRoute);
       for (const source of inlineScripts(document.content)) {
