@@ -246,18 +246,20 @@ test('An initial session read cannot overwrite a newer Auth event', async () => 
 async function accountReadFixture(getMe) {
   const source = await read('js/account-page.js');
   // Exercise the actual private async coordinator without a DOM-rendering suite.
-  const start = source.indexOf('  function loadPublicProfile(');
+  const start = source.indexOf('  async function recordProfileFailure(');
+  const coordinatorStart = source.indexOf('  function loadPublicProfile(');
+  const fixtureStart = start === -1 ? coordinatorStart : start;
   const end = source.indexOf('\n  function handlePublicProfileSave', start);
-  const events = { rendered: [], hidden: 0, errors: 0, logs: [], states: [] };
+  const events = { rendered: [], hidden: 0, errors: 0, logs: [], states: [], access: [], flushes: [] };
   const statusNode = { dataset: { source: 'profile' } };
   const context = vm.createContext({ currentUser: { id: 'user-a' }, publicProfileGeneration: 1, publicProfileInFlight: null,
-    window: { ProfileClient: { getMe } }, profileLoadState: 'idle', nodes: { status: statusNode }, getUserKey: user => user?.id,
+    window: { ProfileClient: { getMe }, SupabaseAuthBridge:{getAccessToken:async()=> 'private-token'}, KLog:{syncAdminAccess(active){events.access.push(active);},flush(force){events.flushes.push(force);}} }, auth:{getCurrentUser:async()=>context.currentUser}, fetch:async()=>({ok:true,json:async()=>({isAdmin:true,userId:context.currentUser.id})}), AbortController,setTimeout,clearTimeout, profileLoadState: 'idle', nodes: { status: statusNode }, getUserKey: user => user?.id,
     renderPublicProfile: profile => events.rendered.push(profile), renderPokerProjection(){}, clearPokerProjection(){},
     setBlockVisibility(){ events.hidden++; }, setStatus(message,tone,source){ if(tone==='error')events.errors++;events.states.push(context.profileLoadState);statusNode.dataset.source=source||'auth'; },
     t: (_, fallback) => fallback, klog: (kind, data) => events.logs.push({ kind, data }), Promise
   });
-  vm.runInContext(source.slice(start, end), context);
-  return { context, events, load: () => vm.runInContext('loadPublicProfile(true)', context) };
+  vm.runInContext(source.slice(fixtureStart, end), context);
+  return { context, events, load: async () => {const value=await vm.runInContext('loadPublicProfile(true)', context);await new Promise(resolve=>setImmediate(resolve));return value;} };
 }
 const cancelledRead = () => Object.assign(new Error('stale_identity'), { code: 'stale_identity' });
 
@@ -349,4 +351,94 @@ test('an import copy conflict refreshes status once and offers withdrawal withou
   const f=await googlePanelFixture();await f.api.load();f.session.provider_token='fake-proof';f.server.copyConflict=true;
   await f.api.runForTest('import');assert.equal(f.server.posts,1);assert.equal(f.server.reads,2);
   assert.equal(f.node('googlePhotoWithdraw').hidden,false);assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoReconnect').hidden,true);
+});
+
+test('Profile failures identify read versus rendering without logging private exception contents', async () => {
+  for (const stage of ['read', 'render_public_profile', 'render_poker_projection']) {
+    const failure = Object.assign(new TypeError('private response or account data'), {code:'private-value'});
+    let reads = 0;
+    const f = await accountReadFixture(async () => { reads++; if(stage==='read')throw failure;return {avatar:{variant:'wizard-indigo'}}; });
+    if(stage==='render_public_profile')f.context.renderPublicProfile=()=>{throw failure;};
+    if(stage==='render_poker_projection')f.context.renderPokerProjection=()=>{throw failure;};
+    await f.load();
+    assert.equal(reads,1);
+    assert.equal(f.events.errors,1);
+    assert.equal(f.events.logs.length,1);
+    assert.equal(f.events.logs[0].data.stage,stage);
+    assert.equal(f.events.logs[0].data.exceptionType,'TypeError');
+    assert.equal(f.events.logs[0].data.code,'request_failed');
+    assert.doesNotMatch(JSON.stringify(f.events.logs),/private/);
+  }
+});
+
+test('An older profile success or failure cannot overwrite a newer identity success', async () => {
+  for (const fails of [false,true]) {
+    let resolveOld,rejectOld,reads=0;
+    const f=await accountReadFixture(()=>++reads===1?new Promise((resolve,reject)=>{resolveOld=resolve;rejectOld=reject;}):Promise.resolve({handle:'new-account'}));
+    const old=f.load();
+    f.context.currentUser={id:'user-b'};f.context.publicProfileGeneration++;f.context.publicProfileInFlight=null;
+    await f.load();
+    if(fails)rejectOld(new TypeError('private old response'));else resolveOld({handle:'old-account'});
+    await old;
+    assert.deepEqual(f.events.rendered,[{handle:'new-account'}]);
+    assert.equal(f.context.profileLoadState,'success');assert.equal(f.events.errors,0);
+    if(fails)assert.equal(f.events.logs.length,0);
+  }
+});
+
+
+test('Profile diagnostics verify admin identity, flush one sanitized error and revoke access', async () => {
+  const f=await accountReadFixture(async()=>{throw Object.assign(new TypeError('private email/token/response'),{code:'private-code'});});
+  let requests=0;
+  f.context.fetch=async(url,options)=>{requests++;assert.equal(url,'/.netlify/functions/admin-me');assert.equal(options.headers.Authorization,'Bearer private-token');return {ok:true,json:async()=>({isAdmin:true,userId:'user-a'})};};
+  await f.load();
+  assert.equal(requests,1);assert.equal(f.events.logs.length,1);assert.deepEqual(f.events.access,[true,false]);assert.deepEqual(f.events.flushes,[true]);
+  assert.deepEqual(Object.keys(f.events.logs[0].data).sort(),['code','currentRequest','exceptionType','stage']);
+  assert.doesNotMatch(JSON.stringify(f.events.logs),/private|user-a|Bearer|@/);
+});
+
+test('Profile diagnostics fail closed for denied, malformed or mismatched admin responses', async () => {
+  for(const response of [
+    {ok:false,json:async()=>({isAdmin:false})},
+    {ok:true,json:async()=>({isAdmin:false,userId:'user-a'})},
+    {ok:true,json:async()=>({isAdmin:'true',userId:'user-a'})},
+    {ok:true,json:async()=>({isAdmin:true,userId:'user-b'})},
+    {ok:true,json:async()=>null},
+    {ok:true,json:async()=>{throw new SyntaxError('private invalid body');}},
+    null
+  ]){
+    const f=await accountReadFixture(async()=>{throw new Error('private failure');});
+    let requests=0;f.context.fetch=async()=>{requests++;if(!response)throw new Error('private fetch failure');return response;};
+    await f.load();assert.equal(requests,1);assert.equal(f.events.logs.length,0);assert.equal(f.events.access.length,0);assert.equal(f.events.flushes.length,0);
+  }
+});
+
+test('Profile diagnostics discard verification after switching identities, including switching back', async()=>{
+  for(const switchBack of [false,true]){
+    let release;const f=await accountReadFixture(async()=>{throw new Error('private failure');});
+    f.context.fetch=()=>new Promise(resolve=>{release=resolve;});
+    await f.load();assert.equal(typeof release,'function');
+    f.context.currentUser={id:'user-b'};f.context.publicProfileGeneration++;
+    if(switchBack){f.context.currentUser={id:'user-a'};f.context.publicProfileGeneration++;}
+    release({ok:true,json:async()=>({isAdmin:true,userId:'user-a'})});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(f.events.logs.length,0);assert.equal(f.events.access.length,0);assert.equal(f.events.flushes.length,0);
+  }
+});
+
+test('A single verified profile failure survives recorder access revocation in existing storage', async()=>{
+  const f=await accountReadFixture(async()=>{throw new TypeError('private profile response');});
+  const storage=new Map();
+  f.context.window.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)};
+  f.context.window.location={search:''};f.context.window.dispatchEvent=()=>{};
+  vm.runInContext(await read('js/debug.js'),f.context);
+  f.context.klog=(kind,data)=>{f.events.logs.push({kind,data});f.context.window.KLog.log(kind,data);};
+  await f.load();
+  const persisted=JSON.parse(storage.get('kcswh:debug:log'));
+  assert.equal(persisted.length,1);assert.match(persisted[0],/profile:account_load_failed/);assert.match(persisted[0],/render|read/);
+  assert.doesNotMatch(persisted[0],/private|user-a|Bearer|@/);
+  assert.equal(f.context.window.KLog.isAdmin(),false);assert.equal(f.context.window.KLog.getText(),'');
+  // A new page restores only the buffer, never administrator authority.
+  vm.runInContext(await read('js/debug.js'),f.context);
+  assert.equal(f.context.window.KLog.isAdmin(),false);assert.equal(f.context.window.KLog.getText(),'');
 });

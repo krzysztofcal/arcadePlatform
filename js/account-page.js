@@ -507,17 +507,53 @@
     }finally{if(active()){avatarSaving=null;renderAvatarGallery();}}
   }
 
+  async function recordProfileFailure(metadata, requestedUserKey, requestedGeneration){
+    var recorder = window.KLog;
+    var bridge = window.SupabaseAuthBridge;
+    var timer;
+    function isCurrent(){ return requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration; }
+    try {
+      if (!isCurrent() || !auth || !auth.getCurrentUser || !bridge || !bridge.getAccessToken || !recorder || !recorder.syncAdminAccess || !recorder.flush) return;
+      var user = await auth.getCurrentUser();
+      if (!user || user.id !== requestedUserKey || !isCurrent()) return;
+      var token = await bridge.getAccessToken();
+      if (!token || !isCurrent()) return;
+      var controller = new AbortController();
+      timer = setTimeout(function(){ controller.abort(); }, 5000);
+      var response = await fetch('/.netlify/functions/admin-me', { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', signal: controller.signal });
+      if (!response.ok) return;
+      var result = await response.json();
+      user = await auth.getCurrentUser();
+      if (!result || result.isAdmin !== true || result.userId !== requestedUserKey || !user || user.id !== requestedUserKey || !isCurrent() || recorder !== window.KLog) return;
+      try {
+        recorder.syncAdminAccess(true);
+        klog('profile:account_load_failed', metadata);
+        recorder.flush(true);
+      } finally {
+        recorder.syncAdminAccess(false);
+      }
+    } catch (_err){
+      // Diagnostics must fail closed without changing the existing profile error UI.
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   function loadPublicProfile(force, retried){
     if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
     if (publicProfileInFlight) return publicProfileInFlight;
     var requestedUserKey = getUserKey(currentUser);
     var requestedGeneration = publicProfileGeneration;
+    var stage = 'read';
     profileLoadState = 'loading';
     setStatus(t('profileLoading', 'Loading your profile…'), 'info', 'profile');
     var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
       if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
+      stage = 'render_public_profile';
       renderPublicProfile(profile);
+      stage = 'render_poker_projection';
       renderPokerProjection(profile);
+      stage = 'status';
       profileLoadState = 'success';
       if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus(t('signedIn', 'Signed in.'), 'success', 'profile');
       return profile;
@@ -534,7 +570,14 @@
         }
         return null;
       }
-      klog('profile:account_load_failed', { code: error && error.code ? error.code : 'request_failed' });
+      var code = error && error.code;
+      var exceptionType = error && error.name;
+      recordProfileFailure({
+        stage: stage,
+        code: ['not_authenticated', 'request_failed', 'server_error'].indexOf(code) !== -1 ? code : 'request_failed',
+        exceptionType: ['Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'AbortError'].indexOf(exceptionType) !== -1 ? exceptionType : 'Error',
+        currentRequest: requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration
+      }, requestedUserKey, requestedGeneration);
       if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
         setBlockVisibility(nodes.publicProfileEditor, false);
         clearPokerProjection();
