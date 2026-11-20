@@ -23,6 +23,12 @@ const rootDir = path.resolve(here, '..');
 const stageConfig = JSON.parse(readFileSync(new URL('../mobile/poker/stage-public.json', import.meta.url), 'utf8'));
 const prodConfig = JSON.parse(readFileSync(new URL('../mobile/poker/production-public.json', import.meta.url), 'utf8'));
 
+function makeJwt(payload) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${header}.${body}.fakesig`;
+}
+
 test('production config: validateProduction passes, validate throws (#1286 gate), channel === "production", anon JWT ref/role correct', () => {
   assert.equal(security.validateProduction(prodConfig), prodConfig);
   assert.throws(() => security.validate(prodConfig), /Invalid public Stage configuration/);
@@ -31,6 +37,48 @@ test('production config: validateProduction passes, validate throws (#1286 gate)
   const anonPayload = JSON.parse(Buffer.from(prodConfig.supabaseAnonKey.split('.')[1], 'base64url').toString());
   assert.equal(anonPayload.ref, 'otbqfijerkieoxwpxjnm');
   assert.equal(anonPayload.role, 'anon');
+});
+
+test('bind: stage and production bind channel, config, and channel redirect', () => {
+  const boundStage = security.bind(stageConfig);
+  assert.equal(boundStage.channel, 'stage');
+  assert.equal(boundStage.config, stageConfig);
+  assert.equal(boundStage.redirectTo, 'arcadepoker-stage://auth/callback');
+
+  const boundProd = security.bind(prodConfig);
+  assert.equal(boundProd.channel, 'production');
+  assert.equal(boundProd.config, prodConfig);
+  assert.equal(boundProd.redirectTo, 'https://play.kcswh.pl/app/auth/callback');
+});
+
+test('redirectFor returns exact channel redirect string and throws on unknown channel', () => {
+  assert.equal(security.redirectFor('stage'), 'arcadepoker-stage://auth/callback');
+  assert.equal(security.redirectFor('production'), 'https://play.kcswh.pl/app/auth/callback');
+  assert.throws(() => security.redirectFor('unknown'), /Unknown channel/);
+  assert.throws(() => security.redirectFor(''), /Unknown channel/);
+});
+
+test('bind rejects mixed tuples, swapped anon keys, and crafted service_role JWT', () => {
+  // Mixed tuples
+  assert.throws(() => security.bind({ ...stageConfig, apiOrigin: prodConfig.apiOrigin }));
+  assert.throws(() => security.bind({ ...prodConfig, apiOrigin: stageConfig.apiOrigin }));
+  assert.throws(() => security.bind({ ...stageConfig, wsUrl: prodConfig.wsUrl }));
+  assert.throws(() => security.bind({ ...prodConfig, supabaseUrl: stageConfig.supabaseUrl }));
+
+  // Swapped anon keys
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: stageConfig.supabaseAnonKey }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...stageConfig, supabaseAnonKey: prodConfig.supabaseAnonKey }), /Invalid public anon key/);
+
+  // Crafted service_role JWT
+  const serviceRoleJwt = makeJwt({ iss: 'supabase', ref: 'otbqfijerkieoxwpxjnm', role: 'service_role' });
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: serviceRoleJwt }), /Invalid public anon key/);
+
+  // Corrupted / malformed anon keys
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'not-a-jwt' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'a.b' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'a.invalid-base64!.c' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'a.' + Buffer.from('not json').toString('base64url') + '.c' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: null }), /Invalid public anon key/);
 });
 
 test('stage config: validate passes, validateProduction throws, channel === "stage"', () => {

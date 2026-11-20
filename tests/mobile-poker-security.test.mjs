@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 const require = createRequire(import.meta.url);
 const security = require('../mobile/poker/security.cjs');
 const config = JSON.parse(readFileSync(new URL('../mobile/poker/stage-public.json', import.meta.url), 'utf8'));
+const prodConfig = JSON.parse(readFileSync(new URL('../mobile/poker/production-public.json', import.meta.url), 'utf8'));
+
 test('mobile cannot target Production, foreign Preview or credential-bearing origins', () => {
   assert.equal(config.apiOrigin, 'https://deploy-preview-1155--playkcswh.netlify.app');
   const anon = JSON.parse(Buffer.from(config.supabaseAnonKey.split('.')[1], 'base64url').toString());
@@ -13,18 +15,54 @@ test('mobile cannot target Production, foreign Preview or credential-bearing ori
   assert.equal(security.validate(config).apiOrigin, config.apiOrigin);
   assert.equal(security.publicProfileUrl(config, 'alice'), config.apiOrigin + '/u/alice');
   assert.equal(security.publicProfileUrl(config, '../?x'), config.apiOrigin + '/u/..%2F%3Fx');
+  assert.equal(security.publicProfileUrl(prodConfig, 'alice'), 'https://play.kcswh.pl/u/alice');
+  assert.equal(security.publicProfileUrl(prodConfig, '../?x'), 'https://play.kcswh.pl/u/..%2F%3Fx');
   assert.throws(() => security.publicProfileUrl({ ...config, apiOrigin: 'https://play.kcswh.pl' }, 'alice'));
+  assert.throws(() => security.publicProfileUrl({ ...prodConfig, apiOrigin: 'https://evil.netlify.app' }, 'alice'));
   for (const apiOrigin of ['https://play.kcswh.pl', 'https://evil.netlify.app', 'https://user@deploy-preview-1155--playkcswh.netlify.app', config.apiOrigin + '/path']) {
     assert.throws(() => security.validate({ ...config, apiOrigin }));
   }
   assert.throws(() => security.validate({ ...config, wsUrl: 'wss://ws.kcswh.pl/ws' }));
   assert.throws(() => security.validate({ ...config, supabaseUrl: 'https://other.supabase.co' }));
 });
+
 test('callback accepts only exact mobile redirect and one PKCE code; never bearer tokens', () => {
+  // Stage callback with default channel or explicit channel
   assert.equal(security.callbackCode('arcadepoker-stage://auth/callback?code=abc'), 'abc');
+  assert.equal(security.callbackCode('arcadepoker-stage://auth/callback?code=abc', 'stage'), 'abc');
   for (const url of ['https://evil.test/?code=abc', 'arcadepoker-stage://auth/other?code=abc', 'arcadepoker-stage://evil/callback?code=abc', 'arcadepoker-stage://auth/callback#access_token=secret', 'arcadepoker-stage://auth/callback?code=a&code=b', 'arcadepoker-stage://auth/callback?error=denied']) {
     assert.throws(() => security.callbackCode(url));
   }
+
+  // Production callback without channel defaults to stage and throws
+  assert.throws(() => security.callbackCode('https://play.kcswh.pl/app/auth/callback?code=abc'), /Invalid auth callback/);
+
+  // Production callback with channel 'production'
+  assert.equal(security.callbackCode('https://play.kcswh.pl/app/auth/callback?code=abc', 'production'), 'abc');
+
+  // Rejects Stage scheme, other host/subdomain/port, other path, hash, multiple/empty codes, error param, credentials
+  for (const url of [
+    'arcadepoker-stage://auth/callback?code=abc',
+    'http://play.kcswh.pl/app/auth/callback?code=abc',
+    'https://evil.test/app/auth/callback?code=abc',
+    'https://play.kcswh.pl.evil.com/app/auth/callback?code=abc',
+    'https://sub.play.kcswh.pl/app/auth/callback?code=abc',
+    'https://play.kcswh.pl:8443/app/auth/callback?code=abc',
+    'https://play.kcswh.pl/app/auth/callback/?code=abc',
+    'https://play.kcswh.pl/app/auth/callbackx?code=abc',
+    'https://play.kcswh.pl/other?code=abc',
+    'https://play.kcswh.pl/app/auth/callback#access_token=secret',
+    'https://play.kcswh.pl/app/auth/callback?code=a&code=b',
+    'https://play.kcswh.pl/app/auth/callback?code=',
+    'https://play.kcswh.pl/app/auth/callback?error=access_denied',
+    'https://user:pass@play.kcswh.pl/app/auth/callback?code=abc',
+    'https://user@play.kcswh.pl/app/auth/callback?code=abc'
+  ]) {
+    assert.throws(() => security.callbackCode(url, 'production'));
+  }
+
+  // Unknown channel throws
+  assert.throws(() => security.callbackCode('https://play.kcswh.pl/app/auth/callback?code=abc', 'unknown'), /Unknown channel/);
 });
 
 test('native PKCE callback uses injected plugins and preserves recovery document', async () => {
@@ -96,6 +134,163 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   window.Capacitor.Plugins = {};
   ready();
   assert.match(node.textContent, /Mobile sign-in is unavailable/);
+});
+
+test('production native PKCE callback uses HTTPS App Link, rejects Stage scheme, and scrubs codes', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const source = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
+  const listeners = {};
+  let ready;
+  let exchanged;
+  let exchangeCount = 0;
+  const openedUrls = [];
+  let closedBrowser = false;
+  const klogEntries = [];
+  const connectivity = { onLine: true };
+  const events = [];
+  const pageListeners = {};
+  const barCalls = [];
+  const storage = new Map();
+  let navigated = false;
+  const node = { textContent: '', hidden: true };
+  const document = {
+    addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; },
+    getElementById() { return node; }
+  };
+  const window = {
+    MobilePokerSecurity: security,
+    MOBILE_POKER_CONFIG: { ...prodConfig, sha: '12345678' },
+    KLog: { log(kind, data) { klogEntries.push({ kind, data }); } },
+    Capacitor: { Plugins: {
+      Browser: {
+        open: async (options) => { openedUrls.push(options.url); return {}; },
+        close: async () => { closedBrowser = true; }
+      },
+      SystemBars: { hide: async () => { barCalls.push('hide'); }, show: async () => { barCalls.push('show'); } },
+      App: { addListener(name, fn) { listeners[name] = fn; }, getLaunchUrl: async () => null }
+    } },
+    supabaseClient: { auth: {
+      startAutoRefresh() {},
+      stopAutoRefresh() {},
+      exchangeCodeForSession: async code => {
+        exchanged = code;
+        exchangeCount++;
+        return { data: { session: {} } };
+      }
+    } },
+    location: { pathname: '/account.html', replace() { navigated = true; } },
+    addEventListener(name, fn) { pageListeners[name] = fn; },
+    dispatchEvent(event) { events.push(event.type); }
+  };
+
+  vm.runInNewContext(source, {
+    window,
+    document,
+    URL,
+    Event,
+    navigator: connectivity,
+    sessionStorage: {
+      getItem(key) { return storage.get(key) || null; },
+      setItem(key, value) { storage.set(key, value); },
+      removeItem(key) { storage.delete(key); }
+    }
+  });
+
+  ready();
+
+  // Verify redirectTo is the Production HTTPS callback
+  assert.equal(window.MobilePoker.redirectTo, 'https://play.kcswh.pl/app/auth/callback');
+
+  // openOAuth rejects Stage redirect_to
+  const stageRedirectOAuth = `https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent('arcadepoker-stage://auth/callback')}`;
+  await assert.rejects(() => window.MobilePoker.openOAuth(stageRedirectOAuth), /google_failed/);
+
+  // openOAuth rejects Stage supabaseUrl
+  const wrongOriginOAuth = `https://krydukthwdvccggbyjfw.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}`;
+  await assert.rejects(() => window.MobilePoker.openOAuth(wrongOriginOAuth), /google_failed/);
+
+  // openOAuth succeeds with Production supabaseUrl and HTTPS callback
+  const validOAuth = `https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}`;
+  await window.MobilePoker.openOAuth(validOAuth);
+  assert.equal(openedUrls.length, 1);
+  assert.equal(openedUrls[0], validOAuth);
+
+  // HTTPS callback exchanges code
+  const prodSecretCode = 'prod-auth-code-12345';
+  await listeners.appUrlOpen({ url: `https://play.kcswh.pl/app/auth/callback?code=${prodSecretCode}` });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(exchanged, prodSecretCode);
+  assert.equal(exchangeCount, 1);
+  assert.equal(closedBrowser, true);
+  assert.match(node.textContent, /Signed in/);
+
+  // Stage-scheme URL is rejected in Production (notice shown, no exchange)
+  const strayStageCode = 'stray-stage-code-67890';
+  node.textContent = '';
+  await listeners.appUrlOpen({ url: `arcadepoker-stage://auth/callback?code=${strayStageCode}` });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(exchangeCount, 1, 'rejected callback must not exchange code');
+  assert.match(node.textContent, /Sign-in return failed or expired/);
+  assert.equal(node.textContent.includes(strayStageCode), false, 'notice text must never contain auth code');
+
+  // Callback with error= shows generic notice and no exchange
+  const leakCode = 'leak-code-99999';
+  node.textContent = '';
+  await listeners.appUrlOpen({ url: `https://play.kcswh.pl/app/auth/callback?error=access_denied&code=${leakCode}` });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(exchangeCount, 1, 'error callback must not exchange code');
+  assert.match(node.textContent, /Sign-in return failed or expired/);
+  assert.equal(node.textContent.includes(leakCode), false, 'notice text must never contain code');
+  assert.equal(node.textContent.includes('access_denied'), false, 'notice text must never contain error detail');
+
+  // Verify klog payloads never contain the codes
+  for (const entry of klogEntries) {
+    const raw = JSON.stringify(entry);
+    assert.equal(raw.includes(prodSecretCode), false);
+    assert.equal(raw.includes(strayStageCode), false);
+    assert.equal(raw.includes(leakCode), false);
+  }
+});
+
+test('js/api-url resolves netlify functions per channel and fails safely on invalid config', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const apiUrlSource = await readFile(new URL('../js/api-url.js', import.meta.url), 'utf8');
+
+  function makeContext(cfg) {
+    const win = {
+      MOBILE_POKER_CONFIG: cfg,
+      MobilePokerSecurity: security
+    };
+    vm.runInNewContext(apiUrlSource, { window: win });
+    return win;
+  }
+
+  // Production config
+  const prodWin = makeContext(prodConfig);
+  assert.equal(prodWin.ArcadeApi.url('/.netlify/functions/poker-state'), 'https://play.kcswh.pl/.netlify/functions/poker-state');
+  assert.equal(prodWin.ArcadeApi.url('/poker/index.html'), '/poker/index.html', 'non-function path unchanged');
+  assert.equal(prodWin.ArcadeApi.url('/.netlify/functions/poker-state\\escape'), '/.netlify/functions/poker-state\\escape', 'backslash guard');
+  assert.equal(prodWin.ArcadeApi.url('/.netlify/functions/poker-state\r\n'), '/.netlify/functions/poker-state\r\n', 'CRLF guard');
+
+  // Stage config
+  const stageWin = makeContext(config);
+  assert.equal(stageWin.ArcadeApi.url('/.netlify/functions/poker-state'), config.apiOrigin + '/.netlify/functions/poker-state');
+  assert.equal(stageWin.ArcadeApi.url('/account.html'), '/account.html', 'non-function path unchanged');
+
+  // No config (web environment)
+  const webWin = makeContext(null);
+  assert.equal(webWin.ArcadeApi.url('/.netlify/functions/poker-state'), '/.netlify/functions/poker-state');
+
+  // Invalid config throws
+  const invalidWin = makeContext({ ...prodConfig, apiOrigin: 'https://evil.netlify.app' });
+  assert.throws(() => invalidWin.ArcadeApi.url('/.netlify/functions/poker-state'));
+
+  // Missing security module throws
+  const noSecWin = { MOBILE_POKER_CONFIG: prodConfig };
+  vm.runInNewContext(apiUrlSource, { window: noSecWin });
+  assert.throws(() => noSecWin.ArcadeApi.url('/.netlify/functions/poker-state'), /Mobile security configuration missing/);
 });
 
 test('verified binding pins own PR/SHA/site and never reuses parent or Production origin', () => {
