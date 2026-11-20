@@ -570,16 +570,16 @@ test('Withdrawal invalidates an older pending status GET so it cannot restore th
 
 
 test('Initial delayed photo status is explicitly loading and never offers an unverified photo',async()=>{
- const f=await googlePanelFixture();let release;f.server.holdGet=new Promise(resolve=>{release=resolve;});const loading=f.api.load();while(!f.server.reads)await new Promise(resolve=>setImmediate(resolve));
+ const f=await googlePanelFixture();assert.equal(f.api.getPresentation('user-a').state,'pending');assert.equal(f.api.getPresentation('user-a').avatar,null);assert.equal(f.api.getPresentation(null),null);let release;f.server.holdGet=new Promise(resolve=>{release=resolve;});const loading=f.api.load();while(!f.server.reads)await new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.node('googlePhotoPanel').hidden,true);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'true');assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);
- release();await loading;assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);
+ assert.equal(f.api.getPresentation('user-a').state,'pending');assert.equal(f.api.getPresentation('user-a').avatar,null);release();await loading;assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);assert.equal(f.api.getPresentation('user-a'),null);
 });
 
 
-test('Failed or OFF initial photo GET never reveals an unverified Google panel or stale loading state',async()=>{
+test('Failed initial photo GET offers read-only retry; confirmed OFF removes the placeholder',async()=>{
  for(const failure of [new TypeError('synthetic offline'),{status:404},{status:503},null]){
   const f=await googlePanelFixture();if(failure)f.server.getError=failure;else f.state.googleLinked=false;
-  await f.api.load();assert.equal(f.node('googlePhotoPanel').hidden,true);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');assert.equal(f.api.getChoice('user-a'),null);
+  await f.api.load();const retryable=!!failure&&failure.status!==404;assert.equal(f.node('googlePhotoPanel').hidden,!retryable);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.node('googlePhotoRetry').hidden,!retryable);assert.equal(f.api.getPresentation('user-a')?.state,retryable?'unavailable':undefined);if(retryable){f.server.getError=null;await f.api.load();assert.equal(f.api.getPresentation('user-a'),null);assert.equal(f.server.posts,0);}
  }
 });
 
@@ -638,4 +638,31 @@ test('a preview GET deadline ends the pending state and permits only an explicit
  f.server.holdGet=new Promise(()=>{});const importing=f.api.runForTest('import');while(f.server.reads<2)await new Promise(r=>setImmediate(r));
  const deadline=timers.at(-1);assert.ok(deadline.ms>10000);deadline.fn();await importing;
  assert.equal(f.api.getPresentation('user-a').state,'unavailable');assert.equal(f.node('googlePhotoRetry').hidden,false);assert.equal(f.server.posts,1);assert.equal(deadline.cleared,true);
+});
+
+
+test('First owned photo read reserves a neutral tile through identity verification and removes old-account data',async()=>{
+ const f=await googlePanelFixture();let resolveOwner;const getUser=f.window.SupabaseAuth.getCurrentUser;f.window.SupabaseAuth.getCurrentUser=()=>new Promise(r=>{resolveOwner=r;});
+ const loading=f.api.load();assert.equal(f.api.getPresentation('user-a').state,'pending');assert.equal(f.api.getPresentation('user-a').avatar,null);f.window.SupabaseAuth.getCurrentUser=getUser;
+ Object.assign(f.state,{copyStored:true,photoInUse:true,consent:{decision:'granted'},previewAvatar:{type:'uploaded',url:'synthetic-owner-a'}});resolveOwner(f.session.user);await loading;
+ assert.equal(f.api.getPresentation('user-a').state,'ready');assert.equal(f.api.getChoice('user-a').url,'synthetic-owner-a');
+ let release;f.server.holdGet=new Promise(r=>{release=r;});f.session.user={id:'user-b'};Object.assign(f.state,{copyStored:false,photoInUse:false,consent:null});delete f.state.previewAvatar;
+ const switching=f.api.load();assert.equal(f.api.getPresentation('user-b').avatar,null);while(f.server.reads<2)await new Promise(r=>setImmediate(r));
+ assert.equal(f.api.getPresentation('user-a'),null);assert.equal(f.api.getPresentation('user-b').state,'pending');assert.equal(f.api.getChoice('user-b',true),null);release();await switching;assert.equal(f.api.getPresentation('user-b'),null);
+});
+
+
+test('A confirmed OFF response does not reserve a Google tile again for the same owner',async()=>{
+ const f=await googlePanelFixture();f.server.getError={status:404};await f.api.load();assert.equal(f.api.getPresentation('user-a'),null);
+ let release;f.server.holdGet=new Promise(r=>{release=r;});const reloading=f.api.load();while(f.server.reads<2)await new Promise(r=>setImmediate(r));
+ assert.equal(f.api.getPresentation('user-a'),null);release();await reloading;assert.equal(f.api.getPresentation('user-a'),null);
+ f.session.user={id:'user-b'};f.server.holdGet=new Promise(r=>{release=r;});const switching=f.api.load();while(f.server.reads<3)await new Promise(r=>setImmediate(r));
+ assert.equal(f.api.getPresentation('user-b').state,'pending');assert.equal(f.api.getPresentation('user-b').avatar,null);release();await switching;
+});
+
+test('A failed explicit read-only retry keeps unavailable and permits a later retry without POST',async()=>{
+ const f=await googlePanelFixture();f.server.getError={status:503};await f.api.load();assert.equal(f.api.getPresentation('user-a').state,'unavailable');
+ f.window.ProfileClient={getMe:async()=>{throw new TypeError('synthetic profile failure');}};await f.api.load(true);
+ assert.equal(f.api.getPresentation('user-a').state,'unavailable');assert.equal(f.node('googlePhotoRetry').hidden,false);assert.equal(f.node('googlePhotoPanel').hidden,false);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.server.posts,0);
+ f.server.getError=null;await f.api.load(true);assert.equal(f.api.getPresentation('user-a'),null);assert.equal(f.server.posts,0);
 });

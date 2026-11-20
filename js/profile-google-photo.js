@@ -10,9 +10,11 @@
   var status = null;
   var busy = false;
   var statusResolved = false;
+  var statusKnown = false;
   var photoState = null;
   var profileFailed = false;
   var reading = false;
+  var resolvingOwner = false;
   var activeOperation = null;
   var closeWithdrawalConfirmation = null;
 
@@ -102,11 +104,15 @@
 
   function hasCopy(value){ return !!(value&&value.consent&&value.consent.decision==='granted'&&value.copyStored===true); }
   function stateFor(value){ return hasCopy(value)?value.previewAvatar&&value.previewAvatar.type==='uploaded'&&typeof value.previewAvatar.url==='string'&&value.previewAvatar.url?'ready':'unavailable':null; }
-  function getPresentation(userId){ return owner===userId&&photoState?{state:photoState,avatar:getChoice(userId,true)}:null; }
+  function getPresentation(userId){
+    if(!userId)return null;
+    if(owner!==userId)return generation===0||resolvingOwner?{state:'pending',avatar:null}:null;
+    return photoState?{state:photoState,avatar:getChoice(userId,true)}:null;
+  }
 
-  function render(next, needsProof){
+  function render(next, needsProof, unresolvedState){
     status = next || null;
-    if(!status){photoState=null;profileFailed=false;}
+    if(!status){photoState=unresolvedState||null;profileFailed=false;}
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
     var consent = node('googlePhotoConsent');
     if (consent) consent.checked = false;
@@ -122,7 +128,7 @@
     var active = !!(status && status.photoInUse === true);
     var hasPhoto = granted || stored || active || !!photoState;
     // Withdrawal stays available without a linked Google identity; only a new import needs one.
-    if (!status || (!hasPhoto && (status.importEnabled === false || status.googleLinked !== true))){
+    if ((!status && photoState!=='unavailable') || (!hasPhoto && (status.importEnabled === false || status.googleLinked !== true))){
       show('googlePhotoPanel', false);
       return;
     }
@@ -288,22 +294,22 @@
   async function readStatus(expectedUser,current){
     var previousStatus=status;
     statusResolved=false;
-    if(hasCopy(status)||photoState)photoState='pending';
-    render(status);
+    if(!statusKnown||hasCopy(status)||photoState)photoState='pending';
+    render(status,false,photoState);
     var panel=node('googlePhotoPanel');if(panel&&panel.setAttribute)panel.setAttribute('aria-busy','true');
     var controller=typeof AbortController==='function'?new AbortController():null;
     var timeout=controller?setTimeout(function(){controller.abort();},20000):null;
     try{
       var result=await request('GET',null,expectedUser,false,null,controller&&controller.signal);
       if(typeof result.copyStored!=='boolean'||typeof result.photoInUse!=='boolean'||!Object.prototype.hasOwnProperty.call(result,'consent'))throw new Error('invalid_photo_status');
-      if(current===generation&&owner===expectedUser){statusResolved=true;photoState=stateFor(result);render(result);}
+      if(current===generation&&owner===expectedUser){statusResolved=true;statusKnown=true;photoState=stateFor(result);render(result);}
     }catch(error){
       if(current!==generation||owner!==expectedUser)return;
       if(error&&error.code==='stale_identity'){owner=null;render(null);}
-      else if(error&&[401,403,404].indexOf(error.status)!==-1){statusResolved=error.status===404;render(null);}
+      else if(error&&[401,403,404].indexOf(error.status)!==-1){statusResolved=error.status===404;if(statusResolved)statusKnown=true;render(null);}
       else{
         photoState=hasCopy(previousStatus)||photoState?'unavailable':null;
-        render(previousStatus?Object.assign({},previousStatus,{previewAvatar:null}):null);
+        render(previousStatus?Object.assign({},previousStatus,{previewAvatar:null}):null,false,photoState);
         if(!photoState)setState(t('googlePhotoStatusUnavailable','Photo status could not be confirmed. Refresh to try again; you can still withdraw consent.'));
       }
       klog('google_photo:status_failed',{code:error&&error.code==='stale_identity'?'stale_identity':'request_failed'});
@@ -317,20 +323,23 @@
       if(current!==generation||owner!==expectedUser)return;
       profileFailed=results[0].status==='rejected';
       if(profileFailed)klog('google_photo:profile_refresh_failed',{code:'request_failed'});
-      render(status);
+      render(status,false,photoState);
     }finally{if(current===generation)reading=false;}
   }
 
   async function load(refreshProfile){
     if(closeWithdrawalConfirmation)closeWithdrawalConfirmation();
     var previousOwner=owner,current=++generation;
-    reading=false;statusResolved=false;
+    reading=false;statusResolved=false;resolvingOwner=true;
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
     var auth=window.SupabaseAuth;
-    var user=auth&&typeof auth.getCurrentUser==='function'?await auth.getCurrentUser():null;
+    var user;
+    try{user=auth&&typeof auth.getCurrentUser==='function'?await auth.getCurrentUser():null;}
+    catch(_error){if(current===generation){resolvingOwner=false;owner=null;render(null);}return;}
     if(current!==generation)return;
+    resolvingOwner=false;
     owner=user&&user.id?String(user.id):null;
-    if(owner!==previousOwner||!owner){activeOperation=null;busy=false;reading=false;render(null);}
+    if(owner!==previousOwner||!owner){activeOperation=null;busy=false;reading=false;statusKnown=false;render(null,false,owner?'pending':null);}
     if(!owner)return;
     if(refreshProfile===true)await refreshReads(owner,current);
     else await readStatus(owner,current);

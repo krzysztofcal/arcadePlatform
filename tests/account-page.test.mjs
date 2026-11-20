@@ -1374,8 +1374,8 @@ test('One Google click during revalidation preserves draft while Save waits for 
 
 
 test('Google pending, ready and unavailable states update the same tile and preserve the sixteen catalog choices',async()=>{
- const h=await avatarPickerHarness();let presentation=null;h.windowObj.ProfileGooglePhoto={getPresentation:()=>presentation,getChoice:()=>presentation&&presentation.state==='ready'?presentation.avatar:null,isArcadeSelectionLocked:()=>false};
- h.setPolicy(16);const gallery=h.get('arcadeAvatarGallery');presentation={state:'pending',avatar:null};h.document.dispatchEvent({type:'profile:photo-status'});
+ const h=await avatarPickerHarness();let presentation={state:'pending',avatar:null};h.windowObj.ProfileGooglePhoto={getPresentation:()=>presentation,getChoice:()=>presentation&&presentation.state==='ready'?presentation.avatar:null,isArcadeSelectionLocked:()=>false};
+ h.setPolicy(16);const gallery=h.get('arcadeAvatarGallery');assert.equal(gallery.children.length,17);const initialGoogle=gallery.children.find(b=>b.dataset.variant==='google');h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),initialGoogle);
  const google=gallery.children.find(b=>b.dataset.variant==='google'),image=google.children[0],catalog=gallery.children.filter(b=>b!==google);
  assert.equal(gallery.children.length,17);assert.equal(image.dataset.avatarLoading,'true');assert.equal(google.attributes['data-saved'],'false');assert.equal(google.disabled,true);
  presentation={state:'ready',avatar:{type:'uploaded',url:'synthetic-confirmed'}};h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.ok(catalog.every(b=>gallery.children.includes(b)));assert.equal(google.disabled,false);
