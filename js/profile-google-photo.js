@@ -10,6 +10,10 @@
   var status = null;
   var busy = false;
   var statusResolved = false;
+  var photoState = null;
+  var profileFailed = false;
+  var reading = false;
+  var activeOperation = null;
   var closeWithdrawalConfirmation = null;
 
   function t(key, fallback){
@@ -53,7 +57,7 @@
   }
 
   // The session is read once per request; token, provider token and account all come from it.
-  async function request(method, body, expectedUser, withProviderToken, guard){
+  async function request(method, body, expectedUser, withProviderToken, guard, signal){
     var session = await currentSession();
     if (!session || !session.access_token || !session.user || session.user.id !== expectedUser) throw staleError();
     var payload = body;
@@ -68,7 +72,7 @@
     if(guard&&!guard.isCurrent())throw staleError();
     var headers = { Authorization: 'Bearer ' + session.access_token };
     if (payload) headers['Content-Type'] = 'application/json';
-    var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(ENDPOINT) : ENDPOINT, { method: method, headers: headers, body: payload ? JSON.stringify(payload) : undefined, credentials: 'omit' });
+    var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(ENDPOINT) : ENDPOINT, { method: method, headers: headers, body: payload ? JSON.stringify(payload) : undefined, credentials: 'omit', signal: signal });
     var data = {};
     try { data = await response.json(); } catch (_err){}
     if (!response.ok){
@@ -96,8 +100,13 @@
     return messages[code] || t('googlePhotoError', 'Something went wrong. Your avatar was not changed.');
   }
 
+  function hasCopy(value){ return !!(value&&value.consent&&value.consent.decision==='granted'&&value.copyStored===true); }
+  function stateFor(value){ return hasCopy(value)?value.previewAvatar&&value.previewAvatar.type==='uploaded'&&typeof value.previewAvatar.url==='string'&&value.previewAvatar.url?'ready':'unavailable':null; }
+  function getPresentation(userId){ return owner===userId&&photoState?{state:photoState,avatar:getChoice(userId,true)}:null; }
+
   function render(next, needsProof){
     status = next || null;
+    if(!status){photoState=null;profileFailed=false;}
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
     var consent = node('googlePhotoConsent');
     if (consent) consent.checked = false;
@@ -107,10 +116,11 @@
     show('googlePhotoOffer', false);
     show('googlePhotoWithdraw', false);
     show('googlePhotoReconnect', false);
+    show('googlePhotoRetry', false);
     var granted = !!(status && status.consent && status.consent.decision === 'granted');
     var stored = !!(status && status.copyStored === true);
     var active = !!(status && status.photoInUse === true);
-    var hasPhoto = granted || stored || active;
+    var hasPhoto = granted || stored || active || !!photoState;
     // Withdrawal stays available without a linked Google identity; only a new import needs one.
     if (!status || (!hasPhoto && (status.importEnabled === false || status.googleLinked !== true))){
       show('googlePhotoPanel', false);
@@ -121,78 +131,92 @@
     var offer = !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
     show('googlePhotoOffer', offer && !needsProof);
     show('googlePhotoReconnect', offer && !!needsProof);
-    show('googlePhotoWithdraw', hasPhoto);
-    if (status.photoInUse === true) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
+    show('googlePhotoWithdraw', granted || stored || active);
+    show('googlePhotoRetry', photoState==='unavailable'||profileFailed);
+    if(photoState==='pending')setState(t('googlePhotoPreviewPending','Waiting for the Google photo preview…'));
+    else if(photoState==='unavailable')setState(t('googlePhotoPreviewUnavailable','The Google photo preview is unavailable. Retry the read; no photo will be imported again.'));
+    else if(profileFailed)setState(t('googlePhotoProfileRefreshFailed','Photo status was read, but the profile could not be refreshed. Retry the read.'));
+    else if (status.photoInUse === true) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
     else if (!granted && stored) setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
     else if (granted) setState(t('googlePhotoNotInUse', 'Your copy is stored with consent. Choose Google in the avatar gallery and save to use it again.'));
     else setState(t('googlePhotoOffer', 'Optional: use your Google profile photo instead of an Arcade avatar.'));
   }
 
-  async function refreshAvatar(expectedUser, expectedGeneration){
+  async function refreshAvatar(expectedUser, expectedGeneration, expectedRevision){
     if (!window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return;
     var profile = await window.ProfileClient.getMe(true);
-    if (owner !== expectedUser || generation !== expectedGeneration) throw staleError();
+    if (owner !== expectedUser || generation !== expectedGeneration || typeof expectedRevision==='number'&&profile.avatarRevision!==expectedRevision) throw staleError();
     document.dispatchEvent(new CustomEvent('profile:updated', {detail: profile}));
     if (typeof window.ProfileClient.applyAvatar === 'function') window.ProfileClient.applyAvatar(node('publicProfileAvatar'), profile);
+  }
+
+  function clearPhotoPresentation(){
+    if(!window.ProfileClient)return;
+    window.ProfileClient.clear();
+    if(window.ProfileClient.applyAvatar)['publicProfileAvatar','accountSummaryAvatar','googleAvatarCurrentImage','avatarInitials','avatarMenuInitials'].forEach(function(id){window.ProfileClient.applyAvatar(node(id),null);});
+  }
+
+  function finishOperation(operation){
+    if(activeOperation!==operation)return;
+    activeOperation=null;busy=false;document.dispatchEvent(new CustomEvent('profile:photo-status'));
   }
 
   async function run(action){
     if (busy || !owner) return;
     var expectedUser = owner;
     var expectedGeneration = ++generation;
-    busy = true;
+    var operation={};activeOperation=operation;
+    busy = true;profileFailed=false;photoState=action==='import'?'pending':null;
+    if(action==='withdraw'){if(status)status=Object.assign({},status,{previewAvatar:null});clearPhotoPresentation();}
+    render(status);
     var panel=node('googlePhotoPanel');if(panel&&panel.setAttribute)panel.setAttribute('aria-busy','true');
-    document.dispatchEvent(new CustomEvent('profile:photo-status'));
     try {
       var result = action === 'withdraw'
         ? await request('POST', { action: 'withdraw' }, expectedUser, false)
         : await request('POST', { action: 'import', consent: true, noticeVersion: status && status.noticeVersion }, expectedUser, true);
       if (expectedGeneration !== generation) return;
-      statusResolved=true;render(result);
+      statusResolved=true;photoState=hasCopy(result)?'pending':null;render(result);
       if (action !== 'withdraw' && result.photoInUse === true) setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
       else if (action === 'withdraw' && result && result.copyDeleted === true) setState(t('googlePhotoWithdrawn', 'Your Google photo is no longer used and our copy was deleted.'));
       else if (action === 'withdraw') setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
-      if (action === 'withdraw' && window.ProfileClient){
-        window.ProfileClient.clear();
-        if (window.ProfileClient.applyAvatar) ['publicProfileAvatar','accountSummaryAvatar','googleAvatarCurrentImage','avatarInitials','avatarMenuInitials'].forEach(function(id){
-          window.ProfileClient.applyAvatar(node(id), null);
-        });
-      }
-      await refreshAvatar(expectedUser, expectedGeneration);
-      var refreshed=await request('GET',null,expectedUser,false);
+      if(action==='withdraw')clearPhotoPresentation();
+      else if(window.ProfileClient)window.ProfileClient.clear();
+      finishOperation(operation);
+      await refreshReads(expectedUser,expectedGeneration,result.avatarRevision);
       if(expectedGeneration!==generation||owner!==expectedUser)return;
-      statusResolved=true;render(refreshed);
       if(action==='withdraw')setState(result.copyDeleted===true?t('googlePhotoWithdrawn','Your Google photo is no longer used and our copy was deleted.'):t('googlePhotoCopyPending','Deletion is not confirmed. Retry withdrawal.'));
     } catch (error){
       if (expectedGeneration !== generation) return;
       var code = error && error.code ? error.code : 'request_failed';
       klog('google_photo:action_failed', { action: action, code: code });
       if (code === 'stale_identity' || code === 'photo_copy_exists' || (!(error&&error.status)&&code!=='google_proof_required'&&code!=='google_proof_invalid')){
-        await load(); // Reconcile once; never retry the POST, including an unknown outcome.
+        if(action==='import')photoState='unavailable';
+        finishOperation(operation);
+        await load(true); // Reconcile reads once; never retry the POST, including an unknown outcome.
         if(owner===expectedUser&&action==='withdraw'&&result)setState(result.copyDeleted===true?t('googlePhotoWithdrawn','Your Google photo is no longer used and our copy was deleted.'):t('googlePhotoCopyPending','Deletion is not confirmed. Retry withdrawal.'));
         return;
       }
       statusResolved=!!(error&&error.status)||code==='google_proof_required';
+      photoState=stateFor(status);
       render(status, action === 'import' && (code === 'google_proof_required' || code === 'google_proof_invalid'));
       setState(errorText(code));
     } finally {
-      busy = false;
-      if(owner===expectedUser&&generation===expectedGeneration&&panel&&panel.setAttribute)panel.setAttribute('aria-busy','false');
-      document.dispatchEvent(new CustomEvent('profile:photo-status'));
+      finishOperation(operation);
+      if(owner===expectedUser&&generation===expectedGeneration&&panel&&panel.setAttribute)panel.setAttribute('aria-busy',String(busy));
     }
   }
 
   async function selectPhoto(expectedRevision, guard){
     var expectedUser=owner,expectedGeneration=generation;
     if(busy||!expectedUser||!getChoice(expectedUser)||!guard||guard.userId!==expectedUser||!guard.isCurrent())throw staleError();
-    busy=true;document.dispatchEvent(new CustomEvent('profile:photo-status'));
+    var operation={};activeOperation=operation;busy=true;document.dispatchEvent(new CustomEvent('profile:photo-status'));
     try{
       var result=await request('POST',{action:'select',expectedRevision:expectedRevision},expectedUser,false,guard);
       if(generation!==expectedGeneration||owner!==expectedUser||!guard.isCurrent())throw staleError();
       var profile=await window.ProfileClient.getMe(true);
       if(generation!==expectedGeneration||owner!==expectedUser||!guard.isCurrent())throw staleError();
       if(result.avatarRevision!==undefined&&result.avatarRevision!==profile.avatarRevision)throw staleError();
-      statusResolved=true;render(Object.assign({},status,result));
+      statusResolved=true;var selected=Object.assign({},status,result);photoState=stateFor(selected);render(selected);
       document.dispatchEvent(new CustomEvent('profile:updated',{detail:profile}));
       return profile;
     }catch(error){
@@ -201,11 +225,11 @@
         if(owner===expectedUser&&statusResolved)setState(errorText(error&&error.code));
       }
       throw error;
-    }finally{busy=false;document.dispatchEvent(new CustomEvent('profile:photo-status'));}
+    }finally{finishOperation(operation);}
   }
 
   function getChoice(userId,displayOnly){
-    return owner===userId&&(statusResolved||displayOnly===true)&&status&&status.consent&&status.consent.decision==='granted'&&status.copyStored===true&&status.previewAvatar&&status.previewAvatar.type==='uploaded'
+    return owner===userId&&(photoState==='ready'||displayOnly===true&&photoState==='pending')&&(statusResolved||displayOnly===true)&&status&&status.consent&&status.consent.decision==='granted'&&status.copyStored===true&&status.previewAvatar&&status.previewAvatar.type==='uploaded'
       ? status.previewAvatar:null;
   }
 
@@ -261,33 +285,55 @@
     });
   }
 
-  async function load(){
-    if (closeWithdrawalConfirmation) closeWithdrawalConfirmation();
-    var previousOwner=owner,previousStatus=status;
-    var current = ++generation;
+  async function readStatus(expectedUser,current){
+    var previousStatus=status;
     statusResolved=false;
-    document.dispatchEvent(new CustomEvent('profile:photo-status'));
-    var panel=node('googlePhotoPanel');if(panel)panel.setAttribute&&panel.setAttribute('aria-busy','true');
-    var auth = window.SupabaseAuth;
-    var user = auth && typeof auth.getCurrentUser === 'function' ? await auth.getCurrentUser() : null;
-    if (current !== generation) return;
-    owner = user && user.id ? String(user.id) : null;
-    if(owner!==previousOwner||!owner)render(null);
-    if (!owner){if(panel&&panel.setAttribute)panel.setAttribute('aria-busy','false');return;}
-    try {
-      var result = await request('GET', null, owner, false);
-      if (current === generation){statusResolved=true;render(result);}
-    } catch (error){
-      if(current===generation&&error&&error.code==='stale_identity'){owner=null;render(null);}
-      if(current===generation&&error&&[401,403,404].indexOf(error.status)!==-1){statusResolved=error.status===404;render(null);}
-      if(current===generation&&owner===previousOwner&&previousStatus&&error&&error.code!=='stale_identity'&&[401,403,404].indexOf(error.status)===-1){
-        // Keep only same-owner presentation and withdrawal; unresolved status never authorizes selection.
-        render({consent:previousStatus.consent,copyStored:previousStatus.copyStored,previewAvatar:previousStatus.previewAvatar,photoInUse:false,importEnabled:false});
-        setState(t('googlePhotoStatusUnavailable','Photo status could not be confirmed. Refresh to try again; you can still withdraw consent.'));
+    if(hasCopy(status)||photoState)photoState='pending';
+    render(status);
+    var panel=node('googlePhotoPanel');if(panel&&panel.setAttribute)panel.setAttribute('aria-busy','true');
+    var controller=typeof AbortController==='function'?new AbortController():null;
+    var timeout=controller?setTimeout(function(){controller.abort();},20000):null;
+    try{
+      var result=await request('GET',null,expectedUser,false,null,controller&&controller.signal);
+      if(typeof result.copyStored!=='boolean'||typeof result.photoInUse!=='boolean'||!Object.prototype.hasOwnProperty.call(result,'consent'))throw new Error('invalid_photo_status');
+      if(current===generation&&owner===expectedUser){statusResolved=true;photoState=stateFor(result);render(result);}
+    }catch(error){
+      if(current!==generation||owner!==expectedUser)return;
+      if(error&&error.code==='stale_identity'){owner=null;render(null);}
+      else if(error&&[401,403,404].indexOf(error.status)!==-1){statusResolved=error.status===404;render(null);}
+      else{
+        photoState=hasCopy(previousStatus)||photoState?'unavailable':null;
+        render(previousStatus?Object.assign({},previousStatus,{previewAvatar:null}):null);
+        if(!photoState)setState(t('googlePhotoStatusUnavailable','Photo status could not be confirmed. Refresh to try again; you can still withdraw consent.'));
       }
-      // 404 means the feature is off on this environment: the panel stays hidden.
-      if (current === generation && error && error.status !== 404) klog('google_photo:status_failed', { code: error.code || 'request_failed' });
-    }finally{if(current===generation&&panel&&panel.setAttribute)panel.setAttribute('aria-busy','false');}
+      klog('google_photo:status_failed',{code:error&&error.code==='stale_identity'?'stale_identity':'request_failed'});
+    }finally{if(timeout!==null)clearTimeout(timeout);if(current===generation&&panel&&panel.setAttribute)panel.setAttribute('aria-busy',String(busy));}
+  }
+
+  async function refreshReads(expectedUser,current,revision){
+    reading=true;profileFailed=false;
+    try{
+      var results=await Promise.allSettled([refreshAvatar(expectedUser,current,revision),readStatus(expectedUser,current)]);
+      if(current!==generation||owner!==expectedUser)return;
+      profileFailed=results[0].status==='rejected';
+      if(profileFailed)klog('google_photo:profile_refresh_failed',{code:'request_failed'});
+      render(status);
+    }finally{if(current===generation)reading=false;}
+  }
+
+  async function load(refreshProfile){
+    if(closeWithdrawalConfirmation)closeWithdrawalConfirmation();
+    var previousOwner=owner,current=++generation;
+    reading=false;statusResolved=false;
+    document.dispatchEvent(new CustomEvent('profile:photo-status'));
+    var auth=window.SupabaseAuth;
+    var user=auth&&typeof auth.getCurrentUser==='function'?await auth.getCurrentUser():null;
+    if(current!==generation)return;
+    owner=user&&user.id?String(user.id):null;
+    if(owner!==previousOwner||!owner){activeOperation=null;busy=false;reading=false;render(null);}
+    if(!owner)return;
+    if(refreshProfile===true)await refreshReads(owner,current);
+    else await readStatus(owner,current);
   }
 
   function wire(){
@@ -309,6 +355,7 @@
       var expectedGeneration = generation;
       if (await confirmWithdrawal() && owner === expectedUser && generation === expectedGeneration) run('withdraw');
     });
+    var retry=node('googlePhotoRetry');if(retry)retry.addEventListener('click',function(){if(!busy&&owner&&(photoState==='unavailable'||profileFailed))load(true);});
     var reconnect = node('googlePhotoReconnect');
     if (reconnect) reconnect.addEventListener('click', function(){
       var auth = window.SupabaseAuth;
@@ -316,11 +363,11 @@
       auth.signInWithGoogle().catch(function(){ setState(errorText('request_failed')); });
     });
     var auth = window.SupabaseAuth;
-    if (auth && typeof auth.onAuthChange === 'function') auth.onAuthChange(function(_event,user){ if(busy&&user&&String(user.id)===owner)return;if(!user||String(user.id)!==owner){owner=null;statusResolved=false;render(null);}load(); });
+    if (auth && typeof auth.onAuthChange === 'function') auth.onAuthChange(function(_event,user){ if((busy||reading||photoState==='pending')&&user&&String(user.id)===owner)return;if(!user||String(user.id)!==owner){owner=null;activeOperation=null;busy=false;reading=false;statusResolved=false;render(null);}load(); });
     load();
   }
 
-  window.ProfileGooglePhoto = { load: load, select: selectPhoto, getChoice: getChoice, isSelected: function(userId,revision){return owner===userId&&statusResolved&&status&&status.avatarRevision===revision&&status.photoInUse===true;}, isArcadeSelectionLocked: function(userId,displayOnly){
+  window.ProfileGooglePhoto = { load: load, select: selectPhoto, getChoice: getChoice, getPresentation: getPresentation, isSelected: function(userId,revision){if(owner!==userId||!status||typeof revision!=='number'||typeof status.avatarRevision!=='number'||status.avatarRevision<revision)return null;return hasCopy(status)&&status.photoInUse===true;}, isArcadeSelectionLocked: function(userId,displayOnly){
     return !!userId && (busy || owner!==userId || (!statusResolved&&displayOnly!==true));
   } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire, { once: true });

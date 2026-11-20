@@ -443,11 +443,31 @@
 
   function savedAvatarSelection(){
     var confirmed=window.ProfileGooglePhoto&&window.ProfileGooglePhoto.isSelected&&publicProfile&&window.ProfileGooglePhoto.isSelected(getUserKey(currentUser),publicProfile.avatarRevision);
-    return confirmed||hasGoogleAvatar()?'google':publicProfile&&publicProfile.avatarVariant;
+    return confirmed===true||confirmed!==false&&hasGoogleAvatar()?'google':publicProfile&&publicProfile.avatarVariant;
   }
 
   function googleAvatarChoice(displayOnly){
     return window.ProfileGooglePhoto && window.ProfileGooglePhoto.getChoice ? window.ProfileGooglePhoto.getChoice(getUserKey(currentUser),displayOnly) : null;
+  }
+
+  function googleAvatarPresentation(){
+    var api=window.ProfileGooglePhoto,user=getUserKey(currentUser);
+    if(api&&api.getPresentation)return api.getPresentation(user);
+    var choice=googleAvatarChoice(true);return choice?{state:'ready',avatar:choice}:null;
+  }
+
+  function renderGoogleAvatar(image,presentation){
+    var choice=presentation&&presentation.avatar,liveUrl=image.dataset.avatarUrl;
+    var samePhoto=liveUrl&&choice&&typeof choice.url==='string'&&liveUrl.split('?')[0]===choice.url.split('?')[0];
+    image.dataset.googlePhotoState=presentation.state;
+    if(choice){
+      if(!samePhoto&&image._googlePhotoUrl!==choice.url&&window.ProfileClient){image._googlePhotoUrl=choice.url;window.ProfileClient.applyAvatar(image,{avatar:choice});}
+    }else{
+      if(image._googlePhotoUrl&&window.ProfileClient)window.ProfileClient.applyAvatar(image,null);
+      image._googlePhotoUrl=null;image.textContent=presentation.state==='unavailable'?'—':'';
+      if(presentation.state==='pending')image.dataset.avatarLoading='true';else delete image.dataset.avatarLoading;
+      image.setAttribute('aria-busy',String(presentation.state==='pending'));
+    }
   }
 
   function avatarSelectionLocked(displayOnly){
@@ -460,12 +480,13 @@
     var gallery=doc.getElementById('arcadeAvatarGallery');
     var saved=savedAvatarSelection(),locked=avatarSelectionLocked();
     var allowed=allowedAvatarVariants();if(googleAvatarChoice())allowed=allowed.concat(['google']);
+    if(gallery){if(avatarSelection===null||avatarSelection===gallery._savedAvatarChoice)avatarSelection=saved;gallery._savedAvatarChoice=saved;}
     if(avatarMessage==='arcadeAvatarUnsaved'&&avatarSelection===saved)avatarMessage='';
     if(gallery){
       gallery.setAttribute('aria-busy',String(!!avatarSaving||locked));
       Array.prototype.forEach.call(gallery.children,function(button){
         var variant=button.dataset.variant,selected=variant===avatarSelection,isSaved=variant===saved;
-        button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving||avatarSelectionLocked(true);
+        button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving||avatarSelectionLocked(true)||(variant==='google'&&!googleAvatarChoice(true));
         var label=variant==='google'?t('googlePhotoTitle','Google profile photo'):t('arcadeAvatarChoice','Choose avatar')+' '+variant;
         button.setAttribute('aria-label',label+(isSaved?'. '+t('arcadeAvatarCurrent','Saved'):'')+(selected?'. '+t('arcadeAvatarSelected','Selected'):''));
         button.title=variant==='google'?t('googlePhotoTitle','Google profile photo'):variant;
@@ -483,17 +504,14 @@
   function renderAvatarGallery(){
     var gallery=doc.getElementById('arcadeAvatarGallery');
     if(!gallery)return;
-    var allowed=allowedAvatarVariants(true),choice=googleAvatarChoice(true),choices=[];
+    var allowed=allowedAvatarVariants(true),presentation=googleAvatarPresentation(),choices=[];
     if(window.ArcadeAvatars&&publicProfile&&currentUser){
       choices=window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;});
-      if(choice)choices.push('google');
+      if(presentation)choices.push('google');
     }
     var shape=getUserKey(currentUser)+'|'+choices.join('|'),oldPhoto=gallery.querySelector('.arcade-avatar-photo');
     if(gallery._avatarShape===shape){
-      // Re-signing the same copy must not clear its image or restart the renderer's expiry timer.
-      var liveUrl=oldPhoto&&oldPhoto.dataset.avatarUrl;
-      var samePhoto=liveUrl&&choice&&typeof choice.url==='string'&&liveUrl.split('?')[0]===choice.url.split('?')[0];
-      if(oldPhoto&&choice&&!samePhoto&&oldPhoto._googlePhotoUrl!==choice.url&&window.ProfileClient){oldPhoto._googlePhotoUrl=choice.url;window.ProfileClient.applyAvatar(oldPhoto,{avatar:choice});}
+      if(oldPhoto&&presentation)renderGoogleAvatar(oldPhoto,presentation);
       syncAvatarSelection();return;
     }
     if(oldPhoto&&window.ProfileClient)window.ProfileClient.applyAvatar(oldPhoto,null);
@@ -514,7 +532,7 @@
         avatarSelection=variant;avatarMessage=variant===savedAvatarSelection()?'':'arcadeAvatarUnsaved';syncAvatarSelection();
       });
       gallery.appendChild(button);
-      if(variant==='google'&&window.ProfileClient){image._googlePhotoUrl=choice.url;window.ProfileClient.applyAvatar(image,{avatar:choice});}
+      if(variant==='google')renderGoogleAvatar(image,presentation);
     });
     syncAvatarSelection();
   }
@@ -536,6 +554,7 @@
       if(!active())return;
       if(!sameAvatarProfile(publicProfile,request.profile)&&!sameAvatarProfile(publicProfile,profile))throw {code:'stale_profile'};
       renderPublicProfile(profile);avatarSelection=savedAvatarSelection();avatarMessage='arcadeAvatarSaved';
+      window.ProfileClient.clear();
       avatarSaving=null;syncAvatarSelection();
       if(window.ProfileGooglePhoto)await window.ProfileGooglePhoto.load();
     }catch(error){

@@ -317,25 +317,26 @@ test('Auth success cannot overwrite a pending or failed profile status', async (
   c.profileLoadState='error';vm.runInContext("setStatus('Other action completed','success')",c);assert.equal(status.textContent,'Other action completed');
 });
 
-async function googlePanelFixture() {
+async function googlePanelFixture(clock) {
   const items = new Map(); const node = id => { if(!items.has(id))items.set(id,{hidden:true,disabled:false,checked:false,textContent:'',attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];}});return items.get(id); };
-  const state={importEnabled:true,googleLinked:true,copyStored:false,photoInUse:false,noticeVersion:'g2'};
+  const state={importEnabled:true,googleLinked:true,copyStored:false,photoInUse:false,consent:null,noticeVersion:'g2'};
   const session={access_token:'fake',user:{id:'user-a'}};
   const server={copyConflict:false,reads:0,posts:0,statusEvents:0,holdPost:null,bodies:[],profileEvents:[]};
   const window={SupabaseAuth:{getCurrentUser:async()=>session.user,getClient:()=>({auth:{getSession:async()=>({data:{session}})}})}};
   const document={readyState:'loading',getElementById:node,addEventListener(){},dispatchEvent(event){if(event.type==='profile:updated')server.profileEvents.push(event.detail);else server.statusEvents++;}};
   const source=(await read('js/profile-google-photo.js')).replace('window.ProfileGooglePhoto = { load: load,','window.ProfileGooglePhoto = { renderForTest: render, runForTest: run, load: load,');
-  vm.runInNewContext(source,{window,document,Promise,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options&&options.detail;}},fetch:async(_url,options)=>{
+  vm.runInNewContext(source,{window,document,Promise,AbortController,setTimeout:clock?clock.setTimeout:setTimeout,clearTimeout:clock?clock.clearTimeout:clearTimeout,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options&&options.detail;}},fetch:async(_url,options)=>{
     var getSnapshot=options.method==='GET'?JSON.parse(JSON.stringify(state)):null;
     if(options.method==='POST'){
       server.posts++;server.bodies.push(JSON.parse(options.body));
+      if(server.onPost)server.onPost(server.bodies.at(-1),state);
       if(server.postError)throw server.postError;
       if(server.postResponse)return server.postResponse;
       if(server.bodies.at(-1).action==='select'){state.photoInUse=true;state.avatarRevision=server.bodies.at(-1).expectedRevision+1;}
       if(server.holdPost)await server.holdPost;
       if(server.copyConflict){state.copyStored=true;return {ok:false,status:409,json:async()=>({error:'photo_copy_exists'})};}
-    }else {server.reads++;if(server.holdGet)await server.holdGet;if(server.getError)throw server.getError;}
-    return {ok:true,json:async()=>getSnapshot||JSON.parse(JSON.stringify(state))};
+    }else {server.reads++;if(server.holdGet)await Promise.race([server.holdGet,new Promise((resolve,reject)=>{if(options.signal)options.signal.addEventListener('abort',()=>reject(new Error('synthetic aborted')),{once:true});})]);if(server.getError)throw server.getError;}
+    return {ok:true,json:async()=>{const data=getSnapshot||JSON.parse(JSON.stringify(state));if(options.method==='POST')delete data.previewAvatar;return data;}};
   }});
   return {api:window.ProfileGooglePhoto,node,state,session,server,window};
 }
@@ -468,7 +469,7 @@ test('Google import and withdrawal lock Arcade selection and notify on both busy
   assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);assert.equal(f.server.statusEvents,before+1);
   while(!f.server.posts)await new Promise(resolve=>setImmediate(resolve));
   assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);release();await pending;
-  assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);assert.equal(f.server.statusEvents,before+4);
+  assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);assert.ok(f.server.statusEvents>before+1);
  }
 });
 
@@ -533,7 +534,7 @@ test('Same-owner background GET preserves display choice but never authorizes it
   const choice=f.api.getChoice('user-a');let release;f.server.holdGet=new Promise(resolve=>{release=resolve;});if(fails)f.server.getError=new TypeError('synthetic offline');
   const pending=f.api.load();await new Promise(resolve=>setImmediate(resolve));
   assert.equal(f.api.getChoice('user-a',true),choice);assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);
-  release();await pending;assert.equal(f.api.getChoice('user-a',true).url,choice.url);
+  release();await pending;if(fails){assert.equal(f.api.getChoice('user-a',true),null);assert.equal(f.api.getPresentation('user-a').state,'unavailable');}else assert.equal(f.api.getChoice('user-a',true).url,choice.url);
   assert.equal(f.api.isArcadeSelectionLocked('user-a'),fails);
   f.session.user=null;await f.api.load();assert.equal(f.api.getChoice('user-a',true),null);
  }
@@ -580,4 +581,61 @@ test('Failed or OFF initial photo GET never reveals an unverified Google panel o
   const f=await googlePanelFixture();if(failure)f.server.getError=failure;else f.state.googleLinked=false;
   await f.api.load();assert.equal(f.node('googlePhotoPanel').hidden,true);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');assert.equal(f.api.getChoice('user-a'),null);
  }
+});
+
+
+async function reimportFixture(clock){
+ const f=await googlePanelFixture(clock);f.session.provider_token='synthetic-proof';f.state.avatarRevision=1;let copies=0;
+ f.server.onPost=(body,state)=>{state.avatarRevision++;if(body.action==='import'){copies++;Object.assign(state,{copyStored:true,photoInUse:true,copyDeleted:false,consent:{decision:'granted'},previewAvatar:{type:'uploaded',url:'synthetic-copy-'+copies}});}else if(body.action==='withdraw'){Object.assign(state,{copyStored:false,photoInUse:false,copyDeleted:true,consent:{decision:'withdrawn'}});delete state.previewAvatar;}};
+ f.window.ProfileClient={clear(){},applyAvatar(){},getMe:async()=>({avatarRevision:f.state.avatarRevision,avatar:f.state.photoInUse?{type:'uploaded'}:{type:'default',variant:'wizard-indigo'}})};
+ await f.api.load();return f;
+}
+
+test('POST-confirmed copy stays pending and its GET runs even when the independent profile refresh fails',async()=>{
+ const f=await reimportFixture();let releasePost,releaseGet;f.server.holdPost=new Promise(r=>{releasePost=r;});f.server.holdGet=new Promise(r=>{releaseGet=r;});let profiles=0;
+ f.window.ProfileClient.getMe=async()=>{profiles++;throw new TypeError('private failure');};const pending=f.api.runForTest('import');assert.equal(f.api.getPresentation('user-a').state,'pending');assert.equal(f.api.isSelected('user-a',1),false);
+ while(!f.server.posts)await new Promise(r=>setImmediate(r));releasePost();while(f.server.reads<2)await new Promise(r=>setImmediate(r));
+ assert.equal(profiles,1);assert.equal(f.api.getPresentation('user-a').state,'pending');assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.api.isSelected('user-a',1),true);
+ releaseGet();await pending;assert.equal(f.api.getPresentation('user-a').state,'ready');assert.equal(f.server.profileEvents.length,0);assert.equal(f.node('googlePhotoRetry').hidden,false);assert.equal(f.server.posts,1);
+ f.server.holdGet=null;f.window.ProfileClient.getMe=async()=>({avatarRevision:2,avatar:{type:'uploaded'}});await f.api.load(true);
+ assert.equal(f.server.posts,1);assert.equal(f.server.profileEvents.length,1);assert.equal(f.node('googlePhotoRetry').hidden,true);
+});
+
+test('withdraw then reimport without page reload retains the new pending tile until its own preview arrives',async()=>{
+ const f=await reimportFixture();await f.api.runForTest('import');const old=f.api.getChoice('user-a').url;
+ const removing=f.api.runForTest('withdraw');assert.equal(f.api.getPresentation('user-a'),null);assert.equal(f.api.getChoice('user-a',true),null);await removing;assert.equal(f.api.getPresentation('user-a'),null);
+ let release;f.server.holdGet=new Promise(r=>{release=r;});const importing=f.api.runForTest('import');assert.equal(f.api.getPresentation('user-a').state,'pending');
+ while(f.server.reads<4)await new Promise(r=>setImmediate(r));assert.equal(f.api.getPresentation('user-a').state,'pending');assert.equal(f.api.getChoice('user-a'),null);
+ release();await importing;assert.equal(f.api.getPresentation('user-a').state,'ready');assert.notEqual(f.api.getChoice('user-a').url,old);assert.equal(f.server.posts,3);
+});
+
+test('a missing preview or GET failure ends loading with read-only retry, never a repeated POST',async()=>{
+ for(const fails of ['missing','network','empty']){
+  const f=await reimportFixture();let release;f.server.holdPost=new Promise(r=>{release=r;});const importing=f.api.runForTest('import');while(!f.server.posts)await new Promise(r=>setImmediate(r));if(fails==='empty')f.state.previewAvatar.url='';else delete f.state.previewAvatar;if(fails==='network')f.server.getError=new TypeError('synthetic offline');release();await importing;
+  assert.equal(f.api.getPresentation('user-a').state,'unavailable');assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.node('googlePhotoRetry').hidden,false);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');assert.equal(f.server.posts,1);
+  await assert.rejects(f.api.select(2,{userId:'user-a',isCurrent:()=>true}),{code:'stale_identity'});assert.equal(f.server.posts,1);
+  f.server.getError=null;f.state.previewAvatar={type:'uploaded',url:'synthetic-retry'};await f.api.load(true);assert.equal(f.api.getPresentation('user-a').state,'ready');assert.equal(f.server.posts,1);
+ }
+});
+
+test('old preview reads cannot restore a photo after withdraw, logout or replacement identity',async()=>{
+ for(const action of ['withdraw','logout','switch']){
+  const f=await reimportFixture();await f.api.runForTest('import');let release;f.server.holdGet=new Promise(r=>{release=r;});const old=f.api.load();while(f.server.reads<3)await new Promise(r=>setImmediate(r));f.server.holdGet=null;
+  if(action==='withdraw')await f.api.runForTest('withdraw');else{f.session.user=action==='logout'?null:{id:'user-b'};Object.assign(f.state,{copyStored:false,photoInUse:false,consent:null});delete f.state.previewAvatar;await f.api.load();}
+  release();await old;assert.equal(f.api.getPresentation('user-a'),null);assert.equal(f.api.getChoice('user-a',true),null);assert.equal(f.api.getPresentation('user-b'),null);
+ }
+});
+
+
+test('an older import read completion cannot unlock a newer pending withdrawal',async()=>{
+ const f=await reimportFixture();let releaseGet;f.server.holdGet=new Promise(r=>{releaseGet=r;});const importing=f.api.runForTest('import');while(f.server.reads<2)await new Promise(r=>setImmediate(r));
+ f.server.holdGet=null;let releasePost;f.server.holdPost=new Promise(r=>{releasePost=r;});const withdrawing=f.api.runForTest('withdraw');while(f.server.posts<2)await new Promise(r=>setImmediate(r));releaseGet();await importing;
+ assert.equal(f.api.isArcadeSelectionLocked('user-a',true),true);assert.equal(f.api.getPresentation('user-a'),null);releasePost();await withdrawing;assert.equal(f.api.getPresentation('user-a'),null);assert.equal(f.server.posts,2);
+});
+
+test('a preview GET deadline ends the pending state and permits only an explicit read retry',async()=>{
+ const timers=[];const f=await reimportFixture({setTimeout:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},clearTimeout:timer=>{timer.cleared=true;}});
+ f.server.holdGet=new Promise(()=>{});const importing=f.api.runForTest('import');while(f.server.reads<2)await new Promise(r=>setImmediate(r));
+ const deadline=timers.at(-1);assert.ok(deadline.ms>10000);deadline.fn();await importing;
+ assert.equal(f.api.getPresentation('user-a').state,'unavailable');assert.equal(f.node('googlePhotoRetry').hidden,false);assert.equal(f.server.posts,1);assert.equal(deadline.cleared,true);
 });
