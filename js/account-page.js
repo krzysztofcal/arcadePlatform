@@ -446,8 +446,8 @@
     return confirmed||hasGoogleAvatar()?'google':publicProfile&&publicProfile.avatarVariant;
   }
 
-  function googleAvatarChoice(){
-    return window.ProfileGooglePhoto && window.ProfileGooglePhoto.getChoice ? window.ProfileGooglePhoto.getChoice(getUserKey(currentUser)) : null;
+  function googleAvatarChoice(displayOnly){
+    return window.ProfileGooglePhoto && window.ProfileGooglePhoto.getChoice ? window.ProfileGooglePhoto.getChoice(getUserKey(currentUser),displayOnly) : null;
   }
 
   function avatarSelectionLocked(){
@@ -466,7 +466,8 @@
         button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving||locked;
         var label=variant==='google'?t('googlePhotoTitle','Google profile photo'):t('arcadeAvatarChoice','Choose avatar')+' '+variant;
         button.setAttribute('aria-label',label+(isSaved?'. '+t('arcadeAvatarCurrent','Saved'):'')+(selected?'. '+t('arcadeAvatarSelected','Selected'):''));
-        button.lastChild.hidden=!isSaved;
+        button.title=variant==='google'?t('googlePhotoTitle','Google profile photo'):variant;
+        button.lastChild.textContent=t('arcadeAvatarCurrent','Saved');button.lastChild.hidden=!isSaved;
       });
     }
     if(nodes.publicAvatarSave){
@@ -480,13 +481,22 @@
   function renderAvatarGallery(){
     var gallery=doc.getElementById('arcadeAvatarGallery');
     if(!gallery)return;
-    var oldPhoto=gallery.querySelector('.arcade-avatar-photo');
+    var allowed=allowedAvatarVariants(),choice=googleAvatarChoice(true),choices=[];
+    if(window.ArcadeAvatars&&publicProfile&&currentUser){
+      choices=window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;});
+      if(choice)choices.push('google');
+    }
+    var shape=getUserKey(currentUser)+'|'+choices.join('|'),oldPhoto=gallery.querySelector('.arcade-avatar-photo');
+    if(gallery._avatarShape===shape){
+      // Re-signing the same copy must not clear its image or restart the renderer's expiry timer.
+      var liveUrl=oldPhoto&&oldPhoto.dataset.avatarUrl;
+      var samePhoto=liveUrl&&choice&&typeof choice.url==='string'&&liveUrl.split('?')[0]===choice.url.split('?')[0];
+      if(oldPhoto&&choice&&!samePhoto&&oldPhoto._googlePhotoUrl!==choice.url&&window.ProfileClient){oldPhoto._googlePhotoUrl=choice.url;window.ProfileClient.applyAvatar(oldPhoto,{avatar:choice});}
+      syncAvatarSelection();return;
+    }
     if(oldPhoto&&window.ProfileClient)window.ProfileClient.applyAvatar(oldPhoto,null);
-    gallery.textContent='';
-    var allowed=allowedAvatarVariants(),choice=googleAvatarChoice();
-    if(!window.ArcadeAvatars||!publicProfile||!currentUser){syncAvatarSelection();return;}
-    var choices=window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;});
-    if(choice)choices.push('google');
+    gallery.textContent='';gallery._avatarShape=shape;
+    if(!choices.length){syncAvatarSelection();return;}
     if(avatarSelection===null)avatarSelection=savedAvatarSelection();
     if(choices.length&&choices.indexOf(avatarSelection)===-1){avatarSelection=choices.indexOf(savedAvatarSelection())!==-1?savedAvatarSelection():null;}
     choices.forEach(function(variant){
@@ -502,7 +512,7 @@
         avatarSelection=variant;avatarMessage=variant===savedAvatarSelection()?'':'arcadeAvatarUnsaved';syncAvatarSelection();
       });
       gallery.appendChild(button);
-      if(variant==='google'&&window.ProfileClient)window.ProfileClient.applyAvatar(image,{avatar:choice});
+      if(variant==='google'&&window.ProfileClient){image._googlePhotoUrl=choice.url;window.ProfileClient.applyAvatar(image,{avatar:choice});}
     });
     syncAvatarSelection();
   }
@@ -524,7 +534,8 @@
       if(!active())return;
       if(!sameAvatarProfile(publicProfile,request.profile)&&!sameAvatarProfile(publicProfile,profile))throw {code:'stale_profile'};
       renderPublicProfile(profile);avatarSelection=savedAvatarSelection();avatarMessage='arcadeAvatarSaved';
-      if(request.variant!=='google'&&window.ProfileGooglePhoto)await window.ProfileGooglePhoto.load();
+      avatarSaving=null;syncAvatarSelection();
+      if(window.ProfileGooglePhoto)await window.ProfileGooglePhoto.load();
     }catch(error){
       if(!active())return;
       var code=error&&error.code;

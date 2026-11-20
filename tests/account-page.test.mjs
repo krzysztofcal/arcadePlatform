@@ -1327,3 +1327,33 @@ test('Google is the seventeenth ordinary choice and Arcade remains selectable wi
  h.windowObj.ProfileGooglePhoto.load=async()=>{};await flush();await flush();
  assert.equal(h.selected(),h.variants[1]);assert.equal(h.get('arcadeAvatarGallery').children.length,17);
 });
+
+
+test('Saving Arcade keeps the same Google tile and ends saving before a delayed status GET',async()=>{
+ const h=await avatarPickerHarness();let release,loading=false;const choice={type:'uploaded',url:'synthetic-preview'};
+ h.windowObj.ProfileGooglePhoto={getChoice:(_id,display)=>!loading||display?choice:null,isArcadeSelectionLocked:()=>loading,load:()=>{loading=true;h.document.dispatchEvent({type:'profile:photo-status'});return new Promise(resolve=>{release=()=>{loading=false;h.document.dispatchEvent({type:'profile:photo-status'});resolve();};});}};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'uploaded'},avatarRevision:2});
+ const gallery=h.get('arcadeAvatarGallery'),google=gallery.children.find(b=>b.dataset.variant==='google'),image=google.children[0],first=gallery.children[0];
+ h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(gallery.children[0],first);
+ h.click(h.variants[1]);h.save();assert.equal(h.get('publicAvatarSaveLabel').textContent,'arcadeAvatarSaving');
+ h.writes[0].resolve({handle:'fixture',avatarVariant:h.variants[1],avatar:{type:'default',variant:h.variants[1]},avatarRevision:3});await flush();await flush();
+ assert.equal(loading,true);assert.equal(h.get('publicAvatarSaveLabel').textContent,'arcadeAvatarSet');assert.equal(h.get('publicAvatarStatus').textContent,'arcadeAvatarSaved');
+ assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(google.children[0],image);assert.equal(google.disabled,true);
+ release();await flush();assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(google.disabled,false);
+ h.logout();await flush();assert.equal(gallery.children.length,0);
+});
+
+
+test('Re-signing the same Google object preserves the live image and its expiry timer',async()=>{
+ const h=await avatarPickerHarness();let choice={type:'uploaded',url:'https://stage.test/object/photo?token=first'};let applies=0;
+ h.windowObj.ProfileGooglePhoto={getChoice:()=>choice,isArcadeSelectionLocked:()=>false};
+ h.windowObj.ProfileClient.applyAvatar=(node,profile)=>{if(!node)return;applies++;if(profile){node.dataset.avatarUrl=profile.avatar.url;node.profileAvatarExpiry=applies;}else delete node.dataset.avatarUrl;};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'uploaded'},avatarRevision:2});
+ const tile=h.get('arcadeAvatarGallery').children.find(b=>b.dataset.variant==='google'),image=tile.children[0],deadline=image.profileAvatarExpiry,initial=applies;
+ choice={type:'uploaded',url:'https://stage.test/object/photo?token=second'};h.document.dispatchEvent({type:'profile:photo-status'});
+ assert.equal(applies,initial);assert.equal(image.dataset.avatarUrl,'https://stage.test/object/photo?token=first');assert.equal(image.profileAvatarExpiry,deadline);
+ delete image.dataset.avatarUrl;h.document.dispatchEvent({type:'profile:photo-status'});
+ assert.equal(applies,initial+1);assert.equal(image.dataset.avatarUrl,choice.url);
+ choice={type:'uploaded',url:'https://stage.test/object/replacement?token=third'};h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(applies,initial+2,'a different copy replaces the prior image');
+ assert.equal(h.get('arcadeAvatarGallery').children.find(b=>b.dataset.variant==='google'),tile);
+});

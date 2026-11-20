@@ -326,6 +326,7 @@ async function googlePanelFixture() {
   const document={readyState:'loading',getElementById:node,addEventListener(){},dispatchEvent(event){if(event.type==='profile:updated')server.profileEvents.push(event.detail);else server.statusEvents++;}};
   const source=(await read('js/profile-google-photo.js')).replace('window.ProfileGooglePhoto = { load: load,','window.ProfileGooglePhoto = { renderForTest: render, runForTest: run, load: load,');
   vm.runInNewContext(source,{window,document,Promise,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options&&options.detail;}},fetch:async(_url,options)=>{
+    var getSnapshot=options.method==='GET'?JSON.parse(JSON.stringify(state)):null;
     if(options.method==='POST'){
       server.posts++;server.bodies.push(JSON.parse(options.body));
       if(server.postError)throw server.postError;
@@ -333,8 +334,8 @@ async function googlePanelFixture() {
       if(server.bodies.at(-1).action==='select'){state.photoInUse=true;state.avatarRevision=server.bodies.at(-1).expectedRevision+1;}
       if(server.holdPost)await server.holdPost;
       if(server.copyConflict){state.copyStored=true;return {ok:false,status:409,json:async()=>({error:'photo_copy_exists'})};}
-    }else {server.reads++;if(server.getError)throw server.getError;}
-    return {ok:true,json:async()=>JSON.parse(JSON.stringify(state))};
+    }else {server.reads++;if(server.holdGet)await server.holdGet;if(server.getError)throw server.getError;}
+    return {ok:true,json:async()=>getSnapshot||JSON.parse(JSON.stringify(state))};
   }});
   return {api:window.ProfileGooglePhoto,node,state,session,server,window};
 }
@@ -347,7 +348,7 @@ test('Google photo offers, active photos and pending deletion have exclusive act
 
 test('Google reauthentication is offered only after a failed import and hides the import form',async()=>{
   const f=await googlePanelFixture();await f.api.load();assert.equal(f.node('googlePhotoReconnect').hidden,true);
-  await f.api.runForTest('import');assert.equal(f.node('googlePhotoReconnect').hidden,false);assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoWithdraw').hidden,true);
+  await f.api.runForTest('import');assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);assert.equal(f.server.posts,0);assert.equal(f.server.reads,1);assert.equal(f.node('googlePhotoReconnect').hidden,false);assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoWithdraw').hidden,true);
 });
 
 
@@ -523,4 +524,45 @@ test('Confirmed withdrawal is not reported as failed when the subsequent profile
  Object.assign(f.state,{copyStored:false,consent:{decision:'withdrawn'},copyDeleted:true});f.window.ProfileClient={clear(){},getMe:async()=>{throw new TypeError('synthetic read failed');}};
  await f.api.runForTest('withdraw');assert.equal(f.server.posts,1);assert.equal(f.server.reads,2);assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);
  assert.match(f.node('googlePhotoState').textContent,/copy was deleted/);assert.equal(f.api.getChoice('user-a'),null);
+});
+
+
+test('Same-owner background GET preserves display choice but never authorizes it before verification',async()=>{
+ for(const fails of [false,true]){
+  const f=await googlePanelFixture();Object.assign(f.state,{copyStored:true,consent:{decision:'granted'},photoInUse:true,avatarRevision:2,previewAvatar:{type:'uploaded',url:'synthetic-preview'}});await f.api.load();
+  const choice=f.api.getChoice('user-a');let release;f.server.holdGet=new Promise(resolve=>{release=resolve;});if(fails)f.server.getError=new TypeError('synthetic offline');
+  const pending=f.api.load();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.api.getChoice('user-a',true),choice);assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);
+  release();await pending;assert.equal(f.api.getChoice('user-a',true).url,choice.url);
+  assert.equal(f.api.isArcadeSelectionLocked('user-a'),fails);
+  f.session.user=null;await f.api.load();assert.equal(f.api.getChoice('user-a',true),null);
+ }
+});
+
+test('Verified missing or withdrawn copy removes the display choice after a background refresh',async()=>{
+ for(const withdrawn of [false,true]){
+  const f=await googlePanelFixture();Object.assign(f.state,{copyStored:true,consent:{decision:'granted'},previewAvatar:{type:'uploaded',url:'synthetic-preview'}});await f.api.load();
+  delete f.state.previewAvatar;if(withdrawn){f.state.consent={decision:'withdrawn'};f.state.copyStored=false;}
+  await f.api.load();assert.equal(f.api.getChoice('user-a',true),null);assert.equal(f.api.getChoice('user-a'),null);
+ }
+});
+
+
+test('Background status never retains a previous account photo after identity change or access denial',async()=>{
+ for(const denied of [false,true]){
+  const f=await googlePanelFixture();Object.assign(f.state,{copyStored:true,consent:{decision:'granted'},previewAvatar:{type:'uploaded',url:'synthetic-preview'}});await f.api.load();
+  let release;f.server.holdGet=new Promise(resolve=>{release=resolve;});const pending=f.api.load();while(f.server.reads<2)await new Promise(resolve=>setImmediate(resolve));
+  if(denied)f.server.getError={status:403};else f.session.user={id:'user-b'};release();await pending;
+  assert.equal(f.api.getChoice('user-a',true),null);assert.equal(f.api.getChoice('user-b',true),null);
+ }
+});
+
+
+test('Withdrawal invalidates an older pending status GET so it cannot restore the deleted photo',async()=>{
+ const f=await googlePanelFixture();Object.assign(f.state,{copyStored:true,consent:{decision:'granted'},photoInUse:true,previewAvatar:{type:'uploaded',url:'synthetic-preview'}});await f.api.load();
+ let release;f.server.holdGet=new Promise(resolve=>{release=resolve;});const old=f.api.load();while(f.server.reads<2)await new Promise(resolve=>setImmediate(resolve));
+ f.server.holdGet=null;Object.assign(f.state,{copyStored:false,photoInUse:false,consent:{decision:'withdrawn'},copyDeleted:true});delete f.state.previewAvatar;
+ await f.api.runForTest('withdraw');release();await old;
+ assert.equal(f.api.getChoice('user-a',true),null);assert.equal(f.node('googlePhotoWithdraw').hidden,true);assert.equal(f.node('googlePhotoOffer').hidden,false);
+ assert.equal(f.server.posts,1);assert.equal(f.server.reads,3);
 });

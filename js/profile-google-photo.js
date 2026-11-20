@@ -139,7 +139,7 @@
   async function run(action){
     if (busy || !owner) return;
     var expectedUser = owner;
-    var expectedGeneration = generation;
+    var expectedGeneration = ++generation;
     busy = true;
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
     try {
@@ -171,7 +171,7 @@
         if(owner===expectedUser&&action==='withdraw'&&result)setState(result.copyDeleted===true?t('googlePhotoWithdrawn','Your Google photo is no longer used and our copy was deleted.'):t('googlePhotoCopyPending','Deletion is not confirmed. Retry withdrawal.'));
         return;
       }
-      if(error&&error.status)statusResolved=true;else statusResolved=false;
+      statusResolved=!!(error&&error.status)||code==='google_proof_required';
       render(status, action === 'import' && (code === 'google_proof_required' || code === 'google_proof_invalid'));
       setState(errorText(code));
     } finally {
@@ -185,13 +185,12 @@
     if(busy||!expectedUser||!getChoice(expectedUser)||!guard||guard.userId!==expectedUser||!guard.isCurrent())throw staleError();
     busy=true;document.dispatchEvent(new CustomEvent('profile:photo-status'));
     try{
-      await request('POST',{action:'select',expectedRevision:expectedRevision},expectedUser,false,guard);
+      var result=await request('POST',{action:'select',expectedRevision:expectedRevision},expectedUser,false,guard);
       if(generation!==expectedGeneration||owner!==expectedUser||!guard.isCurrent())throw staleError();
       var profile=await window.ProfileClient.getMe(true);
-      var refreshed=await request('GET',null,expectedUser,false);
       if(generation!==expectedGeneration||owner!==expectedUser||!guard.isCurrent())throw staleError();
-      statusResolved=true;render(refreshed);
-      if(refreshed.avatarRevision!==undefined&&refreshed.avatarRevision!==profile.avatarRevision)throw staleError();
+      if(result.avatarRevision!==undefined&&result.avatarRevision!==profile.avatarRevision)throw staleError();
+      statusResolved=true;render(Object.assign({},status,result));
       document.dispatchEvent(new CustomEvent('profile:updated',{detail:profile}));
       return profile;
     }catch(error){
@@ -203,8 +202,8 @@
     }finally{busy=false;document.dispatchEvent(new CustomEvent('profile:photo-status'));}
   }
 
-  function getChoice(userId){
-    return owner===userId&&statusResolved&&status&&status.consent&&status.consent.decision==='granted'&&status.copyStored===true&&status.previewAvatar&&status.previewAvatar.type==='uploaded'
+  function getChoice(userId,displayOnly){
+    return owner===userId&&(statusResolved||displayOnly===true)&&status&&status.consent&&status.consent.decision==='granted'&&status.copyStored===true&&status.previewAvatar&&status.previewAvatar.type==='uploaded'
       ? status.previewAvatar:null;
   }
 
@@ -265,20 +264,22 @@
     var previousOwner=owner,previousStatus=status;
     var current = ++generation;
     statusResolved=false;
-    render(null);
+    document.dispatchEvent(new CustomEvent('profile:photo-status'));
     var auth = window.SupabaseAuth;
     var user = auth && typeof auth.getCurrentUser === 'function' ? await auth.getCurrentUser() : null;
     if (current !== generation) return;
     owner = user && user.id ? String(user.id) : null;
+    if(owner!==previousOwner||!owner)render(null);
     if (!owner) return;
     try {
       var result = await request('GET', null, owner, false);
       if (current === generation){statusResolved=true;render(result);}
     } catch (error){
-      if(current===generation&&error&&error.status===404){statusResolved=true;render(null);}
-      if(current===generation&&owner===previousOwner&&previousStatus&&error&&error.code!=='stale_identity'&&error.status!==404){
-        // Only retain the owner's withdrawal action, never an unverified photo or selectable copy.
-        render({consent:previousStatus.consent,copyStored:previousStatus.copyStored,photoInUse:false,importEnabled:false});
+      if(current===generation&&error&&error.code==='stale_identity'){owner=null;render(null);}
+      if(current===generation&&error&&[401,403,404].indexOf(error.status)!==-1){statusResolved=error.status===404;render(null);}
+      if(current===generation&&owner===previousOwner&&previousStatus&&error&&error.code!=='stale_identity'&&[401,403,404].indexOf(error.status)===-1){
+        // Keep only same-owner presentation and withdrawal; unresolved status never authorizes selection.
+        render({consent:previousStatus.consent,copyStored:previousStatus.copyStored,previewAvatar:previousStatus.previewAvatar,photoInUse:false,importEnabled:false});
         setState(t('googlePhotoStatusUnavailable','Photo status could not be confirmed. Refresh to try again; you can still withdraw consent.'));
       }
       // 404 means the feature is off on this environment: the panel stays hidden.
@@ -312,7 +313,7 @@
       auth.signInWithGoogle().catch(function(){ setState(errorText('request_failed')); });
     });
     var auth = window.SupabaseAuth;
-    if (auth && typeof auth.onAuthChange === 'function') auth.onAuthChange(function(_event,user){ if(busy&&user&&String(user.id)===owner)return;load(); });
+    if (auth && typeof auth.onAuthChange === 'function') auth.onAuthChange(function(_event,user){ if(busy&&user&&String(user.id)===owner)return;if(!user||String(user.id)!==owner){owner=null;statusResolved=false;render(null);}load(); });
     load();
   }
 
