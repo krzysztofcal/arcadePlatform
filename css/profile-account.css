@@ -1,5 +1,5 @@
 .arcade-avatar-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(60px,1fr));gap:10px;width:100%;min-width:0;max-width:560px;margin:16px 0;}
-.arcade-avatar-choice{position:relative;display:grid;place-items:center;padding:5px;background:#0b1020;border:2px solid #28334d;border-radius:12px;cursor:pointer;}
+.arcade-avatar-choice{position:relative;display:grid;place-items:center;grid-template-rows:48px 14px;height:80px;min-width:0;box-sizing:border-box;padding:5px;background:#0b1020;border:2px solid #28334d;border-radius:12px;cursor:pointer;}
 .arcade-avatar-choice[aria-pressed="true"]{border-color:#6ee7e7;box-shadow:0 0 0 2px #6ee7e733;}
 .arcade-avatar-choice img{display:block;border-radius:8px;image-rendering:pixelated;}
 .arcade-terms-dialog{max-width:480px;width:calc(100% - 40px);border:1px solid #526080;border-radius:18px;background:#10162a;color:#edf3ff;padding:24px;font-family:inherit;}
@@ -53,7 +53,7 @@
 #account-deletion{border-color:rgba(255,123,123,.4);background:transparent;margin-top:24px;max-width:540px;padding:24px;scroll-margin-top:80px;}
 #account-deletion[hidden]{display:none!important;}
 .account-header-card{display:flex;align-items:center;gap:16px;padding:18px 20px;}
-.account-header-card .av{width:64px;height:64px;border-radius:50%;background:var(--sf2) center/cover;border:2px solid var(--ac);flex:0 0 64px;}
+.account-header-card .av{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;background:var(--sf2) center/cover;border:2px solid var(--ac);flex:0 0 64px;}
 .account-header-card .h2{font-size:20px;font-weight:800;margin:0;}
 .account-email-private{display:inline-block;font-size:12px;color:var(--mu);font-weight:600;}
 .account-settings-card{padding:4px 18px;}
@@ -75,10 +75,12 @@
 .account-danger-zone{border-color:rgba(255,123,123,.45);background:transparent;border-radius:20px;padding:20px;margin-top:20px;scroll-margin-top:80px;}
 @keyframes accountDangerPulse{0%{box-shadow:0 0 0 0 rgba(255,123,123,.5);}70%{box-shadow:0 0 0 10px rgba(255,123,123,0);}100%{box-shadow:0 0 0 0 rgba(255,123,123,0);}}
 .account-danger-highlight{animation:accountDangerPulse 1.5s ease-out 2;border-color:var(--red)!important;}
-dialog#accountDeletionDialog{border:1px solid var(--bd);border-radius:22px;background:var(--sf);color:var(--tx);padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.7);max-width:440px;width:calc(100% - 32px);}
-dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filter:blur(4px);}
+dialog.account-delete-dialog{border:1px solid var(--bd);border-radius:22px;background:var(--sf);color:var(--tx);padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.7);max-width:440px;width:calc(100% - 32px);}
+dialog.account-delete-dialog::backdrop{background:rgba(0,0,0,.75);backdrop-filter:blur(4px);}
 .account-delete-dialog__content{display:flex;flex-direction:column;gap:14px;}
 .account-delete-dialog__actions{display:flex;gap:10px;margin-top:6px;}
+#googlePhotoWithdrawDialog .account-delete-dialog__actions{flex-direction:column;}
+#googlePhotoWithdrawDialog .btn{white-space:normal;}
 .public-profile-editor__identity{display:flex;align-items:center;gap:12px;}
 .public-profile-editor__avatar{position:relative;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 16px/1 Poppins,sans-serif;}
 .public-profile-editor__avatar.profile-avatar--uploaded{background-position:center;background-size:cover;}
@@ -108,3 +110,14 @@ dialog#accountDeletionDialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 [data-admin-only][hidden],.account-links a[hidden]{display:none!important;}
 .account-note a{color:var(--ac);font-weight:700;text-decoration:none;}
 .account-note a:hover{text-decoration:underline;}
+
+.google-photo{display:grid;gap:8px;margin:12px 0;padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;}
+.google-photo[hidden]{display:none!important;}
+.google-photo [hidden]{display:none!important;}
+.google-photo legend{padding:0 6px;font-weight:700;}
+.google-photo__consent{display:flex;gap:8px;align-items:flex-start;}
+
+.arcade-avatar-photo{display:grid;place-items:center;width:48px;height:48px;border-radius:8px;}
+
+.arcade-avatar-photo[data-avatar-loading="true"]::after{content:"";width:16px;height:16px;border:2px solid #526080;border-top-color:#6ee7e7;border-radius:50%;animation:public-avatar-spin .8s linear infinite;}
+.account-header-card .av[data-avatar-loading="true"]::after{content:"";width:16px;height:16px;border:2px solid #526080;border-top-color:#6ee7e7;border-radius:50%;animation:public-avatar-spin .8s linear infinite;}

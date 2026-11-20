@@ -306,7 +306,7 @@
   function applyProfileAvatar(node, profile, name){
     if (!node) return;
     if (window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function'){
-      window.ProfileClient.applyAvatar(node, profile || { displayName: name, avatar: { variant: 'default' } });
+      window.ProfileClient.applyAvatar(node, profile);
       return;
     }
     if(profile&&window.ArcadeAvatars){window.ArcadeAvatars.apply(node,profile);return;}
@@ -401,6 +401,9 @@
   function applyResolvedUser(user){
     var previousUserId = state.user && state.user.id ? String(state.user.id) : null;
     var ui = userUiState();
+    var nextUserId = user && user.id ? String(user.id) : null;
+    // Token refresh and repeated sign-in events do not change the profile owner.
+    if (previousUserId !== nextUserId && window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
     if (!user || !user.id){
       if (ui && previousUserId) ui.clearUser(previousUserId);
       if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
@@ -411,7 +414,8 @@
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
     var hydrated = ui ? ui.hydrate(userId) : { generation: 0, profile: null };
     if (!ui) setUserUiState('loading');
-    renderUser(user, hydrated.profile || null);
+    // Hydrated names are useful; cached avatars need a fresh server confirmation.
+    renderUser(user, hydrated.profile ? { displayName: hydrated.profile.displayName } : null);
     if (ui && hydrated.profile) ui.markSliceApplied(userId, 'profile', 'hydrated');
     refreshProfile(user, hydrated.generation, !!hydrated.profile);
   }
@@ -536,14 +540,15 @@
   }
 
   function hydrateSession(){
+    var authRevision = 0;
     renderUser(null, null);
 
     getCurrentUser().then(function(user){
-      applyResolvedUser(user);
+      if (authRevision === 0) applyResolvedUser(user);
     });
 
     onAuthChange(function(_event, user){
-      if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
+      authRevision += 1;
       applyResolvedUser(user);
     });
   }

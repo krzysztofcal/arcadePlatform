@@ -13,6 +13,7 @@
   var avatarSaving = null;
   var avatarMessage = '';
   var publicProfileGeneration = 0;
+  var profileLoadState = 'idle';
   var publicProfileSaveResetTimer = null;
   var passwordRecoveryActive = false;
   var signupConfirmationPending = false;
@@ -151,11 +152,15 @@
     node.style.display = isVisible ? '' : 'none';
   }
 
-  function setStatus(message, tone){
+  function setStatus(message, tone, source){
     if (!nodes.status) return;
+    // A repeated Auth success must not replace a pending or failed profile read.
+    if (source === 'auth' && currentUser && !deletionReceivedOwnerId && tone === 'success' && (profileLoadState === 'loading' || profileLoadState === 'error')) return;
     if (deletionReceivedOwnerId){ message = deletionReceivedMessage(); tone = 'success'; }
     nodes.status.textContent = message || '';
     nodes.status.dataset.tone = tone || '';
+    nodes.status.dataset.source = source || 'general';
+    nodes.status.dataset.profileState = profileLoadState;
     nodes.status.hidden = !message;
   }
 
@@ -270,11 +275,11 @@
       deletionLinkFocused = false;
       if (nextUserKey && deletionAttempt && nextUserKey !== deletionAttempt.ownerId) resetDeletionAttempt();
       avatarSelection = null; avatarSaving = null; avatarMessage = '';
-      publicProfile = null;
+      renderPublicProfile(null);
       renderAvatarGallery();
       publicProfileGeneration += 1;
+      profileLoadState = 'idle';
       publicProfileInFlight = null;
-      if (window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
     }
 
     // Toggle panels
@@ -329,10 +334,15 @@
   }
 
   function renderPublicProfile(profile){
+    var followSaved=avatarSelection===null||avatarSelection===savedAvatarSelection();
     publicProfile = profile || null;
+    if(followSaved)avatarSelection=savedAvatarSelection()||null;
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
     if (nodes.publicProfileBrowserHint) nodes.publicProfileBrowserHint.hidden = !window.MobilePoker;
-    if (!profile) return;
+    if (!profile){
+      if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(doc.getElementById('accountSummaryAvatar'), null);
+      return;
+    }
     if (window.ProfileClient && window.ProfileClient.applyAvatar){
       window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
       var summaryAv = doc.getElementById('accountSummaryAvatar');
@@ -425,51 +435,104 @@
     renderPokerState(accountPokerProjection);
   }
 
-  function allowedAvatarVariants(){
-    return currentUser&&window.ArcadeTerms&&typeof window.ArcadeTerms.getAvatarVariants==='function'?window.ArcadeTerms.getAvatarVariants(getUserKey(currentUser)):[];
+  function allowedAvatarVariants(displayOnly){
+    return currentUser&&window.ArcadeTerms&&typeof window.ArcadeTerms.getAvatarVariants==='function'?window.ArcadeTerms.getAvatarVariants(getUserKey(currentUser),displayOnly):[];
+  }
+
+  function hasGoogleAvatar(){ return !!(publicProfile && publicProfile.avatar && publicProfile.avatar.type === 'uploaded'); }
+
+  function savedAvatarSelection(){
+    var confirmed=window.ProfileGooglePhoto&&window.ProfileGooglePhoto.isSelected&&publicProfile&&window.ProfileGooglePhoto.isSelected(getUserKey(currentUser),publicProfile.avatarRevision);
+    return confirmed===true||confirmed!==false&&hasGoogleAvatar()?'google':publicProfile&&publicProfile.avatarVariant;
+  }
+
+  function googleAvatarChoice(displayOnly){
+    return window.ProfileGooglePhoto && window.ProfileGooglePhoto.getChoice ? window.ProfileGooglePhoto.getChoice(getUserKey(currentUser),displayOnly) : null;
+  }
+
+  function googleAvatarPresentation(){
+    var api=window.ProfileGooglePhoto,user=getUserKey(currentUser);
+    if(api&&api.getPresentation)return api.getPresentation(user);
+    var choice=googleAvatarChoice(true);return choice?{state:'ready',avatar:choice}:null;
+  }
+
+  function renderGoogleAvatar(image,presentation){
+    var choice=presentation&&presentation.avatar,liveUrl=image.dataset.avatarUrl;
+    var samePhoto=liveUrl&&choice&&typeof choice.url==='string'&&liveUrl.split('?')[0]===choice.url.split('?')[0];
+    image.dataset.googlePhotoState=presentation.state;
+    if(choice){
+      if(!samePhoto&&image._googlePhotoUrl!==choice.url&&window.ProfileClient){image._googlePhotoUrl=choice.url;window.ProfileClient.applyAvatar(image,{avatar:choice});}
+    }else{
+      if(image._googlePhotoUrl&&window.ProfileClient)window.ProfileClient.applyAvatar(image,null);
+      image._googlePhotoUrl=null;image.textContent=presentation.state==='unavailable'?'—':'';
+      if(presentation.state==='pending')image.dataset.avatarLoading='true';else delete image.dataset.avatarLoading;
+      image.setAttribute('aria-busy',String(presentation.state==='pending'));
+    }
+  }
+
+  function avatarSelectionLocked(displayOnly){
+    if(!displayOnly&&!window.ArcadeTerms)return true;
+    if(!displayOnly&&window.ArcadeTerms&&window.ArcadeTerms.isReady&&!window.ArcadeTerms.isReady(getUserKey(currentUser)))return true;
+    return !!(window.ProfileGooglePhoto && window.ProfileGooglePhoto.isArcadeSelectionLocked && window.ProfileGooglePhoto.isArcadeSelectionLocked(getUserKey(currentUser),displayOnly));
   }
 
   function syncAvatarSelection(){
     var gallery=doc.getElementById('arcadeAvatarGallery');
-    var saved=publicProfile&&publicProfile.avatarVariant;
-    var allowed=allowedAvatarVariants();
+    var saved=savedAvatarSelection(),locked=avatarSelectionLocked();
+    var allowed=allowedAvatarVariants();if(googleAvatarChoice())allowed=allowed.concat(['google']);
+    if(gallery){if(avatarSelection===null||avatarSelection===gallery._savedAvatarChoice)avatarSelection=saved;gallery._savedAvatarChoice=saved;}
     if(avatarMessage==='arcadeAvatarUnsaved'&&avatarSelection===saved)avatarMessage='';
     if(gallery){
-      gallery.setAttribute('aria-busy',String(!!avatarSaving));
+      gallery.setAttribute('aria-busy',String(!!avatarSaving||locked));
       Array.prototype.forEach.call(gallery.children,function(button){
         var variant=button.dataset.variant,selected=variant===avatarSelection,isSaved=variant===saved;
-        button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving;
-        button.setAttribute('aria-label',t('arcadeAvatarChoice','Choose avatar')+' '+variant+(isSaved?'. '+t('arcadeAvatarCurrent','Saved'):'')+(selected?'. '+t('arcadeAvatarSelected','Selected'):''));
-        button.lastChild.hidden=!isSaved;
+        button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving||avatarSelectionLocked(true)||(variant==='google'&&!googleAvatarChoice(true));
+        var label=variant==='google'?t('googlePhotoTitle','Google profile photo'):t('arcadeAvatarChoice','Choose avatar')+' '+variant;
+        button.setAttribute('aria-label',label+(isSaved?'. '+t('arcadeAvatarCurrent','Saved'):'')+(selected?'. '+t('arcadeAvatarSelected','Selected'):''));
+        button.title=variant==='google'?t('googlePhotoTitle','Google profile photo'):variant;
+        button.lastChild.textContent=t('arcadeAvatarCurrent','Saved');button.lastChild.hidden=!isSaved;
       });
     }
     if(nodes.publicAvatarSave){
-      nodes.publicAvatarSave.disabled=!!avatarSaving||!publicProfile||!avatarSelection||avatarSelection===saved||allowed.indexOf(avatarSelection)===-1;
+      nodes.publicAvatarSave.disabled=locked||!!avatarSaving||!publicProfile||!avatarSelection||avatarSelection===saved||allowed.indexOf(avatarSelection)===-1;
       nodes.publicAvatarSave.setAttribute('aria-busy',String(!!avatarSaving));
     }
     if(nodes.publicAvatarSaveLabel){var key=avatarSaving?'arcadeAvatarSaving':'arcadeAvatarSet';nodes.publicAvatarSaveLabel.dataset.i18n=key;nodes.publicAvatarSaveLabel.textContent=t(key,avatarSaving?'Saving…':'Set avatar');}
-    if(nodes.publicAvatarStatus){nodes.publicAvatarStatus.dataset.i18n=avatarMessage;nodes.publicAvatarStatus.textContent=avatarMessage?t(avatarMessage,'Could not save avatar. Try again.'):'';}
+    if(nodes.publicAvatarStatus){var message=!avatarSaving&&locked&&(!avatarMessage||avatarMessage==='arcadeAvatarUnsaved')?'arcadeAvatarChecking':avatarMessage;nodes.publicAvatarStatus.dataset.i18n=message;nodes.publicAvatarStatus.textContent=message?t(message,message==='arcadeAvatarChecking'?'Checking avatar availability…':'Could not save avatar. Try again.'):'';}
   }
 
   function renderAvatarGallery(){
     var gallery=doc.getElementById('arcadeAvatarGallery');
     if(!gallery)return;
-    gallery.textContent='';
-    var allowed=allowedAvatarVariants();
-    if(!window.ArcadeAvatars||!publicProfile||!currentUser){syncAvatarSelection();return;}
-    if(avatarSelection===null)avatarSelection=publicProfile.avatarVariant;
-    if(allowed.length&&allowed.indexOf(avatarSelection)===-1){avatarSelection=allowed.indexOf(publicProfile.avatarVariant)!==-1?publicProfile.avatarVariant:null;avatarMessage='arcadeAvatarNotActive';}
-    window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;}).forEach(function(variant){
-      var button=doc.createElement('button'),img=doc.createElement('img'),check=doc.createElement('span'),saved=doc.createElement('span');
-      button.type='button';button.className='arcade-avatar-choice';button.title=variant;button.dataset.variant=variant;
-      img.src=window.ArcadeAvatars.url(variant);img.alt='';img.width=48;img.height=48;button.appendChild(img);
+    var allowed=allowedAvatarVariants(true),presentation=googleAvatarPresentation(),choices=[];
+    if(window.ArcadeAvatars&&publicProfile&&currentUser){
+      choices=window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;});
+      if(presentation)choices.push('google');
+    }
+    var shape=getUserKey(currentUser)+'|'+choices.join('|'),oldPhoto=gallery.querySelector('.arcade-avatar-photo');
+    if(gallery._avatarShape===shape){
+      if(oldPhoto&&presentation)renderGoogleAvatar(oldPhoto,presentation);
+      syncAvatarSelection();return;
+    }
+    if(oldPhoto&&window.ProfileClient)window.ProfileClient.applyAvatar(oldPhoto,null);
+    gallery.textContent='';gallery._avatarShape=shape;
+    if(!choices.length){syncAvatarSelection();return;}
+    if(avatarSelection===null)avatarSelection=savedAvatarSelection();
+    if(choices.length&&choices.indexOf(avatarSelection)===-1){avatarSelection=choices.indexOf(savedAvatarSelection())!==-1?savedAvatarSelection():null;}
+    choices.forEach(function(variant){
+      var button=doc.createElement('button'),image=doc.createElement(variant==='google'?'span':'img'),check=doc.createElement('span'),saved=doc.createElement('span');
+      button.type='button';button.className='arcade-avatar-choice';button.title=variant==='google'?t('googlePhotoTitle','Google profile photo'):variant;button.dataset.variant=variant;
+      if(variant==='google'){image.id='googleAvatarCurrentImage';image.className='arcade-avatar-photo';}
+      else{image.src=window.ArcadeAvatars.url(variant);image.alt='';image.width=48;image.height=48;}
+      button.appendChild(image);
       check.className='arcade-avatar-choice__check';check.textContent='✓';check.setAttribute('aria-hidden','true');button.appendChild(check);
       saved.className='arcade-avatar-choice__saved';saved.textContent=t('arcadeAvatarCurrent','Saved');button.appendChild(saved);
       button.addEventListener('click',function(){
-        if(avatarSaving||allowedAvatarVariants().indexOf(variant)===-1)return;
-        avatarSelection=variant;avatarMessage=variant===publicProfile.avatarVariant?'':'arcadeAvatarUnsaved';syncAvatarSelection();
+        if(avatarSelectionLocked(true)||avatarSaving||(variant==='google'?!googleAvatarChoice(true):allowedAvatarVariants(true).indexOf(variant)===-1))return;
+        avatarSelection=variant;avatarMessage=variant===savedAvatarSelection()?'':'arcadeAvatarUnsaved';syncAvatarSelection();
       });
       gallery.appendChild(button);
+      if(variant==='google')renderGoogleAvatar(image,presentation);
     });
     syncAvatarSelection();
   }
@@ -479,42 +542,108 @@
   }
 
   async function saveAvatar(){
-    if(avatarSaving||!publicProfile||!currentUser||!avatarSelection||avatarSelection===publicProfile.avatarVariant||allowedAvatarVariants().indexOf(avatarSelection)===-1)return;
+    if(avatarSelectionLocked()||avatarSaving||!publicProfile||!currentUser||!avatarSelection||avatarSelection===savedAvatarSelection()||(avatarSelection==='google'?!googleAvatarChoice():allowedAvatarVariants().indexOf(avatarSelection)===-1))return;
     var request={owner:getUserKey(currentUser),generation:publicProfileGeneration,profile:publicProfile,variant:avatarSelection};
     avatarSaving=request;avatarMessage='';syncAvatarSelection();
     function active(){return avatarSaving===request&&getUserKey(currentUser)===request.owner&&publicProfileGeneration===request.generation;}
     try{
-      var profile=await window.ProfileClient.updateMe({avatarVariant:request.variant,expectedRevision:request.profile.avatarRevision},{userId:request.owner,isCurrent:function(){return active()&&sameAvatarProfile(publicProfile,request.profile)&&allowedAvatarVariants().indexOf(request.variant)!==-1;}});
+      var guard={userId:request.owner,isCurrent:function(){return active()&&sameAvatarProfile(publicProfile,request.profile)&&window.ArcadeTerms&&(!window.ArcadeTerms.isReady||window.ArcadeTerms.isReady(request.owner))&&(request.variant==='google'?!!googleAvatarChoice():!avatarSelectionLocked()&&allowedAvatarVariants().indexOf(request.variant)!==-1);}};
+      var profile=request.variant==='google'
+        ? await window.ProfileGooglePhoto.select(request.profile.avatarRevision,guard)
+        : await window.ProfileClient.updateMe({avatarVariant:request.variant,expectedRevision:request.profile.avatarRevision},guard);
       if(!active())return;
       if(!sameAvatarProfile(publicProfile,request.profile)&&!sameAvatarProfile(publicProfile,profile))throw {code:'stale_profile'};
-      renderPublicProfile(profile);avatarSelection=profile.avatarVariant;avatarMessage='arcadeAvatarSaved';
+      renderPublicProfile(profile);avatarSelection=savedAvatarSelection();avatarMessage='arcadeAvatarSaved';
+      window.ProfileClient.clear();
+      avatarSaving=null;syncAvatarSelection();
+      if(window.ProfileGooglePhoto)await window.ProfileGooglePhoto.load();
     }catch(error){
       if(!active())return;
       var code=error&&error.code;
-      avatarMessage=code==='stale_avatar_revision'||code==='stale_profile'?'arcadeAvatarConflict':code==='terms_required'?'arcadeAvatarTermsRequired':code==='avatar_variants_not_active'?'arcadeAvatarNotActive':'arcadeAvatarSaveError';
+      avatarMessage=code==='stale_avatar_revision'||code==='stale_profile'||code==='stale_identity'?'arcadeAvatarConflict':code==='terms_required'?'arcadeAvatarTermsRequired':code==='avatar_variants_not_active'?'arcadeAvatarNotActive':'arcadeAvatarSaveError';
       klog('profile:avatar_save_failed',{code:code||'request_failed'});
-      if(code==='stale_avatar_revision'||code==='stale_profile')await loadPublicProfile(true);
+      if(request.variant==='google'||code==='stale_avatar_revision'||code==='stale_profile'||code==='stale_identity'){await loadPublicProfile(true);if(request.variant!=='google'&&window.ProfileGooglePhoto)await window.ProfileGooglePhoto.load();}
       if(code==='terms_required'&&window.ArcadeTerms)window.ArcadeTerms.open();
       if(code==='avatar_variants_not_active'&&window.ArcadeTerms)window.ArcadeTerms.refresh(false);
     }finally{if(active()){avatarSaving=null;renderAvatarGallery();}}
   }
 
-  function loadPublicProfile(force){
+  async function recordProfileFailure(metadata, requestedUserKey, requestedGeneration){
+    var recorder = window.KLog;
+    var bridge = window.SupabaseAuthBridge;
+    var timer;
+    function isCurrent(){ return requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration; }
+    try {
+      if (!isCurrent() || !auth || !auth.getCurrentUser || !bridge || !bridge.getAccessToken || !recorder || !recorder.syncAdminAccess || !recorder.flush) return;
+      var user = await auth.getCurrentUser();
+      if (!user || user.id !== requestedUserKey || !isCurrent()) return;
+      var token = await bridge.getAccessToken();
+      if (!token || !isCurrent()) return;
+      var controller = new AbortController();
+      timer = setTimeout(function(){ controller.abort(); }, 5000);
+      var response = await fetch('/.netlify/functions/admin-me', { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', signal: controller.signal });
+      if (!response.ok) return;
+      var result = await response.json();
+      user = await auth.getCurrentUser();
+      if (!result || result.isAdmin !== true || result.userId !== requestedUserKey || !user || user.id !== requestedUserKey || !isCurrent() || recorder !== window.KLog) return;
+      try {
+        recorder.syncAdminAccess(true);
+        klog('profile:account_load_failed', metadata);
+        recorder.flush(true);
+      } finally {
+        recorder.syncAdminAccess(false);
+      }
+    } catch (_err){
+      // Diagnostics must fail closed without changing the existing profile error UI.
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function loadPublicProfile(force, retried){
     if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
     if (publicProfileInFlight) return publicProfileInFlight;
     var requestedUserKey = getUserKey(currentUser);
     var requestedGeneration = publicProfileGeneration;
+    var stage = 'read';
+    profileLoadState = 'loading';
+    setStatus(t('profileLoading', 'Loading your profile…'), 'info', 'profile');
     var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
       if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
+      stage = 'render_public_profile';
       renderPublicProfile(profile);
+      stage = 'render_poker_projection';
       renderPokerProjection(profile);
+      stage = 'status';
+      profileLoadState = 'success';
+      if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus(t('signedIn', 'Signed in.'), 'success', 'profile');
       return profile;
     }).catch(function(error){
-      klog('profile:account_load_failed', { code: error && error.code ? error.code : 'request_failed' });
+      if (error && error.code === 'stale_identity'){
+        // Cancellation is not a failed profile. One fresh read, only for this identity.
+        if (!retried && requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
+          if (publicProfileInFlight === request) publicProfileInFlight = null;
+          return loadPublicProfile(true, true);
+        }
+        if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
+          profileLoadState = 'idle';
+          if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus('', '', 'profile');
+        }
+        return null;
+      }
+      var code = error && error.code;
+      var exceptionType = error && error.name;
+      recordProfileFailure({
+        stage: stage,
+        code: ['not_authenticated', 'request_failed', 'server_error'].indexOf(code) !== -1 ? code : 'request_failed',
+        exceptionType: ['Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'AbortError'].indexOf(exceptionType) !== -1 ? exceptionType : 'Error',
+        currentRequest: requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration
+      }, requestedUserKey, requestedGeneration);
       if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
         setBlockVisibility(nodes.publicProfileEditor, false);
         clearPokerProjection();
-        setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error');
+        profileLoadState = 'error';
+        setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error', 'profile');
       }
       return null;
     }).finally(function(){ if (publicProfileInFlight === request) publicProfileInFlight = null; });
@@ -1144,10 +1273,10 @@
     auth.signIn(email, password).then(function(res){
       var user = res && res.data && res.data.user ? res.data.user : null;
       if (user){
-        setStatus(t('signedInSuccessfully', 'Signed in successfully.'), 'success');
+        setStatus(t('signedInSuccessfully', 'Signed in successfully.'), 'success', 'auth');
         openAccountPanel(user);
       } else {
-        setStatus(t('signedInRedirecting', 'Signed in. Redirecting...'), 'success');
+        setStatus(t('signedInRedirecting', 'Signed in. Redirecting...'), 'success', 'auth');
       }
     }).catch(function(err){
       var msg = err && err.message ? String(err.message) : t('signInError', 'Could not sign in. Please try again.');
@@ -1487,18 +1616,19 @@
   }
 
   function hydrateUser(){
+    var authRevision = 0;
     if (!auth || !auth.getCurrentUser){
       setStatus(t('authNotConfigured', 'Authentication is not configured yet.'), 'error');
       return;
     }
 
     if (typeof auth.isPasswordRecoveryPending === 'function' && auth.isPasswordRecoveryPending()) showPasswordRecovery();
-    setStatus(passwordRecoveryActive ? '' : t('checkingSession', 'Checking session...'), passwordRecoveryActive ? '' : 'info');
+    setStatus(passwordRecoveryActive ? '' : t('checkingSession', 'Checking session...'), passwordRecoveryActive ? '' : 'info', 'auth');
     auth.getCurrentUser().then(function(user){
-      if (passwordRecoveryActive) return;
+      if (passwordRecoveryActive || authRevision !== 0) return;
       renderUser(user);
       var googleError = auth.getAuthCallbackError && auth.getAuthCallbackError();
-      setStatus(googleError ? googleErrorMessage(googleError) : (user ? t('signedIn', 'Signed in.') : ''), googleError ? 'error' : (user ? 'success' : ''));
+      setStatus(googleError ? googleErrorMessage(googleError) : (user ? t('signedIn', 'Signed in.') : ''), googleError ? 'error' : (user ? 'success' : ''), 'auth');
       if (user){
         loadChips();
         refreshWelcomeBonus(user);
@@ -1514,13 +1644,14 @@
 
     if (auth.onAuthChange){
       auth.onAuthChange(function(event, user){
+        authRevision += 1;
         if (event === 'PASSWORD_RECOVERY'){
           showPasswordRecovery();
           return;
         }
         renderUser(user);
         if (user){
-          setStatus(t('signedIn', 'Signed in.'), 'success');
+          setStatus(t('signedIn', 'Signed in.'), 'success', 'auth');
           loadChips();
           refreshWelcomeBonus(user);
         } else {
@@ -1545,6 +1676,7 @@
 
     doc.addEventListener('chips:tx-complete', loadChips);
     doc.addEventListener('profile:terms-status', renderAvatarGallery);
+    doc.addEventListener('profile:photo-status', renderAvatarGallery);
     doc.addEventListener('profile:updated', function(event){ renderPublicProfile(event && event.detail ? event.detail : null); });
     doc.addEventListener('langchange', function(){
       if(publicProfile)renderAvatarGallery();

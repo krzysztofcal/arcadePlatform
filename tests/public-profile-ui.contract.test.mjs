@@ -183,3 +183,29 @@ test("profile page clears on logout, account switch and hiding; visibility retur
   if(mode!=='logout'){assert.equal(reads,2);assert.equal(nodes.get('publicProfileName').textContent,'Fresh identity');}
  }
 });
+
+test('avatar loading and expired photos stay neutral; late photo callbacks cannot repaint a cleared identity',async()=>{
+ const images=[],timers=[];let catalog=0,now=Date.now();
+ const window={SUPABASE_CONFIG:{SUPABASE_URL:'https://stage.supabase.co'},ArcadeAvatars:{apply(node){catalog++;node.style.backgroundImage='catalog';}}};
+ vm.runInNewContext(await read('js/profile-client.js'),{window,URL,atob,Date:{now:()=>now},Image:class{constructor(){images.push(this);}},setTimeout:fn=>{timers.push(fn);return timers.length;},clearTimeout(){}});
+ const node={dataset:{},style:{},classList:{add(){},remove(){}},textContent:''};
+ window.ProfileClient.applyAvatar(node,null);assert.equal(catalog,0);assert.equal(node.textContent,'AH');
+ const url=exp=>'https://stage.supabase.co/storage/v1/object/sign/profile-avatar-uploads/pending/00000000-0000-0000-0000-000000000001?token=x.'+btoa(JSON.stringify({exp}))+'.x';
+ const profile={avatar:{type:'uploaded',variant:'wizard-indigo',url:url(Math.floor(Date.now()/1000)+60)}};
+ window.ProfileClient.applyAvatar(node,profile);assert.equal(node.textContent,'');assert.equal(node.dataset.avatarLoading,'true');assert.equal(node.style.backgroundImage,'');
+ images[0].onload();assert.equal(node.dataset.avatarLoading,undefined);assert.equal(node.style.backgroundImage,'url("'+profile.avatar.url+'")');
+ window.ProfileClient.applyAvatar(node,null);images[0].onload();assert.equal(node.dataset.avatarLoading,undefined);assert.equal(node.style.backgroundImage,'');assert.equal(node.textContent,'AH');
+ window.ProfileClient.applyAvatar(node,{avatar:{...profile.avatar,url:url(1)}});assert.equal(catalog,0);assert.equal(node.textContent,'AH');
+ window.ProfileClient.applyAvatar(node,profile);now+=65000;images.at(-1).onload();assert.equal(node.style.backgroundImage,'');now=Date.now();
+ window.ProfileClient.applyAvatar(node,profile);timers.at(-1)();images.at(-1).onload();assert.equal(node.style.backgroundImage,'');assert.equal(node.textContent,'AH');
+ window.ProfileClient.applyAvatar(node,profile);window.ProfileClient.applyAvatar(node,{avatar:{type:'default',variant:'default'}});images.at(-1).onload();assert.equal(node.style.backgroundImage,'catalog');
+});
+
+test('public profile masking passes only the default avatar when the viewer blocks the handle',async()=>{
+ const source=await read('js/public-profile-page.js'),start=source.indexOf('  function applyProfileAvatar('),end=source.indexOf('\n  function render(',start);
+ let blocked=false;const seen=[];
+ const context={currentProfile:{handle:'target',displayName:'Player',avatar:{type:'uploaded',url:'private-photo-url'}},appliedAvatar:null,avatar:{},window:{ArcadeUgc:{isBlockedHandle:()=>blocked},ProfileClient:{applyAvatar:(_node,profile)=>seen.push(profile)}}};
+ vm.runInNewContext(source.slice(start,end)+'\napplyProfileAvatar();',context);
+ blocked=true;vm.runInNewContext(source.slice(start,end)+'\napplyProfileAvatar();',context);
+ assert.equal(seen[0].avatar.type,'uploaded');assert.equal(seen[1].avatar.type,'default');assert.equal(seen[1].avatar.url,undefined);
+});

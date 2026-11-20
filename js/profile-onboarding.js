@@ -1,6 +1,6 @@
 (function(){
  'use strict';
- var status=null,identity=null,generation=0,pending=null,requestId=null,dialog=null,prompt=null,displayed=null;
+ var ready=false,status=null,identity=null,generation=0,pending=null,requestId=null,dialog=null,prompt=null,displayed=null;
  var pl=function(){return (window.I18N?window.I18N.getLang():document.documentElement.lang)==='pl';};
  function label(en,polish){return pl()?polish:en;}
  function log(code){try{if(window.KLog)window.KLog.log('profile:terms',{code:code});}catch(_err){}}
@@ -25,7 +25,7 @@
   var response=await fetch(window.ArcadeApi?window.ArcadeApi.url('/.netlify/functions/profile-onboarding'):'/.netlify/functions/profile-onboarding',{
    method:method,headers:{Authorization:'Bearer '+principal.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined
   });
-  var data=await response.json();if(!response.ok)throw Object.assign(Error(data.error||'terms_unavailable'),{code:data.error});
+  var data=await response.json();if(!response.ok)throw Object.assign(Error(data.error||'terms_unavailable'),{code:data.error,status:response.status});
   var current=await credentials();if(!current||current.id!==principal.id)throw Error('stale_identity');
   identity=principal.id;return data;
  }
@@ -66,23 +66,23 @@
   if(!dialog.open)dialog.showModal();
  }
  async function refresh(open){
-  var version=++generation;setStatus(null);
+  var version=++generation;ready=false;setStatus(status);
   try{
    var principal=await credentials();if(version!==generation)return;
-   if(!principal){identity=null;status=null;requestId=null;close();if(prompt)prompt.hidden=true;return;}
-   if(identity!==principal.id){identity=principal.id;status=null;requestId=null;close();}
-   var result=await api('GET');if(version!==generation)return;setStatus(result);
+   if(!principal){identity=null;setStatus(null);requestId=null;close();if(prompt)prompt.hidden=true;return;}
+   if(identity!==principal.id){identity=principal.id;setStatus(null);requestId=null;close();}
+   var result=await api('GET');if(version!==generation)return;ready=true;setStatus(result);
    if(!result.required||result.current){if(prompt)prompt.hidden=true;close();return;}
    if(!prompt){prompt=document.createElement('button');prompt.type='button';prompt.className='arcade-terms-prompt';prompt.onclick=show;document.body.appendChild(prompt);}
    prompt.textContent=label('Review Terms','Akceptuj regulamin');prompt.hidden=false;
    if(open&&location.pathname.indexOf('table-v2.html')===-1)show();
-  }catch(err){if(version===generation)setStatus(null);log(err.code||'unavailable');}
+  }catch(err){if(version===generation){if(err.message==='stale_identity'||err.status===401||err.status===403){identity=null;setStatus(null);}else setStatus(status);}log(err.code||'unavailable');}
  }
- window.ArcadeTerms={getAvatarVariants:function(userId){
-  if(!status||identity!==userId||status.required&&!status.current||!Array.isArray(status.avatarVariants))return [];
+ window.ArcadeTerms={isReady:function(userId){return ready&&identity===userId;},getAvatarVariants:function(userId,displayOnly){
+  if((!ready&&displayOnly!==true)||!status||identity!==userId||status.required&&!status.current||!Array.isArray(status.avatarVariants))return [];
   return status.avatarVariants.slice(0,status.variantsEnabled===true?16:6);
- },open:function(){if(status&&status.required&&!status.current)show();else refresh(true);},refresh:refresh,requireAcceptance:async function(){
-  await refresh(false);if(!status)throw Error('terms_unavailable');if(!status.required||status.current)return true;
+ },open:function(){if(ready&&status&&status.required&&!status.current)show();else refresh(true);},refresh:refresh,requireAcceptance:async function(){
+  await refresh(false);if(!ready||!status)throw Error('terms_unavailable');if(!status.required||status.current)return true;
   if(pending)return false;return new Promise(function(resolve){pending=resolve;show();});
  }};
  function init(){
@@ -92,7 +92,7 @@
   initReady();
  }
  function initReady(){
-  if(window.SupabaseAuth)window.SupabaseAuth.onAuthChange(function(){generation++;identity=null;setStatus(null);requestId=null;close();setTimeout(function(){refresh(true);},0);});
+  if(window.SupabaseAuth)window.SupabaseAuth.onAuthChange(function(_event,user){generation++;ready=false;if(!user||identity!==String(user.id)){identity=null;setStatus(null);}else setStatus(status);requestId=null;close();setTimeout(function(){refresh(true);},0);});
   refresh(true);
   document.addEventListener('profile:terms-required',function(){window.ArcadeTerms.open();});
   document.addEventListener('langchange',function(){

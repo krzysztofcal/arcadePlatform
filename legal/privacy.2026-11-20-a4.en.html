@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy • Arcade Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/portal.css">
+  <link rel="stylesheet" href="../css/xp-badge.css">
+  <link rel="stylesheet" href="/css/xp-overlay.css">
+
+<script src="../js/analytics.js" defer></script>
+  <script src="/js/i18n.js" defer></script>
+  <script src="/js/auth/supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+  <script src="/js/user-ui-state.js" defer></script>
+  <script src="/js/profile-avatar-catalog.js" defer></script>
+  <script src="/js/profile-client.js" integrity="sha256-sl8TkM7k/e2SuXYLHiqEMk+C4991hMKDGchHmtX+ywk=" crossorigin="anonymous" defer></script>
+  <script src="/js/auth/supabaseClient.js" defer></script>
+  <script src="/js/profile-onboarding.js" defer></script>
+  <script src="/js/chips/client.js" defer></script>
+  <script src="/js/core/number-format.js" defer></script>
+  <script src="/js/topbar.js" defer></script>
+  <script src="/js/xpClient.js" defer></script>
+  <script src="/js/ui/xp-overlay.js" defer></script>
+  <script src="../js/core/catalog.js" defer></script>
+  <script src="../js/core/search-utils.js" defer></script>
+  <script src="../js/search-popup.js" defer></script>
+  <script src="../js/search-popup-bootstrap.js" defer></script>
+  <script src="/js/core/sidebar-model.js" defer></script>
+  <script src="/js/sidebar.js" defer></script>
+  <script src="../js/xp/combo.js" defer></script>
+  <script src="../js/xp/scoring.js" defer></script>
+  <script src="../js/xp/core.js" defer></script>
+  <script src="../js/xp.js" defer></script>
+  <link rel="stylesheet" href="../js/vendor/klaro/klaro.css">
+  <script src="../js/klaro-config.js" defer></script>
+  <script src="../js/vendor/klaro/klaro.js" defer></script>
+  <script src="../js/consent-services.js" defer></script>
+</head>
+<body>
+  <div class="topbar" data-user-ui-state="pending" data-user-ui-profile-state="pending" data-user-ui-xp-state="pending" data-user-ui-chips-state="pending">
+    <div class="topbar-left">
+      <button class="hamburger" id="sbToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <a href="../index.html" class="brand" aria-label="Arcade Hub home">
+        <div class="logo" aria-hidden="true"></div>
+        <h1>Arcade Hub</h1>
+      </a>
+      <div class="search search-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-3.9-3.9M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="#86e1e1" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="search" id="searchInput" data-i18n-aria="searchAria" data-i18n-placeholder="searchPlaceholder" aria-label="Search games" placeholder="Search games" />
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a id="xpBadge" class="xp-badge xp-badge--loading" aria-live="polite" aria-busy="true" href="../xp.html">
+        <span class="xp-badge__label">Syncing XP…</span>
+      </a>
+      <div class="avatar-shell" id="avatarShell">
+        <button type="button" class="avatar-btn" id="avatarButton" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar-circle" id="avatarInitials" aria-hidden="true">AH</span>
+          <span class="avatar-label" id="avatarLabel">Sign in</span>
+          <span class="avatar-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="avatar-menu" id="avatarMenu" hidden>
+          <div class="avatar-menu__user">
+            <div class="avatar-menu__initials" id="avatarMenuInitials" aria-hidden="true">AH</div>
+            <div class="avatar-menu__meta">
+              <div class="avatar-menu__name" id="avatarMenuName">Guest</div>
+              <div class="avatar-menu__email" id="avatarMenuEmail">Sign in to sync progress</div>
+            </div>
+          </div>
+          <button type="button" class="avatar-menu__action" id="avatarMenuAction">Sign in</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar collapsed" id="sidebar" aria-label="Main navigation">
+      <nav class="sb-nav">
+        <ul class="sb-list"></ul>
+      </nav>
+    </aside>
+
+    <main style="padding:16px; font-family:Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#e8eeff; background:#0b1020;">
+<h1>Arcade Hub and Arcade Poker Privacy Policy</h1>
+<p>Version: 2026-11-20-a4</p>
+<h2>Controller and contact</h2>
+<p>Data controller: Krzysztof Cal. KCSWH is the brand of a hobby project offering the free Arcade Hub and Arcade Poker services. Contact for the project and personal data: <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>.</p>
+<h2>Data we process</h2>
+<p>We process your email address, account ID, authentication and session data, player profiles, XP, game records, virtual-unit settlements and technical data such as IP addresses and error information. Supabase provides authentication; passwords are not stored in plain text.</p>
+<p>If you choose to sign in with Google, Supabase receives identification and basic Google account information, including a name and photo. We do not receive your Google password. The Google name and photo are not automatically shown in your player profile. Any publication of a photo requires separate, informed permission.</p>
+<p>An account and an automatically generated profile may be created during registration, before you acknowledge the Terms. Profiles are available to signed-in users by default: after signing in, they can see the player name, handle, catalog avatar (or a separately approved Google photo in eligible website views), XP and level. Leaderboard data is available after signing in. Accounts appear in the leaderboard by default. Opting out of the leaderboard does not hide the public profile. It does not display email, real name, sign-in credentials, balances or private game records. At a table, names and avatars help participants recognize each other. The website profile is also available to signed-in people who are not taking part in that game.</p>
+<h2>Optional Google profile photo</h2>
+<p>Google sign-in alone does not import or publish your photo. If you give separate, voluntary permission in Account, Arcade Hub imports your current Google profile photo once and stores a normalized copy in private Supabase Storage with a record of your consent. When you select it as your avatar, the photo may appear in your website profile and leaderboard for signed-in users; Poker table avatars remain catalog-based. You can keep using your account without this feature.</p>
+<p>Choosing a catalog avatar stops new publication of your Google photo, but does not withdraw permission or remove the private copy. You can preview that copy in your own Account and select it again without reimporting it. Use the separate “Stop using my Google photo” action in Account to withdraw permission and request deletion, including when a catalog avatar is active. New image links stop being issued after withdrawal; links issued earlier can remain valid for up to 60 seconds, and copies already saved by other people cannot be recalled. If deletion is not confirmed, Account reports this and lets you retry withdrawal. Account deletion also covers the stored copy.</p>
+<h2>Purposes and legal grounds</h2>
+<ul>
+<li>Account creation at your request, sign-in and necessary game and account features: GDPR Article 6(1)(b), where necessary to perform a contract for the service or take necessary steps at your request before entering into it. This legal ground does not depend solely on later acceptance of the Terms.</li>
+<li>Public player identity and the leaderboard: Article 6(1)(f), the interest in recognizing participants and comparing players’ results. Acknowledging the Terms is not consent to data publication.</li>
+<li>Security, abuse prevention, settlement integrity and keeping basic records of acceptance of the rules: Article 6(1)(f), protecting users and proper project operation.</li>
+<li>Handling data rights: Article 6(1)(c), to meet the controller's legal obligations.</li>
+<li>Optional website analytics: separate consent under Article 6(1)(a). You can withdraw it in the consent manager without affecting earlier lawful processing based on consent.</li>
+<li>Optional Google photo import, storage and use as a profile image: your separate consent under GDPR Article 6(1)(a). You can withdraw it in Account; withdrawal does not affect the lawfulness of earlier processing based on consent.</li>
+</ul>
+<p>Without data necessary for an account, account features cannot be used. Private guest play against bots and Poker Offline do not require an account.</p>
+<h2>Providers and transfers</h2>
+<p>Netlify hosts the website and API, Supabase provides authentication, the database and file storage, and Upstash supports game and XP data. We also use server-hosting and email services. Google participates in chosen sign-in and, after consent, website analytics.</p>
+<p>Processing may take place outside the European Economic Area, including in the USA. The Supabase database region is in France; this does not mean all provider operations stay in the EEA. Netlify and Upstash processing agreements provide for the EU–US Data Privacy Framework for covered transfers and standard contractual clauses in the specified circumstances. Supabase describes standard contractual clauses as safeguards for transfers to Singapore and the USA. Contact <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a> for information about safeguards and a copy. Current provider terms: <a href="https://www.netlify.com/gdpr-ccpa/">Netlify</a>, <a href="https://supabase.com/legal/customer-resources/data-processing-addendum">Supabase</a>, <a href="https://upstash.com/static/trust/dpa.pdf">Upstash</a>.</p>
+<p>Arcade's own websites do not use AdSense. Google Analytics starts only after consent. The Android app does not include Analytics or AdSense scripts. External games may use separate services described when they are made available.</p>
+<h2>Retention</h2>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Period or retention criterion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Account and profile</td>
+<td>Until account deletion is completed, allowing for security and settlement of ongoing games.</td>
+</tr>
+<tr>
+<td>Optional Google photo and consent record</td>
+<td>The private photo copy is retained until withdrawal and completion of deletion, or account deletion. Switching to a catalog avatar alone does not erase it. Consent and withdrawal records can remain while the account exists to prevent use without permission; backups follow the general retention criteria below. Previously issued image links may remain valid for up to 60 seconds.</td>
+</tr>
+<tr>
+<td>Account Terms acceptance records</td>
+<td>For as long as the account exists, with no separate expiry. Account deletion includes the related acceptance records.</td>
+</tr>
+<tr>
+<td>Guest Terms acceptance records</td>
+<td>Valid for one hour. Expired records are currently deleted in batches during later acceptances of the Terms. Expiry does not mean physical deletion exactly one hour later.</td>
+</tr>
+<tr>
+<td>Sessions, limits and caches</td>
+<td>According to session validity, the expiry of each entry or cache replacement. Redis data does not all share one expiry period.</td>
+</tr>
+<tr>
+<td>Logs and recovery backups</td>
+<td>Until rotation or deletion under capacity limits, service scope and provider rules. Retention depends on the type of record and available plan; there is no single period for all these data. Deleting a database record does not immediately erase it from an existing backup.</td>
+</tr>
+<tr>
+<td>Game and settlement history, and completed account-deletion requests</td>
+<td>Settled game and settlement records, including their private archive and recovery copies, and the data of completed account-deletion requests, are automatically deleted or minimized once they are older than 12 months. Deletion runs periodically and in batches, so it may happen after this period ends and may take longer when there is a backlog. We keep only the following for longer: the balance history of an account that still exists, because it is needed to prove that balance; the settlement history of a deleted account as a financial record, without the profile or sign-in data; the identifier of a deleted account, so that it cannot be reused; records needed to finish a game or settlement in progress.</td>
+</tr>
+<tr>
+<td>File permissions and other technical account records</td>
+<td>Some records have no automatic deletion date and may remain after account deletion. Further retention needs a specific justification, such as checking a disputed settlement, resolving an outstanding incident or dispute, or meeting a legal obligation. The absence of automatic deletion alone does not justify keeping data indefinitely.</td>
+</tr>
+<tr>
+<td>Correspondence</td>
+<td>While handling the matter and preserving its history where needed for follow-up questions, a dispute or a legal obligation.</td>
+</tr>
+</tbody>
+</table>
+<p>An acknowledgement contains an identifier, version, server timestamp and request ID. Its validity does not determine retention of other data.</p>
+<p>Cookies and local storage support sessions, preferences and caches. Website consent choices have a 180-day validity. A remembered avatar may be used for Offline appearance, without synchronizing game progress. Signing out does not remove local saves; you can clear them through browser or app settings.</p>
+<h2 id="account-deletion">Your rights and account deletion</h2>
+<p>If an objection to profile visibility is upheld, the operator can block the profile from being shared with other signed-in users without deleting the account. This is not a switch in user settings. A profile block does not remove the identity needed by participants in an ongoing game; we consider any request about leaderboard visibility separately.</p>
+<p>You may request access, correction, erasure and restriction, and portability where applicable. You may object to processing based on legitimate interests, including the public profile, through <a href="mailto:contact@kcswh.pl">contact@kcswh.pl</a>. Leaderboard opt-out is a separate setting and does not replace this right. Your request may also cover records remaining after account deletion. Reviewing it requires identifying which data is still needed, for what specific purpose and on what legal ground. Any refusal to erase data must be explained. Not every request entails deleting the entire settlement history or all files. We also consider requests concerning children's data.</p>
+<p>Request account deletion in Account when the feature is available, or by email. The process removes the profile and sign-in identity after safely handling game participation and the virtual balance. We do not promise immediate deletion of all logs, backups and integrity records. You do not need to accept new Terms to make a request or obtain support.</p>
+<p>We respond without undue delay, normally within one month. If an extension is necessary under the GDPR, we will explain it within the first month. We may request proportionate identity verification; do not send passwords or tokens. You may complain to the Polish supervisory authority, the President of the Personal Data Protection Office (UODO).</p>
+</main>
+  </div>
+
+  <footer class="site-footer" role="contentinfo">
+    <nav class="footer-nav" aria-label="Footer">
+      <a class="ft-link" data-i18n="about" data-href-en="../about.en.html" data-href-pl="../about.pl.html" href="../about.en.html">About</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="licenses" data-href-en="../about/licenses.html" data-href-pl="../about/licenses.html" href="../about/licenses.html">Licenses</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="terms" data-href-en="terms.en.html" data-href-pl="terms.pl.html" href="terms.en.html">Terms</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="privacy" data-href-en="privacy.en.html" data-href-pl="privacy.pl.html" href="privacy.en.html">Privacy</a>
+      <span class="sep">•</span>
+      <a class="ft-link" data-i18n="contact" href="mailto:contact@kcswh.pl">Contact</a>
+      <span class="sep">•</span>
+      <a class="ft-link manage-cookies" data-i18n="manageCookies"
+         id="manageCookies" href="#">Manage cookies</a>
+    </nav>
+    <div class="lang-switch" aria-label="Language">
+      <button type="button" class="lang-btn" data-lang="pl" aria-pressed="false">PL</button>
+      <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </footer>
+  <script src="../js/consent-manager.js" defer></script>
+</body>
+</html>

@@ -256,3 +256,7 @@ When solving a problem:
 - Configuration, activation and retained manual path: [WWW release SOP](docs/www-production-release.md).
 
 - T007 Candidate agents: follow `AGENTS.md` Agent Candidate operating rule, including queue/deduplication checks, wait, receipts and immutable-link handoff; audit/activation remains separate.
+
+## Application dialogs
+
+Follow the mandatory application-dialog rule in `AGENTS.md` for new and modified code. Reuse the accessible `accountDeletionDialog` pattern in `account.html`, `confirmAccountDeletion()` in `js/account-page.js`, and the shared `.account-delete-dialog` styles in `css/profile-account.css`. Native Android Back handling for open HTML dialogs lives in `mobile/poker/runtime.js`. Do not rewrite historical dialogs outside the task scope.

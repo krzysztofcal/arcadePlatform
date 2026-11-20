@@ -147,6 +147,7 @@ run("node", ["tests/admin-page.contract.test.mjs"], "admin-page-contract");
 run("node", ["tests/admin-page.behavior.test.mjs"], "admin-page-behavior");
 run("node", ["tests/admin-user-search.behavior.test.mjs"], "admin-user-search-behavior");
 run("node", ["tests/public-profiles.behavior.test.mjs"], "public-profiles-behavior");
+run("node", ["--test", "tests/profile-google-photo.behavior.test.mjs"], "google-photo-behavior");
 run("node", ["tests/ugc-safety.behavior.test.mjs"], "ugc-safety-behavior");
 run("node", ["tests/ugc-moderation.behavior.test.mjs"], "ugc-moderation-behavior");
 run("node", ["tests/admin-ugc-reports.behavior.test.mjs"], "admin-ugc-reports-behavior");

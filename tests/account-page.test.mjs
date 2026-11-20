@@ -1241,6 +1241,7 @@ async function avatarPickerHarness(){
  h.document.createElement=tag=>{const node=originalCreate(tag);Object.defineProperty(node,'lastChild',{get(){return node.children.at(-1);}});return node;};
  for(const id of ['arcadeAvatarGallery','publicAvatarSave','publicAvatarSaveLabel','publicAvatarStatus','publicProfileEditor','publicDisplayName','publicHandle','publicProfileUrl'])h.document.__nodes.set(id,createElement('div',id));
  const gallery=h.document.getElementById('arcadeAvatarGallery');Object.defineProperty(gallery,'textContent',{get(){return '';},set(){gallery.children.length=0;}});
+ gallery.querySelector=selector=>gallery.children.flatMap(button=>button.children).find(node=>'.'+node.className===selector)||null;
  h.windowObj.I18N={t:key=>key};h.windowObj.ArcadeAvatars={variants:PUBLIC_AVATAR_VARIANTS,url:v=>'/avatars/'+v};
  h.windowObj.ArcadeTerms={getAvatarVariants:owner=>user&&owner===user.id?allowed:[],refresh(){},open(){}};
  h.windowObj.ProfileClient={getMe:async()=>profile,clear(){},applyAvatar(){},updateMe:(payload,guard)=>new Promise((resolve,reject)=>{writes.push({payload,guard,resolve:result=>{if(!guard.isCurrent())return reject({code:'stale_profile'});profile=result;h.document.dispatchEvent({type:'profile:updated',detail:result});resolve(result);},reject});})};
@@ -1312,4 +1313,72 @@ test('external deletion entry is signed-out WWW only and signed-in hash focuses 
  }
  const h=await deletionHarness([],{hash:'#account-deletion'});assert.equal(h.info.hidden,true);assert.equal(h.scrolled(),1);
  h.windowObj.location.hash='';h.hashChange();h.windowObj.location.hash='#account-deletion';h.hashChange();assert.equal(h.scrolled(),2);assert.deepEqual(h.calls,[]);
+});
+
+
+test('Google is the seventeenth ordinary choice and Arcade remains selectable without withdrawing consent',async()=>{
+ const h=await avatarPickerHarness();h.windowObj.ProfileGooglePhoto={getChoice:()=>({type:'uploaded',url:'synthetic-preview'}),isArcadeSelectionLocked:()=>false};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'uploaded'},avatarRevision:2});
+ assert.equal(h.get('arcadeAvatarGallery').children.length,17);assert.equal(h.get('arcadeAvatarGallery').children.find(b=>b.attributes['aria-pressed']==='true').dataset.variant,'google');
+ const google=h.get('arcadeAvatarGallery').children.find(b=>b.dataset.variant==='google');assert.equal(google.children.length,3);assert.equal(google.lastChild.textContent,'arcadeAvatarCurrent');
+ assert.equal(h.get('arcadeAvatarGallery').children.filter(b=>b.attributes['aria-pressed']==='true').length,1);
+ h.click(h.variants[1]);assert.equal(h.selected(),h.variants[1]);h.save();assert.equal(h.writes.length,1);
+ h.writes[0].resolve({handle:'fixture',avatarVariant:h.variants[1],avatar:{type:'default',variant:h.variants[1]},avatarRevision:3});
+ h.windowObj.ProfileGooglePhoto.load=async()=>{};await flush();await flush();
+ assert.equal(h.selected(),h.variants[1]);assert.equal(h.get('arcadeAvatarGallery').children.length,17);
+});
+
+
+test('Saving Arcade keeps the same Google tile and ends saving before a delayed status GET',async()=>{
+ const h=await avatarPickerHarness();let release,loading=false;const choice={type:'uploaded',url:'synthetic-preview'};
+ h.windowObj.ProfileGooglePhoto={getChoice:(_id,display)=>!loading||display?choice:null,isArcadeSelectionLocked:()=>loading,load:()=>{loading=true;h.document.dispatchEvent({type:'profile:photo-status'});return new Promise(resolve=>{release=()=>{loading=false;h.document.dispatchEvent({type:'profile:photo-status'});resolve();};});}};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'uploaded'},avatarRevision:2});
+ const gallery=h.get('arcadeAvatarGallery'),google=gallery.children.find(b=>b.dataset.variant==='google'),image=google.children[0],first=gallery.children[0];
+ h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(gallery.children[0],first);
+ h.click(h.variants[1]);h.save();assert.equal(h.get('publicAvatarSaveLabel').textContent,'arcadeAvatarSaving');
+ h.writes[0].resolve({handle:'fixture',avatarVariant:h.variants[1],avatar:{type:'default',variant:h.variants[1]},avatarRevision:3});await flush();await flush();
+ assert.equal(loading,true);assert.equal(h.get('publicAvatarSaveLabel').textContent,'arcadeAvatarSet');assert.equal(h.get('publicAvatarStatus').textContent,'arcadeAvatarSaved');
+ assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(google.children[0],image);assert.equal(google.disabled,true);
+ release();await flush();assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(google.disabled,false);
+ h.logout();await flush();assert.equal(gallery.children.length,0);
+});
+
+
+test('Re-signing the same Google object preserves the live image and its expiry timer',async()=>{
+ const h=await avatarPickerHarness();let choice={type:'uploaded',url:'https://stage.test/object/photo?token=first'};let applies=0;
+ h.windowObj.ProfileGooglePhoto={getChoice:()=>choice,isArcadeSelectionLocked:()=>false};
+ h.windowObj.ProfileClient.applyAvatar=(node,profile)=>{if(!node)return;applies++;if(profile){node.dataset.avatarUrl=profile.avatar.url;node.profileAvatarExpiry=applies;}else delete node.dataset.avatarUrl;};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'uploaded'},avatarRevision:2});
+ const tile=h.get('arcadeAvatarGallery').children.find(b=>b.dataset.variant==='google'),image=tile.children[0],deadline=image.profileAvatarExpiry,initial=applies;
+ choice={type:'uploaded',url:'https://stage.test/object/photo?token=second'};h.document.dispatchEvent({type:'profile:photo-status'});
+ assert.equal(applies,initial);assert.equal(image.dataset.avatarUrl,'https://stage.test/object/photo?token=first');assert.equal(image.profileAvatarExpiry,deadline);
+ delete image.dataset.avatarUrl;h.document.dispatchEvent({type:'profile:photo-status'});
+ assert.equal(applies,initial+1);assert.equal(image.dataset.avatarUrl,choice.url);
+ choice={type:'uploaded',url:'https://stage.test/object/replacement?token=third'};h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(applies,initial+2,'a different copy replaces the prior image');
+ assert.equal(h.get('arcadeAvatarGallery').children.find(b=>b.dataset.variant==='google'),tile);
+});
+
+
+test('One Google click during revalidation preserves draft while Save waits for verified status and Terms',async()=>{
+ const h=await avatarPickerHarness();let pending=false;const choice={type:'uploaded',url:'synthetic-preview'};
+ h.windowObj.ProfileGooglePhoto={getChoice:(_id,display)=>!pending||display?choice:null,isArcadeSelectionLocked:(_id,display)=>pending&&!display};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'default'},avatarRevision:2});
+ const gallery=h.get('arcadeAvatarGallery'),google=gallery.children.find(b=>b.dataset.variant==='google');pending=true;h.document.dispatchEvent({type:'profile:photo-status'});
+ google.dispatchEvent({type:'click'});assert.equal(google.attributes['aria-pressed'],'true');assert.equal(h.get('publicAvatarSave').disabled,true);assert.equal(h.writes.length,0);
+ pending=false;h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(google.attributes['aria-pressed'],'true');assert.equal(h.get('publicAvatarSave').disabled,false);
+ const getVariants=h.windowObj.ArcadeTerms.getAvatarVariants;let ready=false;h.windowObj.ArcadeTerms.isReady=()=>ready;h.windowObj.ArcadeTerms.getAvatarVariants=(user,display)=>ready||display?getVariants(user):[];
+ h.document.dispatchEvent({type:'profile:terms-status'});assert.equal(gallery.children.length,17);assert.equal(h.get('publicAvatarSave').disabled,true);
+ ready=true;h.document.dispatchEvent({type:'profile:terms-status'});assert.equal(gallery.children.length,17);assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(h.get('publicAvatarSave').disabled,false);
+ delete h.windowObj.ArcadeTerms;h.document.dispatchEvent({type:'profile:terms-status'});assert.equal(h.get('publicAvatarSave').disabled,true);h.save();assert.equal(h.writes.length,0);
+});
+
+
+test('Google pending, ready and unavailable states update the same tile and preserve the sixteen catalog choices',async()=>{
+ const h=await avatarPickerHarness();let presentation={state:'pending',avatar:null};h.windowObj.ProfileGooglePhoto={getPresentation:()=>presentation,getChoice:()=>presentation&&presentation.state==='ready'?presentation.avatar:null,isArcadeSelectionLocked:()=>false};
+ h.setPolicy(16);const gallery=h.get('arcadeAvatarGallery');assert.equal(gallery.children.length,17);const initialGoogle=gallery.children.find(b=>b.dataset.variant==='google');h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),initialGoogle);
+ const google=gallery.children.find(b=>b.dataset.variant==='google'),image=google.children[0],catalog=gallery.children.filter(b=>b!==google);
+ assert.equal(gallery.children.length,17);assert.equal(image.dataset.avatarLoading,'true');assert.equal(google.attributes['data-saved'],'false');assert.equal(google.disabled,true);
+ presentation={state:'ready',avatar:{type:'uploaded',url:'synthetic-confirmed'}};h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.ok(catalog.every(b=>gallery.children.includes(b)));assert.equal(google.disabled,false);
+ presentation={state:'unavailable',avatar:null};h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(image.dataset.avatarLoading,undefined);assert.equal(image.textContent,'—');assert.equal(google.disabled,true);assert.equal(gallery.children.filter(b=>b.attributes['aria-pressed']==='true').length,1);
+ presentation=null;h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.length,16);
 });

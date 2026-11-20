@@ -2,6 +2,7 @@ import { createXpLedgerKeys, resolveXpNamespace } from "./xp-ledger.mjs";
 import { executeSql } from "./supabase-admin.mjs";
 import { store as defaultStore } from "./store-upstash.mjs";
 import { publicProfile } from "./user-profile.mjs";
+import { attachPublishedPhotos } from "./profile-photo-publication.mjs";
 import { computeXpLevel } from "./xp-level.mjs";
 import { createXpLeaderboardKeys, getXpLeaderboardPeriods } from "./xp-leaderboard.mjs";
 
@@ -76,10 +77,8 @@ async function readLeaderboardProfiles(userIds, runSql = executeSql) {
      where user_id = any($1::uuid[]) and leaderboard_visible = true and public_profile_blocked = false;`,
     [validIds],
   );
-  return new Map((rows || []).map((row) => {
-    const profile = normalizeProfileRow(row);
-    return [profile.userId, profile];
-  }));
+  const profiles=await attachPublishedPhotos((rows||[]).map(normalizeProfileRow),{executeSql:runSql});
+  return new Map(profiles.map(profile=>[profile.userId,profile]));
 }
 
 function projectLeaderboardProfile(profile, { rank, xp, lifetimeXp }) {

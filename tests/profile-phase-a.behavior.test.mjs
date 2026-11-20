@@ -173,7 +173,7 @@ test('WS reaction reuses its lifecycle transaction rather than requesting a seco
 });
 async function termsClientFixture({autoInit=true,required=true}={}){
  const vm=await import('node:vm');
- let user=id,serverVersion='2026-10-26-a1',tokenHook=null,rejectOldVersion=false,variantsEnabled=false,getHook=null,failGet=false;const posts=[],events={},nodes=[],emitted=[];
+ let user=id,serverVersion='2026-10-26-a1',tokenHook=null,rejectOldVersion=false,variantsEnabled=false,getHook=null,failGet=false,deniedGet=0;const posts=[],events={},nodes=[],emitted=[];
  const node=()=>({textContent:'',hidden:false,disabled:false,open:false,fields:{},setAttribute(){},addEventListener(type,fn){this[type]=fn;},querySelector(key){return this.fields[key]||(this.fields[key]=node());},showModal(){this.open=true;},close(){this.open=false;}});
  const doc={readyState:'loading',documentElement:{lang:'en'},head:{appendChild(){}},body:{appendChild(n){nodes.push(n);}},createElement:node,querySelector:()=>({sheet:{}}),addEventListener(type,fn){events[type]=fn;},dispatchEvent(event){emitted.push(event.type);}};
  let authChanged;
@@ -183,13 +183,14 @@ async function termsClientFixture({autoInit=true,required=true}={}){
   if(options.method==='POST'){posts.push({body:JSON.parse(options.body),token:options.headers.Authorization});if(rejectOldVersion){rejectOldVersion=false;serverVersion='next-version';return {ok:false,json:async()=>({error:'terms_version_changed'})};}}
   const result={required:required,version:serverVersion,current:options.method==='POST',variantsEnabled:variantsEnabled,avatarVariants:PUBLIC_AVATAR_VARIANTS.slice(0,variantsEnabled?16:6)};
   if(options.method==='GET'&&getHook){const hook=getHook;getHook=null;await hook();}
+  if(options.method==='GET'&&deniedGet){const status=deniedGet;deniedGet=0;return {ok:false,status,json:async()=>({error:'unauthorized'})};}
   if(options.method==='GET'&&failGet){failGet=false;throw Error('offline');}
   return {ok:true,json:async()=>result};
  };
  vm.runInNewContext(await readFile(new URL('../js/profile-onboarding.js',import.meta.url),'utf8'),{window,document:doc,fetch,location:{pathname:'/account.html',search:''},URLSearchParams,sessionStorage:{getItem:()=>null},crypto:globalThis.crypto,atob:globalThis.atob,CustomEvent:class{constructor(type){this.type=type;}},setTimeout,clearTimeout});
  const flush=async()=>{await new Promise(r=>setTimeout(r,0));await new Promise(r=>setTimeout(r,0));};
  if(autoInit){events.DOMContentLoaded();await flush();}
- return {window,posts,emitted,start:()=>events.DOMContentLoaded(),setVariants:value=>{variantsEnabled=value;},holdGet:fn=>{getHook=fn;},failNextGet:()=>{failGet=true;},dialog:()=>nodes.find(n=>n.open),flush,token,setUser:value=>{user=value;authChanged();},holdToken:fn=>{tokenHook=fn;},rejectNextVersion:()=>{rejectOldVersion=true;}};
+ return {window,posts,emitted,start:()=>events.DOMContentLoaded(),setVariants:value=>{variantsEnabled=value;},holdGet:fn=>{getHook=fn;},denyNextGet:value=>{deniedGet=value;},failNextGet:()=>{failGet=true;},dialog:()=>nodes.find(n=>n.open),flush,token,emitSameUser:()=>authChanged('TOKEN_REFRESHED',{id:user}),setUser:value=>{user=value;authChanged('SIGNED_IN',value?{id:value}:null);},holdToken:fn=>{tokenHook=fn;},rejectNextVersion:()=>{rejectOldVersion=true;}};
 }
 test('Terms acceptance never posts under a replacement identity while credentials are pending',async()=>{
  const h=await termsClientFixture();const dialog=h.dialog();assert.ok(dialog);
@@ -200,7 +201,7 @@ test('Terms acceptance never posts under a replacement identity while credential
 });
 test('a changed Terms version is displayed with its document before another explicit acceptance',async()=>{
  const h=await termsClientFixture();h.rejectNextVersion();
- assert.equal(h.dialog().querySelector('[data-privacy-link]').href,'/legal/privacy.2026-10-26-a1.en.html');
+ assert.equal(h.dialog().querySelector('[data-privacy-link]').href,'/legal/privacy.en.html');
  await h.dialog().querySelector('[data-terms-accept]').onclick();await h.flush();
  const next=h.dialog();assert.ok(next);assert.match(next.querySelector('[data-terms-copy]').textContent,/next-version/);assert.match(next.querySelector('[data-terms-link]').href,/terms\.next-version\.en\.html/);
  await next.querySelector('[data-terms-accept]').onclick();assert.equal(h.posts.length,2);assert.equal(h.posts[0].body.version,'2026-10-26-a1');assert.equal(h.posts[1].body.version,'next-version');
@@ -309,4 +310,22 @@ test('WS guest retention uses the existing cadence, serializes ticks and recover
  fail=false;const recovered=context.tick();await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,3);release(0);await recovered;
  const timer=source.slice(end,source.indexOf('pokerAccessRefreshTimer.unref();',end));
  assert.match(timer,/void runGuestReceiptCleanupTick\(\)\.catch/);assert.doesNotMatch(timer,/if\s*\(/);
+});
+
+
+test('same-owner Terms revalidation retains display variants but blocks writes until verified',async()=>{
+ const h=await termsClientFixture({required:false});h.setVariants(true);await h.window.ArcadeTerms.refresh(false);let release;
+ h.holdGet(()=>new Promise(resolve=>{release=resolve;}));const pending=h.window.ArcadeTerms.refresh(false);await h.flush();
+ assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(id,true)),PUBLIC_AVATAR_VARIANTS);assert.deepEqual(Array.from(h.window.ArcadeTerms.getAvatarVariants(id)),[]);assert.equal(h.window.ArcadeTerms.isReady(id),false);
+ release();await pending;assert.equal(h.window.ArcadeTerms.isReady(id),true);
+ h.failNextGet();await h.window.ArcadeTerms.refresh(false);assert.equal(h.window.ArcadeTerms.isReady(id),false);assert.equal(h.window.ArcadeTerms.getAvatarVariants(id,true).length,16);assert.equal(h.window.ArcadeTerms.getAvatarVariants(id).length,0);
+ h.setVariants(false);await h.window.ArcadeTerms.refresh(false);assert.equal(h.window.ArcadeTerms.getAvatarVariants(id,true).length,6);
+ h.holdGet(()=>new Promise(resolve=>{release=resolve;}));h.emitSameUser();await h.flush();assert.equal(h.window.ArcadeTerms.getAvatarVariants(id,true).length,6);assert.equal(h.window.ArcadeTerms.isReady(id),false);release();await h.flush();
+ h.setUser(null);assert.equal(h.window.ArcadeTerms.getAvatarVariants(id,true).length,0);await h.flush();
+});
+
+
+test('confirmed Terms access denial clears the retained gallery presentation',async()=>{
+ const h=await termsClientFixture({required:false});h.setVariants(true);await h.window.ArcadeTerms.refresh(false);assert.equal(h.window.ArcadeTerms.getAvatarVariants(id,true).length,16);
+ h.denyNextGet(403);await h.window.ArcadeTerms.refresh(false);assert.equal(h.window.ArcadeTerms.getAvatarVariants(id,true).length,0);assert.equal(h.window.ArcadeTerms.isReady(id),false);
 });
