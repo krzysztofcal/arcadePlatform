@@ -342,6 +342,7 @@ test('production runtime recovery handoff from non-account page to account.html'
   let ready2;
   let exchanged2 = null;
   let exchangeCount2 = 0;
+  let launchUrlCalls2 = 0;
   const node2 = { textContent: '', hidden: true };
   const document2 = {
     addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready2 = fn; },
@@ -354,7 +355,7 @@ test('production runtime recovery handoff from non-account page to account.html'
     Capacitor: { Plugins: {
       Browser: { close: async () => {} },
       SystemBars: { hide: async () => {}, show: async () => {} },
-      App: { addListener(name, fn) { listeners2[name] = fn; }, getLaunchUrl: async () => null }
+      App: { addListener(name, fn) { listeners2[name] = fn; }, getLaunchUrl: async () => { launchUrlCalls2++; return { url: 'https://play.kcswh.pl/app/auth/callback?code=older-launch' }; } }
     } },
     supabaseClient: { auth: {
       exchangeCodeForSession: async (code) => {
@@ -387,6 +388,7 @@ test('production runtime recovery handoff from non-account page to account.html'
 
   assert.equal(exchanged2, 'rec-1');
   assert.equal(exchangeCount2, 1);
+  assert.equal(launchUrlCalls2, 0, 'pending handoff code wins over an older launch URL');
   assert.equal(sessionStorage.getItem('mobilePokerAuthCode'), null, 'mobilePokerAuthCode consumed and removed');
   assert.equal(sessionStorage.getItem('mobilePokerConsumedAuthCode'), 'rec-1');
   assert.match(node2.textContent, /Signed in/);

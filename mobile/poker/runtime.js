@@ -84,8 +84,9 @@
       app.addListener('appUrlOpen', function(event){ callback(event.url); });
       var pendingCode = sessionStorage.getItem('mobilePokerAuthCode');
       sessionStorage.removeItem('mobilePokerAuthCode');
+      // A code handed over from another page wins; replaying an older launch URL could block it.
       if (pendingCode) setTimeout(function(){ callback(bound.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
-      app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
+      else app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
         if (window.PokerOffline && window.PokerOffline.cancelDialog && window.PokerOffline.cancelDialog()) return;
         var dialog = document.querySelector('dialog[open]');
