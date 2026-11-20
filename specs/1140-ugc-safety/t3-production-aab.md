@@ -49,12 +49,18 @@ The current task ends with a verified unsigned AAB. After a separate OWNER decis
 2. Back up `arcade-poker-upload.jks` and both passwords in two offline places (for example, a password manager plus an encrypted USB drive). If it is lost, request an upload-key reset in Play Console (Play App Signing keeps the app signing key).
 3. For each build, in the extracted artifact folder (the `jarsigner` prompts ask for the keystore password):
    ```bash
-   sha256sum -c SHA256SUMS
-   UNSIGNED="$(ls arcade-poker-production-*-unsigned.aab)"
-   SIGNED="${UNSIGNED%-unsigned.aab}-signed.aab"
-   cp "$UNSIGNED" "$SIGNED"
-   jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore /path/to/arcade-poker-upload.jks "$SIGNED" upload
-   jarsigner -verify -verbose -certs "$SIGNED"   # must show the upload certificate, never "Android Debug"
+   (
+     set -euo pipefail
+     shopt -s nullglob
+     files=(arcade-poker-production-*-unsigned.aab)
+     [ "${#files[@]}" -eq 1 ] || { echo "expected exactly one unsigned AAB"; exit 1; }
+     UNSIGNED="${files[0]}"
+     sha256sum -c SHA256SUMS
+     SIGNED="${UNSIGNED%-unsigned.aab}-signed.aab"
+     cp "$UNSIGNED" "$SIGNED"
+     jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore /path/to/arcade-poker-upload.jks "$SIGNED" upload
+     jarsigner -verify -verbose -certs "$SIGNED"   # must show the upload certificate, never "Android Debug"
+   )
    ```
 4. First upload, to **Internal testing** (separate OWNER GO): accept Play App Signing (Google-managed app signing key). Copy the **app signing** certificate SHA-256 from Play Console → App integrity for T2d. The **upload** certificate is a different value and is not used in assetlinks.
 5. `versionCode` must be strictly higher on every upload. Use the next integer for each dispatch and record it in the release notes.
