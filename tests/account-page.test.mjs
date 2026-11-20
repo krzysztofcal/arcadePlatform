@@ -1314,3 +1314,16 @@ test('external deletion entry is signed-out WWW only and signed-in hash focuses 
  const h=await deletionHarness([],{hash:'#account-deletion'});assert.equal(h.info.hidden,true);assert.equal(h.scrolled(),1);
  h.windowObj.location.hash='';h.hashChange();h.windowObj.location.hash='#account-deletion';h.hashChange();assert.equal(h.scrolled(),2);assert.deepEqual(h.calls,[]);
 });
+
+
+test('Google is the seventeenth ordinary choice and Arcade remains selectable without withdrawing consent',async()=>{
+ const h=await avatarPickerHarness();h.windowObj.ProfileGooglePhoto={getChoice:()=>({type:'uploaded',url:'synthetic-preview'}),isArcadeSelectionLocked:()=>false};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'uploaded'},avatarRevision:2});
+ assert.equal(h.get('arcadeAvatarGallery').children.length,17);assert.equal(h.get('arcadeAvatarGallery').children.find(b=>b.attributes['aria-pressed']==='true').dataset.variant,'google');
+ const google=h.get('arcadeAvatarGallery').children.find(b=>b.dataset.variant==='google');assert.equal(google.children.length,3);assert.equal(google.lastChild.textContent,'arcadeAvatarCurrent');
+ assert.equal(h.get('arcadeAvatarGallery').children.filter(b=>b.attributes['aria-pressed']==='true').length,1);
+ h.click(h.variants[1]);assert.equal(h.selected(),h.variants[1]);h.save();assert.equal(h.writes.length,1);
+ h.writes[0].resolve({handle:'fixture',avatarVariant:h.variants[1],avatar:{type:'default',variant:h.variants[1]},avatarRevision:3});
+ h.windowObj.ProfileGooglePhoto.load=async()=>{};await flush();await flush();
+ assert.equal(h.selected(),h.variants[1]);assert.equal(h.get('arcadeAvatarGallery').children.length,17);
+});

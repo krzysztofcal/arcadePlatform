@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 import { requireCurrentTerms } from "../../../shared/profile-terms.mjs";
-import { CAPABILITY_MS, deleteTrackedPhoto, normalizeAvatarImage, writeTrackedOutput } from "./profile-avatar.mjs";
+import { CAPABILITY_MS, deleteTrackedPhoto, normalizeAvatarImage, signedPhotoUrls, writeTrackedOutput } from "./profile-avatar.mjs";
 import { googlePhotoEnabled } from "./profile-photo-publication.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 
@@ -149,7 +149,7 @@ export async function googlePhotoStatus(userId, deps = {}) {
   const runSql = deps.executeSql || executeSql;
   const [row] = await runSql(
     `select c.decision, c.notice_version, c.granted_at, c.withdrawn_at, c.imported_avatar_key,
-            p.avatar_key, p.google_photo_suppressed,
+            p.avatar_key, p.avatar_revision, p.google_photo_suppressed,
             exists(select 1 from private.profile_photo_pending_deletions d where d.user_id = $1) as pending_copy,
             exists(select 1 from auth.identities i where i.user_id = $1 and i.provider = 'google') as google_linked
      from (select $1::uuid as user_id) u
@@ -159,6 +159,7 @@ export async function googlePhotoStatus(userId, deps = {}) {
   );
   const iso = (value) => (value ? new Date(value).toISOString() : null);
   return {
+    avatarRevision: row?.avatar_revision ? Number(row.avatar_revision) : null,
     noticeVersion: GOOGLE_PHOTO_NOTICE_VERSION,
     googleLinked: row?.google_linked === true,
     consent: row?.decision ? { decision: row.decision, noticeVersion: row.notice_version, grantedAt: iso(row.granted_at), withdrawnAt: iso(row.withdrawn_at) } : null,
@@ -166,6 +167,67 @@ export async function googlePhotoStatus(userId, deps = {}) {
     // Our copy still exists (after a withdrawal: its deletion failed and is retried by the next withdrawal).
     copyStored: !!row?.imported_avatar_key || row?.pending_copy === true,
   };
+}
+
+// Reuse consent and the V3 source manifest. The caller never supplies a key or a URL.
+async function existingCopy(tx, user, deps) {
+  const env = deps.env || process.env;
+  if (!googlePhotoEnabled(env)) throw photoError("photo_import_unavailable");
+  if (env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED !== '1' && !accountDeletionEnabled(env)) throw photoError('avatar_tracking_unavailable',503);
+  await assertAccountActive(tx, user);
+  await requireCurrentTerms(tx, { kind: 'account', id: user });
+  await assertNoModeratorHold(tx, user);
+  const [consent] = await tx.unsafe('select decision, imported_avatar_key, consent_revision from private.profile_photo_consents where user_id=$1 for update;', [user]);
+  const [profile] = await tx.unsafe('select avatar_revision, avatar_variant, avatar_key, google_photo_suppressed, public_profile_blocked from public.user_profiles where user_id=$1 for update;', [user]);
+  if (!profile || profile.public_profile_blocked || consent?.decision !== 'granted' || !/^[0-9a-f-]{36}[.]webp$/.test(consent.imported_avatar_key || '')) throw photoError('photo_copy_unavailable');
+  const key = consent.imported_avatar_key;
+  const [eligible] = await tx.unsafe(`select
+    exists(select 1 from storage.buckets where id='profile-avatar-uploads' and public=false) as private,
+    exists(select 1 from public.profile_avatar_uploads where user_id=$1 and id=$2::uuid and source_path=$3
+      and tracking_version=3 and signing_finished_at is not null and source_deleted_at is null) as owned,
+    exists(select 1 from private.profile_photo_pending_deletions where user_id=$1) as pending;`, [user, key.slice(0,-5), 'pending/'+key.slice(0,-5)]);
+  if (eligible?.private !== true || eligible.owned !== true || eligible.pending !== false) throw photoError('photo_copy_unavailable');
+  return { key, revision: Number(profile.avatar_revision), consentRevision: Number(consent.consent_revision), variant: profile.avatar_variant, previousKey: profile.avatar_key, inUse: profile.avatar_key === key && profile.google_photo_suppressed === false };
+}
+
+async function availableCopyUrl(copy, deps) {
+  try {
+    const urls = await signedPhotoUrls([copy.key], deps);
+    if (urls.has(copy.key)) return urls.get(copy.key);
+  } catch {}
+  throw photoError('photo_copy_unavailable');
+}
+
+function sameCopy(before, after) {
+  return before.key === after.key && before.consentRevision === after.consentRevision && before.revision === after.revision;
+}
+
+// Owner-only preview, even when Arcade is selected. Never used by public/profile/leaderboard projections.
+export async function ownerGooglePhotoPreview(userId, deps = {}) {
+  const user = requireUser(userId), runTx = deps.beginSql || beginSql;
+  const before = await runTx(tx => existingCopy(tx, user, deps));
+  const url = await availableCopyUrl(before, deps); // no database locks during Storage I/O
+  await runTx(async tx => { if (!sameCopy(before, await existingCopy(tx, user, deps))) throw photoError('stale_avatar_revision'); });
+  return { previewAvatar: { type: 'uploaded', variant: before.variant, url }, avatarRevision: before.revision, photoInUse: before.inUse };
+}
+
+export async function selectGooglePhoto(userId, input = {}, deps = {}) {
+  const user = requireUser(userId), runTx = deps.beginSql || beginSql;
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['action','expectedRevision'].includes(key))
+      || input.action !== 'select' || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) throw photoError('invalid_request',400);
+  const before = await runTx(async tx => {
+    const copy = await existingCopy(tx, user, deps);
+    if (copy.revision !== input.expectedRevision) throw photoError('stale_avatar_revision');
+    return copy;
+  });
+  await availableCopyUrl(before, deps); // proves the owned object is available; no Google download or new consent
+  await runTx(async tx => {
+    const current = await existingCopy(tx, user, deps);
+    if (!sameCopy(before, current) || current.revision !== input.expectedRevision) throw photoError('stale_avatar_revision');
+    if(current.previousKey&&current.previousKey!==current.key)await tx.unsafe('insert into private.account_avatar_objects(user_id,output_path) values($1,$2) on conflict(user_id,output_path) do nothing;', [user,current.previousKey]);
+    await tx.unsafe('update public.user_profiles set avatar_key=$2, google_photo_suppressed=false, avatar_revision=avatar_revision+1 where user_id=$1;', [user, current.key]);
+  });
+  return googlePhotoStatus(user, deps);
 }
 
 export async function importGooglePhoto(userId, input = {}, deps = {}) {

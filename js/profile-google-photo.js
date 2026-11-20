@@ -53,7 +53,7 @@
   }
 
   // The session is read once per request; token, provider token and account all come from it.
-  async function request(method, body, expectedUser, withProviderToken){
+  async function request(method, body, expectedUser, withProviderToken, guard){
     var session = await currentSession();
     if (!session || !session.access_token || !session.user || session.user.id !== expectedUser) throw staleError();
     var payload = body;
@@ -65,6 +65,7 @@
       }
       payload = Object.assign({}, body, { providerToken: session.provider_token });
     }
+    if(guard&&!guard.isCurrent())throw staleError();
     var headers = { Authorization: 'Bearer ' + session.access_token };
     if (payload) headers['Content-Type'] = 'application/json';
     var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(ENDPOINT) : ENDPOINT, { method: method, headers: headers, body: payload ? JSON.stringify(payload) : undefined, credentials: 'omit' });
@@ -86,7 +87,8 @@
       google_proof_required: t('googlePhotoReconnectNeeded', 'Google needs to confirm your identity again. Choose "Confirm with Google", then review the consent and choose "Use my Google photo" again.'),
       google_proof_invalid: t('googlePhotoReconnectNeeded', 'Google needs to confirm your identity again. Choose "Confirm with Google", then review the consent and choose "Use my Google photo" again.'),
       google_photo_unavailable: t('googlePhotoUnavailable', 'Your Google account has no photo we can use. Your Arcade avatar stays.'),
-      photo_copy_exists: t('googlePhotoNotInUse', 'Your Arcade avatar is shown. To use your Google photo again, first delete the stored copy.'),
+      photo_copy_exists: t('googlePhotoNotInUse', 'Your copy is stored with consent. Choose Google in the avatar gallery and save to use it again.'),
+      photo_copy_unavailable: t('googlePhotoCopyUnavailable', 'The stored Google photo is unavailable. Refresh before choosing it.'),
       photo_import_blocked: t('googlePhotoBlocked', 'A moderator has hidden your photo, so a Google photo cannot be used. Your Arcade avatar stays.'),
       terms_required: t('googlePhotoTermsRequired', 'Accept the current Terms first.'),
       rate_limit_exceeded: t('googlePhotoRateLimited', 'Too many attempts. Try again later.')
@@ -101,6 +103,7 @@
     if (consent) consent.checked = false;
     var importButton = node('googlePhotoImport');
     if (importButton) importButton.disabled = true;
+    show('arcadeAvatarPhotoHint', false);
     show('googlePhotoOffer', false);
     show('googlePhotoWithdraw', false);
     show('googlePhotoReconnect', false);
@@ -114,24 +117,23 @@
       return;
     }
     show('googlePhotoPanel', true);
+    show('arcadeAvatarPhotoHint', true);
     var offer = !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
     show('googlePhotoOffer', offer && !needsProof);
     show('googlePhotoReconnect', offer && !!needsProof);
     show('googlePhotoWithdraw', hasPhoto);
     if (status.photoInUse === true) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
     else if (!granted && stored) setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
-    else if (granted) setState(t('googlePhotoNotInUse', 'Your Arcade avatar is shown. To use your Google photo again, first delete the stored copy.'));
+    else if (granted) setState(t('googlePhotoNotInUse', 'Your copy is stored with consent. Choose Google in the avatar gallery and save to use it again.'));
     else setState(t('googlePhotoOffer', 'Optional: use your Google profile photo instead of an Arcade avatar.'));
   }
 
   async function refreshAvatar(expectedUser, expectedGeneration){
     if (!window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return;
-    try {
-      var profile = await window.ProfileClient.getMe(true);
-      if (owner !== expectedUser || generation !== expectedGeneration) return;
-      document.dispatchEvent(new CustomEvent('profile:updated', {detail: profile}));
-      if (typeof window.ProfileClient.applyAvatar === 'function') window.ProfileClient.applyAvatar(node('publicProfileAvatar'), profile);
-    } catch (_err){}
+    var profile = await window.ProfileClient.getMe(true);
+    if (owner !== expectedUser || generation !== expectedGeneration) throw staleError();
+    document.dispatchEvent(new CustomEvent('profile:updated', {detail: profile}));
+    if (typeof window.ProfileClient.applyAvatar === 'function') window.ProfileClient.applyAvatar(node('publicProfileAvatar'), profile);
   }
 
   async function run(action){
@@ -156,17 +158,54 @@
         });
       }
       await refreshAvatar(expectedUser, expectedGeneration);
+      var refreshed=await request('GET',null,expectedUser,false);
+      if(expectedGeneration!==generation||owner!==expectedUser)return;
+      statusResolved=true;render(refreshed);
+      if(action==='withdraw')setState(result.copyDeleted===true?t('googlePhotoWithdrawn','Your Google photo is no longer used and our copy was deleted.'):t('googlePhotoCopyPending','Deletion is not confirmed. Retry withdrawal.'));
     } catch (error){
       if (expectedGeneration !== generation) return;
       var code = error && error.code ? error.code : 'request_failed';
       klog('google_photo:action_failed', { action: action, code: code });
-      if (code === 'stale_identity' || code === 'photo_copy_exists') return load();
+      if (code === 'stale_identity' || code === 'photo_copy_exists' || (!(error&&error.status)&&code!=='google_proof_required'&&code!=='google_proof_invalid')){
+        await load(); // Reconcile once; never retry the POST, including an unknown outcome.
+        if(owner===expectedUser&&action==='withdraw'&&result)setState(result.copyDeleted===true?t('googlePhotoWithdrawn','Your Google photo is no longer used and our copy was deleted.'):t('googlePhotoCopyPending','Deletion is not confirmed. Retry withdrawal.'));
+        return;
+      }
+      if(error&&error.status)statusResolved=true;else statusResolved=false;
       render(status, action === 'import' && (code === 'google_proof_required' || code === 'google_proof_invalid'));
       setState(errorText(code));
     } finally {
       busy = false;
       document.dispatchEvent(new CustomEvent('profile:photo-status'));
     }
+  }
+
+  async function selectPhoto(expectedRevision, guard){
+    var expectedUser=owner,expectedGeneration=generation;
+    if(busy||!expectedUser||!getChoice(expectedUser)||!guard||guard.userId!==expectedUser||!guard.isCurrent())throw staleError();
+    busy=true;document.dispatchEvent(new CustomEvent('profile:photo-status'));
+    try{
+      await request('POST',{action:'select',expectedRevision:expectedRevision},expectedUser,false,guard);
+      if(generation!==expectedGeneration||owner!==expectedUser||!guard.isCurrent())throw staleError();
+      var profile=await window.ProfileClient.getMe(true);
+      var refreshed=await request('GET',null,expectedUser,false);
+      if(generation!==expectedGeneration||owner!==expectedUser||!guard.isCurrent())throw staleError();
+      statusResolved=true;render(refreshed);
+      if(refreshed.avatarRevision!==undefined&&refreshed.avatarRevision!==profile.avatarRevision)throw staleError();
+      document.dispatchEvent(new CustomEvent('profile:updated',{detail:profile}));
+      return profile;
+    }catch(error){
+      if(owner===expectedUser&&generation===expectedGeneration){
+        await load();
+        if(owner===expectedUser&&statusResolved)setState(errorText(error&&error.code));
+      }
+      throw error;
+    }finally{busy=false;document.dispatchEvent(new CustomEvent('profile:photo-status'));}
+  }
+
+  function getChoice(userId){
+    return owner===userId&&statusResolved&&status&&status.consent&&status.consent.decision==='granted'&&status.copyStored===true&&status.previewAvatar&&status.previewAvatar.type==='uploaded'
+      ? status.previewAvatar:null;
   }
 
   // Same accessible confirmation pattern as accountDeletionDialog; no native WebView prompt.
@@ -223,6 +262,7 @@
 
   async function load(){
     if (closeWithdrawalConfirmation) closeWithdrawalConfirmation();
+    var previousOwner=owner,previousStatus=status;
     var current = ++generation;
     statusResolved=false;
     render(null);
@@ -236,6 +276,11 @@
       if (current === generation){statusResolved=true;render(result);}
     } catch (error){
       if(current===generation&&error&&error.status===404){statusResolved=true;render(null);}
+      if(current===generation&&owner===previousOwner&&previousStatus&&error&&error.code!=='stale_identity'&&error.status!==404){
+        // Only retain the owner's withdrawal action, never an unverified photo or selectable copy.
+        render({consent:previousStatus.consent,copyStored:previousStatus.copyStored,photoInUse:false,importEnabled:false});
+        setState(t('googlePhotoStatusUnavailable','Photo status could not be confirmed. Refresh to try again; you can still withdraw consent.'));
+      }
       // 404 means the feature is off on this environment: the panel stays hidden.
       if (current === generation && error && error.status !== 404) klog('google_photo:status_failed', { code: error.code || 'request_failed' });
     }
@@ -267,12 +312,12 @@
       auth.signInWithGoogle().catch(function(){ setState(errorText('request_failed')); });
     });
     var auth = window.SupabaseAuth;
-    if (auth && typeof auth.onAuthChange === 'function') auth.onAuthChange(function(){ load(); });
+    if (auth && typeof auth.onAuthChange === 'function') auth.onAuthChange(function(_event,user){ if(busy&&user&&String(user.id)===owner)return;load(); });
     load();
   }
 
-  window.ProfileGooglePhoto = { load: load, isArcadeSelectionLocked: function(userId){
-    return !!userId && (busy || owner!==userId || !statusResolved || !!(status && (status.copyStored || status.photoInUse || status.consent && status.consent.decision==='granted')));
+  window.ProfileGooglePhoto = { load: load, select: selectPhoto, getChoice: getChoice, isSelected: function(userId,revision){return owner===userId&&statusResolved&&status&&status.avatarRevision===revision&&status.photoInUse===true;}, isArcadeSelectionLocked: function(userId){
+    return !!userId && (busy || owner!==userId || !statusResolved);
   } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire, { once: true });
   else wire();

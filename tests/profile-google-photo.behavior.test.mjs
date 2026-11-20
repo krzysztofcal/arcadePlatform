@@ -558,3 +558,65 @@ test('private copies issue only bounded signed reads and stop issuing them after
  assert.equal((await read(net.deps)).publishedPhotoUrl,undefined);
  assert.ok(net.calls.every(call=>!call.url.includes('/object/profile-avatars/')),'no permanent public write');
 });
+
+test('existing Google copy can be selected after Arcade without reimport or renewed consent', async()=>{
+ const env=await database();const id=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);
+ const consent=await consentRow(env,id);
+ await env.db.exec(`create function public.ensure_user_profile(uuid) returns setof public.user_profiles language sql as 'select * from public.user_profiles where user_id=$1';`);
+ const {updateUserProfile}=await import('../netlify/functions/_shared/user-profile.mjs');
+ const arcade=await updateUserProfile(id,{avatarVariant:'fox-blue',expectedRevision:2},net.deps);
+ const beforePublic=net.calls.length;const [inactive]=await attachPublishedPhotos([arcade],net.deps);assert.equal(inactive.publishedPhotoUrl,undefined);assert.equal(net.calls.length,beforePublic);
+ assert.equal((await profileRow(env,id)).avatar_key,null);assert.deepEqual(await consentRow(env,id),consent);
+ assert.equal((await publishedPhotoKeys([id],net.deps)).size,0);
+ const preview=await photo.ownerGooglePhotoPreview(id,net.deps);assert.equal(preview.previewAvatar.type,'uploaded');
+ const result=await photo.selectGooglePhoto(id,{action:'select',expectedRevision:3},net.deps);
+ assert.equal(result.photoInUse,true);assert.equal((await profileRow(env,id)).avatar_revision,4);assert.deepEqual(await consentRow(env,id),consent);
+ assert.equal(net.calls.filter(c=>new URL(c.url).hostname==='lh3.googleusercontent.com'||c.url==='https://openidconnect.googleapis.com/v1/userinfo').length,2);
+ await updateUserProfile(id,{avatarVariant:'fox-blue',expectedRevision:4},net.deps);
+ await photo.withdrawGooglePhoto(id,net.deps);const count=net.calls.length;
+ await assert.rejects(photo.ownerGooglePhotoPreview(id,net.deps));await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:6},net.deps));
+ assert.equal(net.calls.length,count);assert.equal((await consentRow(env,id)).imported_avatar_key,null);
+});
+
+test('select and owner preview refuse unconsented, foreign, pending, held or unavailable copies without publishing',async()=>{
+ const env=await database();const id=await env.user();const other=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);const key=(await consentRow(env,id)).imported_avatar_key;
+ const attempt=()=>photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},net.deps);
+ const denied=async mutate=>{await mutate();const count=net.calls.length;await assert.rejects(attempt());await assert.rejects(photo.ownerGooglePhotoPreview(id,net.deps));assert.equal(net.calls.length,count);};
+ await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:1},net.deps),{code:'stale_avatar_revision'});
+ await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},{...net.deps,env:{}}));
+ await denied(()=>env.executeSql('insert into private.ugc_avatar_holds values($1,$2)',[id,other]));await env.executeSql('delete from private.ugc_avatar_holds where user_id=$1',[id]);
+ await denied(()=>env.executeSql('update public.profile_avatar_uploads set user_id=$2 where user_id=$1',[id,other]));await env.executeSql('update public.profile_avatar_uploads set user_id=$1 where id=$2::uuid',[id,key.slice(0,-5)]);
+ await denied(()=>env.executeSql('insert into private.profile_photo_pending_deletions(user_id,avatar_key) values($1,$2)',[id,key]));await env.executeSql('delete from private.profile_photo_pending_deletions where user_id=$1',[id]);
+ await denied(()=>env.executeSql('update public.user_profiles set public_profile_blocked=true where user_id=$1',[id]));await env.executeSql('update public.user_profiles set public_profile_blocked=false where user_id=$1',[id]);
+ await denied(()=>env.executeSql('insert into public.account_deletion_requests values($1)',[id]));await env.executeSql('delete from public.account_deletion_requests where old_user_id=$1',[id]);
+ await denied(()=>env.executeSql("update private.profile_terms_policy set active=true"));await env.executeSql('update private.profile_terms_policy set active=false');
+ const missing=network(env,{onStorage:()=>{throw new Error('missing object');}});await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},missing.deps),{code:'photo_copy_unavailable'});assert.equal((await profileRow(env,id)).avatar_revision,2);
+ await photo.withdrawGooglePhoto(id,net.deps);const count=net.calls.length;await assert.rejects(attempt());await assert.rejects(photo.ownerGooglePhotoPreview(id,net.deps));assert.equal(net.calls.length,count);
+});
+
+test('withdrawal or Arcade revision wins during Google select and owner preview signing',async()=>{
+ for(const operation of ['select','preview']){
+  const env=await database();const id=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);
+  let once=false;const race=network(env,{onStorage:async call=>{if(!once&&call.url.endsWith('/object/sign/profile-avatar-uploads')){once=true;await photo.withdrawGooglePhoto(id,net.deps);}}});
+  await assert.rejects(operation==='select'?photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},race.deps):photo.ownerGooglePhotoPreview(id,race.deps));
+  assert.equal((await profileRow(env,id)).avatar_key,null);assert.equal((await consentRow(env,id)).decision,'withdrawn');
+ }
+ const env=await database();const id=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);
+ const race=network(env,{onStorage:async()=>{await env.executeSql('update public.user_profiles set avatar_key=null,google_photo_suppressed=true,avatar_revision=avatar_revision+1 where user_id=$1',[id]);}});
+ await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},race.deps),{code:'stale_avatar_revision'});assert.equal((await profileRow(env,id)).avatar_key,null);
+});
+
+test('an Arcade choice during copy availability checking defeats Google select CAS',async()=>{
+ const env=await database();const id=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);
+ await env.db.exec(`create function public.ensure_user_profile(uuid) returns setof public.user_profiles language sql as 'select * from public.user_profiles where user_id=$1';`);
+ const {updateUserProfile}=await import('../netlify/functions/_shared/user-profile.mjs');
+ const race=network(env,{onStorage:async call=>{if(call.url.endsWith('/object/sign/profile-avatar-uploads'))await updateUserProfile(id,{avatarVariant:'comet-blue',expectedRevision:2},net.deps);}});
+ await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},race.deps),{code:'stale_avatar_revision'});
+ assert.equal((await profileRow(env,id)).avatar_key,null);assert.equal((await consentRow(env,id)).decision,'granted');
+});
+
+test('select endpoint uses only authenticated owner and CAS, without Google proof or the import limiter',async()=>{
+ const id=randomUUID();let calls=0;
+ const handler=createProfileGooglePhotoHandler({env:{GOOGLE_PHOTO_IMPORT_ENABLED:'1',UGC_SAFETY_ENABLED:'1'},verifySupabaseJwt:async()=>({valid:true,userId:id}),selectGooglePhoto:async(user,body)=>{assert.equal(user,id);assert.deepEqual(body,{action:'select',expectedRevision:2});calls++;return {photoInUse:true};},allowImport:()=>{throw Error('must not reimport');}});
+ const response=await handler({httpMethod:'POST',headers:{origin:'https://arcade.test',authorization:'Bearer synthetic'},body:JSON.stringify({action:'select',expectedRevision:2})});assert.equal(response.statusCode,200);assert.equal(calls,1);
+});

@@ -134,6 +134,7 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
     const same=choose&&current.avatarVariant===payload.avatarVariant&&!current.avatarKey&&current.googlePhotoSuppressed;
     if(choose&&!same&&current.avatarRevision!==payload.expectedRevision)throw profileError('stale_avatar_revision',409);
     if(choose&&current.avatarKey)await tx.unsafe(`insert into private.account_avatar_objects(user_id,output_path) values($1,$2) on conflict(user_id,output_path) do nothing;`,[userId,current.avatarKey]);
+    // Selection only: Google consent/imported_avatar_key remain until explicit withdrawal or Account Deletion.
     const [updated]=await tx.unsafe(`update public.user_profiles set avatar_variant=$2,
       avatar_key=case when $3 then null else avatar_key end,
       google_photo_suppressed=case when $3 then true else google_photo_suppressed end,

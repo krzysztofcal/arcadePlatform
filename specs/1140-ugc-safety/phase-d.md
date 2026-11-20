@@ -87,3 +87,45 @@ Review round2 found P2 OFF-response state and permanent public objects. Both are
 includes the current import gate, and Google copies now use existing private source slots/short read capabilities.
 No OWNER risk waiver is inferred. See Supabase [bucket access](https://supabase.com/docs/guides/storage/buckets/fundamentals)
 and [batch signed URLs](https://supabase.com/docs/reference/javascript/storage-from-createsignedurls), checked 2026-11-17.
+
+## Local follow-up — one gallery, consent separate from selection (2026-11-20)
+
+Prepared locally on `045848c8`, not reviewed/deployed. The Google copy is the optional seventeenth tile when all
+16 catalog variants are enabled; existing Terms/catalog rollout still controls which Arcade choices are shown.
+All tiles use the same fixed-height grid, image slot, check marker and saved label. Google has only its image,
+accessible label and tooltip, not a multiline description. One `avatarSelection` draft and the existing Save
+button commit either choice. Selecting Arcade does **not** withdraw Google consent or delete the private copy.
+The separate withdrawal dialog deletes that copy even when Arcade is active; it remains available when import is OFF.
+
+`POST profile-google-photo {action:"select", expectedRevision}` reattaches only the authenticated user's existing
+consented copy. It accepts no key, URL, provider token or new consent. It requires both rollout flags, V3 tracking,
+ACTIVE lifecycle, current Terms, no moderator/profile hold, private bucket, a granted decision, an owned V3 source
+manifest, no pending deletion and a successful existing Storage signing/availability check. No network call is made
+under row locks: eligibility is checked before and again after I/O. The final lifecycle/consent/profile locks and
+CAS serialize selection against Arcade changes, withdrawal and deletion. Consent revision/key cannot change
+between checks. No new migration or storage write is needed. `updateUserProfile` keeps its existing detach and
+suppression behavior; it never mutates the consent/copy record.
+
+Only authenticated Account GET may return `previewAvatar` (TTL <=60 seconds) for the owner's inactive copy. It
+rechecks eligibility after signing, never adds inactive keys to public/profile/leaderboard read projections and
+never stores the URL in a durable client cache. Storage signed URLs are bearer capabilities: a link already
+issued can remain usable until expiry, including after withdrawal; cached/saved recipient copies cannot be recalled.
+After withdrawal, no new preview/selection is allowed, and the current gallery/photo presentation is cleared.
+The existing profile renderer is reused unchanged, including expiry and stale-image fences.
+
+Privacy review: current Privacy a3 mentions separate conscious photo permission, but describes catalog-only
+avatars and does not explain retained inactive Google copies, owner-only preview or that catalog selection leaves
+consent/copy intact. **Clarification and OWNER approval are required before public rollout.** This task does not
+edit Privacy, its version/hash, Terms or the consent notice version. The Account explanation is explicit before
+import and while a copy exists; it does not infer a new consent or renew an old one.
+
+Local-only validation uses existing PGlite/Sharp/network fixtures for consent retention, Google/Arcade round-trip,
+CAS, withdrawal races, moderator hold, foreign/missing objects and post-withdrawal refusal. Existing Account/Auth
+fixtures cover selectable Google tiles and session changes; a temporary mobile-browser check measures equal tile
+rectangles and no horizontal overflow. No broad maintained layout suite, live DB/Storage or APK run is introduced.
+Review #13 requires separate GO. Public release, Privacy acceptance and physical-device testing remain OWNER gates.
+
+Cost: one bounded owner GET adds two short eligibility transactions and one signing request for a single owned
+object, never a bucket list; select uses the same one-object availability proof and final CAS. Existing public
+batch signing is unchanged. No polling or automatic retries; owner status is refreshed only on existing events
+and completed explicit avatar actions. Provider download cost remains import-only, at most 1MiB per allowed import.

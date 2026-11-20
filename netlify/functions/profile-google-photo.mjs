@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
 import { atomicRateLimitIncr, xpStoreUnavailableResponse } from "./_shared/store-upstash.mjs";
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { googlePhotoEnabled, googlePhotoStatus, importGooglePhoto, withdrawGooglePhoto } from "./_shared/profile-google-photo.mjs";
+import { googlePhotoEnabled, googlePhotoStatus, importGooglePhoto, withdrawGooglePhoto, selectGooglePhoto, ownerGooglePhotoPreview } from "./_shared/profile-google-photo.mjs";
 
 // #1140 UGC phase D, signed-in accounts only, 404 unless GOOGLE_PHOTO_IMPORT_ENABLED=1:
 // GET -> { noticeVersion, googleLinked, consent, photoInUse }
 // POST { action: "import", consent: true, noticeVersion, providerToken } (at most 5 imports per account and hour)
+// POST { action: "select", expectedRevision } reuses the owned consented copy; no Google proof/download.
 // POST { action: "withdraw" }
 // The request body carries a Google provider token: it is never logged.
 const IMPORT_LIMIT_PER_HOUR = 5;
@@ -27,6 +28,8 @@ function createProfileGooglePhotoHandler(deps = {}) {
   const status = deps.googlePhotoStatus || googlePhotoStatus;
   const importPhoto = deps.importGooglePhoto || importGooglePhoto;
   const withdraw = deps.withdrawGooglePhoto || withdrawGooglePhoto;
+  const selectPhoto = deps.selectGooglePhoto || selectGooglePhoto;
+  const preview = deps.ownerGooglePhotoPreview || ownerGooglePhotoPreview;
   const allow = deps.allowImport || allowImport;
   const storeUnavailable = deps.xpStoreUnavailableResponse || xpStoreUnavailableResponse;
   return async function handler(event) {
@@ -45,7 +48,11 @@ function createProfileGooglePhotoHandler(deps = {}) {
         try { current = await status(auth.userId); }
         catch (error) { if (!importEnabled && error?.code === '42P01') return json(404, cors, {error:'not_found'}); throw error; }
         if (!importEnabled && !current.consent && !current.copyStored) return json(404, cors, {error:'not_found'});
-        return json(200, cors, {...current, photoInUse: importEnabled && current.photoInUse === true, importEnabled});
+        let ownPreview = {};
+        if (importEnabled && current.consent?.decision === 'granted' && current.copyStored) {
+          try { ownPreview = await preview(auth.userId); } catch { /* Status/withdrawal remain available; no preview on uncertain eligibility. */ }
+        }
+        return json(200, cors, {...current, ...ownPreview, photoInUse: importEnabled && (ownPreview.photoInUse ?? current.photoInUse) === true, importEnabled});
       }
       if (typeof event.body === "string" && event.body.length > MAX_BODY) return json(413, cors, { error: "invalid_request" });
       let body;
@@ -62,6 +69,11 @@ function createProfileGooglePhotoHandler(deps = {}) {
         return json(200, cors, {...result,importEnabled});
       }
       if (!importEnabled) return json(404, cors, { error: "not_found" });
+      if (body.action === "select") {
+        const result = await selectPhoto(auth.userId, body);
+        klog('google_photo_selected', {});
+        return json(200, cors, {...result, importEnabled});
+      }
       if (body.action !== "import") return json(400, cors, { error: "invalid_request" });
       const unavailable = storeUnavailable(cors);
       if (unavailable) return unavailable;
