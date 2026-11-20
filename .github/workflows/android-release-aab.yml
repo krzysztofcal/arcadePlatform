@@ -19,10 +19,8 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/android-release-aab.yml'
-      - 'mobile/poker/capacitor.production.json'
-      - 'mobile/poker/production-public.json'
-      - 'mobile/poker/configure-android.mjs'
-      - 'mobile/poker/package-web.mjs'
+      - 'mobile/poker/**'
+      - 'tests/mobile-poker-*.test.mjs'
 
 permissions:
   contents: read
@@ -125,7 +123,7 @@ jobs:
           curl -sSL "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar" -o "$BUNDLETOOL_JAR"
           echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $BUNDLETOOL_JAR" | sha256sum -c -
 
-          mkdir -p artifacts
+          mkdir artifacts
           AAB_SRC="android/app/build/outputs/bundle/release/app-release.aab"
           AAB_DEST="artifacts/arcade-poker-production-${MOBILE_VERSION_NAME}-${MOBILE_VERSION_CODE}-${SOURCE_SHA}-unsigned.aab"
           cp "$AAB_SRC" "$AAB_DEST"
@@ -180,10 +178,13 @@ jobs:
 
             // 5. One intent filter must carry the complete verified App Link callback.
             const filters = [...manifest.matchAll(/<intent-filter\b[^>]*>[\s\S]*?<\/intent-filter>/g)].map(m => m[0]);
-            const appLink = filters.filter(f => /<intent-filter\b[^>]*autoVerify="true"/.test(f)
-              && f.includes("android.intent.action.VIEW") && f.includes("android.intent.category.DEFAULT")
-              && f.includes("android.intent.category.BROWSABLE") && /scheme="https"/.test(f)
-              && /host="play\.kcswh\.pl"/.test(f) && /path="\/app\/auth\/callback"/.test(f));
+            const has = (f, tag, attr, value) => new RegExp("<" + tag + "\\b[^>]*android:" + attr + "=\"" + value.replace(/\./g, "\\.") + "\"").test(f);
+            const appLink = filters.filter(f => /^<intent-filter\b[^>]*android:autoVerify="true"/.test(f)
+              && has(f, "action", "name", "android.intent.action.VIEW")
+              && has(f, "category", "name", "android.intent.category.DEFAULT")
+              && has(f, "category", "name", "android.intent.category.BROWSABLE")
+              && has(f, "data", "scheme", "https") && has(f, "data", "host", "play.kcswh.pl")
+              && has(f, "data", "path", "/app/auth/callback"));
             if (appLink.length !== 1) {
               throw new Error("Manifest must contain exactly one complete autoVerify App Link callback filter, found " + appLink.length);
             }
@@ -245,7 +246,7 @@ jobs:
             fs.writeFileSync("artifacts/release-receipt.json", JSON.stringify(releaseReceipt, null, 2) + "\n");
           '
 
-          (cd artifacts && sha256sum *.aab > SHA256SUMS)
+          (cd artifacts && sha256sum "$(basename "$AAB_DEST")" > SHA256SUMS)
           cat artifacts/release-receipt.json >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
