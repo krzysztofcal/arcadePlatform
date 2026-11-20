@@ -210,7 +210,24 @@ test('production native PKCE callback uses HTTPS App Link, rejects Stage scheme,
   const wrongOriginOAuth = `https://krydukthwdvccggbyjfw.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}`;
   await assert.rejects(() => window.MobilePoker.openOAuth(wrongOriginOAuth), /google_failed/);
 
-  // openOAuth succeeds with Production supabaseUrl and HTTPS callback
+  // openOAuth rejects duplicated redirect_to (both orders: good+evil, evil+good)
+  const goodEvilOAuth = `https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}&redirect_to=${encodeURIComponent('https://evil.com')}`;
+  await assert.rejects(() => window.MobilePoker.openOAuth(goodEvilOAuth), /google_failed/);
+
+  const evilGoodOAuth = `https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent('https://evil.com')}&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}`;
+  await assert.rejects(() => window.MobilePoker.openOAuth(evilGoodOAuth), /google_failed/);
+
+  // openOAuth rejects duplicated provider
+  const dupProviderOAuth = `https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google&provider=github&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}`;
+  await assert.rejects(() => window.MobilePoker.openOAuth(dupProviderOAuth), /google_failed/);
+
+  const dupProviderOAuth2 = `https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=github&provider=google&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}`;
+  await assert.rejects(() => window.MobilePoker.openOAuth(dupProviderOAuth2), /google_failed/);
+
+  // browser.open was never called for any rejected OAuth URL
+  assert.equal(openedUrls.length, 0);
+
+  // openOAuth succeeds with single correct URL
   const validOAuth = `https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent('https://play.kcswh.pl/app/auth/callback')}`;
   await window.MobilePoker.openOAuth(validOAuth);
   assert.equal(openedUrls.length, 1);
@@ -251,6 +268,129 @@ test('production native PKCE callback uses HTTPS App Link, rejects Stage scheme,
     assert.equal(raw.includes(strayStageCode), false);
     assert.equal(raw.includes(leakCode), false);
   }
+});
+
+test('production runtime recovery handoff from non-account page to account.html', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const source = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
+
+  const storage = new Map();
+  const sessionStorage = {
+    getItem(key) { return storage.get(key) || null; },
+    setItem(key, value) { storage.set(key, value); },
+    removeItem(key) { storage.delete(key); }
+  };
+
+  // Phase 1: Boot on /poker/index.html
+  const listeners1 = {};
+  let ready1;
+  let exchanged1 = null;
+  let exchangeCount1 = 0;
+  let replacedUrl1 = null;
+  const node1 = { textContent: '', hidden: true };
+  const document1 = {
+    addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready1 = fn; },
+    getElementById() { return node1; }
+  };
+  const window1 = {
+    MobilePokerSecurity: security,
+    MOBILE_POKER_CONFIG: { ...prodConfig, sha: '12345678' },
+    KLog: { log() {} },
+    Capacitor: { Plugins: {
+      Browser: { close: async () => {} },
+      SystemBars: { hide: async () => {}, show: async () => {} },
+      App: { addListener(name, fn) { listeners1[name] = fn; }, getLaunchUrl: async () => null }
+    } },
+    supabaseClient: { auth: {
+      exchangeCodeForSession: async (code) => {
+        exchanged1 = code;
+        exchangeCount1++;
+        return { data: { session: {} } };
+      }
+    } },
+    location: {
+      pathname: '/poker/index.html',
+      replace(url) { replacedUrl1 = url; }
+    },
+    addEventListener() {},
+    dispatchEvent() {}
+  };
+
+  vm.runInNewContext(source, {
+    window: window1,
+    document: document1,
+    URL,
+    Event,
+    navigator: { onLine: true },
+    sessionStorage,
+    setTimeout
+  });
+  ready1();
+
+  // Trigger appUrlOpen with recovery callback while on lobby
+  await listeners1.appUrlOpen({ url: 'https://play.kcswh.pl/app/auth/callback?code=rec-1' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(sessionStorage.getItem('mobilePokerAuthCode'), 'rec-1');
+  assert.equal(replacedUrl1, '/account.html');
+  assert.equal(exchangeCount1, 0, 'no exchange on lobby; deferred to account.html');
+  assert.equal(exchanged1, null);
+
+  // Phase 2: Boot again on /account.html with the same storage
+  const listeners2 = {};
+  let ready2;
+  let exchanged2 = null;
+  let exchangeCount2 = 0;
+  const node2 = { textContent: '', hidden: true };
+  const document2 = {
+    addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready2 = fn; },
+    getElementById() { return node2; }
+  };
+  const window2 = {
+    MobilePokerSecurity: security,
+    MOBILE_POKER_CONFIG: { ...prodConfig, sha: '12345678' },
+    KLog: { log() {} },
+    Capacitor: { Plugins: {
+      Browser: { close: async () => {} },
+      SystemBars: { hide: async () => {}, show: async () => {} },
+      App: { addListener(name, fn) { listeners2[name] = fn; }, getLaunchUrl: async () => null }
+    } },
+    supabaseClient: { auth: {
+      exchangeCodeForSession: async (code) => {
+        exchanged2 = code;
+        exchangeCount2++;
+        return { data: { session: {} } };
+      }
+    } },
+    location: {
+      pathname: '/account.html',
+      replace() {}
+    },
+    addEventListener() {},
+    dispatchEvent() {}
+  };
+
+  vm.runInNewContext(source, {
+    window: window2,
+    document: document2,
+    URL,
+    Event,
+    navigator: { onLine: true },
+    sessionStorage,
+    setTimeout
+  });
+  ready2();
+
+  // Allow setTimeout and async callback to complete
+  await new Promise(resolve => setTimeout(resolve, 20));
+
+  assert.equal(exchanged2, 'rec-1');
+  assert.equal(exchangeCount2, 1);
+  assert.equal(sessionStorage.getItem('mobilePokerAuthCode'), null, 'mobilePokerAuthCode consumed and removed');
+  assert.equal(sessionStorage.getItem('mobilePokerConsumedAuthCode'), 'rec-1');
+  assert.match(node2.textContent, /Signed in/);
+  assert.equal(node2.textContent.includes('rec-1'), false, 'notice must not leak auth code');
 });
 
 test('js/api-url resolves netlify functions per channel and fails safely on invalid config', async () => {

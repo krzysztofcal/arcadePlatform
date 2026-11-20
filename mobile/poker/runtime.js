@@ -37,7 +37,12 @@
     publicProfileUrl: function(handle){ return window.MobilePokerSecurity.publicProfileUrl(config, handle); },
     openOAuth: function(value){
       var url = new URL(value);
-      if (url.origin !== config.supabaseUrl || url.pathname !== '/auth/v1/authorize' || url.searchParams.get('provider') !== 'google' || url.searchParams.get('redirect_to') !== bound.redirectTo) {
+      if (url.searchParams.getAll('redirect_to').length !== 1 ||
+          url.searchParams.getAll('provider').length !== 1 ||
+          url.origin !== config.supabaseUrl ||
+          url.pathname !== '/auth/v1/authorize' ||
+          url.searchParams.get('provider') !== 'google' ||
+          url.searchParams.get('redirect_to') !== bound.redirectTo) {
         return Promise.reject(new Error('google_failed'));
       }
       return browser.open({ url: url.href });

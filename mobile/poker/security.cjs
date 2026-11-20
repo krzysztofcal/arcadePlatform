@@ -38,11 +38,8 @@
     if (ch === 'production') return productionRedirectTo;
     throw new Error('Unknown channel: ' + ch);
   }
-  function decodePayload(jwt){
-    if (typeof jwt !== 'string') throw new Error('Invalid public anon key');
-    var parts = jwt.split('.');
-    if (parts.length !== 3 || !parts[1]) throw new Error('Invalid public anon key');
-    var part = parts[1];
+  function decodeSegment(part){
+    if (!part) throw new Error('Invalid public anon key');
     var json;
     try {
       if (typeof atob === 'function') {
@@ -58,6 +55,21 @@
     } catch (_e) {
       throw new Error('Invalid public anon key');
     }
+  }
+  function decodePayload(jwt){
+    if (typeof jwt !== 'string') throw new Error('Invalid public anon key');
+    var parts = jwt.split('.');
+    if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+      throw new Error('Invalid public anon key');
+    }
+    var header = decodeSegment(parts[0]);
+    if (!header || typeof header !== 'object' || typeof header.alg !== 'string' || !header.alg) {
+      throw new Error('Invalid public anon key');
+    }
+    if (header.typ !== undefined && header.typ !== 'JWT') {
+      throw new Error('Invalid public anon key');
+    }
+    return decodeSegment(parts[1]);
   }
   function bind(config){
     var ch = channel(config);
