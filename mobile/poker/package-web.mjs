@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import security from './security.cjs';
 import { assertLobbyPackaged, lobbyEntry } from './licensed-audio.mjs';
-import { assertChannelIdentity, releaseVersion } from './configure-android.mjs';
+import { assertChannelIdentity, releaseVersion, resolveChannel } from './configure-android.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const out = path.join(here, 'www');
@@ -14,8 +14,7 @@ try { await access(out); throw new Error('www already exists: use a fresh build 
 catch (error) { if (error.code !== 'ENOENT') throw error; }
 const capacitorConfig = JSON.parse(await readFile(path.join(here, 'capacitor.config.json'), 'utf8'));
 const appId = capacitorConfig?.appId;
-const channel = process.env.MOBILE_CHANNEL || 'stage';
-if (channel !== 'stage' && channel !== 'production') throw new Error('Unknown MOBILE_CHANNEL');
+const channel = resolveChannel(process.env);
 assertChannelIdentity(channel, appId);
 const version = releaseVersion(channel);
 let config;

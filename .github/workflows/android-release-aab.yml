@@ -52,12 +52,12 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GITHUB_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             test -n "$DISPATCH_INPUT_SHA"
-            test "$DISPATCH_INPUT_SHA" = "$GITHUB_SHA"
+            test "$DISPATCH_INPUT_SHA" = "$EXPECTED_SHA"
           fi
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           df -h .
@@ -169,7 +169,8 @@ jobs:
             const targetSdk = Number(targetSdkMatch[1]);
 
             const minSdkMatch = manifest.match(/\b(?:android:)?minSdkVersion="?(\d+)"?/);
-            const minSdk = minSdkMatch ? Number(minSdkMatch[1]) : 24;
+            if (!minSdkMatch) throw new Error("Manifest minSdkVersion missing");
+            const minSdk = Number(minSdkMatch[1]);
 
             // 4. no android:debuggable="true"
             if (manifest.includes("debuggable=\"true\"") || manifest.includes("debuggable=true")) {
@@ -186,11 +187,11 @@ jobs:
               throw new Error("Manifest contains arcadepoker-stage");
             }
 
-            // 7. list uses-permission names into receipt and fail on anything other than android.permission.INTERNET
+            // 7. Only INTERNET plus the app-scoped AndroidX receiver permission (same as the Stage APK).
             const permissions = [...manifest.matchAll(/<uses-permission\b[^>]*(?:android:)?name="([^"]+)"/g)].map(m => m[1]);
             process.stdout.write("Permissions found: " + JSON.stringify(permissions) + "\n");
             for (const perm of permissions) {
-              if (perm !== "android.permission.INTERNET") {
+              if (perm !== "android.permission.INTERNET" && perm !== "pl.kcswh.arcadepoker.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION") {
                 throw new Error("Disallowed permission: " + perm);
               }
             }

@@ -133,18 +133,18 @@ Poker Offline now uses the same presentation code: `scripts/build-poker-offline-
 
 ## #1291 T3: Production AAB (unsigned)
 
-The production release artifact is an **unsigned** Android App Bundle (`.aab`) built on GitHub-hosted `ubuntu-24.04` via the **Android Production AAB (unsigned)** workflow (`.github/workflows/android-release-aab.yml`).
+**Android Production AAB (unsigned)** (`.github/workflows/android-release-aab.yml`) builds `pl.kcswh.arcadepoker` ("Arcade Poker") as an **unsigned** release App Bundle on GitHub-hosted ubuntu-24.04.
 
-- **Dispatch**: Manual `workflow_dispatch` on `refs/heads/main` requires:
-  - `sourceSha`: Exact current `main` HEAD commit SHA.
-  - `versionName`: Semantic version string matching `/^[0-9]+\.[0-9]+\.[0-9]+$/` (e.g. `1.0.0`).
-  - `versionCode`: Integer version code matching `/^[1-9][0-9]{0,9}$/` with value ≤ 2100000000 (e.g. `1`).
-- **PR validation**: Same-repo Draft PRs touching mobile release paths build a test bundle with `versionName=0.0.1` and `versionCode=1` to validate the toolchain without dispatch.
-- **Verification**: The workflow verifies:
-  - Bundletool manifest dump: `package="pl.kcswh.arcadepoker"`, exact `versionName` and `versionCode`, `targetSdkVersion` ≥ 36, no `android:debuggable="true"`, autoVerify Android App Link intent filter for `https://play.kcswh.pl/app/auth/callback`, and no `arcadepoker-stage`.
-  - Permissions: asserts only `android.permission.INTERNET` is declared.
-  - Bundled config: `base/assets/public/mobile/config.js` pins `https://play.kcswh.pl`, Supabase ref `otbqfijerkieoxwpxjnm`, and `wss://ws.kcswh.pl/ws`; no preview/stage strings.
-  - Unsigned proof: `jarsigner -verify` proves the AAB is unsigned (`jar is unsigned`).
-- **Signing**: The AAB is strictly unsigned in CI. No signing key or secret exists on GitHub. The OWNER signs the release AAB locally with the Play Console upload key before distribution.
-- **Runtime status**: The production AAB is not functional for online gameplay until the dependent release gates land: T2a client runtime, T2d production CORS and auth redirects, and WWW production release.
-
+- **How it runs:**
+  - Release builds use manual `workflow_dispatch` from `main` with `sourceSha` (must equal current main HEAD), `versionName` (`x.y.z`) and `versionCode` (integer, higher than any earlier upload).
+  - Same-repository Draft PRs that touch release files build a validation bundle (`0.0.1`/`1`).
+  - Nothing is uploaded, signed or deployed.
+- **Checks:**
+  - bundletool 1.18.3 (SHA-256 pinned) confirms package and version, targetSdk ≥ 36, not debuggable, the `play.kcswh.pl/app/auth/callback` App Link and no Stage scheme.
+  - Permissions are only `INTERNET` and the app-scoped AndroidX receiver permission.
+  - The bundled `config.js` holds Production endpoints only.
+  - `jarsigner -verify` must report `jar is unsigned`.
+  - The licensed lobby music decrypt stays fail-closed.
+- **Signing:** done by the OWNER locally with the Play upload key; Google signs the delivered app through Play App Signing. Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts.
+- **Status:** online play and sign-in in the Production app need T2a (channel-aware runtime/OAuth), the WWW Production release of T2b, the Supabase redirect allowlist and T2d (`assetlinks.json` with the Play app signing fingerprint). Until then only Poker Offline is expected to work.
+- **Details:** procedure, blockers and the Galaxy S24+ plan are in `specs/1140-ugc-safety/t3-production-aab.md`.

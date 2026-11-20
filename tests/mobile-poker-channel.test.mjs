@@ -131,6 +131,16 @@ test('packager fail-closed for production with stage config, preview binding, an
   assert.match(bogusRun.stderr, /Unknown MOBILE_CHANNEL/);
   assert.equal(existsSync(wwwPath), false);
 
+  // 2b. An empty MOBILE_CHANNEL never silently selects Stage
+  const emptyRun = spawnSync(process.execPath, ['mobile/poker/package-web.mjs'], {
+    cwd: rootDir,
+    env: { ...cleanEnv, MOBILE_CHANNEL: '' },
+    encoding: 'utf8'
+  });
+  assert.notEqual(emptyRun.status, 0);
+  assert.match(emptyRun.stderr, /Empty MOBILE_CHANNEL/);
+  assert.equal(existsSync(wwwPath), false);
+
   // 3. Production with Preview binding env fails in a temp copy before creating www
   const tempPoker = mkdtempSync(path.join(os.tmpdir(), 'poker-packager-'));
   try {
