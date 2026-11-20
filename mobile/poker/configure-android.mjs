@@ -3,8 +3,8 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Set only after OWNER approval of the Play Console application ID (D1, T3).
-export const APPROVED_PRODUCTION_APP_ID = null;
+// OWNER-approved in #1291, 2026-11-20.
+export const APPROVED_PRODUCTION_APP_ID = 'pl.kcswh.arcadepoker';
 
 export function callbackIntentFilter(channel) {
   if (channel === 'stage') {
@@ -73,6 +73,25 @@ export function assertChannelIdentity(channel, appId) {
   throw new Error('Unknown MOBILE_CHANNEL');
 }
 
+export function releaseVersion(channel, env = process.env) {
+  if (channel === 'stage') {
+    return { name: '0.0.1', code: 1 };
+  }
+  if (channel === 'production') {
+    const name = env?.MOBILE_VERSION_NAME;
+    if (typeof name !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(name)) {
+      throw new Error('Invalid MOBILE_VERSION_NAME');
+    }
+    const code = env?.MOBILE_VERSION_CODE;
+    const codeStr = typeof code === 'string' ? code : (typeof code === 'number' ? String(code) : '');
+    if (!/^[1-9][0-9]{0,9}$/.test(codeStr) || Number(codeStr) > 2100000000) {
+      throw new Error('Invalid MOBILE_VERSION_CODE');
+    }
+    return { name, code: Number(codeStr) };
+  }
+  throw new Error('Unknown MOBILE_CHANNEL');
+}
+
 // Compare canonical paths so a symlinked invocation still configures (never a silent no-op).
 function isDirectRun() {
   if (!process.argv[1]) return false;
@@ -84,6 +103,7 @@ if (isDirectRun()) {
   const capacitorConfig = JSON.parse(await readFile(new URL('./capacitor.config.json', import.meta.url), 'utf8'));
   const appId = capacitorConfig?.appId;
   assertChannelIdentity(channel, appId);
+  const version = releaseVersion(channel, process.env);
   const packagePath = appId.split('.').join('/');
 
   const file = new URL('./android/app/src/main/AndroidManifest.xml', import.meta.url);
@@ -94,7 +114,8 @@ if (isDirectRun()) {
   const gradleFile = new URL('./android/app/build.gradle', import.meta.url);
   let gradle = await readFile(gradleFile, 'utf8');
   if (!gradle.includes('versionName "1.0"') || !gradle.includes('versionCode 1')) throw new Error('Unexpected Android template version');
-  gradle = gradle.replace('versionName "1.0"', 'versionName "0.0.1"');
+  gradle = gradle.replace('versionName "1.0"', `versionName "${version.name}"`);
+  gradle = gradle.replace('versionCode 1', `versionCode ${version.code}`);
   await writeFile(gradleFile, gradle);
 
   // One inset owner: full table background, safe content; native margins elsewhere.
@@ -184,7 +205,14 @@ import com.getcapacitor.WebViewListener;`);
     }
 }`);
   await writeFile(activityFile, activity);
-  await copyFile(new URL('./PokerAudioPlugin.java', import.meta.url), new URL(`./android/app/src/main/java/${packagePath}/PokerAudioPlugin.java`, import.meta.url));
+  const pluginFile = new URL('./PokerAudioPlugin.java', import.meta.url);
+  let pluginSrc = await readFile(pluginFile, 'utf8');
+  const firstLine = pluginSrc.split(/\r?\n/, 1)[0];
+  if (firstLine !== 'package pl.kcswh.arcadepoker.stage;') {
+    throw new Error('PokerAudioPlugin package header missing');
+  }
+  pluginSrc = pluginSrc.replace('package pl.kcswh.arcadepoker.stage;', `package ${appId};`);
+  await writeFile(new URL(`./android/app/src/main/java/${packagePath}/PokerAudioPlugin.java`, import.meta.url), pluginSrc);
 
   // Keep the launch window and WebView on the same dark brand surface.
   const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);

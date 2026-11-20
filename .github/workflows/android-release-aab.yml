@@ -1,0 +1,251 @@
+name: Android Production AAB (unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sourceSha:
+        description: Exact current main commit SHA
+        required: true
+        type: string
+      versionName:
+        description: Play Store versionName (e.g. 1.0.0)
+        required: true
+        type: string
+      versionCode:
+        description: Play Store versionCode (integer <= 2100000000)
+        required: true
+        type: string
+
+# Manual dispatch from main only: no pull_request trigger, so PR code never receives MOBILE_LOBBY_MUSIC_KEY here.
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-aab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-aab:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      MOBILE_CHANNEL: production
+      SOURCE_SHA: ${{ inputs.sourceSha }}
+      # Inputs pass through unchanged; empty or invalid values fail releaseVersion().
+      MOBILE_VERSION_NAME: ${{ inputs.versionName }}
+      MOBILE_VERSION_CODE: ${{ inputs.versionCode }}
+      DISPATCH_INPUT_SHA: ${{ inputs.sourceSha }}
+      GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Xmx2g'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - name: Resource and source preflight
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            test -n "$DISPATCH_INPUT_SHA"
+            test "$DISPATCH_INPUT_SHA" = "$EXPECTED_SHA"
+          fi
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          df -h .
+          free -h
+          test "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 6291456
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+      - name: Fundamental security checks
+        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs tests/mobile-poker-audio.test.mjs tests/mobile-poker-channel.test.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.1'
+          cache: npm
+          cache-dependency-path: mobile/poker/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21.0.10+7.0.LTS'
+      - name: Locked mobile dependencies
+        working-directory: mobile/poker
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Decrypt licensed lobby music (fails closed)
+        working-directory: mobile/poker
+        env:
+          MOBILE_LOBBY_MUSIC_KEY: ${{ secrets.MOBILE_LOBBY_MUSIC_KEY }}
+        run: node licensed-audio.mjs decrypt
+      - name: Package shared frontend and generate Android template
+        working-directory: mobile/poker
+        run: |
+          set -euo pipefail
+          cp capacitor.production.json capacitor.config.json
+          node package-web.mjs
+          ./node_modules/.bin/cap add android
+          node configure-android.mjs
+          ./node_modules/.bin/cap sync android
+          node -e '
+            const fs = require("node:fs");
+            const match = fs.readFileSync("android/variables.gradle", "utf8").match(/targetSdkVersion\s*=\s*(\d+)/);
+            if (!match || Number(match[1]) < 36) {
+              process.stderr.write("targetSdkVersion must be >= 36\n");
+              process.exit(1);
+            }
+          '
+      - name: Build release bundle
+        working-directory: mobile/poker/android
+        run: |
+          set -euo pipefail
+          df -h .
+          test "$(df -Pk . | awk 'NR==2 {print $4}')" -ge 4194304
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 bundleRelease
+      - name: Verify release AAB and assemble artifacts
+        working-directory: mobile/poker
+        env:
+          SOURCE_SHA: ${{ env.SOURCE_SHA }}
+          MOBILE_VERSION_NAME: ${{ env.MOBILE_VERSION_NAME }}
+          MOBILE_VERSION_CODE: ${{ env.MOBILE_VERSION_CODE }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          BUNDLETOOL_JAR="$RUNNER_TEMP/bundletool-all-1.18.3.jar"
+          curl -sSL "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar" -o "$BUNDLETOOL_JAR"
+          echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $BUNDLETOOL_JAR" | sha256sum -c -
+
+          mkdir artifacts
+          AAB_SRC="android/app/build/outputs/bundle/release/app-release.aab"
+          AAB_DEST="artifacts/arcade-poker-production-${MOBILE_VERSION_NAME}-${MOBILE_VERSION_CODE}-${SOURCE_SHA}-unsigned.aab"
+          cp "$AAB_SRC" "$AAB_DEST"
+
+          java -jar "$BUNDLETOOL_JAR" dump manifest --bundle "$AAB_DEST" > artifacts/manifest.txt
+
+          cp www/build-receipt.json artifacts/
+          (node --version; java -version 2>&1; cat android/variables.gradle; cat android/gradle/wrapper/gradle-wrapper.properties; ./android/gradlew -p android --version; df -h .) > artifacts/toolchain.txt
+
+          export AAB_DEST="$AAB_DEST"
+          node -e '
+            const fs = require("node:fs");
+            const cp = require("node:child_process");
+            const crypto = require("node:crypto");
+
+            const manifest = fs.readFileSync("artifacts/manifest.txt", "utf8");
+            const aabPath = process.env.AAB_DEST;
+            const expectedName = process.env.MOBILE_VERSION_NAME;
+            const expectedCode = process.env.MOBILE_VERSION_CODE;
+
+            // 1. Assert package="pl.kcswh.arcadepoker"
+            const pkgMatch = manifest.match(/\bpackage="([^"]+)"/);
+            if (!pkgMatch || pkgMatch[1] !== "pl.kcswh.arcadepoker") {
+              throw new Error("Manifest package mismatch: expected pl.kcswh.arcadepoker, got " + (pkgMatch ? pkgMatch[1] : "none"));
+            }
+
+            // 2. versionCode/versionName equal to the env
+            const vcMatch = manifest.match(/\b(?:android:)?versionCode="?(\d+)"?/);
+            if (!vcMatch || vcMatch[1] !== expectedCode) {
+              throw new Error("Manifest versionCode mismatch: expected " + expectedCode + ", got " + (vcMatch ? vcMatch[1] : "none"));
+            }
+            const vnMatch = manifest.match(/\b(?:android:)?versionName="?([^"\s>]+)"?/);
+            if (!vnMatch || vnMatch[1] !== expectedName) {
+              throw new Error("Manifest versionName mismatch: expected " + expectedName + ", got " + (vnMatch ? vnMatch[1] : "none"));
+            }
+
+            // 3. targetSdkVersion >= 36
+            const targetSdkMatch = manifest.match(/\b(?:android:)?targetSdkVersion="?(\d+)"?/);
+            if (!targetSdkMatch || Number(targetSdkMatch[1]) < 36) {
+              throw new Error("Manifest targetSdkVersion must be >= 36, got " + (targetSdkMatch ? targetSdkMatch[1] : "none"));
+            }
+            const targetSdk = Number(targetSdkMatch[1]);
+
+            const minSdkMatch = manifest.match(/\b(?:android:)?minSdkVersion="?(\d+)"?/);
+            if (!minSdkMatch) throw new Error("Manifest minSdkVersion missing");
+            const minSdk = Number(minSdkMatch[1]);
+
+            // 4. no android:debuggable="true"
+            if (manifest.includes("debuggable=\"true\"") || manifest.includes("debuggable=true")) {
+              throw new Error("AAB manifest is debuggable");
+            }
+
+            // 5. One intent filter must carry the complete verified App Link callback.
+            const filters = [...manifest.matchAll(/<intent-filter\b[^>]*>[\s\S]*?<\/intent-filter>/g)].map(m => m[0]);
+            const has = (f, tag, attr, value) => new RegExp("<" + tag + "\\b[^>]*android:" + attr + "=\"" + value.replace(/\./g, "\\.") + "\"").test(f);
+            const appLink = filters.filter(f => /^<intent-filter\b[^>]*android:autoVerify="true"/.test(f)
+              && has(f, "action", "name", "android.intent.action.VIEW")
+              && has(f, "category", "name", "android.intent.category.DEFAULT")
+              && has(f, "category", "name", "android.intent.category.BROWSABLE")
+              && has(f, "data", "scheme", "https") && has(f, "data", "host", "play.kcswh.pl")
+              && has(f, "data", "path", "/app/auth/callback"));
+            if (appLink.length !== 1) {
+              throw new Error("Manifest must contain exactly one complete autoVerify App Link callback filter, found " + appLink.length);
+            }
+
+            // 6. contains no arcadepoker-stage
+            if (manifest.includes("arcadepoker-stage")) {
+              throw new Error("Manifest contains arcadepoker-stage");
+            }
+
+            // 7. Only INTERNET plus the app-scoped AndroidX receiver permission (same as the Stage APK).
+            const permissions = [...manifest.matchAll(/<uses-permission\b[^>]*(?:android:)?name="([^"]+)"/g)].map(m => m[1]);
+            process.stdout.write("Permissions found: " + JSON.stringify(permissions) + "\n");
+            for (const perm of permissions) {
+              if (perm !== "android.permission.INTERNET" && perm !== "pl.kcswh.arcadepoker.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION") {
+                throw new Error("Disallowed permission: " + perm);
+              }
+            }
+
+            // 8. Packaged config.js must equal the pinned Production endpoints exactly.
+            const configJs = cp.execFileSync("unzip", ["-p", aabPath, "base/assets/public/mobile/config.js"], { encoding: "utf8" });
+            const configMatch = configJs.match(/^window\.MOBILE_POKER_CONFIG = (\{.*\});\n$/s);
+            if (!configMatch) throw new Error("Unexpected packaged config.js format");
+            const packaged = JSON.parse(configMatch[1]);
+            const pinned = JSON.parse(fs.readFileSync("production-public.json", "utf8"));
+            for (const field of ["apiOrigin", "supabaseUrl", "wsUrl", "supabaseAnonKey"]) {
+              if (packaged[field] !== pinned[field]) throw new Error("Packaged config.js " + field + " differs from production-public.json");
+            }
+            if (packaged.sha !== process.env.SOURCE_SHA) throw new Error("Packaged config.js sha differs from SOURCE_SHA");
+
+            // 9. jarsigner -verify output must contain "jar is unsigned"
+            const jarsignerOut = cp.execFileSync("jarsigner", ["-verify", aabPath], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+            if (!jarsignerOut.includes("jar is unsigned")) {
+              throw new Error("jarsigner output missing \"jar is unsigned\":\n" + jarsignerOut);
+            }
+
+            // 10. Generate release-receipt.json
+            const aabBytes = fs.readFileSync(aabPath);
+            const aabSha256 = crypto.createHash("sha256").update(aabBytes).digest("hex");
+
+            const releaseReceipt = {
+              sourceSha: process.env.SOURCE_SHA,
+              runId: Number(process.env.RUN_ID),
+              runAttempt: Number(process.env.RUN_ATTEMPT),
+              event: process.env.EVENT_NAME,
+              channel: "production",
+              appId: "pl.kcswh.arcadepoker",
+              versionName: expectedName,
+              versionCode: Number(expectedCode),
+              minSdk,
+              targetSdk,
+              permissions,
+              aabSha256,
+              signed: false,
+              bundletool: {
+                version: "1.18.3",
+                sha256: "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29"
+              }
+            };
+            fs.writeFileSync("artifacts/release-receipt.json", JSON.stringify(releaseReceipt, null, 2) + "\n");
+          '
+
+          (cd artifacts && sha256sum "$(basename "$AAB_DEST")" > SHA256SUMS)
+          cat artifacts/release-receipt.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcade-poker-production-aab-unsigned-${{ env.MOBILE_VERSION_CODE }}-${{ env.SOURCE_SHA }}
+          path: mobile/poker/artifacts/
+          if-no-files-found: error
+          retention-days: 7

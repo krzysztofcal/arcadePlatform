@@ -1,0 +1,8 @@
+{
+  "appId": "pl.kcswh.arcadepoker",
+  "appName": "Arcade Poker",
+  "webDir": "www",
+  "server": { "hostname": "localhost", "androidScheme": "https", "cleartext": false },
+  "android": { "backgroundColor": "#0a0f14", "allowMixedContent": false, "webContentsDebuggingEnabled": false },
+  "plugins": { "CapacitorHttp": { "enabled": false }, "CapacitorCookies": { "enabled": false }, "SystemBars": { "insetsHandling": "disable", "style": "DARK" } }
+}

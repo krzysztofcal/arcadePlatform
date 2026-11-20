@@ -11,7 +11,8 @@ import {
   configureManifest,
   resolveChannel,
   APPROVED_PRODUCTION_APP_ID,
-  assertChannelIdentity
+  assertChannelIdentity,
+  releaseVersion
 } from '../mobile/poker/configure-android.mjs';
 
 const require = createRequire(import.meta.url);
@@ -99,7 +100,7 @@ test('forPreview still rejects a binding whose resulting config is Production', 
   assert.throws(() => security.forPreview(prodConfig, binding, 1160, sha));
 });
 
-test('packager fail-closed for production and bogus channel without creating www', (t) => {
+test('packager fail-closed for production with stage config, preview binding, and bogus channel without creating www', (t) => {
   const wwwPath = path.join(rootDir, 'mobile/poker/www');
   if (existsSync(wwwPath)) {
     t.skip('mobile/poker/www already exists; skipping to avoid deletion or interference');
@@ -110,17 +111,17 @@ test('packager fail-closed for production and bogus channel without creating www
   delete cleanEnv.CI;
   delete cleanEnv.GITHUB_ACTIONS;
 
-  // 1. MOBILE_CHANNEL=production
+  // 1. MOBILE_CHANNEL=production with Stage capacitor config in rootDir fails before www
   const prodRun = spawnSync(process.execPath, ['mobile/poker/package-web.mjs'], {
     cwd: rootDir,
     env: { ...cleanEnv, MOBILE_CHANNEL: 'production' },
     encoding: 'utf8'
   });
   assert.notEqual(prodRun.status, 0);
-  assert.match(prodRun.stderr, /Production packaging is disabled until the T2\/T3 release gates/);
+  assert.match(prodRun.stderr, /Production appId mismatch/);
   assert.equal(existsSync(wwwPath), false);
 
-  // 2. MOBILE_CHANNEL=bogus
+  // 2. MOBILE_CHANNEL=bogus fails before www
   const bogusRun = spawnSync(process.execPath, ['mobile/poker/package-web.mjs'], {
     cwd: rootDir,
     env: { ...cleanEnv, MOBILE_CHANNEL: 'bogus' },
@@ -129,6 +130,41 @@ test('packager fail-closed for production and bogus channel without creating www
   assert.notEqual(bogusRun.status, 0);
   assert.match(bogusRun.stderr, /Unknown MOBILE_CHANNEL/);
   assert.equal(existsSync(wwwPath), false);
+
+  // 2b. An empty MOBILE_CHANNEL never silently selects Stage
+  const emptyRun = spawnSync(process.execPath, ['mobile/poker/package-web.mjs'], {
+    cwd: rootDir,
+    env: { ...cleanEnv, MOBILE_CHANNEL: '' },
+    encoding: 'utf8'
+  });
+  assert.notEqual(emptyRun.status, 0);
+  assert.match(emptyRun.stderr, /Empty MOBILE_CHANNEL/);
+  assert.equal(existsSync(wwwPath), false);
+
+  // 3. Production with Preview binding env fails in a temp copy before creating www
+  const tempPoker = mkdtempSync(path.join(os.tmpdir(), 'poker-packager-'));
+  try {
+    for (const name of ['package-web.mjs', 'configure-android.mjs', 'security.cjs', 'production-public.json', 'stage-public.json', 'package.json', 'licensed-audio.mjs']) {
+      copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(tempPoker, name));
+    }
+    copyFileSync(path.join(rootDir, 'mobile/poker/capacitor.production.json'), path.join(tempPoker, 'capacitor.config.json'));
+    const bindingRun = spawnSync(process.execPath, ['package-web.mjs'], {
+      cwd: tempPoker,
+      env: {
+        ...cleanEnv,
+        MOBILE_CHANNEL: 'production',
+        MOBILE_PREVIEW_BINDING: '/tmp/fake-binding.json',
+        MOBILE_VERSION_NAME: '1.0.0',
+        MOBILE_VERSION_CODE: '1'
+      },
+      encoding: 'utf8'
+    });
+    assert.notEqual(bindingRun.status, 0);
+    assert.match(bindingRun.stderr, /Production packaging cannot use a Preview binding/);
+    assert.equal(existsSync(path.join(tempPoker, 'www')), false);
+  } finally {
+    rmSync(tempPoker, { recursive: true, force: true });
+  }
 });
 
 test('stage regression: capacitor appId, redirectTo, and configure-android path derivation', () => {
@@ -221,19 +257,22 @@ test('resolveChannel: undefined defaults to stage, empty/whitespace throws, vali
   assert.throws(() => resolveChannel({ MOBILE_CHANNEL: 'prod' }), /Unknown MOBILE_CHANNEL/);
 });
 
-test('assertChannelIdentity: stage with Stage id passes, mismatches throw, production fail-closed', () => {
-  assert.equal(APPROVED_PRODUCTION_APP_ID, null);
+test('assertChannelIdentity: stage with Stage id passes, mismatches throw, production approved id passes', () => {
+  assert.equal(APPROVED_PRODUCTION_APP_ID, 'pl.kcswh.arcadepoker');
 
-  // 5. assertChannelIdentity: Stage with the Stage id passes
+  // Stage with the Stage id passes
   assert.doesNotThrow(() => assertChannelIdentity('stage', 'pl.kcswh.arcadepoker.stage'));
 
   // Stage with another id throws Stage appId mismatch
   assert.throws(() => assertChannelIdentity('stage', 'pl.kcswh.arcadepoker.other'), /Stage appId mismatch/);
   assert.throws(() => assertChannelIdentity('stage', 'pl.kcswh.arcadepoker'), /Stage appId mismatch/);
 
-  // Production throws Production applicationId not approved (with Stage id and with pl.kcswh.arcadepoker)
-  assert.throws(() => assertChannelIdentity('production', 'pl.kcswh.arcadepoker.stage'), /Production applicationId not approved/);
-  assert.throws(() => assertChannelIdentity('production', 'pl.kcswh.arcadepoker'), /Production applicationId not approved/);
+  // Production with approved id passes
+  assert.doesNotThrow(() => assertChannelIdentity('production', 'pl.kcswh.arcadepoker'));
+
+  // Production with Stage id or other id throws Production appId mismatch
+  assert.throws(() => assertChannelIdentity('production', 'pl.kcswh.arcadepoker.stage'), /Production appId mismatch/);
+  assert.throws(() => assertChannelIdentity('production', 'pl.kcswh.arcadepoker.other'), /Production appId mismatch/);
 
   // Invalid ids throw Invalid appId in capacitor.config.json
   const invalidIds = ['', ' ', 'pl', '123.app.id', 'pl.kcswh.ArcadePoker', 'pl..kcswh', 'pl.kcswh/poker'];
@@ -241,6 +280,48 @@ test('assertChannelIdentity: stage with Stage id passes, mismatches throw, produ
     assert.throws(() => assertChannelIdentity('stage', invalidId), /Invalid appId in capacitor\.config\.json/);
     assert.throws(() => assertChannelIdentity('production', invalidId), /Invalid appId in capacitor\.config\.json/);
   }
+
+  // Unknown channel throws
+  assert.throws(() => assertChannelIdentity('bogus', 'pl.kcswh.arcadepoker'), /Unknown MOBILE_CHANNEL/);
+});
+
+test('releaseVersion: stage fixed, production valid, invalid or missing inputs throw', () => {
+  // Stage is fixed and ignores env
+  assert.deepEqual(releaseVersion('stage'), { name: '0.0.1', code: 1 });
+  assert.deepEqual(releaseVersion('stage', {}), { name: '0.0.1', code: 1 });
+  assert.deepEqual(releaseVersion('stage', { MOBILE_VERSION_NAME: 'bad', MOBILE_VERSION_CODE: 'bad' }), { name: '0.0.1', code: 1 });
+
+  // Production valid
+  assert.deepEqual(releaseVersion('production', { MOBILE_VERSION_NAME: '1.0.0', MOBILE_VERSION_CODE: '1' }), { name: '1.0.0', code: 1 });
+  assert.deepEqual(releaseVersion('production', { MOBILE_VERSION_NAME: '10.20.300', MOBILE_VERSION_CODE: '2100000000' }), { name: '10.20.300', code: 2100000000 });
+
+  // Missing or invalid MOBILE_VERSION_NAME
+  assert.throws(() => releaseVersion('production', { MOBILE_VERSION_CODE: '1' }), /Invalid MOBILE_VERSION_NAME/);
+  for (const badName of ['', '   ', '1.0', 'v1.0.0', '1.0.0.0', '1.0.0-beta', 'abc', null, 123]) {
+    assert.throws(() => releaseVersion('production', { MOBILE_VERSION_NAME: badName, MOBILE_VERSION_CODE: '1' }), /Invalid MOBILE_VERSION_NAME/);
+  }
+
+  // Missing or invalid MOBILE_VERSION_CODE
+  assert.throws(() => releaseVersion('production', { MOBILE_VERSION_NAME: '1.0.0' }), /Invalid MOBILE_VERSION_CODE/);
+  for (const badCode of ['', '   ', '0', '01', '-1', '1.5', 'abc', '2100000001', '9999999999', null]) {
+    assert.throws(() => releaseVersion('production', { MOBILE_VERSION_NAME: '1.0.0', MOBILE_VERSION_CODE: badCode }), /Invalid MOBILE_VERSION_CODE/);
+  }
+
+  // Unknown channel
+  assert.throws(() => releaseVersion('bogus', {}), /Unknown MOBILE_CHANNEL/);
+});
+
+test('capacitor.production.json equals capacitor.config.json except appId and appName', () => {
+  const stageCap = JSON.parse(readFileSync(new URL('../mobile/poker/capacitor.config.json', import.meta.url), 'utf8'));
+  const prodCap = JSON.parse(readFileSync(new URL('../mobile/poker/capacitor.production.json', import.meta.url), 'utf8'));
+  assert.equal(prodCap.appId, 'pl.kcswh.arcadepoker');
+  assert.equal(prodCap.appName, 'Arcade Poker');
+  assert.equal(stageCap.appId, 'pl.kcswh.arcadepoker.stage');
+  assert.equal(stageCap.appName, 'Arcade Poker Stage');
+
+  const { appId: _sId, appName: _sName, ...stageRest } = stageCap;
+  const { appId: _pId, appName: _pName, ...prodRest } = prodCap;
+  assert.deepEqual(prodRest, stageRest);
 });
 
 // Minimal writable copy of the generated Android tree; never touches mobile/poker itself.
@@ -281,16 +362,88 @@ function runConfigure(dir, channel) {
   return spawnSync(process.execPath, ['configure-android.mjs'], { cwd: dir, env, encoding: 'utf8' });
 }
 
-test('configure script: Production and empty/unknown channels fail before any file write', () => {
+function androidProductionFixture() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'configure-android-prod-'));
+  for (const name of ['configure-android.mjs', 'PokerAudioPlugin.java', 'launch-mark.xml']) {
+    copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(dir, name));
+  }
+  copyFileSync(path.join(rootDir, 'mobile/poker/capacitor.production.json'), path.join(dir, 'capacitor.config.json'));
+  const files = {
+    'android/app/src/main/AndroidManifest.xml': '<manifest><application><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN" /></intent-filter></activity></application></manifest>\n',
+    'android/app/build.gradle': 'defaultConfig {\n  versionCode 1\n  versionName "1.0"\n}\n',
+    'android/app/src/main/java/pl/kcswh/arcadepoker/MainActivity.java': 'package pl.kcswh.arcadepoker;\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {}\n',
+    'android/app/src/main/res/values/styles.xml': '<style><item name="android:background">@null</item><item name="android:background">@drawable/splash</item></style>\n',
+  };
+  for (const [name, value] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    writeFileSync(path.join(dir, name), value);
+  }
+  mkdirSync(path.join(dir, 'android/app/src/main/res/drawable'), { recursive: true });
+  return dir;
+}
+
+test('configure script: Production with Stage config and empty/unknown channels fail before any file write', () => {
   const dir = androidFixture();
   try {
     const before = treeSnapshot(dir);
-    for (const [channel, message] of [['production', /Production applicationId not approved/], ['', /Empty MOBILE_CHANNEL/], ['bogus', /Unknown MOBILE_CHANNEL/]]) {
+    for (const [channel, message] of [['production', /Production appId mismatch/], ['', /Empty MOBILE_CHANNEL/], ['bogus', /Unknown MOBILE_CHANNEL/]]) {
       const run = runConfigure(dir, channel);
       assert.notEqual(run.status, 0);
       assert.match(run.stderr, message);
       assert.deepEqual(treeSnapshot(dir), before);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('configure script: Production in temporary tree with production config and version env writes expected files, missing version fails before write', () => {
+  // 1. Missing version env fails before any write
+  const dirMissing = androidProductionFixture();
+  try {
+    const before = treeSnapshot(dirMissing);
+    const env = { ...process.env, MOBILE_CHANNEL: 'production' };
+    delete env.MOBILE_VERSION_NAME;
+    delete env.MOBILE_VERSION_CODE;
+    const run = spawnSync(process.execPath, ['configure-android.mjs'], { cwd: dirMissing, env, encoding: 'utf8' });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /Invalid MOBILE_VERSION_NAME/);
+    assert.deepEqual(treeSnapshot(dirMissing), before);
+  } finally {
+    rmSync(dirMissing, { recursive: true, force: true });
+  }
+
+  // 2. Valid production run writes App Link filter, versionName, versionCode, PokerAudioPlugin with production package
+  const dir = androidProductionFixture();
+  try {
+    const env = {
+      ...process.env,
+      MOBILE_CHANNEL: 'production',
+      MOBILE_VERSION_NAME: '1.2.3',
+      MOBILE_VERSION_CODE: '42'
+    };
+    const run = spawnSync(process.execPath, ['configure-android.mjs'], { cwd: dir, env, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+
+    const manifest = readFileSync(path.join(dir, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+    assert.ok(manifest.includes(callbackIntentFilter('production') + '\n</activity>'));
+    assert.ok(manifest.includes('android:autoVerify="true"'));
+    assert.ok(manifest.includes('play.kcswh.pl'));
+    assert.ok(!manifest.includes('arcadepoker-stage'));
+
+    const gradle = readFileSync(path.join(dir, 'android/app/build.gradle'), 'utf8');
+    assert.ok(gradle.includes('versionName "1.2.3"'));
+    assert.ok(gradle.includes('versionCode 42'));
+
+    const pluginPath = path.join(dir, 'android/app/src/main/java/pl/kcswh/arcadepoker/PokerAudioPlugin.java');
+    assert.ok(existsSync(pluginPath));
+    const pluginSrc = readFileSync(pluginPath, 'utf8');
+    assert.equal(pluginSrc.split(/\r?\n/, 1)[0], 'package pl.kcswh.arcadepoker;');
+
+    const activityPath = path.join(dir, 'android/app/src/main/java/pl/kcswh/arcadepoker/MainActivity.java');
+    assert.ok(existsSync(activityPath));
+    const activitySrc = readFileSync(activityPath, 'utf8');
+    assert.ok(activitySrc.includes('registerPlugin(PokerAudioPlugin.class);'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -308,6 +461,11 @@ test('configure script: unset channel configures Stage, also through a symlinked
       const manifest = readFileSync(path.join(dir, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
       assert.ok(manifest.includes(callbackIntentFilter('stage') + '\n</activity>'));
       assert.ok(!manifest.includes('play.kcswh.pl'));
+      const gradle = readFileSync(path.join(dir, 'android/app/build.gradle'), 'utf8');
+      assert.ok(gradle.includes('versionName "0.0.1"'));
+      assert.ok(gradle.includes('versionCode 1'));
+      const pluginSrc = readFileSync(path.join(dir, 'android/app/src/main/java/pl/kcswh/arcadepoker/stage/PokerAudioPlugin.java'), 'utf8');
+      assert.equal(pluginSrc.split(/\r?\n/, 1)[0], 'package pl.kcswh.arcadepoker.stage;');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

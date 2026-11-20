@@ -131,3 +131,20 @@ Six short English lines in one consistent synthetic female voice (Kokoro-82M, vo
 
 Poker Offline now uses the same presentation code: `scripts/build-poker-offline-poc.mjs` preloads the cues in the Offline init and the regenerated `poker/offline/renderer.generated.js` / `play.html` carry the new SRI and CSP hashes. Offline still loads only its bundled scripts plus the local audio adapter (`connect-src 'none'`), so table cues and the dealer voice work in airplane mode. Phone checklist (OWNER): Offline in airplane mode plays hands with cues and voice; each line matches its moment, is clearly audible over the music and never talks over itself; Online unchanged apart from the voice; Sound OFF silences everything; WWW silent. Device behaviour is unverified until the OWNER test.
 
+## #1291 T3: Production AAB (unsigned)
+
+**Android Production AAB (unsigned)** (`.github/workflows/android-release-aab.yml`) builds `pl.kcswh.arcadepoker` ("Arcade Poker") as an **unsigned** release App Bundle on GitHub-hosted ubuntu-24.04.
+
+- **How it runs:**
+  - Release builds use manual `workflow_dispatch` from `main` with `sourceSha` (must equal current main HEAD), `versionName` (`x.y.z`) and `versionCode` (integer, higher than any earlier upload).
+  - There is no pull_request trigger: PR code never receives the music key in this workflow. The first real run is possible only after merge.
+  - GitHub Actions keeps the artifact (AAB plus receipts) for 7 days. Nothing is signed, uploaded to Google Play or deployed.
+- **Checks:**
+  - bundletool 1.18.3 (SHA-256 pinned) confirms package and version, targetSdk ≥ 36, not debuggable, the `play.kcswh.pl/app/auth/callback` App Link and no Stage scheme.
+  - Permissions are only `INTERNET` and the app-scoped AndroidX receiver permission.
+  - The bundled `config.js` must equal the pinned Production endpoints exactly.
+  - `jarsigner -verify` must report `jar is unsigned`.
+  - The licensed lobby music decrypt stays fail-closed.
+- **Signing:** a future OWNER step (separate GO), done locally with the Play upload key; Google signs the delivered app through Play App Signing. Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts.
+- **Status:** online play and sign-in in the Production app need T2a (channel-aware runtime/OAuth), the WWW Production release of T2b, the Supabase redirect allowlist and T2d (`assetlinks.json` with the Play app signing fingerprint). Until then only Poker Offline is expected to work.
+- **Details:** procedure, blockers and the Galaxy S24+ plan are in `specs/1140-ugc-safety/t3-production-aab.md`.

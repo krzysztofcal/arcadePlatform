@@ -5,27 +5,38 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import security from './security.cjs';
 import { assertLobbyPackaged, lobbyEntry } from './licensed-audio.mjs';
+import { assertChannelIdentity, releaseVersion, resolveChannel } from './configure-android.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const out = path.join(here, 'www');
 // Refuse stale output instead of deleting any existing data.
 try { await access(out); throw new Error('www already exists: use a fresh build workspace'); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
-const channel = process.env.MOBILE_CHANNEL || 'stage';
+const capacitorConfig = JSON.parse(await readFile(path.join(here, 'capacitor.config.json'), 'utf8'));
+const appId = capacitorConfig?.appId;
+const channel = resolveChannel(process.env);
+assertChannelIdentity(channel, appId);
+const version = releaseVersion(channel);
+let config;
+let key;
+let binding = null;
 if (channel === 'production') {
+  if (process.env.MOBILE_PREVIEW_BINDING) {
+    throw new Error('Production packaging cannot use a Preview binding');
+  }
   const prodConfig = JSON.parse(await readFile(path.join(here, 'production-public.json'), 'utf8'));
   security.validateProduction(prodConfig);
-  const prodKey = JSON.parse(Buffer.from(prodConfig.supabaseAnonKey.split('.')[1], 'base64url').toString());
-  if (prodKey.ref !== 'otbqfijerkieoxwpxjnm' || prodKey.role !== 'anon') throw new Error('Only pinned public Production anon key permitted');
-  throw new Error('Production packaging is disabled until the T2/T3 release gates');
+  key = JSON.parse(Buffer.from(prodConfig.supabaseAnonKey.split('.')[1], 'base64url').toString());
+  if (key.ref !== 'otbqfijerkieoxwpxjnm' || key.role !== 'anon') throw new Error('Only pinned public Production anon key permitted');
+  config = prodConfig;
+} else {
+  const localConfig = JSON.parse(await readFile(path.join(here, 'stage-public.json'), 'utf8'));
+  binding = process.env.MOBILE_PREVIEW_BINDING ? JSON.parse(await readFile(process.env.MOBILE_PREVIEW_BINDING, 'utf8')) : null;
+  if ((process.env.CI || process.env.GITHUB_ACTIONS) && !binding) throw new Error('CI requires a verified own-PR Preview binding');
+  config = binding ? security.forPreview(localConfig, binding, Number(process.env.PR_NUMBER), process.env.SOURCE_SHA) : security.validate(localConfig);
+  key = JSON.parse(Buffer.from(config.supabaseAnonKey.split('.')[1], 'base64url').toString());
+  if (key.ref !== 'krydukthwdvccggbyjfw' || key.role !== 'anon') throw new Error('Only pinned public Stage anon key permitted');
 }
-if (channel !== 'stage') throw new Error('Unknown MOBILE_CHANNEL');
-const localConfig = JSON.parse(await readFile(path.join(here, 'stage-public.json'), 'utf8'));
-const binding = process.env.MOBILE_PREVIEW_BINDING ? JSON.parse(await readFile(process.env.MOBILE_PREVIEW_BINDING, 'utf8')) : null;
-if ((process.env.CI || process.env.GITHUB_ACTIONS) && !binding) throw new Error('CI requires a verified own-PR Preview binding');
-const config = binding ? security.forPreview(localConfig, binding, Number(process.env.PR_NUMBER), process.env.SOURCE_SHA) : security.validate(localConfig);
-const key = JSON.parse(Buffer.from(config.supabaseAnonKey.split('.')[1], 'base64url').toString());
-if (key.ref !== 'krydukthwdvccggbyjfw' || key.role !== 'anon') throw new Error('Only pinned public Stage anon key permitted');
 config.sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 if (process.env.SOURCE_SHA && config.sha !== process.env.SOURCE_SHA) throw new Error('Build SHA mismatch');
 await mkdir(out, { recursive: true });
@@ -56,7 +67,7 @@ await put('mobile/audio.js', await readFile(path.join(here, 'audio.js')));
 await put('mobile/runtime.js', await readFile(path.join(here, 'runtime.js')));
 await put('mobile/mobile.css', await readFile(path.join(here, 'mobile.css')));
 await put('js/auth/supabase-config.js', 'window.SUPABASE_CONFIG = ' + JSON.stringify({ SUPABASE_URL: config.supabaseUrl, SUPABASE_ANON_KEY: config.supabaseAnonKey, AUTH_GOOGLE_ENABLED: true }) + ';\n');
-await put('js/build-info.js', 'window.BUILD_INFO = ' + JSON.stringify({ commit: config.sha, pokerWsUrl: config.wsUrl, mobileVersion: '0.0.1' }) + '; window.__POKER_WS_URL = ' + JSON.stringify(config.wsUrl) + ';\n');
+await put('js/build-info.js', 'window.BUILD_INFO = ' + JSON.stringify({ commit: config.sha, pokerWsUrl: config.wsUrl, mobileVersion: version.name }) + '; window.__POKER_WS_URL = ' + JSON.stringify(config.wsUrl) + ';\n');
 await put('js/vendor/supabase.js', await readFile(path.join(here, 'node_modules/@supabase/supabase-js/dist/umd/supabase.js')));
 const launch = await readFile(path.join(here, 'launch.html'), 'utf8');
 const launchStyle = launch.match(/<style id="pokerLaunchStyle">[\s\S]*?<\/style>/)[0];
@@ -170,7 +181,7 @@ for (const name of [...pages, 'index.html']) {
     }
   }
 }
-const version = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8')).version;
-const capacitorConfig = JSON.parse(await readFile(path.join(here, 'capacitor.config.json'), 'utf8'));
-await put('build-receipt.json', JSON.stringify({ sha: config.sha, prNumber: binding?.prNumber || null, preview: binding || null, appId: capacitorConfig.appId, version, versionCode: 1, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, audio: { files: audioFiles }, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
+const pkgVersion = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8')).version;
+const channelFields = channel === 'production' ? { channel, versionName: version.name } : {};
+await put('build-receipt.json', JSON.stringify({ sha: config.sha, ...channelFields, prNumber: binding?.prNumber || null, preview: binding || null, appId: capacitorConfig.appId, version: pkgVersion, versionCode: version.code, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, audio: { files: audioFiles }, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
 process.stdout.write('Packaged shared Poker/account assets at SHA ' + config.sha + '\n');
