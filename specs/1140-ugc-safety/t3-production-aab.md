@@ -28,7 +28,7 @@ OWNER GO 2026-11-20 (#1291): prepare a Google Play–ready Production AAB. Not a
 ## Constitution Check
 - I Simplicity: extends the existing configure/package scripts. One narrowly scoped workflow, no new npm dependency.
 - II Runtime boundaries: no WS, engine or DB change.
-- III Fail-closed / separation: explicit channel, approved appId, version inputs, pinned endpoints and exact main SHA are all required. The artifact is unsigned, and nothing is uploaded or deployed.
+- III Fail-closed / separation: explicit channel, approved appId, version inputs, pinned endpoints and exact main SHA are all required. The artifact is unsigned and kept by GitHub Actions for 7 days; nothing is signed, uploaded to Google Play or deployed.
 - IV Platform: no browser JS, CSS or CSP change in shipped pages.
 - V Tests: only `tests/mobile-poker-channel.test.mjs` is extended (identity, version, packager/configure guards).
 
@@ -46,20 +46,27 @@ The AAB builds without these, but online play and sign-in will not work in it ye
 The current task ends with a verified unsigned AAB. After a separate OWNER decision, the OWNER does the following on a trusted computer, and never in a repository, PR, issue or chat:
 1. Create the upload key (JDK `keytool`):
    `keytool -genkeypair -v -keystore arcade-poker-upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000`
-2. Back up `arcade-poker-upload.jks` and both passwords in two offline places (for example, a password manager plus an encrypted USB drive). If it is lost, request an upload-key reset in Play Console (Play App Signing keeps the app signing key).
-3. For each build, in the extracted artifact folder (the `jarsigner` prompts ask for the keystore password):
+2. Record the upload certificate SHA-256 from `keytool -list -v -keystore arcade-poker-upload.jks -alias upload` (public value; store it next to the release notes). Back up `arcade-poker-upload.jks` and both passwords in two offline places (for example, a password manager plus an encrypted USB drive). If it is lost, request an upload-key reset in Play Console (Play App Signing keeps the app signing key).
+3. For each build, in the extracted artifact folder. Set `UPLOAD_CERT_SHA256` to the upload certificate SHA-256 recorded in step 2. The `jarsigner` prompt asks for the keystore password.
    ```bash
    (
      set -euo pipefail
      shopt -s nullglob
+     : "${UPLOAD_CERT_SHA256:?set the recorded upload certificate SHA-256}"
      files=(arcade-poker-production-*-unsigned.aab)
      [ "${#files[@]}" -eq 1 ] || { echo "expected exactly one unsigned AAB"; exit 1; }
      UNSIGNED="${files[0]}"
+     [ "$(wc -l < SHA256SUMS)" -eq 1 ] || { echo "SHA256SUMS must have exactly one entry"; exit 1; }
+     [ "$(awk '{print $2}' SHA256SUMS)" = "$UNSIGNED" ] || { echo "SHA256SUMS does not name $UNSIGNED"; exit 1; }
      sha256sum -c SHA256SUMS
      SIGNED="${UNSIGNED%-unsigned.aab}-signed.aab"
      cp "$UNSIGNED" "$SIGNED"
      jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore /path/to/arcade-poker-upload.jks "$SIGNED" upload
-     jarsigner -verify -verbose -certs "$SIGNED"   # must show the upload certificate, never "Android Debug"
+     jarsigner -verify -strict "$SIGNED"
+     signers="$(keytool -printcert -jarfile "$SIGNED" | awk '$1 == "SHA256:" {print $2}')"
+     [ "$(printf '%s\n' "$signers" | grep -c .)" -eq 1 ] || { echo "expected exactly one signer certificate"; exit 1; }
+     [ "${signers^^}" = "${UPLOAD_CERT_SHA256^^}" ] || { echo "signer is not the recorded upload certificate"; exit 1; }
+     echo "signed with the upload key: $SIGNED"
    )
    ```
 4. First upload, to **Internal testing** (separate OWNER GO): accept Play App Signing (Google-managed app signing key). Copy the **app signing** certificate SHA-256 from Play Console → App integrity for T2d. The **upload** certificate is a different value and is not used in assetlinks.

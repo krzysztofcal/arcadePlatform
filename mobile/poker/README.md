@@ -138,7 +138,7 @@ Poker Offline now uses the same presentation code: `scripts/build-poker-offline-
 - **How it runs:**
   - Release builds use manual `workflow_dispatch` from `main` with `sourceSha` (must equal current main HEAD), `versionName` (`x.y.z`) and `versionCode` (integer, higher than any earlier upload).
   - There is no pull_request trigger: PR code never receives the music key in this workflow. The first real run is possible only after merge.
-  - Nothing is uploaded, signed or deployed.
+  - GitHub Actions keeps the artifact (AAB plus receipts) for 7 days. Nothing is signed, uploaded to Google Play or deployed.
 - **Checks:**
   - bundletool 1.18.3 (SHA-256 pinned) confirms package and version, targetSdk ≥ 36, not debuggable, the `play.kcswh.pl/app/auth/callback` App Link and no Stage scheme.
   - Permissions are only `INTERNET` and the app-scoped AndroidX receiver permission.
