@@ -180,5 +180,6 @@ for (const name of [...pages, 'index.html']) {
   }
 }
 const pkgVersion = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8')).version;
-await put('build-receipt.json', JSON.stringify({ sha: config.sha, channel, prNumber: binding?.prNumber || null, preview: binding || null, appId: capacitorConfig.appId, version: pkgVersion, versionName: version.name, versionCode: version.code, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, audio: { files: audioFiles }, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
+const channelFields = channel === 'production' ? { channel, versionName: version.name } : {};
+await put('build-receipt.json', JSON.stringify({ sha: config.sha, ...channelFields, prNumber: binding?.prNumber || null, preview: binding || null, appId: capacitorConfig.appId, version: pkgVersion, versionCode: version.code, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, audio: { files: audioFiles }, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
 process.stdout.write('Packaged shared Poker/account assets at SHA ' + config.sha + '\n');

@@ -142,9 +142,9 @@ Poker Offline now uses the same presentation code: `scripts/build-poker-offline-
 - **Checks:**
   - bundletool 1.18.3 (SHA-256 pinned) confirms package and version, targetSdk ≥ 36, not debuggable, the `play.kcswh.pl/app/auth/callback` App Link and no Stage scheme.
   - Permissions are only `INTERNET` and the app-scoped AndroidX receiver permission.
-  - The bundled `config.js` holds Production endpoints only.
+  - The bundled `config.js` must equal the pinned Production endpoints exactly.
   - `jarsigner -verify` must report `jar is unsigned`.
   - The licensed lobby music decrypt stays fail-closed.
-- **Signing:** done by the OWNER locally with the Play upload key; Google signs the delivered app through Play App Signing. Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts.
+- **Signing:** a future OWNER step (separate GO), done locally with the Play upload key; Google signs the delivered app through Play App Signing. Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts.
 - **Status:** online play and sign-in in the Production app need T2a (channel-aware runtime/OAuth), the WWW Production release of T2b, the Supabase redirect allowlist and T2d (`assetlinks.json` with the Play app signing fingerprint). Until then only Poker Offline is expected to work.
 - **Details:** procedure, blockers and the Galaxy S24+ plan are in `specs/1140-ugc-safety/t3-production-aab.md`.

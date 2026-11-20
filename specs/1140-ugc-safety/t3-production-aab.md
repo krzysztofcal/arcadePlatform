@@ -11,7 +11,7 @@ OWNER GO 2026-11-20 (#1291): prepare a Google Play–ready Production AAB. Not a
 - `mobile/poker/package-web.mjs`:
   - `resolveChannel()` + `assertChannelIdentity()` run before `www` is created.
   - Production uses the pinned `production-public.json` and the anon-key ref/role check. A Preview binding is refused.
-  - The receipt records `channel`, `versionName` and `versionCode`.
+  - The Production receipt records `channel`, `versionName` and `versionCode`. The Stage receipt keeps its existing fields.
   - The licensed lobby music remains mandatory in CI.
 - `.github/workflows/android-release-aab.yml`: manual `workflow_dispatch` from `main` with `sourceSha == github.sha`, plus a validation build on same-repo Draft PRs that touch release files. `contents: read` only.
   - Pinned hosted toolchain (same as the Stage APK workflow), then `bundleRelease`.
@@ -19,9 +19,9 @@ OWNER GO 2026-11-20 (#1291): prepare a Google Play–ready Production AAB. Not a
     - package and version;
     - targetSdk ≥ 36;
     - not debuggable;
-    - App Link filter present, no Stage scheme;
+    - exactly one complete autoVerify App Link callback filter, no Stage scheme;
     - permissions limited to `INTERNET` and the app-scoped AndroidX `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
-  - The bundled `config.js` must contain the Production endpoints and no Stage endpoints.
+  - The bundled `config.js` must equal the pinned Production endpoints and anon key exactly, and carry the source SHA.
   - `jarsigner -verify` must report `jar is unsigned`.
   - Artifact (7 days): AAB, `release-receipt.json`, `build-receipt.json`, `manifest.txt`, `toolchain.txt`, `SHA256SUMS`.
 
@@ -42,8 +42,8 @@ The AAB builds without these, but online play and sign-in will not work in it ye
 4. **T2d**: `/.well-known/assetlinks.json` with the Play App Signing SHA-256 certificate fingerprint. That fingerprint exists only after the first upload with Play App Signing enabled. Until then the App Link is unverified.
 5. #1286 (Suppi link): `stageApk()` stays false for the Production config because `validate()` stays Stage-only.
 
-## OWNER signing procedure (upload key; nothing on GitHub)
-The OWNER does this once, on a trusted computer, and never in a repository, PR, issue or chat:
+## Future OWNER signing procedure (not authorized by #1291; each step needs its own OWNER GO)
+The current task ends with a verified unsigned AAB. After a separate OWNER decision, the OWNER does the following on a trusted computer, and never in a repository, PR, issue or chat:
 1. Create the upload key (JDK `keytool`):
    `keytool -genkeypair -v -keystore arcade-poker-upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000`
 2. Back up `arcade-poker-upload.jks` and both passwords in two offline places (for example, a password manager plus an encrypted USB drive). If it is lost, request an upload-key reset in Play Console (Play App Signing keeps the app signing key).
@@ -52,7 +52,7 @@ The OWNER does this once, on a trusted computer, and never in a repository, PR, 
    - `cp …-unsigned.aab arcade-poker-<versionName>-<versionCode>.aab`
    - `jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore arcade-poker-upload.jks arcade-poker-<versionName>-<versionCode>.aab upload`
    - `jarsigner -verify -verbose -certs arcade-poker-<versionName>-<versionCode>.aab` must show the upload certificate, not "Android Debug".
-4. First upload, to **Internal testing**: accept Play App Signing (Google-managed app signing key). Copy the **app signing** certificate SHA-256 from Play Console → App integrity for T2d. The **upload** certificate is a different value and is not used in assetlinks.
+4. First upload, to **Internal testing** (separate OWNER GO): accept Play App Signing (Google-managed app signing key). Copy the **app signing** certificate SHA-256 from Play Console → App integrity for T2d. The **upload** certificate is a different value and is not used in assetlinks.
 5. `versionCode` must be strictly higher on every upload. Use the next integer for each dispatch and record it in the release notes.
 
 A CI-signed variant (upload key as secrets in a protected Environment with OWNER approval) is possible later. It needs a separate OWNER GO and secret provisioning.

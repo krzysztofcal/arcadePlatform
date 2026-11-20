@@ -39,8 +39,9 @@ jobs:
     env:
       MOBILE_CHANNEL: production
       SOURCE_SHA: ${{ github.event.pull_request.head.sha || inputs.sourceSha }}
-      MOBILE_VERSION_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.versionName || '0.0.1' }}
-      MOBILE_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.versionCode || '1' }}
+      # Fixed values only for PR validation; dispatch inputs pass through unchanged (empty fails releaseVersion()).
+      MOBILE_VERSION_NAME: ${{ github.event_name == 'pull_request' && '0.0.1' || inputs.versionName }}
+      MOBILE_VERSION_CODE: ${{ github.event_name == 'pull_request' && '1' || inputs.versionCode }}
       DISPATCH_INPUT_SHA: ${{ inputs.sourceSha || '' }}
       GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Xmx2g'
     steps:
@@ -177,9 +178,14 @@ jobs:
               throw new Error("AAB manifest is debuggable");
             }
 
-            // 5. contains play.kcswh.pl /app/auth/callback autoVerify filter
-            if (!manifest.includes("play.kcswh.pl") || !manifest.includes("/app/auth/callback") || !manifest.includes("autoVerify=\"true\"")) {
-              throw new Error("Manifest missing autoVerify App Link callback filter for play.kcswh.pl");
+            // 5. One intent filter must carry the complete verified App Link callback.
+            const filters = [...manifest.matchAll(/<intent-filter\b[^>]*>[\s\S]*?<\/intent-filter>/g)].map(m => m[0]);
+            const appLink = filters.filter(f => /<intent-filter\b[^>]*autoVerify="true"/.test(f)
+              && f.includes("android.intent.action.VIEW") && f.includes("android.intent.category.DEFAULT")
+              && f.includes("android.intent.category.BROWSABLE") && /scheme="https"/.test(f)
+              && /host="play\.kcswh\.pl"/.test(f) && /path="\/app\/auth\/callback"/.test(f));
+            if (appLink.length !== 1) {
+              throw new Error("Manifest must contain exactly one complete autoVerify App Link callback filter, found " + appLink.length);
             }
 
             // 6. contains no arcadepoker-stage
@@ -196,16 +202,16 @@ jobs:
               }
             }
 
-            // 8. unzip -p app-release.aab base/assets/public/mobile/config.js
+            // 8. Packaged config.js must equal the pinned Production endpoints exactly.
             const configJs = cp.execFileSync("unzip", ["-p", aabPath, "base/assets/public/mobile/config.js"], { encoding: "utf8" });
-            const required = ["https://play.kcswh.pl", "otbqfijerkieoxwpxjnm", "wss://ws.kcswh.pl/ws"];
-            for (const r of required) {
-              if (!configJs.includes(r)) throw new Error("config.js missing required string: " + r);
+            const configMatch = configJs.match(/^window\.MOBILE_POKER_CONFIG = (\{.*\});\n$/s);
+            if (!configMatch) throw new Error("Unexpected packaged config.js format");
+            const packaged = JSON.parse(configMatch[1]);
+            const pinned = JSON.parse(fs.readFileSync("production-public.json", "utf8"));
+            for (const field of ["apiOrigin", "supabaseUrl", "wsUrl", "supabaseAnonKey"]) {
+              if (packaged[field] !== pinned[field]) throw new Error("Packaged config.js " + field + " differs from production-public.json");
             }
-            const forbidden = ["krydukthwdvccggbyjfw", "deploy-preview-", "ws-preview"];
-            for (const f of forbidden) {
-              if (configJs.includes(f)) throw new Error("config.js contains forbidden string: " + f);
-            }
+            if (packaged.sha !== process.env.SOURCE_SHA) throw new Error("Packaged config.js sha differs from SOURCE_SHA");
 
             // 9. jarsigner -verify output must contain "jar is unsigned"
             const jarsignerOut = cp.execFileSync("jarsigner", ["-verify", aabPath], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
