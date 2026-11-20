@@ -62,7 +62,7 @@ The current task ends with a verified unsigned AAB. After a separate OWNER decis
      SIGNED="${UNSIGNED%-unsigned.aab}-signed.aab"
      cp "$UNSIGNED" "$SIGNED"
      jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore /path/to/arcade-poker-upload.jks "$SIGNED" upload
-     jarsigner -verify -strict "$SIGNED"
+     jarsigner -verify "$SIGNED"   # signature integrity (no -strict: the upload certificate is self-signed)
      signers="$(keytool -printcert -jarfile "$SIGNED" | awk '$1 == "SHA256:" {print $2}')"
      [ "$(printf '%s\n' "$signers" | grep -c .)" -eq 1 ] || { echo "expected exactly one signer certificate"; exit 1; }
      [ "${signers^^}" = "${UPLOAD_CERT_SHA256^^}" ] || { echo "signer is not the recorded upload certificate"; exit 1; }
