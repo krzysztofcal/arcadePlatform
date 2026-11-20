@@ -37,14 +37,19 @@
     var url = avatar.url;
     var remaining = Math.min(photoExpiresAt(url) - Date.now(), 60000);
     if (remaining <= 0) return false;
+    var deadline = Date.now() + remaining;
     node.dataset.avatarUrl = url;
     node.classList.add('profile-avatar--uploaded');
     node.style.backgroundSize = 'cover';
     node.style.backgroundPosition = 'center';
-    node.textContent = '';
+    node.textContent = 'AH';
     var image = new Image();
-    image.onload = function(){ if (node.dataset.avatarUrl === url) node.style.backgroundImage = 'url("' + url + '")'; };
-    function fallback(){ if (node.dataset.avatarUrl === url) applyAvatar(node, { avatar: { type: 'default', variant: avatar.variant } }); }
+    image.onload = function(){
+      if (node.dataset.avatarUrl !== url) return;
+      if (Date.now() >= deadline){ fallback(); return; }
+      node.textContent = ''; node.style.backgroundImage = 'url("' + url + '")';
+    };
+    function fallback(){ if (node.dataset.avatarUrl === url) applyAvatar(node, null); }
     image.onerror = fallback;
     node.profileAvatarExpiry = setTimeout(fallback, remaining);
     image.src = url;
@@ -60,6 +65,8 @@
     node.style.backgroundImage = '';
     node.classList.remove('profile-avatar--uploaded');
     if (applyPhoto(node, profile)) return;
+    // Missing confirmation or an unusable photo is not a confirmed Arcade selection.
+    if (!profile || !profile.avatar || profile.avatar.type === 'uploaded'){ node.textContent = 'AH'; return; }
     if(window.ArcadeAvatars){window.ArcadeAvatars.apply(node,profile);return;}
     node.textContent = initials(profile && profile.displayName);
   }

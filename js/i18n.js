@@ -2,6 +2,7 @@
 (function(){
   const dict = {
     profileTermsSignupNote: { en: 'After email verification, accept the current Terms before using your account.', pl: 'Po weryfikacji adresu e-mail zaakceptuj aktualny regulamin przed korzystaniem z konta.' },
+    arcadeAvatarWithdrawFirst: { en: 'To choose an Arcade avatar, first stop using your Google photo and confirm deletion of our copy below.', pl: 'Aby wybrać awatar Arcade, najpierw przestań używać zdjęcia Google i potwierdź usunięcie naszej kopii poniżej.' },
     arcadeAvatarGallery: { en: 'Arcade avatars', pl: 'Awatary Arcade' },
     arcadeAvatarChoice: { en: 'Choose avatar', pl: 'Wybierz awatar' },
     arcadeAvatarSaved: { en: 'Avatar saved.', pl: 'Avatar został zapisany.' },

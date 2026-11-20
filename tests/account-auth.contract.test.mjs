@@ -321,13 +321,14 @@ async function googlePanelFixture() {
   const items = new Map(); const node = id => { if(!items.has(id))items.set(id,{hidden:true,disabled:false,checked:false,textContent:''});return items.get(id); };
   const state={importEnabled:true,googleLinked:true,copyStored:false,photoInUse:false,noticeVersion:'g2'};
   const session={access_token:'fake',user:{id:'user-a'}};
-  const server={copyConflict:false,reads:0,posts:0};
+  const server={copyConflict:false,reads:0,posts:0,statusEvents:0,holdPost:null};
   const window={SupabaseAuth:{getCurrentUser:async()=>session.user,getClient:()=>({auth:{getSession:async()=>({data:{session}})}})}};
-  const document={readyState:'loading',getElementById:node,addEventListener(){}};
-  const source=(await read('js/profile-google-photo.js')).replace('window.ProfileGooglePhoto = { load: load };','window.ProfileGooglePhoto = { load: load, renderForTest: render, runForTest: run };');
-  vm.runInNewContext(source,{window,document,Promise,fetch:async(_url,options)=>{
+  const document={readyState:'loading',getElementById:node,addEventListener(){},dispatchEvent(){server.statusEvents++;}};
+  const source=(await read('js/profile-google-photo.js')).replace('window.ProfileGooglePhoto = { load: load,','window.ProfileGooglePhoto = { renderForTest: render, runForTest: run, load: load,');
+  vm.runInNewContext(source,{window,document,Promise,CustomEvent:class{},fetch:async(_url,options)=>{
     if(options.method==='POST'){
       server.posts++;
+      if(server.holdPost)await server.holdPost;
       if(server.copyConflict){state.copyStored=true;return {ok:false,status:409,json:async()=>({error:'photo_copy_exists'})};}
     }else server.reads++;
     return {ok:true,json:async()=>JSON.parse(JSON.stringify(state))};
@@ -441,4 +442,39 @@ test('A single verified profile failure survives recorder access revocation in e
   // A new page restores only the buffer, never administrator authority.
   vm.runInContext(await read('js/debug.js'),f.context);
   assert.equal(f.context.window.KLog.isAdmin(),false);assert.equal(f.context.window.KLog.getText(),'');
+});
+
+
+test('Arcade selection stays locked through Google copy cleanup and unlocks after confirmed withdrawal',async()=>{
+ const f=await googlePanelFixture();assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);
+ await f.api.load();assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);
+ f.state.copyStored=true;f.state.photoInUse=true;f.state.consent={decision:'granted'};await f.api.load();assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);
+ f.state.photoInUse=false;f.state.consent={decision:'withdrawn'};await f.api.load();assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);
+ f.state.copyStored=false;await f.api.load();assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);
+ f.session.user={id:'user-b'};assert.equal(f.api.isArcadeSelectionLocked('user-b'),true);
+});
+
+
+test('Google import and withdrawal lock Arcade selection and notify on both busy transitions',async()=>{
+ for(const action of ['import','withdraw']){
+  const f=await googlePanelFixture();f.session.provider_token='synthetic-proof';await f.api.load();
+  assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);
+  let release;f.server.holdPost=new Promise(resolve=>{release=resolve;});
+  const before=f.server.statusEvents,pending=f.api.runForTest(action);
+  assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);assert.equal(f.server.statusEvents,before+1);
+  while(!f.server.posts)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);release();await pending;
+  assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);assert.equal(f.server.statusEvents,before+3);
+ }
+});
+
+test('A Google status lock prevents Saved or active Arcade markers when the photo URL is unavailable',async()=>{
+ const source=await read('js/account-page.js'),start=source.indexOf('  function syncAvatarSelection('),end=source.indexOf('  function renderAvatarGallery(',start);
+ const button={dataset:{variant:'wizard-indigo'},lastChild:{hidden:false},attributes:{},setAttribute(k,v){this.attributes[k]=v;}};
+ const gallery={children:[button],setAttribute(){}};let locked=true;
+ const context={doc:{getElementById:id=>id==='arcadeAvatarGallery'?gallery:null},publicProfile:{avatarVariant:'wizard-indigo',avatar:{type:'default',variant:'wizard-indigo'}},avatarSelection:'wizard-indigo',avatarMessage:'',avatarSaving:null,nodes:{publicAvatarSave:{setAttribute(){}}},hasGoogleAvatar:()=>false,avatarSelectionLocked:()=>locked,allowedAvatarVariants:()=>['wizard-indigo'],t:(_,fallback)=>fallback};
+ vm.runInNewContext(source.slice(start,end)+'syncAvatarSelection();',context);
+ assert.equal(button.attributes['aria-pressed'],'false');assert.equal(button.attributes['data-saved'],'false');assert.equal(button.lastChild.hidden,true);assert.equal(button.disabled,true);assert.equal(context.nodes.publicAvatarSave.disabled,true);
+ locked=false;vm.runInNewContext('syncAvatarSelection();',context);
+ assert.equal(button.attributes['aria-pressed'],'true');assert.equal(button.attributes['data-saved'],'true');assert.equal(button.lastChild.hidden,false);
 });

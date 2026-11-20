@@ -306,7 +306,7 @@
   function applyProfileAvatar(node, profile, name){
     if (!node) return;
     if (window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function'){
-      window.ProfileClient.applyAvatar(node, profile || { displayName: name, avatar: { variant: 'default' } });
+      window.ProfileClient.applyAvatar(node, profile);
       return;
     }
     if(profile&&window.ArcadeAvatars){window.ArcadeAvatars.apply(node,profile);return;}
@@ -414,7 +414,8 @@
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
     var hydrated = ui ? ui.hydrate(userId) : { generation: 0, profile: null };
     if (!ui) setUserUiState('loading');
-    renderUser(user, hydrated.profile || null);
+    // Hydrated names are useful; cached avatars need a fresh server confirmation.
+    renderUser(user, hydrated.profile ? { displayName: hydrated.profile.displayName } : null);
     if (ui && hydrated.profile) ui.markSliceApplied(userId, 'profile', 'hydrated');
     refreshProfile(user, hydrated.generation, !!hydrated.profile);
   }
