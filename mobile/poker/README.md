@@ -137,7 +137,7 @@ Poker Offline now uses the same presentation code: `scripts/build-poker-offline-
 
 - **How it runs:**
   - Release builds use manual `workflow_dispatch` from `main` with `sourceSha` (must equal current main HEAD), `versionName` (`x.y.z`) and `versionCode` (integer, higher than any earlier upload).
-  - Same-repository Draft PRs that touch release files build a validation bundle (`0.0.1`/`1`).
+  - There is no pull_request trigger: PR code never receives the music key in this workflow. The first real run is possible only after merge.
   - Nothing is uploaded, signed or deployed.
 - **Checks:**
   - bundletool 1.18.3 (SHA-256 pinned) confirms package and version, targetSdk ≥ 36, not debuggable, the `play.kcswh.pl/app/auth/callback` App Link and no Stage scheme.

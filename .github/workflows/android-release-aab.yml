@@ -15,32 +15,27 @@ on:
         description: Play Store versionCode (integer <= 2100000000)
         required: true
         type: string
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - '.github/workflows/android-release-aab.yml'
-      - 'mobile/poker/**'
-      - 'tests/mobile-poker-*.test.mjs'
 
+# Manual dispatch from main only: no pull_request trigger, so PR code never receives MOBILE_LOBBY_MUSIC_KEY here.
 permissions:
   contents: read
 
 concurrency:
-  group: android-release-aab-${{ github.event.pull_request.number || github.ref }}
+  group: android-release-aab-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   release-aab:
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == true)
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       MOBILE_CHANNEL: production
-      SOURCE_SHA: ${{ github.event.pull_request.head.sha || inputs.sourceSha }}
-      # Fixed values only for PR validation; dispatch inputs pass through unchanged (empty fails releaseVersion()).
-      MOBILE_VERSION_NAME: ${{ github.event_name == 'pull_request' && '0.0.1' || inputs.versionName }}
-      MOBILE_VERSION_CODE: ${{ github.event_name == 'pull_request' && '1' || inputs.versionCode }}
-      DISPATCH_INPUT_SHA: ${{ inputs.sourceSha || '' }}
+      SOURCE_SHA: ${{ inputs.sourceSha }}
+      # Inputs pass through unchanged; empty or invalid values fail releaseVersion().
+      MOBILE_VERSION_NAME: ${{ inputs.versionName }}
+      MOBILE_VERSION_CODE: ${{ inputs.versionCode }}
+      DISPATCH_INPUT_SHA: ${{ inputs.sourceSha }}
       GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Xmx2g'
     steps:
       - uses: actions/checkout@v4

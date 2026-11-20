@@ -13,7 +13,7 @@ OWNER GO 2026-11-20 (#1291): prepare a Google Play–ready Production AAB. Not a
   - Production uses the pinned `production-public.json` and the anon-key ref/role check. A Preview binding is refused.
   - The Production receipt records `channel`, `versionName` and `versionCode`. The Stage receipt keeps its existing fields.
   - The licensed lobby music remains mandatory in CI.
-- `.github/workflows/android-release-aab.yml`: manual `workflow_dispatch` from `main` with `sourceSha == github.sha`, plus a validation build on same-repo Draft PRs that touch release files. `contents: read` only.
+- `.github/workflows/android-release-aab.yml`: manual `workflow_dispatch` from `main` only, with `sourceSha == github.sha`. There is no pull_request trigger, so code from a PR never receives `MOBILE_LOBBY_MUSIC_KEY` here (OWNER security fix, 2026-11-20). `contents: read` only.
   - Pinned hosted toolchain (same as the Stage APK workflow), then `bundleRelease`.
   - bundletool 1.18.3 (SHA-256 pinned) checks the manifest:
     - package and version;
