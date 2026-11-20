@@ -1,50 +1,72 @@
-# #1140 T3 / #1291 — Unsigned Production AAB Build Path
+# #1140 T3 / #1291 — Production AAB build path (unsigned)
 
-## Goal
-Establish a reproducible, secure, GitHub-hosted build and verification path for an **unsigned** production Android App Bundle (`.aab`) for Google Play (`pl.kcswh.arcadepoker`), without embedding secrets or signing keys on CI.
+OWNER GO 2026-11-20 (#1291): prepare a Google Play–ready Production AAB. Not authorized: Play upload, signing-key or secret creation, WWW/WS/Supabase changes, merge, Release Record.
 
-## Implementation Summary
-- **App Identity**: `mobile/poker/capacitor.production.json` pins `appId: "pl.kcswh.arcadepoker"` and `appName: "Arcade Poker"`.
-- **Channel Configuration**:
-  - `mobile/poker/configure-android.mjs`: `APPROVED_PRODUCTION_APP_ID = 'pl.kcswh.arcadepoker'` (OWNER-approved in #1291).
-  - `releaseVersion(channel, env)` enforces semantic `versionName` and numeric `versionCode` (≤ 2100000000) for production before writes; rewrites `PokerAudioPlugin.java` package declaration to match the target `appId`.
-- **Web Packaging**:
-  - `mobile/poker/package-web.mjs` verifies `assertChannelIdentity` against `capacitor.config.json` before creating `www`.
-  - Disallows preview bindings for production; pins production Supabase and WebSocket endpoints.
-  - Bundles licensed lobby music in CI (fails closed if missing).
-- **CI Workflow**:
-  - `.github/workflows/android-release-aab.yml`: gated on `workflow_dispatch` (exact current `main` HEAD) and same-repo Draft PRs.
-  - Runs on hosted `ubuntu-24.04`, builds unsigned release AAB via `./gradlew bundleRelease`.
-  - Verifies bundle via `bundletool-all-1.18.3.jar` (SHA-pinned), checks manifest, single `INTERNET` permission, production assets, and verifies unsigned state via `jarsigner`.
-  - Produces immutable artifacts with receipts and SHA256 checksums.
+## Implementation
+- `mobile/poker/capacitor.production.json`: `appId` `pl.kcswh.arcadepoker` (Play Console package observed by the OWNER), `appName` "Arcade Poker". The workflow copies it over `capacitor.config.json` in the CI workspace only. The Stage file and the Stage workflow are unchanged.
+- `mobile/poker/configure-android.mjs`:
+  - `APPROVED_PRODUCTION_APP_ID = 'pl.kcswh.arcadepoker'`.
+  - `releaseVersion(channel, env)`: Stage stays fixed at `0.0.1`/`1`. Production requires `MOBILE_VERSION_NAME` (`x.y.z`) and `MOBILE_VERSION_CODE` (1…2100000000), checked before any write.
+  - The `PokerAudioPlugin.java` package line follows the appId. Stage output is byte-identical.
+- `mobile/poker/package-web.mjs`:
+  - `resolveChannel()` + `assertChannelIdentity()` run before `www` is created.
+  - Production uses the pinned `production-public.json` and the anon-key ref/role check. A Preview binding is refused.
+  - The receipt records `channel`, `versionName` and `versionCode`.
+  - The licensed lobby music remains mandatory in CI.
+- `.github/workflows/android-release-aab.yml`: manual `workflow_dispatch` from `main` with `sourceSha == github.sha`, plus a validation build on same-repo Draft PRs that touch release files. `contents: read` only.
+  - Pinned hosted toolchain (same as the Stage APK workflow), then `bundleRelease`.
+  - bundletool 1.18.3 (SHA-256 pinned) checks the manifest:
+    - package and version;
+    - targetSdk ≥ 36;
+    - not debuggable;
+    - App Link filter present, no Stage scheme;
+    - permissions limited to `INTERNET` and the app-scoped AndroidX `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+  - The bundled `config.js` must contain the Production endpoints and no Stage endpoints.
+  - `jarsigner -verify` must report `jar is unsigned`.
+  - Artifact (7 days): AAB, `release-receipt.json`, `build-receipt.json`, `manifest.txt`, `toolchain.txt`, `SHA256SUMS`.
 
 ## Constitution Check
-- **Principle I (Simplicity & Existing Mechanisms)**: Extends existing `configure-android.mjs`, `package-web.mjs`, and pattern from `android-poc.yml`. No extra abstractions or new dependencies.
-- **Principle II (Authoritative Runtime Boundaries)**: Mobile bundle connects to authoritative WebSocket server; config endpoints pinned to production.
-- **Principle III (Fail-Closed Safety & Environment Separation)**: Strict channel checks ensure Stage and Production configs cannot mix. CI fails closed if required keys, music, or configurations are missing. No automatic deploy or merge.
-- **Principle IV (Platform Compatibility & Style)**: Plain JS web assets, JSP-compatible, logs copyable.
-- **Principle V (Fundamental Tests)**: Deterministic unit tests in `tests/mobile-poker-channel.test.mjs` covering identity, versioning, packager guards, and configure writes.
-- **Deployment & Safety Gates**: Build artifact is unsigned. No signing keys on GitHub. No merge, deploy, or workflow dispatch performed by agents.
+- I Simplicity: extends the existing configure/package scripts. One narrowly scoped workflow, no new npm dependency.
+- II Runtime boundaries: no WS, engine or DB change.
+- III Fail-closed / separation: explicit channel, approved appId, version inputs, pinned endpoints and exact main SHA are all required. The artifact is unsigned, and nothing is uploaded or deployed.
+- IV Platform: no browser JS, CSS or CSP change in shipped pages.
+- V Tests: only `tests/mobile-poker-channel.test.mjs` is extended (identity, version, packager/configure guards).
 
-## Dependencies & Blockers
-1. **T2a (#1276 / #1286)**: Production mobile client runtime and security checks.
-2. **T2d**: Production Netlify CORS allowlist (`https://localhost`) and Supabase OAuth redirect URL allowlist for `https://play.kcswh.pl/app/auth/callback`.
-3. **WWW Release**: Production web assets published to `play.kcswh.pl`.
-4. **OWNER Upload Key**: Physical signing key remains exclusively in OWNER custody.
+## Dependencies before an internal-testing build is useful
+The AAB builds without these, but online play and sign-in will not work in it yet:
+1. **T2a** (not started; follows #1276, which edits `mobile/poker/runtime.js` and `js/auth/supabaseClient.js`):
+   - `runtime.js`, `js/api-url.js` and `security.cjs` (`validate`, `redirectTo`, `callbackCode`, `publicProfileUrl`) are still Stage-only.
+   - In a Production package the native runtime fails closed at start-up. Poker Offline is the only mode expected to work.
+2. **WWW Production release of T2b** (OWNER): Production CORS for `https://localhost` and `/app/auth/callback`. Currently `play.kcswh.pl/app/auth/callback` returns 404.
+3. **Supabase Production redirect allowlist**: add `https://play.kcswh.pl/app/auth/callback` (OWNER, separate GO).
+4. **T2d**: `/.well-known/assetlinks.json` with the Play App Signing SHA-256 certificate fingerprint. That fingerprint exists only after the first upload with Play App Signing enabled. Until then the App Link is unverified.
+5. #1286 (Suppi link): `stageApk()` stays false for the Production config because `validate()` stays Stage-only.
 
-## Signing Procedure (Placeholder for OWNER)
-The CI artifact is an unsigned AAB. The OWNER performs local release signing:
-1. Download `arcade-poker-production-<versionName>-<versionCode>-<SOURCE_SHA>-unsigned.aab` from the successful Actions run.
-2. Verify SHA256 against `SHA256SUMS`.
-3. Sign using `jarsigner` with the private Play Console upload keystore:
-   ```bash
-   jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-     -keystore /path/to/upload-keystore.jks \
-     arcade-poker-production-<versionName>-<versionCode>-<SOURCE_SHA>-unsigned.aab \
-     <upload-key-alias>
-   ```
-4. Verify signature:
-   ```bash
-   jarsigner -verify -verbose arcade-poker-production-...-unsigned.aab
-   ```
-5. Upload the signed `.aab` to Google Play Console (internal testing / closed testing / production track).
+## OWNER signing procedure (upload key; nothing on GitHub)
+The OWNER does this once, on a trusted computer, and never in a repository, PR, issue or chat:
+1. Create the upload key (JDK `keytool`):
+   `keytool -genkeypair -v -keystore arcade-poker-upload.jks -alias upload -keyalg RSA -keysize 4096 -validity 10000`
+2. Back up `arcade-poker-upload.jks` and both passwords in two offline places (for example, a password manager plus an encrypted USB drive). If it is lost, request an upload-key reset in Play Console (Play App Signing keeps the app signing key).
+3. For each build:
+   - Download the artifact and run `sha256sum -c SHA256SUMS`.
+   - `cp …-unsigned.aab arcade-poker-<versionName>-<versionCode>.aab`
+   - `jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore arcade-poker-upload.jks arcade-poker-<versionName>-<versionCode>.aab upload`
+   - `jarsigner -verify -verbose -certs arcade-poker-<versionName>-<versionCode>.aab` must show the upload certificate, not "Android Debug".
+4. First upload, to **Internal testing**: accept Play App Signing (Google-managed app signing key). Copy the **app signing** certificate SHA-256 from Play Console → App integrity for T2d. The **upload** certificate is a different value and is not used in assetlinks.
+5. `versionCode` must be strictly higher on every upload. Use the next integer for each dispatch and record it in the release notes.
+
+A CI-signed variant (upload key as secrets in a protected Environment with OWNER approval) is possible later. It needs a separate OWNER GO and secret provisioning.
+
+## Galaxy S24+ internal-testing plan (OWNER, after the gates above)
+1. Install from the Play internal-testing link. Stage (`pl.kcswh.arcadepoker.stage`) stays installed side by side with separate data.
+2. Cold start, lobby, Poker Offline in airplane mode, sound on/off, back/resume.
+3. After T2a/T2b/T2d: Google sign-in returns to the app (verified App Link), email/password sign-in, session survives restart, online table join/leave, reconnect after a network drop.
+4. Check that no "Support" link appears and that no Stage or SHA banner is shown.
+5. `adb shell pm get-app-links pl.kcswh.arcadepoker` shows `verified` for `play.kcswh.pl` after T2d.
+
+## Breaking impact
+- New applicationId: Production is a separate app from Stage. No data, session or settings migration. The Stage APK is unaffected.
+- Native signature: Play delivers builds signed by the Google app signing key. Sideloaded Stage/debug builds can never update it.
+- Auth callback: Production uses `https://play.kcswh.pl/app/auth/callback`. It does not work until T2a, the Supabase allowlist and T2d are done.
+- Persistent data: the template default `android:allowBackup="true"` is unchanged (separate privacy decision).
+- `MOBILE_CHANNEL=''` now also fails in `package-web.mjs` (previously it meant Stage). CI never sets it empty.
