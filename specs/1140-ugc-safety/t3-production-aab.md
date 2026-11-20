@@ -60,12 +60,19 @@ The current task ends with a verified unsigned AAB. After a separate OWNER decis
      [ "$(awk '{print $2}' SHA256SUMS)" = "$UNSIGNED" ] || { echo "SHA256SUMS does not name $UNSIGNED"; exit 1; }
      sha256sum -c SHA256SUMS
      SIGNED="${UNSIGNED%-unsigned.aab}-signed.aab"
-     cp "$UNSIGNED" "$SIGNED"
-     jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore /path/to/arcade-poker-upload.jks "$SIGNED" upload
-     jarsigner -verify "$SIGNED"   # signature integrity (no -strict: the upload certificate is self-signed)
-     signers="$(keytool -printcert -jarfile "$SIGNED" | awk '$1 == "SHA256:" {print $2}')"
+     [ ! -e "$SIGNED" ] || { echo "$SIGNED already exists"; exit 1; }
+     TMP="$(mktemp ./signing-XXXXXX)"
+     trap 'rm -f "$TMP"' EXIT
+     cp "$UNSIGNED" "$TMP"
+     jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore /path/to/arcade-poker-upload.jks "$TMP" upload
+     # Signature integrity; no -strict because the upload certificate is self-signed.
+     verify="$(jarsigner -verify -verbose "$TMP")"
+     ! printf '%s\n' "$verify" | grep -qi 'unsigned entries' || { echo "AAB contains unsigned entries"; exit 1; }
+     signers="$(keytool -printcert -jarfile "$TMP" | awk '$1 == "SHA256:" {print $2}')"
      [ "$(printf '%s\n' "$signers" | grep -c .)" -eq 1 ] || { echo "expected exactly one signer certificate"; exit 1; }
      [ "${signers^^}" = "${UPLOAD_CERT_SHA256^^}" ] || { echo "signer is not the recorded upload certificate"; exit 1; }
+     mv "$TMP" "$SIGNED"
+     trap - EXIT
      echo "signed with the upload key: $SIGNED"
    )
    ```
