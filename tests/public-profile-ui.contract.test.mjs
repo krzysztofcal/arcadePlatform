@@ -193,7 +193,7 @@ test('avatar loading and expired photos stay neutral; late photo callbacks canno
  const url=exp=>'https://stage.supabase.co/storage/v1/object/sign/profile-avatar-uploads/pending/00000000-0000-0000-0000-000000000001?token=x.'+btoa(JSON.stringify({exp}))+'.x';
  const profile={avatar:{type:'uploaded',variant:'wizard-indigo',url:url(Math.floor(Date.now()/1000)+60)}};
  window.ProfileClient.applyAvatar(node,profile);assert.equal(node.textContent,'AH');assert.equal(node.style.backgroundImage,'');
- images[0].onload();assert.ok(node.style.backgroundImage.includes('https://stage.supabase.co'));
+ images[0].onload();assert.equal(node.style.backgroundImage,'url("'+profile.avatar.url+'")');
  window.ProfileClient.applyAvatar(node,null);images[0].onload();assert.equal(node.style.backgroundImage,'');assert.equal(node.textContent,'AH');
  window.ProfileClient.applyAvatar(node,{avatar:{...profile.avatar,url:url(1)}});assert.equal(catalog,0);assert.equal(node.textContent,'AH');
  window.ProfileClient.applyAvatar(node,profile);now+=65000;images.at(-1).onload();assert.equal(node.style.backgroundImage,'');now=Date.now();

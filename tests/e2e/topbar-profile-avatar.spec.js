@@ -62,8 +62,10 @@ test.describe('authenticated topbar profile avatar', () => {
     });
   }
 
-  test('hydrates the cached avatar before delayed revalidation without a visible initials frame', async ({ page }) => {
+  test('shows neutral AH during delayed revalidation and the confirmed avatar afterwards', async ({ page }) => {
     await mockAuthenticatedSession(page);
+    const avatar = page.locator('#avatarInitials');
+    const menuAvatar = page.locator('#avatarMenuInitials');
     let requests = 0;
     let releaseProfile;
     const profileGate = new Promise((resolve) => { releaseProfile = resolve; });
@@ -89,7 +91,7 @@ test.describe('authenticated topbar profile avatar', () => {
           window.__avatarFrames.push({
             state: bar.getAttribute('data-user-ui-state'),
             text: node.textContent.trim(),
-            color: style.color,
+            image: style.backgroundImage,
             variant: node.dataset.avatarVariant,
           });
         }
@@ -106,24 +108,26 @@ test.describe('authenticated topbar profile avatar', () => {
     await expect.poll(() => requests).toBe(2);
     await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-profile-state', 'hydrated');
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    assertNoVisibleInitials(await page.evaluate(() => window.__avatarFrames));
-    releaseAvatar();
-    await expect(page.locator('#avatarInitials')).toHaveAttribute('data-avatar-variant', 'fox-blue');
-    await expect(page.locator('#avatarInitials')).toHaveCSS('background-image', `url("${new URL(AVATAR_URL, page.url()).href}")`);
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const frames = await page.evaluate(() => window.__avatarFrames);
-    assertNoVisibleInitials(frames);
+    const pendingFrames = frames.filter((frame) => frame.state === 'hydrated');
+    expect(pendingFrames.length).toBeGreaterThan(0);
+    for (const frame of pendingFrames) {
+      expect(frame.text, JSON.stringify(frame)).toBe('AH');
+      expect(frame.image, JSON.stringify(frame)).toBe('none');
+    }
+    await expect(avatar).toHaveText('AH');
+    await expect(menuAvatar).toHaveText('AH');
+    await expect(avatar).toHaveCSS('background-image', 'none');
+    await expect(menuAvatar).toHaveCSS('background-image', 'none');
     releaseProfile();
     await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-profile-state', 'ready');
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    assertNoVisibleInitials(await page.evaluate(() => window.__avatarFrames));
+    releaseAvatar();
+    const confirmedImage = `url("${new URL(AVATAR_URL, page.url()).href}")`;
+    await expect(avatar).toHaveCSS('background-image', confirmedImage);
+    await expect(menuAvatar).toHaveCSS('background-image', confirmedImage);
+    await expect(avatar).toHaveAttribute('data-avatar-variant', 'fox-blue');
+    await expect(menuAvatar).toHaveAttribute('data-avatar-variant', 'fox-blue');
+    await expect(avatar).toHaveText('');
+    await expect(menuAvatar).toHaveText('');
   });
 });
-
-function assertNoVisibleInitials(frames) {
-  expect(frames.length).toBeGreaterThan(0);
-  for (const frame of frames) {
-    const transparent = frame.color === 'rgba(0, 0, 0, 0)';
-    expect(frame.text && !transparent, JSON.stringify(frame)).toBeFalsy();
-  }
-}

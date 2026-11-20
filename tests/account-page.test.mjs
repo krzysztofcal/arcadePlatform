@@ -1241,6 +1241,7 @@ async function avatarPickerHarness(){
  h.document.createElement=tag=>{const node=originalCreate(tag);Object.defineProperty(node,'lastChild',{get(){return node.children.at(-1);}});return node;};
  for(const id of ['arcadeAvatarGallery','publicAvatarSave','publicAvatarSaveLabel','publicAvatarStatus','publicProfileEditor','publicDisplayName','publicHandle','publicProfileUrl'])h.document.__nodes.set(id,createElement('div',id));
  const gallery=h.document.getElementById('arcadeAvatarGallery');Object.defineProperty(gallery,'textContent',{get(){return '';},set(){gallery.children.length=0;}});
+ gallery.querySelector=selector=>gallery.children.flatMap(button=>button.children).find(node=>'.'+node.className===selector)||null;
  h.windowObj.I18N={t:key=>key};h.windowObj.ArcadeAvatars={variants:PUBLIC_AVATAR_VARIANTS,url:v=>'/avatars/'+v};
  h.windowObj.ArcadeTerms={getAvatarVariants:owner=>user&&owner===user.id?allowed:[],refresh(){},open(){}};
  h.windowObj.ProfileClient={getMe:async()=>profile,clear(){},applyAvatar(){},updateMe:(payload,guard)=>new Promise((resolve,reject)=>{writes.push({payload,guard,resolve:result=>{if(!guard.isCurrent())return reject({code:'stale_profile'});profile=result;h.document.dispatchEvent({type:'profile:updated',detail:result});resolve(result);},reject});})};
