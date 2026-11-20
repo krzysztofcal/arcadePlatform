@@ -176,16 +176,22 @@ async function existingCopy(tx, user, deps) {
   if (env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED !== '1' && !accountDeletionEnabled(env)) throw photoError('avatar_tracking_unavailable',503);
   await assertAccountActive(tx, user);
   await requireCurrentTerms(tx, { kind: 'account', id: user });
-  await assertNoModeratorHold(tx, user);
-  const [consent] = await tx.unsafe('select decision, imported_avatar_key, consent_revision from private.profile_photo_consents where user_id=$1 for update;', [user]);
-  const [profile] = await tx.unsafe('select avatar_revision, avatar_variant, avatar_key, google_photo_suppressed, public_profile_blocked from public.user_profiles where user_id=$1 for update;', [user]);
-  if (!profile || profile.public_profile_blocked || consent?.decision !== 'granted' || !/^[0-9a-f-]{36}[.]webp$/.test(consent.imported_avatar_key || '')) throw photoError('photo_copy_unavailable');
+  const [consent] = await tx.unsafe(`select c.decision,c.imported_avatar_key,c.consent_revision,
+    p.avatar_revision,p.avatar_variant,p.avatar_key,p.google_photo_suppressed,p.public_profile_blocked
+    from private.profile_photo_consents c join public.user_profiles p on p.user_id=c.user_id
+    where c.user_id=$1 for update of c,p;`, [user]);
+  const profile=consent;
+  if (!profile || profile.public_profile_blocked || consent.decision !== 'granted' || !/^[0-9a-f-]{36}[.]webp$/.test(consent.imported_avatar_key || '')) throw photoError('photo_copy_unavailable');
   const key = consent.imported_avatar_key;
-  const [eligible] = await tx.unsafe(`select
+  let eligible;
+  try{[eligible] = await tx.unsafe(`select
     exists(select 1 from storage.buckets where id='profile-avatar-uploads' and public=false) as private,
     exists(select 1 from public.profile_avatar_uploads where user_id=$1 and id=$2::uuid and source_path=$3
       and tracking_version=3 and signing_finished_at is not null and source_deleted_at is null) as owned,
-    exists(select 1 from private.profile_photo_pending_deletions where user_id=$1) as pending;`, [user, key.slice(0,-5), 'pending/'+key.slice(0,-5)]);
+    exists(select 1 from private.profile_photo_pending_deletions where user_id=$1) as pending,
+    exists(select 1 from private.ugc_avatar_holds where user_id=$1) as held;`, [user, key.slice(0,-5), 'pending/'+key.slice(0,-5)]);}
+  catch(error){if(error?.code==='42P01')throw photoError('photo_import_unavailable');throw error;}
+  if(eligible?.held===true)throw photoError('photo_import_blocked');
   if (eligible?.private !== true || eligible.owned !== true || eligible.pending !== false) throw photoError('photo_copy_unavailable');
   return { key, revision: Number(profile.avatar_revision), consentRevision: Number(consent.consent_revision), variant: profile.avatar_variant, previousKey: profile.avatar_key, inUse: profile.avatar_key === key && profile.google_photo_suppressed === false };
 }
@@ -205,9 +211,13 @@ function sameCopy(before, after) {
 // Owner-only preview, even when Arcade is selected. Never used by public/profile/leaderboard projections.
 export async function ownerGooglePhotoPreview(userId, deps = {}) {
   const user = requireUser(userId), runTx = deps.beginSql || beginSql;
+  const started=Date.now();
   const before = await runTx(tx => existingCopy(tx, user, deps));
+  const checked=Date.now();if(deps.timings)deps.timings.dbBeforeMs=checked-started;
   const url = await availableCopyUrl(before, deps); // no database locks during Storage I/O
+  const signed=Date.now();if(deps.timings)deps.timings.signMs=signed-checked;
   await runTx(async tx => { if (!sameCopy(before, await existingCopy(tx, user, deps))) throw photoError('stale_avatar_revision'); });
+  if(deps.timings)deps.timings.dbAfterMs=Date.now()-signed;
   return { previewAvatar: { type: 'uploaded', variant: before.variant, url }, avatarRevision: before.revision, photoInUse: before.inUse };
 }
 

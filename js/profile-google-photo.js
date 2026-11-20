@@ -141,6 +141,7 @@
     var expectedUser = owner;
     var expectedGeneration = ++generation;
     busy = true;
+    var panel=node('googlePhotoPanel');if(panel&&panel.setAttribute)panel.setAttribute('aria-busy','true');
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
     try {
       var result = action === 'withdraw'
@@ -176,6 +177,7 @@
       setState(errorText(code));
     } finally {
       busy = false;
+      if(owner===expectedUser&&generation===expectedGeneration&&panel&&panel.setAttribute)panel.setAttribute('aria-busy','false');
       document.dispatchEvent(new CustomEvent('profile:photo-status'));
     }
   }
@@ -265,12 +267,13 @@
     var current = ++generation;
     statusResolved=false;
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
+    var panel=node('googlePhotoPanel');if(panel)panel.setAttribute&&panel.setAttribute('aria-busy','true');
     var auth = window.SupabaseAuth;
     var user = auth && typeof auth.getCurrentUser === 'function' ? await auth.getCurrentUser() : null;
     if (current !== generation) return;
     owner = user && user.id ? String(user.id) : null;
     if(owner!==previousOwner||!owner)render(null);
-    if (!owner) return;
+    if (!owner){if(panel&&panel.setAttribute)panel.setAttribute('aria-busy','false');return;}
     try {
       var result = await request('GET', null, owner, false);
       if (current === generation){statusResolved=true;render(result);}
@@ -284,7 +287,7 @@
       }
       // 404 means the feature is off on this environment: the panel stays hidden.
       if (current === generation && error && error.status !== 404) klog('google_photo:status_failed', { code: error.code || 'request_failed' });
-    }
+    }finally{if(current===generation&&panel&&panel.setAttribute)panel.setAttribute('aria-busy','false');}
   }
 
   function wire(){
@@ -317,8 +320,8 @@
     load();
   }
 
-  window.ProfileGooglePhoto = { load: load, select: selectPhoto, getChoice: getChoice, isSelected: function(userId,revision){return owner===userId&&statusResolved&&status&&status.avatarRevision===revision&&status.photoInUse===true;}, isArcadeSelectionLocked: function(userId){
-    return !!userId && (busy || owner!==userId || !statusResolved);
+  window.ProfileGooglePhoto = { load: load, select: selectPhoto, getChoice: getChoice, isSelected: function(userId,revision){return owner===userId&&statusResolved&&status&&status.avatarRevision===revision&&status.photoInUse===true;}, isArcadeSelectionLocked: function(userId,displayOnly){
+    return !!userId && (busy || owner!==userId || (!statusResolved&&displayOnly!==true));
   } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire, { once: true });
   else wire();

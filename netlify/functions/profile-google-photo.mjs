@@ -30,6 +30,7 @@ function createProfileGooglePhotoHandler(deps = {}) {
   const withdraw = deps.withdrawGooglePhoto || withdrawGooglePhoto;
   const selectPhoto = deps.selectGooglePhoto || selectGooglePhoto;
   const preview = deps.ownerGooglePhotoPreview || ownerGooglePhotoPreview;
+  const log = deps.klog || klog;
   const allow = deps.allowImport || allowImport;
   const storeUnavailable = deps.xpStoreUnavailableResponse || xpStoreUnavailableResponse;
   return async function handler(event) {
@@ -38,21 +39,27 @@ function createProfileGooglePhotoHandler(deps = {}) {
     if (!cors) return json(403, baseHeaders(), { error: "forbidden_origin" });
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
     if (event.httpMethod !== "GET" && event.httpMethod !== "POST") return json(405, cors, { error: "method_not_allowed" });
+    const readStarted=Date.now();
     const auth = await verifyJwt(extractBearerToken(event.headers));
     if (!auth?.valid || !auth.userId) return json(401, cors, { error: "unauthorized" });
+    const readTimings={authMs:Date.now()-readStarted};
     const importEnabled = googlePhotoEnabled(env);
     try {
       if (event.httpMethod === "GET") {
         // Disabling new imports must not hide an existing user's withdrawal controls.
-        let current;
-        try { current = await status(auth.userId); }
-        catch (error) { if (!importEnabled && error?.code === '42P01') return json(404, cors, {error:'not_found'}); throw error; }
-        if (!importEnabled && !current.consent && !current.copyStored) return json(404, cors, {error:'not_found'});
-        let ownPreview = {};
-        if (importEnabled && current.consent?.decision === 'granted' && current.copyStored) {
-          try { ownPreview = await preview(auth.userId); } catch { /* Status/withdrawal remain available; no preview on uncertain eligibility. */ }
-        }
-        return json(200, cors, {...current, ...ownPreview, photoInUse: importEnabled && (ownPreview.photoInUse ?? current.photoInUse) === true, importEnabled});
+        const statusStarted=Date.now();
+        try {
+          let current;
+          try { current = await status(auth.userId); }
+          catch (error) { if (!importEnabled && error?.code === '42P01') return json(404, cors, {error:'not_found'}); throw error; }
+          if (!importEnabled && !current.consent && !current.copyStored) return json(404, cors, {error:'not_found'});
+          readTimings.statusMs=Date.now()-statusStarted;
+          let ownPreview = {};
+          if (importEnabled && current.consent?.decision === 'granted' && current.copyStored) {
+            try { ownPreview = await preview(auth.userId,{timings:readTimings}); } catch { /* Status/withdrawal remain available; no preview on uncertain eligibility. */ }
+          }
+          return json(200, cors, {...current, ...ownPreview, photoInUse: importEnabled && (ownPreview.photoInUse ?? current.photoInUse) === true, importEnabled});
+        }finally{log('google_photo_read_timing',{...readTimings,totalMs:Date.now()-readStarted});}
       }
       if (typeof event.body === "string" && event.body.length > MAX_BODY) return json(413, cors, { error: "invalid_request" });
       let body;

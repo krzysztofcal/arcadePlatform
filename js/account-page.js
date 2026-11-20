@@ -435,8 +435,8 @@
     renderPokerState(accountPokerProjection);
   }
 
-  function allowedAvatarVariants(){
-    return currentUser&&window.ArcadeTerms&&typeof window.ArcadeTerms.getAvatarVariants==='function'?window.ArcadeTerms.getAvatarVariants(getUserKey(currentUser)):[];
+  function allowedAvatarVariants(displayOnly){
+    return currentUser&&window.ArcadeTerms&&typeof window.ArcadeTerms.getAvatarVariants==='function'?window.ArcadeTerms.getAvatarVariants(getUserKey(currentUser),displayOnly):[];
   }
 
   function hasGoogleAvatar(){ return !!(publicProfile && publicProfile.avatar && publicProfile.avatar.type === 'uploaded'); }
@@ -450,8 +450,10 @@
     return window.ProfileGooglePhoto && window.ProfileGooglePhoto.getChoice ? window.ProfileGooglePhoto.getChoice(getUserKey(currentUser),displayOnly) : null;
   }
 
-  function avatarSelectionLocked(){
-    return !!(window.ProfileGooglePhoto && window.ProfileGooglePhoto.isArcadeSelectionLocked && window.ProfileGooglePhoto.isArcadeSelectionLocked(getUserKey(currentUser)));
+  function avatarSelectionLocked(displayOnly){
+    if(!displayOnly&&!window.ArcadeTerms)return true;
+    if(!displayOnly&&window.ArcadeTerms&&window.ArcadeTerms.isReady&&!window.ArcadeTerms.isReady(getUserKey(currentUser)))return true;
+    return !!(window.ProfileGooglePhoto && window.ProfileGooglePhoto.isArcadeSelectionLocked && window.ProfileGooglePhoto.isArcadeSelectionLocked(getUserKey(currentUser),displayOnly));
   }
 
   function syncAvatarSelection(){
@@ -463,7 +465,7 @@
       gallery.setAttribute('aria-busy',String(!!avatarSaving||locked));
       Array.prototype.forEach.call(gallery.children,function(button){
         var variant=button.dataset.variant,selected=variant===avatarSelection,isSaved=variant===saved;
-        button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving||locked;
+        button.setAttribute('aria-pressed',String(selected));button.setAttribute('data-saved',String(isSaved));button.disabled=!!avatarSaving||avatarSelectionLocked(true);
         var label=variant==='google'?t('googlePhotoTitle','Google profile photo'):t('arcadeAvatarChoice','Choose avatar')+' '+variant;
         button.setAttribute('aria-label',label+(isSaved?'. '+t('arcadeAvatarCurrent','Saved'):'')+(selected?'. '+t('arcadeAvatarSelected','Selected'):''));
         button.title=variant==='google'?t('googlePhotoTitle','Google profile photo'):variant;
@@ -475,13 +477,13 @@
       nodes.publicAvatarSave.setAttribute('aria-busy',String(!!avatarSaving));
     }
     if(nodes.publicAvatarSaveLabel){var key=avatarSaving?'arcadeAvatarSaving':'arcadeAvatarSet';nodes.publicAvatarSaveLabel.dataset.i18n=key;nodes.publicAvatarSaveLabel.textContent=t(key,avatarSaving?'Saving…':'Set avatar');}
-    if(nodes.publicAvatarStatus){nodes.publicAvatarStatus.dataset.i18n=avatarMessage;nodes.publicAvatarStatus.textContent=avatarMessage?t(avatarMessage,'Could not save avatar. Try again.'):'';}
+    if(nodes.publicAvatarStatus){var message=!avatarSaving&&locked&&(!avatarMessage||avatarMessage==='arcadeAvatarUnsaved')?'arcadeAvatarChecking':avatarMessage;nodes.publicAvatarStatus.dataset.i18n=message;nodes.publicAvatarStatus.textContent=message?t(message,message==='arcadeAvatarChecking'?'Checking avatar availability…':'Could not save avatar. Try again.'):'';}
   }
 
   function renderAvatarGallery(){
     var gallery=doc.getElementById('arcadeAvatarGallery');
     if(!gallery)return;
-    var allowed=allowedAvatarVariants(),choice=googleAvatarChoice(true),choices=[];
+    var allowed=allowedAvatarVariants(true),choice=googleAvatarChoice(true),choices=[];
     if(window.ArcadeAvatars&&publicProfile&&currentUser){
       choices=window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;});
       if(choice)choices.push('google');
@@ -508,7 +510,7 @@
       check.className='arcade-avatar-choice__check';check.textContent='✓';check.setAttribute('aria-hidden','true');button.appendChild(check);
       saved.className='arcade-avatar-choice__saved';saved.textContent=t('arcadeAvatarCurrent','Saved');button.appendChild(saved);
       button.addEventListener('click',function(){
-        if(avatarSelectionLocked()||avatarSaving||(variant==='google'?!googleAvatarChoice():allowedAvatarVariants().indexOf(variant)===-1))return;
+        if(avatarSelectionLocked(true)||avatarSaving||(variant==='google'?!googleAvatarChoice(true):allowedAvatarVariants(true).indexOf(variant)===-1))return;
         avatarSelection=variant;avatarMessage=variant===savedAvatarSelection()?'':'arcadeAvatarUnsaved';syncAvatarSelection();
       });
       gallery.appendChild(button);
@@ -527,7 +529,7 @@
     avatarSaving=request;avatarMessage='';syncAvatarSelection();
     function active(){return avatarSaving===request&&getUserKey(currentUser)===request.owner&&publicProfileGeneration===request.generation;}
     try{
-      var guard={userId:request.owner,isCurrent:function(){return active()&&sameAvatarProfile(publicProfile,request.profile)&&(request.variant==='google'?!!googleAvatarChoice():!avatarSelectionLocked()&&allowedAvatarVariants().indexOf(request.variant)!==-1);}};
+      var guard={userId:request.owner,isCurrent:function(){return active()&&sameAvatarProfile(publicProfile,request.profile)&&window.ArcadeTerms&&(!window.ArcadeTerms.isReady||window.ArcadeTerms.isReady(request.owner))&&(request.variant==='google'?!!googleAvatarChoice():!avatarSelectionLocked()&&allowedAvatarVariants().indexOf(request.variant)!==-1);}};
       var profile=request.variant==='google'
         ? await window.ProfileGooglePhoto.select(request.profile.avatarRevision,guard)
         : await window.ProfileClient.updateMe({avatarVariant:request.variant,expectedRevision:request.profile.avatarRevision},guard);

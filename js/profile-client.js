@@ -42,11 +42,13 @@
     node.classList.add('profile-avatar--uploaded');
     node.style.backgroundSize = 'cover';
     node.style.backgroundPosition = 'center';
-    node.textContent = 'AH';
+    node.dataset.avatarLoading='true';if(node.setAttribute)node.setAttribute('aria-busy','true');
+    node.textContent = '';
     var image = new Image();
     image.onload = function(){
       if (node.dataset.avatarUrl !== url) return;
       if (Date.now() >= deadline){ fallback(); return; }
+      delete node.dataset.avatarLoading;if(node.setAttribute)node.setAttribute('aria-busy','false');
       node.textContent = ''; node.style.backgroundImage = 'url("' + url + '")';
     };
     function fallback(){ if (node.dataset.avatarUrl === url) applyAvatar(node, null); }
@@ -61,7 +63,7 @@
     // Cancel old image callbacks and hide the previous photo before any fallback loads.
     clearTimeout(node.profileAvatarExpiry);
     delete node.profileAvatarExpiry;
-    delete node.dataset.avatarUrl;
+    delete node.dataset.avatarUrl;delete node.dataset.avatarLoading;if(node.setAttribute)node.setAttribute('aria-busy','false');
     node.style.backgroundImage = '';
     node.classList.remove('profile-avatar--uploaded');
     if (applyPhoto(node, profile)) return;

@@ -53,7 +53,7 @@
 #account-deletion{border-color:rgba(255,123,123,.4);background:transparent;margin-top:24px;max-width:540px;padding:24px;scroll-margin-top:80px;}
 #account-deletion[hidden]{display:none!important;}
 .account-header-card{display:flex;align-items:center;gap:16px;padding:18px 20px;}
-.account-header-card .av{width:64px;height:64px;border-radius:50%;background:var(--sf2) center/cover;border:2px solid var(--ac);flex:0 0 64px;}
+.account-header-card .av{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;background:var(--sf2) center/cover;border:2px solid var(--ac);flex:0 0 64px;}
 .account-header-card .h2{font-size:20px;font-weight:800;margin:0;}
 .account-email-private{display:inline-block;font-size:12px;color:var(--mu);font-weight:600;}
 .account-settings-card{padding:4px 18px;}
@@ -118,3 +118,6 @@ dialog.account-delete-dialog::backdrop{background:rgba(0,0,0,.75);backdrop-filte
 .google-photo__consent{display:flex;gap:8px;align-items:flex-start;}
 
 .arcade-avatar-photo{display:grid;place-items:center;width:48px;height:48px;border-radius:8px;}
+
+.arcade-avatar-photo[data-avatar-loading="true"]::after{content:"";width:16px;height:16px;border:2px solid #526080;border-top-color:#6ee7e7;border-radius:50%;animation:public-avatar-spin .8s linear infinite;}
+.account-header-card .av[data-avatar-loading="true"]::after{content:"";width:16px;height:16px;border:2px solid #526080;border-top-color:#6ee7e7;border-radius:50%;animation:public-avatar-spin .8s linear infinite;}

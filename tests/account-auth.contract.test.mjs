@@ -318,7 +318,7 @@ test('Auth success cannot overwrite a pending or failed profile status', async (
 });
 
 async function googlePanelFixture() {
-  const items = new Map(); const node = id => { if(!items.has(id))items.set(id,{hidden:true,disabled:false,checked:false,textContent:''});return items.get(id); };
+  const items = new Map(); const node = id => { if(!items.has(id))items.set(id,{hidden:true,disabled:false,checked:false,textContent:'',attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];}});return items.get(id); };
   const state={importEnabled:true,googleLinked:true,copyStored:false,photoInUse:false,noticeVersion:'g2'};
   const session={access_token:'fake',user:{id:'user-a'}};
   const server={copyConflict:false,reads:0,posts:0,statusEvents:0,holdPost:null,bodies:[],profileEvents:[]};
@@ -564,5 +564,20 @@ test('Withdrawal invalidates an older pending status GET so it cannot restore th
  f.server.holdGet=null;Object.assign(f.state,{copyStored:false,photoInUse:false,consent:{decision:'withdrawn'},copyDeleted:true});delete f.state.previewAvatar;
  await f.api.runForTest('withdraw');release();await old;
  assert.equal(f.api.getChoice('user-a',true),null);assert.equal(f.node('googlePhotoWithdraw').hidden,true);assert.equal(f.node('googlePhotoOffer').hidden,false);
- assert.equal(f.server.posts,1);assert.equal(f.server.reads,3);
+ assert.equal(f.server.posts,1);assert.equal(f.server.reads,3);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');
+});
+
+
+test('Initial delayed photo status is explicitly loading and never offers an unverified photo',async()=>{
+ const f=await googlePanelFixture();let release;f.server.holdGet=new Promise(resolve=>{release=resolve;});const loading=f.api.load();while(!f.server.reads)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.node('googlePhotoPanel').hidden,true);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'true');assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.api.isArcadeSelectionLocked('user-a'),true);
+ release();await loading;assert.equal(f.api.isArcadeSelectionLocked('user-a'),false);
+});
+
+
+test('Failed or OFF initial photo GET never reveals an unverified Google panel or stale loading state',async()=>{
+ for(const failure of [new TypeError('synthetic offline'),{status:404},{status:503},null]){
+  const f=await googlePanelFixture();if(failure)f.server.getError=failure;else f.state.googleLinked=false;
+  await f.api.load();assert.equal(f.node('googlePhotoPanel').hidden,true);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');assert.equal(f.api.getChoice('user-a'),null);
+ }
 });

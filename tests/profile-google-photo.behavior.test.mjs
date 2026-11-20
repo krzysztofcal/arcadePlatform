@@ -620,3 +620,21 @@ test('select endpoint uses only authenticated owner and CAS, without Google proo
  const handler=createProfileGooglePhotoHandler({env:{GOOGLE_PHOTO_IMPORT_ENABLED:'1',UGC_SAFETY_ENABLED:'1'},verifySupabaseJwt:async()=>({valid:true,userId:id}),selectGooglePhoto:async(user,body)=>{assert.equal(user,id);assert.deepEqual(body,{action:'select',expectedRevision:2});calls++;return {photoInUse:true};},allowImport:()=>{throw Error('must not reimport');}});
  const response=await handler({httpMethod:'POST',headers:{origin:'https://arcade.test',authorization:'Bearer synthetic'},body:JSON.stringify({action:'select',expectedRevision:2})});assert.equal(response.statusCode,200);assert.equal(calls,1);
 });
+
+
+test('owner preview keeps pre/post eligibility with twelve bounded SQL reads and separate timing phases',async()=>{
+ const env=await database();const id=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);let reads=0;const timings={};
+ const result=await photo.ownerGooglePhotoPreview(id,{...net.deps,timings,beginSql:work=>env.beginSql(tx=>work({unsafe:async(...args)=>{reads++;return tx.unsafe(...args);}}))});
+ assert.equal(result.previewAvatar.type,'uploaded');assert.equal(reads,12);assert.deepEqual(Object.keys(timings).sort(),['dbAfterMs','dbBeforeMs','signMs']);assert.ok(Object.values(timings).every(v=>Number.isFinite(v)&&v>=0));
+});
+
+test('authenticated photo GET logs only aggregate auth, status, DB and signing durations',async()=>{
+ const id=randomUUID(),logs=[];const handler=createProfileGooglePhotoHandler({env:{GOOGLE_PHOTO_IMPORT_ENABLED:'1',UGC_SAFETY_ENABLED:'1'},verifySupabaseJwt:async()=>({valid:true,userId:id}),googlePhotoStatus:async()=>({consent:{decision:'granted'},copyStored:true}),ownerGooglePhotoPreview:async(_user,{timings})=>{Object.assign(timings,{dbBeforeMs:2,signMs:3,dbAfterMs:2});return {};},klog:(kind,data)=>logs.push({kind,data})});
+ const result=await handler({httpMethod:'GET',headers:{origin:'https://arcade.test',authorization:'Bearer synthetic'}});assert.equal(result.statusCode,200);assert.equal(logs.length,1);assert.equal(logs[0].kind,'google_photo_read_timing');assert.deepEqual(Object.keys(logs[0].data).sort(),['authMs','dbAfterMs','dbBeforeMs','signMs','statusMs','totalMs']);assert.ok(Object.values(logs[0].data).every(v=>Number.isFinite(v)&&v>=0));assert.doesNotMatch(JSON.stringify(logs),new RegExp(id+'|Bearer|synthetic|https:'));
+});
+
+
+test('a missing moderation table keeps select and owner preview fail-closed with the existing availability error',async()=>{
+ const env=await database();const id=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);await env.db.exec('drop table private.ugc_avatar_holds');
+ const calls=net.calls.length;await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},net.deps),{code:'photo_import_unavailable'});await assert.rejects(photo.ownerGooglePhotoPreview(id,net.deps),{code:'photo_import_unavailable'});assert.equal(net.calls.length,calls);
+});

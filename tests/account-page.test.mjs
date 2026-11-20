@@ -1357,3 +1357,17 @@ test('Re-signing the same Google object preserves the live image and its expiry 
  choice={type:'uploaded',url:'https://stage.test/object/replacement?token=third'};h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(applies,initial+2,'a different copy replaces the prior image');
  assert.equal(h.get('arcadeAvatarGallery').children.find(b=>b.dataset.variant==='google'),tile);
 });
+
+
+test('One Google click during revalidation preserves draft while Save waits for verified status and Terms',async()=>{
+ const h=await avatarPickerHarness();let pending=false;const choice={type:'uploaded',url:'synthetic-preview'};
+ h.windowObj.ProfileGooglePhoto={getChoice:(_id,display)=>!pending||display?choice:null,isArcadeSelectionLocked:(_id,display)=>pending&&!display};
+ h.setPolicy(16);h.setProfile({handle:'fixture',avatarVariant:h.variants[0],avatar:{type:'default'},avatarRevision:2});
+ const gallery=h.get('arcadeAvatarGallery'),google=gallery.children.find(b=>b.dataset.variant==='google');pending=true;h.document.dispatchEvent({type:'profile:photo-status'});
+ google.dispatchEvent({type:'click'});assert.equal(google.attributes['aria-pressed'],'true');assert.equal(h.get('publicAvatarSave').disabled,true);assert.equal(h.writes.length,0);
+ pending=false;h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(google.attributes['aria-pressed'],'true');assert.equal(h.get('publicAvatarSave').disabled,false);
+ const getVariants=h.windowObj.ArcadeTerms.getAvatarVariants;let ready=false;h.windowObj.ArcadeTerms.isReady=()=>ready;h.windowObj.ArcadeTerms.getAvatarVariants=(user,display)=>ready||display?getVariants(user):[];
+ h.document.dispatchEvent({type:'profile:terms-status'});assert.equal(gallery.children.length,17);assert.equal(h.get('publicAvatarSave').disabled,true);
+ ready=true;h.document.dispatchEvent({type:'profile:terms-status'});assert.equal(gallery.children.length,17);assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);assert.equal(h.get('publicAvatarSave').disabled,false);
+ delete h.windowObj.ArcadeTerms;h.document.dispatchEvent({type:'profile:terms-status'});assert.equal(h.get('publicAvatarSave').disabled,true);h.save();assert.equal(h.writes.length,0);
+});

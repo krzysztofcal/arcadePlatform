@@ -2,6 +2,7 @@
 (function(){
   const dict = {
     profileTermsSignupNote: { en: 'After email verification, accept the current Terms before using your account.', pl: 'Po weryfikacji adresu e-mail zaakceptuj aktualny regulamin przed korzystaniem z konta.' },
+    arcadeAvatarChecking: { en: 'Awaiting avatar verification. Please wait or refresh.', pl: 'Oczekiwanie na potwierdzenie dostępności awatarów. Poczekaj lub odśwież stronę.' },
     googlePhotoRetention: { en: 'Choosing an Arcade avatar does not withdraw Google photo consent or delete our stored copy. Use the separate withdrawal action below to delete it.', pl: 'Wybór awatara Arcade nie wycofuje zgody Google ani nie usuwa przechowywanej kopii. Aby ją usunąć, osobno wycofaj zgodę poniżej.' },
     arcadeAvatarGallery: { en: 'Arcade avatars', pl: 'Awatary Arcade' },
     arcadeAvatarChoice: { en: 'Choose avatar', pl: 'Wybierz awatar' },
