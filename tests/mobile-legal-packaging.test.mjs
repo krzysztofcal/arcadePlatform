@@ -16,7 +16,7 @@ const normalize = text => text.replace(/\s+/g, ' ').trim();
 const htmlText = html => normalize(html.replace(/<\/(?:p|h[1-6]|li|th|td|tr)>/g, ' ').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
 const markdownText = text => normalize(text.replace(/^\|[-| ]+\|\s*$/gm, '').replace(/^#{1,6} /gm, '').replace(/^- /gm, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\|/g, ' '));
 
-test('approved legal content, both policy versions and deletion links survive the real web packager', async () => {
+test('approved legal content, historical policies and active a4 survive the real web packager', async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), 'arcade-legal-package-'));
   try {
     await cp(root, fixture, { recursive: true, filter: source => !path.relative(root, source).split(path.sep).some(part => ['.git', 'node_modules', 'www'].includes(part)) });
@@ -59,6 +59,25 @@ test('approved legal content, both policy versions and deletion links survive th
       assert.match(packaged, /href="mailto:contact@kcswh\.pl"/);
     }
     assert.ok(!receipt.sourcePages.some(page => page.startsWith('legal/terms.') && page.includes(a3.candidateVersion)), 'a3 adds no Terms page');
+    const a4 = JSON.parse(await readFile(path.join(root, 'specs/1140-ugc-safety/legal-candidate-a4/manifest.json'), 'utf8'));
+    assert.equal(a4.candidateVersion, '2026-11-20-a4');
+    assert.equal(a4.previousVersion, a3.candidateVersion);
+    assert.deepEqual(Object.keys(a4.files).sort(), ['privacy.2026-11-20-a4.en.html', 'privacy.2026-11-20-a4.pl.html']);
+    for (const [file, expectedHash] of Object.entries(a4.files)) {
+      const page = `legal/${file}`;
+      const source = await readFile(path.join(root, page), 'utf8');
+      assert.equal(createHash('sha256').update(source).digest('hex'), expectedHash, `a4 hash mismatch: ${page}`);
+      const lang = file.split('.')[2];
+      const previous = `legal/privacy.${a3.candidateVersion}.${lang}.html`;
+      assert.equal(a4.basedOn[previous], a3.files[`privacy.${a3.candidateVersion}.${lang}.html`], `a4 predecessor mismatch: ${previous}`);
+      assert.ok(receipt.sourcePages.includes(page), `missing packaged ${page}`);
+      const packaged = await readFile(path.join(fixture, 'mobile/poker/www', page), 'utf8');
+      assert.equal(main(packaged), main(source), `packaging changed legal content: ${page}`);
+      assert.equal(htmlText(main(packaged)), htmlText(main(source)));
+      assert.match(packaged, /id="account-deletion"/);
+      assert.match(packaged, /href="mailto:contact@kcswh\.pl"/);
+    }
+    assert.ok(!receipt.sourcePages.some(page => page.startsWith('legal/terms.') && page.includes(a4.candidateVersion)), 'a4 adds no Terms page');
     for (const lang of ['pl', 'en']) {
       for (const version of ['2026-10-26-a1', manifest.candidateVersion]) {
         for (const kind of ['terms', 'privacy']) assert.ok(receipt.sourcePages.includes(`legal/${kind}.${version}.${lang}.html`));
@@ -66,10 +85,10 @@ test('approved legal content, both policy versions and deletion links survive th
       const alias = await readFile(path.join(root, `legal/privacy.${lang}.html`), 'utf8');
       assert.match(alias, /id="account-deletion"/);
       assert.match(alias, /href="mailto:contact@kcswh\.pl"/);
-      // #1157: the active alias carries the accepted a3 text byte for byte; a1 stays immutable for past acceptances.
-      const active = await readFile(path.join(root, `legal/privacy.${a3.candidateVersion}.${lang}.html`), 'utf8');
+      // #1276: active Privacy aliases match a4; the a1/a2/a3 checks above remain intact.
+      const active = await readFile(path.join(root, `legal/privacy.${a4.candidateVersion}.${lang}.html`), 'utf8');
       const inner = html => html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)[1];
-      assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the accepted a3 text');
+      assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the a4 candidate text');
       const legacy = await readFile(path.join(root, `legal/privacy.2026-10-26-a1.${lang}.html`), 'utf8');
       assert.equal(createHash('sha256').update(legacy).digest('hex'), PRIVACY_A1_SHA256[lang], 'Privacy a1 must stay immutable');
       // #1140: the active Terms alias carries the approved a2 text byte for byte; Terms a1 stays immutable for past acceptances.

@@ -88,7 +88,7 @@ includes the current import gate, and Google copies now use existing private sou
 No OWNER risk waiver is inferred. See Supabase [bucket access](https://supabase.com/docs/guides/storage/buckets/fundamentals)
 and [batch signed URLs](https://supabase.com/docs/reference/javascript/storage-from-createsignedurls), checked 2026-11-17.
 
-## Local follow-up — one gallery, consent separate from selection (2026-11-20)
+## Historical local follow-up — one gallery, consent separate from selection (2026-11-20)
 
 Prepared locally on `045848c8`, not reviewed/deployed. The Google copy is the optional seventeenth tile when all
 16 catalog variants are enabled; existing Terms/catalog rollout still controls which Arcade choices are shown.
@@ -113,7 +113,7 @@ issued can remain usable until expiry, including after withdrawal; cached/saved 
 After withdrawal, no new preview/selection is allowed, and the current gallery/photo presentation is cleared.
 The existing profile renderer is reused unchanged, including expiry and stale-image fences.
 
-Privacy review: current Privacy a3 mentions separate conscious photo permission, but describes catalog-only
+Historical Privacy review (superseded by the a4 closeout below): Privacy a3 mentions separate conscious photo permission, but describes catalog-only
 avatars and does not explain retained inactive Google copies, owner-only preview or that catalog selection leaves
 consent/copy intact. **Clarification and OWNER approval are required before public rollout.** This task does not
 edit Privacy, its version/hash, Terms or the consent notice version. The Account explanation is explicit before
@@ -129,3 +129,14 @@ Cost: one bounded owner GET adds two short eligibility transactions and one sign
 object, never a bucket list; select uses the same one-object availability proof and final CAS. Existing public
 batch signing is unchanged. No polling or automatic retries; owner status is refreshed only on existing events
 and completed explicit avatar actions. Provider download cost remains import-only, at most 1MiB per allowed import.
+
+## Privacy a4 documentation closeout (2026-11-20)
+
+- The final optional Google photo behavior is unchanged. The linked bilingual Privacy update (2026-11-20-a4) clarifies separate consent, private copy retained when a catalog avatar is selected, owner-only preview, authenticated WWW viewers, 60-second signed links and the withdrawal/deletion boundary. This documentation supersedes the open Privacy a3 clarification above, but it does not change Terms or Google-photo consent notice `2026-11-17-g2`.
+- OWNER reported Firefox Android initial-tile and same-node preview verification PASS on `6eb669dfabfc1e858728b8cf20f4f24238cf20c0`. GitHub Tests/core ran `scripts/test-all.mjs` successfully for that SHA. `npm run check:all` is a separate lifecycle/Xp guard pipeline and must be evaluated separately. `npm run check:all` currently exits 1 with five lifecycle violations on both this documentation delta and current `main` (`1c33d32b7ba43d50512386335d43e1d82159a880`): `js/leaderboard-page.js:348`, `js/public-profile-page.js:119`, and `poker/offline/game.generated.js:3422,3426,3429`. There are no new violations. OWNER explicitly accepts these five pre-existing violations as this PR baseline, conditional on no new violations. No guard or waiver is changed; `check:all` remains FAIL and is not reported as PASS. Ready still requires passing scoped checks, GitHub checks and Review #24.
+- Google Play Data Safety is a separate #1140 release gate: if the native app can import a Google profile photo, reconcile the Play Console `Photos and videos > Photos` category as optional collection and assess the user-directed sharing disclosure against the Play policy before any Play submission. Google's [official Data safety guidance](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en) includes controlled WebViews and permits optional collection when users can decline it. Its user-initiated-action/prominent-disclosure-and-consent exception concerns reporting sharing, not a blanket collection exemption; validate the actual APK and disclosure before relying on it. Do not infer that the existing Data Safety form covers this photo; no Play Console change is made by this documentation patch.
+- After this documentation-only edit, verify HTML/SRI/CSP and the entire final diff with independent Claude Code review (using the one additional OWNER-authorized Review #24); do not present previous Review #22 as covering modified Privacy text. OWNER code-owner approval is still required. No merge, import enablement, migration, WWW Production publication, or Play publication is implied by this note.
+
+- Historical Stage note: OWNER reported official migration apply run `44089689664` PASS with postflight history 126/126, RLS and private Storage. The earlier unapplied-Stage finding above is historical. This docs-only closeout neither repeats that migration nor verifies/applies Production schema; Production migration, feature activation, Privacy publication and Google Play submission each remain separate OWNER gates.
+
+- Review #23 found the a4 alias/immutable-version packaging mismatch (P2). OWNER authorized its documentation/packaging-only alignment: immutable `legal/privacy.2026-11-20-a4.{pl,en}.html`, SHA-256 manifest `legal-candidate-a4/manifest.json`, and the existing packager/test update. Earlier Privacy versions, Terms and notice g2 remain unchanged. The existing test retains earlier hashes/content checks and additionally checks a4 hashes, packaged content, deletion links and exact active-alias content. No new APK or app behavior is introduced; packaging is verified only in a synthetic fixture. Production publication and final legal acceptance remain OWNER gates.
