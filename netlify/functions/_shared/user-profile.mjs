@@ -29,7 +29,19 @@ function normalizeProfileRow(row) {
   };
 }
 
+const STORAGE_ORIGIN_RE = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i;
+const PHOTO_KEY_RE = /^[0-9a-f-]{36}\.webp$/;
+
+// Phase D: a consented Google photo (publishedPhotoKey, set by attachPublishedPhotos) is shown on WWW; everything
+// else keeps the Arcade catalog avatar. The shared projection, used by the WS server, is unchanged.
 function profileAvatar(profile) {
+  const base = String(process.env.SUPABASE_URL || process.env.SUPABASE_URL_V2 || "").replace(/\/$/, "");
+  const key = profile.avatarKey;
+  if (profile.publishedPhotoKey===key && PHOTO_KEY_RE.test(key||'') && STORAGE_ORIGIN_RE.test(base)
+    && typeof profile.publishedPhotoUrl==='string'
+    && profile.publishedPhotoUrl.startsWith(`${base}/storage/v1/object/sign/profile-avatar-uploads/pending/${key.slice(0,-5)}?token=`)) {
+    return {type:'uploaded',variant:profile.avatarVariant,url:profile.publishedPhotoUrl};
+  }
   return projectPublicAvatar({
     avatarKey: profile.avatarKey,
     avatarVariant: profile.avatarVariant,
@@ -122,6 +134,7 @@ async function updateUserProfile(userId, payload = {}, deps = {}) {
     const same=choose&&current.avatarVariant===payload.avatarVariant&&!current.avatarKey&&current.googlePhotoSuppressed;
     if(choose&&!same&&current.avatarRevision!==payload.expectedRevision)throw profileError('stale_avatar_revision',409);
     if(choose&&current.avatarKey)await tx.unsafe(`insert into private.account_avatar_objects(user_id,output_path) values($1,$2) on conflict(user_id,output_path) do nothing;`,[userId,current.avatarKey]);
+    // Selection only: Google consent/imported_avatar_key remain until explicit withdrawal or Account Deletion.
     const [updated]=await tx.unsafe(`update public.user_profiles set avatar_variant=$2,
       avatar_key=case when $3 then null else avatar_key end,
       google_photo_suppressed=case when $3 then true else google_photo_suppressed end,

@@ -127,6 +127,14 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 
 ---
 
+## Application dialogs (mandatory)
+
+All application-owned confirmations, alerts, prompts and popups MUST use custom, accessible UI components consistent with Arcade Hub's design system. Do not use `window.alert()`, `window.confirm()` or `window.prompt()` for application UX. Reuse existing dialog components before creating new ones. Native browser/OS security and permission prompts are exempt.
+
+This applies to new and modified code. It does not require a wholesale rewrite of historical dialogs.
+
+---
+
 ## 🏗️ Architecture Overview
 
 ### Frontend

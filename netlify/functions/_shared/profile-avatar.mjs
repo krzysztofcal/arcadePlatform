@@ -1,6 +1,5 @@
 import { accountDeletionEnabled, assertAccountActive } from "../../../shared/account-deletion.mjs";
 import crypto from "node:crypto";
-import sharp from "sharp";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { ensureUserProfile, updateUserAvatarKey } from "./user-profile.mjs";
 
@@ -55,7 +54,7 @@ async function storageRequest(path, options = {}, deps = {}) {
   const config = deps.storageConfig || storageConfig(deps.env);
   const fetchImpl = deps.fetch || fetch;
   const headers = { apikey: config.serviceKey, Authorization: `Bearer ${config.serviceKey}`, ...(options.headers || {}) };
-  const response = await fetchImpl(config.baseUrl + path, { ...options, headers, ...(enabled(deps) ? { signal: AbortSignal.timeout(30000) } : {}) });
+  const response = await fetchImpl(config.baseUrl + path, { ...options, headers, ...(enabled(deps) && !options.signal ? { signal: AbortSignal.timeout(30000) } : {}) });
   if (!response.ok) {
     const message = await response.text().catch(() => "");
     const error = avatarError("storage_error", response.status >= 500 ? 503 : 400);
@@ -170,6 +169,19 @@ async function deleteStorageObject(bucket, path, deps = {}) {
   }, deps);
 }
 
+// Shared by the retired upload path and the phase D Google photo import: JPEG/PNG/WebP only, a single frame,
+// at most 1024x1024, re-encoded to a 256x256 WebP without the source metadata.
+async function normalizeAvatarImage(source, deps = {}) {
+  const image = (deps.sharp || (await import("sharp")).default)(source, { failOn: "error", limitInputPixels: MAX_DIMENSION * MAX_DIMENSION });
+  const metadata = await image.metadata();
+  const actualMime = FORMAT_MIME[metadata.format];
+  if (!actualMime || !ALLOWED_MIME.has(actualMime) || Number(metadata.pages || 1) > 1) throw avatarError("invalid_avatar_file");
+  if (!metadata.width || !metadata.height || metadata.width > MAX_DIMENSION || metadata.height > MAX_DIMENSION) {
+    throw avatarError("avatar_dimensions_too_large");
+  }
+  return image.rotate().resize(256, 256, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
+}
+
 async function finalizeAvatar(userId, uploadId, deps = {}) {
   const pending = await consumePendingUpload(userId, uploadId, deps);
   const runSql = deps.executeSql || executeSql;
@@ -183,14 +195,7 @@ async function finalizeAvatar(userId, uploadId, deps = {}) {
     if (!source.length || source.length > MAX_SOURCE_BYTES || source.length > Number(pending.declared_size)) {
       throw avatarError("invalid_avatar_file");
     }
-    const image = (deps.sharp || sharp)(source, { failOn: "error", limitInputPixels: MAX_DIMENSION * MAX_DIMENSION });
-    const metadata = await image.metadata();
-    const actualMime = FORMAT_MIME[metadata.format];
-    if (!actualMime || !ALLOWED_MIME.has(actualMime)) throw avatarError("invalid_avatar_file");
-    if (!metadata.width || !metadata.height || metadata.width > MAX_DIMENSION || metadata.height > MAX_DIMENSION) {
-      throw avatarError("avatar_dimensions_too_large");
-    }
-    const processed = await image.rotate().resize(256, 256, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
+    const processed = await normalizeAvatarImage(source, deps);
     newAvatarKey = enabled(deps) ? pending.output_path : `${crypto.randomUUID()}.webp`;
     outputAttempted = true;
     await storageRequest(storagePath(PUBLIC_BUCKET, newAvatarKey, null), {
@@ -222,6 +227,55 @@ and output_write_finished_at is null returning id;`, [uploadId,userId]);
   }
 }
 
+// Google copies reuse the private source bucket and its V3 intent. No permanent public object is created.
+function photoPath(key) {
+  if (!/^[0-9a-f-]{36}\.webp$/.test(key)) throw avatarError('invalid_avatar_key');
+  return 'pending/' + key.slice(0,-5);
+}
+async function writeTrackedOutput(userId, body, deps = {}, key = `${crypto.randomUUID()}.webp`) {
+  if (!enabled(deps)) throw avatarError('avatar_tracking_unavailable',503);
+  const sourcePath = photoPath(key), id = key.slice(0,-5);
+  const expiresAt = new Date(Date.now()+PENDING_TTL_MS).toISOString();
+  await activeTransaction(userId,deps,tx=>tx.unsafe(`insert into public.profile_avatar_uploads
+    (id,user_id,source_path,declared_mime_type,declared_size,expires_at,tracking_version)
+    values ($1,$2,$3,'image/webp',$4,$5::timestamptz,3);`,[id,userId,sourcePath,body.length,expiresAt]));
+  // The existing private-source protocol keeps an uncertain write covered through the capability horizon.
+  await finishSigning(userId,id,deps);
+  await activeTransaction(userId,deps,async()=>{});
+  try {
+    await storageRequest(storagePath(UPLOAD_BUCKET,sourcePath,null),{method:'POST',
+      headers:{'content-type':'image/webp','cache-control':'0','x-upsert':'false'},body},deps);
+  } catch(error) {
+    if (!(error?.code==='storage_error' && error?.status===400)) error.writeUncertain=true;
+    throw error;
+  }
+  return key;
+}
+async function deleteTrackedPhoto(userId,key,deps={}) {
+  // Keys are taken from this user's locked consent/pending snapshot. Leave V3 absence evidence to its purge.
+  await deleteStorageObject(UPLOAD_BUCKET,photoPath(key),deps);
+}
+
+async function signedPhotoUrls(keys,deps={}) {
+  if (!keys.length) return new Map();
+  if (keys.length>100) throw avatarError('photo_signing_unavailable',503);
+  const paths=keys.map(photoPath);
+  const {response,config}=await storageRequest(`/storage/v1/object/sign/${UPLOAD_BUCKET}`,{
+    method:'POST',signal:AbortSignal.timeout(5000),headers:{'content-type':'application/json'},body:JSON.stringify({expiresIn:60,paths})},deps);
+  const rows=await response.json();
+  if (!Array.isArray(rows)||rows.length!==paths.length) throw avatarError('photo_signing_unavailable',503);
+  const urls=new Map();
+  for (const row of rows) {
+    const index=paths.indexOf(row.path), relative=row.signedURL||row.signedUrl;
+    if (index<0||row.error||urls.has(keys[index])||typeof relative!=='string') throw avatarError('photo_signing_unavailable',503);
+    const url=new URL(relative.startsWith('/storage/v1/') ? relative : '/storage/v1'+relative,config.baseUrl);
+    if (url.origin!==config.baseUrl||url.pathname!==`/storage/v1/object/sign/${UPLOAD_BUCKET}/${row.path}`
+      ||!url.searchParams.get('token')||[...url.searchParams.keys()].some(key=>key!=='token')||url.hash) throw avatarError('photo_signing_unavailable',503);
+    urls.set(keys[index],url.href);
+  }
+  return urls;
+}
+
 async function removeAvatar(userId, deps = {}) {
   const { profile, previousAvatarKey } = await (deps.updateUserAvatarKey || updateUserAvatarKey)(userId, null, deps);
   if (previousAvatarKey) await deleteStorageObject(PUBLIC_BUCKET, previousAvatarKey, deps).catch(() => {});
@@ -229,10 +283,15 @@ async function removeAvatar(userId, deps = {}) {
 }
 
 export {
+  CAPABILITY_MS,
   MAX_SOURCE_BYTES,
+  deleteTrackedPhoto,
+  signedPhotoUrls,
+  normalizeAvatarImage,
   cleanupExpiredUploads,
   createPendingUpload,
   finalizeAvatar,
   removeAvatar,
   validateUploadRequest,
+  writeTrackedOutput,
 };

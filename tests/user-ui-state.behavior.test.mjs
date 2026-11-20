@@ -52,6 +52,8 @@ const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.st
   const hydrated = state.api.hydrate('user-a');
   const repeated = state.api.hydrate('user-a');
   assert.equal(hydrated.profile.displayName, 'User A');
+  assert.equal(hydrated.profile.avatar.url, undefined);
+  assert.ok(!state.values.get('kcswh:user-ui:profile:v1:user-a').includes('https://'));
   assert.equal(repeated.generation, hydrated.generation);
   assert.equal(state.topbar.state, 'loading');
   assert.equal(state.topbar.attributes['data-user-ui-xp-state'], 'loading');
@@ -75,7 +77,9 @@ const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.st
   const confirmedAt = Date.now();
   first.api.publish('shared-user', 'profile', { displayName: 'Shared Avatar', avatar: { type: 'uploaded', variant: 'fox-blue', url: 'https://stage-test.supabase.co/new-avatar.webp' } }, confirmedAt);
   assert.equal(received.length, 1);
-  assert.equal(received[0].value.avatar.url, 'https://stage-test.supabase.co/new-avatar.webp');
+  assert.equal(received[0].value.avatar.type, 'uploaded');
+  assert.equal(received[0].value.avatar.url, undefined);
+  assert.ok(!values.get('kcswh:user-ui:profile:v1:shared-user').includes('https://'));
   assert.equal(second.topbar.state, 'ready');
   hub.deliver(1, received[0]);
   assert.equal(received.length, 1);

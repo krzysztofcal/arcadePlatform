@@ -30,8 +30,7 @@
     var type = avatar.type === 'uploaded' ? 'uploaded' : 'default';
     var variant = typeof avatar.variant === 'string' && /^[a-z0-9-]{1,40}$/.test(avatar.variant) ? avatar.variant : 'default';
     var result = { type: type, variant: variant };
-    if (type === 'uploaded' && typeof avatar.url === 'string' && /^https:\/\/[^\s"\\]{1,2048}$/.test(avatar.url)) result.url = avatar.url;
-    if (type === 'uploaded' && !result.url) result.type = 'default';
+    // Persist only the photo marker, never a signed bearer URL or image.
     return result;
   }
 
@@ -75,6 +74,10 @@
     if (!raw) return null;
     var record = parseRecord(slice, userId, raw, Date.now());
     if (!record){ try { store.removeItem(cacheKey); } catch (_err){} }
+    else if (slice === 'profile' && record.value.avatar.type === 'uploaded'){
+      // Strip signed URLs left by older clients on this origin.
+      try { store.setItem(cacheKey, JSON.stringify(record)); } catch (_err){}
+    }
     return record;
   }
 
