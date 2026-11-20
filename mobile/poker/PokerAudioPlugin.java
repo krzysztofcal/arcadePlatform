@@ -41,6 +41,8 @@ public class PokerAudioPlugin extends Plugin {
     private static final String MUSIC = "lobby";
     private static final float GAIN = 0.35f;
     private static final float DUCK = 0.3f;
+    private static final float VOICE_DUCK = 0.5f; // about -6 dB for music and other cues while the dealer speaks
+    private static final long VOICE_MS = 1100; // longer than the longest dealer line
     private static final long FADE_MS = 600;
     private static final long STEP_MS = 50;
     private static final long STALE_MS = 400;
@@ -66,6 +68,7 @@ public class PokerAudioPlugin extends Plugin {
     private boolean focusHeld; // held only while music is wanted
     private boolean cueFocusHeld; // brief may-duck focus for cues while no music plays
     private boolean ducked;
+    private boolean voiceDucked;
     private boolean prepared;
     private boolean listening;
     private float volume;
@@ -97,6 +100,8 @@ public class PokerAudioPlugin extends Plugin {
     private final Runnable releaseCueFocus = this::stopCues;
 
     private final Runnable retryFocus = () -> sync(true);
+
+    private final Runnable voiceDone = this::endVoiceDuck;
 
     private final BroadcastReceiver noisy = new BroadcastReceiver() {
         @Override
@@ -307,7 +312,7 @@ public class PokerAudioPlugin extends Plugin {
             else if (player != null && prepared) {
                 if (want) {
                     if (!player.isPlaying()) player.start(); // resumes at the kept position
-                    fadeTo(GAIN * (ducked ? DUCK : 1f));
+                    fadeTo(musicLevel());
                 } else if (fade && player.isPlaying()) fadeTo(0f);
                 else pauseMusic();
             } else if (!want) dropFocus();
@@ -440,14 +445,47 @@ public class PokerAudioPlugin extends Plugin {
         }
     }
 
+    private float musicLevel() {
+        return GAIN * (ducked ? DUCK : 1f) * (voiceDucked ? VOICE_DUCK : 1f);
+    }
+
+    private float cueLevel(boolean voice) {
+        return (ducked ? DUCK : 1f) * (voiceDucked && !voice ? VOICE_DUCK : 1f);
+    }
+
+    // Moves playing music to its current level; a fade-out towards a pause is left alone.
+    private void levelMusic() {
+        if (player != null && prepared && player.isPlaying() && fadeTarget > 0f) fadeTo(musicLevel());
+    }
+
+    // The dealer's line takes priority: music and other cues dip while it plays and return afterwards.
+    private void startVoiceDuck() {
+        main.removeCallbacks(voiceDone);
+        main.postDelayed(voiceDone, VOICE_MS);
+        if (voiceDucked) return;
+        voiceDucked = true;
+        duckCues();
+        levelMusic();
+    }
+
+    private void endVoiceDuck() {
+        main.removeCallbacks(voiceDone);
+        if (!voiceDucked) return;
+        voiceDucked = false;
+        duckCues();
+        levelMusic();
+    }
+
     private boolean startCue(int id, boolean voice) {
         if (!takeCueFocus()) return false;
         if (voice && voiceStream != 0) pool.stop(voiceStream); // one dealer line at a time
-        float level = ducked ? DUCK : 1f;
+        float level = cueLevel(voice);
         int stream = pool.play(id, level, level, voice ? 2 : 1, 0, 1f);
         if (stream == 0) return false;
-        if (voice) voiceStream = stream;
-        else {
+        if (voice) {
+            voiceStream = stream;
+            startVoiceDuck();
+        } else {
             streams.add(stream);
             if (streams.size() > MAX_STREAMS) pool.stop(streams.remove());
         }
@@ -456,11 +494,10 @@ public class PokerAudioPlugin extends Plugin {
 
     // Active cues follow the same duck/restore as the music.
     private void duckCues() {
-        float level = ducked ? DUCK : 1f;
         try {
             if (pool == null) return;
-            if (voiceStream != 0) pool.setVolume(voiceStream, level, level);
-            for (int stream : streams) pool.setVolume(stream, level, level);
+            if (voiceStream != 0) pool.setVolume(voiceStream, cueLevel(true), cueLevel(true));
+            for (int stream : streams) pool.setVolume(stream, cueLevel(false), cueLevel(false));
         } catch (RuntimeException error) {
             fail(error);
         }
@@ -478,6 +515,7 @@ public class PokerAudioPlugin extends Plugin {
         }
         voiceStream = 0;
         streams.clear();
+        endVoiceDuck();
         dropCueFocus();
     }
 }

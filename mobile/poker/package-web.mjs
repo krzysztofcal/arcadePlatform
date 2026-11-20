@@ -4,12 +4,22 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import security from './security.cjs';
+import { assertLobbyPackaged, lobbyEntry } from './licensed-audio.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const out = path.join(here, 'www');
 // Refuse stale output instead of deleting any existing data.
 try { await access(out); throw new Error('www already exists: use a fresh build workspace'); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
+const channel = process.env.MOBILE_CHANNEL || 'stage';
+if (channel === 'production') {
+  const prodConfig = JSON.parse(await readFile(path.join(here, 'production-public.json'), 'utf8'));
+  security.validateProduction(prodConfig);
+  const prodKey = JSON.parse(Buffer.from(prodConfig.supabaseAnonKey.split('.')[1], 'base64url').toString());
+  if (prodKey.ref !== 'otbqfijerkieoxwpxjnm' || prodKey.role !== 'anon') throw new Error('Only pinned public Production anon key permitted');
+  throw new Error('Production packaging is disabled until the T2/T3 release gates');
+}
+if (channel !== 'stage') throw new Error('Unknown MOBILE_CHANNEL');
 const localConfig = JSON.parse(await readFile(path.join(here, 'stage-public.json'), 'utf8'));
 const binding = process.env.MOBILE_PREVIEW_BINDING ? JSON.parse(await readFile(process.env.MOBILE_PREVIEW_BINDING, 'utf8')) : null;
 if ((process.env.CI || process.env.GITHUB_ACTIONS) && !binding) throw new Error('CI requires a verified own-PR Preview binding');
@@ -141,6 +151,8 @@ for (const name of (await readdir(path.join(here, 'audio'))).filter(name => /^[a
   await put('mobile/audio/' + name, data);
   audioFiles.push({ name, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') });
 }
+// The licensed lobby track is decrypted only in the APK workflow; official CI builds fail without it.
+if (process.env.CI || process.env.GITHUB_ACTIONS) assertLobbyPackaged(audioFiles, await lobbyEntry());
 // Validate the composed documents, including isolated Offline, before claiming CSP/SRI PASS.
 for (const name of [...pages, 'index.html']) {
   const html = await readFile(path.join(out, name), 'utf8');
@@ -159,5 +171,6 @@ for (const name of [...pages, 'index.html']) {
   }
 }
 const version = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8')).version;
-await put('build-receipt.json', JSON.stringify({ sha: config.sha, prNumber: binding?.prNumber || null, preview: binding || null, appId: 'pl.kcswh.arcadepoker.stage', version, versionCode: 1, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, audio: { files: audioFiles }, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
+const capacitorConfig = JSON.parse(await readFile(path.join(here, 'capacitor.config.json'), 'utf8'));
+await put('build-receipt.json', JSON.stringify({ sha: config.sha, prNumber: binding?.prNumber || null, preview: binding || null, appId: capacitorConfig.appId, version, versionCode: 1, apiOrigin: config.apiOrigin, supabaseUrl: config.supabaseUrl, supabaseProjectRef: key.ref, wsUrl: config.wsUrl, audio: { files: audioFiles }, securityChecks: { csp: 'PASS', sri: 'PASS', checkedPages: pages.length + 1 }, sourcePages: pages, updateModel: 'bundled assets; new APK required' }, null, 2));
 process.stdout.write('Packaged shared Poker/account assets at SHA ' + config.sha + '\n');

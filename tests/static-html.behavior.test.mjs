@@ -167,7 +167,14 @@ assert.equal(existsSync(path.join(root, 'games-open', 'freedoom', 'vendor', 'dwa
 assert.match(headersFile, /\/games-open\/freedoom\/\*/, 'Freedoom should have a scoped CSP in _headers');
 assert.doesNotMatch(headersFile, /dwasm\.m-h\.org\.uk/, 'Freedoom CSP should not rely on a remote WAD mirror');
 assert.match(headersFile, /\/\*\s+[\s\S]*?frame-ancestors 'none'[\s\S]*?X-Frame-Options: DENY/, 'portal routes should deny framing by default');
-const cspBlocks = [...headersFile.matchAll(/Content-Security-Policy:\s*([^\n]+)/g)].map((match) => match[1]);
+// #1140 T2b: the auth callback fallback is deliberately analytics-free and frameless; portal CSP rules exclude it.
+const callbackRoutes = ['/app/auth/callback', '/app/auth/callback.html'];
+const headerBlocks = headersFile.split(/\n(?=\/)/);
+const callbackBlocks = headerBlocks.filter((block) => callbackRoutes.includes(block.split('\n')[0].trim()));
+assert.equal(callbackBlocks.length, 2, 'auth callback routes should have their own header blocks');
+callbackBlocks.forEach((block) => assert.doesNotMatch(block, /google|googletagmanager|netlify\.com|cdn\.jsdelivr|github\.com/, 'auth callback CSP must not allow analytics or third parties'));
+const portalHeaders = headerBlocks.filter((block) => !callbackBlocks.includes(block)).join('\n');
+const cspBlocks = [...portalHeaders.matchAll(/Content-Security-Policy:\s*([^\n]+)/g)].map((match) => match[1]);
 assert.equal(cspBlocks.length > 0, true, 'canonical headers should define CSP blocks');
 cspBlocks.forEach((csp) => {
   assert.doesNotMatch(csp, /googlesyndication|doubleclick|adtrafficquality|googleadservices/, 'CSP should not authorize AdSense hosts');

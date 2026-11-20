@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import vm from 'node:vm';
+import { execFileSync } from 'node:child_process';
 
 test('adapter in node:vm with no Capacitor or getPlatform() === "web" is inactive and registers no listeners', async () => {
   const source = await readFile(new URL('../mobile/poker/audio.js', import.meta.url), 'utf8');
@@ -161,45 +162,40 @@ test('adapter with fake android PokerAudio plugin needs no gesture and forwards 
   });
 });
 
-test('generate-lobby-loop reproduces committed lobby.wav byte-for-byte matching manifest.json', async () => {
-  const { render } = await import('../mobile/poker/audio/generate-lobby-loop.mjs');
-  const rendered = render();
-  assert.ok(Buffer.isBuffer(rendered), 'render() must return a Buffer');
+test('licensed lobby music: committed only encrypted, decrypts to the manifest checksum, fails closed otherwise', async () => {
+  const { parseKey, encryptAsset, decryptAsset, assertLobbyPackaged, lobbyEntry } = await import('../mobile/poker/licensed-audio.mjs');
+  const entry = await lobbyEntry();
+  assert.equal(entry.cue, 'lobby');
+  assert.equal(entry.file, 'lobby.mp3');
+  assert.equal(entry.sha256, '277f149f3d4fe8e6ddd76b38019fdc6e8ca2f8b50a65eb5609f06af19fdf5556');
+  assert.equal(entry.author, 'snoozybeats');
+  assert.match(entry.license, /^Pixabay Content License/);
+  assert.match(entry.license, /not CC0, not MIT/, 'third-party licence is never labelled CC0 or MIT');
+  assert.doesNotMatch(JSON.stringify(entry), /project-owned|procedurally/i);
+  // No plaintext lobby audio is tracked: only the encrypted file.
+  const tracked = execFileSync('git', ['ls-files', 'mobile/poker/audio'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' }).split('\n').filter(Boolean);
+  assert.deepEqual(tracked.filter(name => /\/lobby\./.test(name)), ['mobile/poker/audio/lobby.mp3.enc']);
+  const blob = await readFile(new URL('../mobile/poker/audio/lobby.mp3.enc', import.meta.url));
+  assert.ok(blob.length > entry.bytes, 'committed file is the encrypted container');
+  assert.notEqual(createHash('sha256').update(blob).digest('hex'), entry.sha256);
 
-  const committed = await readFile(new URL('../mobile/poker/audio/lobby.wav', import.meta.url));
-  assert.equal(Buffer.compare(rendered, committed), 0, 'rendered buffer must match committed lobby.wav byte-for-byte');
-
-  const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
-  const lobbyEntry = manifest.assets.find(a => a.file === 'lobby.wav');
-  assert.ok(lobbyEntry, 'manifest must contain lobby.wav entry');
-  const sha256 = createHash('sha256').update(rendered).digest('hex');
-  assert.equal(rendered.length, lobbyEntry.bytes, 'byte length must match manifest.bytes');
-  assert.equal(sha256, lobbyEntry.sha256, 'sha256 must match manifest.sha256');
-
-  // WAV header check: PCM, mono, 16-bit, 22050
-  assert.equal(rendered.toString('utf8', 0, 4), 'RIFF');
-  assert.equal(rendered.toString('utf8', 8, 12), 'WAVE');
-  assert.equal(rendered.toString('utf8', 12, 16), 'fmt ');
-  assert.equal(rendered.readUInt16LE(20), 1, 'AudioFormat must be 1 (PCM)');
-  assert.equal(rendered.readUInt16LE(22), 1, 'NumChannels must be 1 (mono)');
-  assert.equal(rendered.readUInt32LE(24), 22050, 'SampleRate must be 22050');
-  assert.equal(rendered.readUInt16LE(34), 16, 'BitsPerSample must be 16');
-
-  // Seam delta
-  const firstSample = rendered.readInt16LE(44);
-  const lastSample = rendered.readInt16LE(rendered.length - 2);
-  const seamDelta = Math.abs(firstSample - lastSample);
-  assert.ok(seamDelta < 200, `first and last sample must be within small amplitude delta (got ${seamDelta})`);
-
-  // Peak check
-  let maxInt = 0;
-  for (let i = 44; i < rendered.length; i += 2) {
-    const v = Math.abs(rendered.readInt16LE(i));
-    if (v > maxInt) maxInt = v;
-  }
-  const peakNorm = maxInt / 32768;
-  const dBFS = 20 * Math.log10(peakNorm);
-  assert.ok(dBFS <= -6.0, `peak must be <= -6 dBFS (got ${dBFS.toFixed(2)} dBFS)`);
+  // Synthetic fixture only: the real key never exists in tests.
+  const key = Buffer.alloc(32, 7), plain = Buffer.from('synthetic lobby fixture');
+  const sum = createHash('sha256').update(plain).digest('hex');
+  const sealed = encryptAsset(plain, key, 'lobby.mp3');
+  assert.equal(Buffer.compare(decryptAsset(sealed, key, 'lobby.mp3', sum), plain), 0);
+  assert.throws(() => decryptAsset(sealed, Buffer.alloc(32, 8), 'lobby.mp3', sum), /authentication/);
+  const altered = Buffer.from(sealed); altered[altered.length - 1] ^= 1;
+  assert.throws(() => decryptAsset(altered, key, 'lobby.mp3', sum), /authentication/);
+  assert.throws(() => decryptAsset(sealed, key, 'other.mp3', sum), /authentication/);
+  assert.throws(() => decryptAsset(sealed, key, 'lobby.mp3', '0'.repeat(64)), /checksum/);
+  for (const bad of [undefined, '', 'short', Buffer.alloc(16).toString('base64')]) assert.throws(() => parseKey(bad), /MOBILE_LOBBY_MUSIC_KEY/);
+  assert.equal(parseKey(key.toString('base64')).length, 32);
+  // Official packaging refuses a missing or altered lobby track.
+  assert.throws(() => assertLobbyPackaged([{ name: 'bonus_coins.mp3', sha256: 'x' }], entry), /refusing/);
+  assert.throws(() => assertLobbyPackaged([{ name: 'lobby.mp3', sha256: '0'.repeat(64) }], entry), /refusing/);
+  assert.throws(() => assertLobbyPackaged([{ name: 'lobby.wav', sha256: 'x' }, { name: 'lobby.mp3', sha256: entry.sha256 }], entry), /refusing/, 'a second lobby file is refused');
+  assert.doesNotThrow(() => assertLobbyPackaged([{ name: 'lobby.mp3', sha256: entry.sha256 }], entry));
 });
 
 test('bonus cue is the bundled CC0 CapsLok preview, unchanged, recorded in the manifest and under the native cue limit', async () => {
@@ -480,3 +476,48 @@ test('static guards: root pages contain no mobile/audio references, plugin conta
   assert.ok(pluginJava.includes('releaseCueFocus = this::stopCues'), 'the cue focus timeout stops cues before releasing focus');
   assert.match(pluginJava, /private void dropFocus\(\) \{[^}]*stopCues\(\);[^}]*abandonAudioFocus\(focus\)/, 'music focus is never abandoned under a playing cue');
 });
+
+test('table cues: every cue named in poker-v2.js is a bundled WAV under the native 3 s limit with recorded provenance; WWW never reaches native', async () => {
+  const source = await readFile(new URL('../poker/poker-v2.js', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('var TABLE_CUES = {'), source.indexOf('var tableCueAt'));
+  const cues = [...new Set([...block.matchAll(/'([a-z0-9_]+)'/g)].map(m => m[1]))];
+  assert.equal(cues.length, 19, 'thirteen Kenney table cues and six dealer lines');
+  const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
+  for (const cue of cues) {
+    const entries = manifest.assets.filter(a => a.cue === cue);
+    assert.equal(entries.length, 1, cue);
+    const [entry] = entries;
+    const file = await readFile(new URL('../mobile/poker/audio/' + entry.file, import.meta.url));
+    assert.equal(createHash('sha256').update(file).digest('hex'), entry.sha256, cue);
+    assert.equal(file.length, entry.bytes, cue);
+    assert.equal(file.toString('ascii', 0, 4) + file.toString('ascii', 8, 12), 'RIFFWAVE', cue);
+    assert.equal(file.readUInt16LE(20), 1, cue + ' PCM');
+    const seconds = file.readUInt32LE(40) / file.readUInt32LE(28);
+    assert.ok(seconds > 0 && seconds < 3, cue + ' below the native cue limit');
+    if (cue.startsWith('dealer_')) {
+      // #1146 PR4: project-generated voice; the pinned open-weight model is recorded, never bundled.
+      assert.equal(entry.channel, 'voice', cue);
+      assert.match(entry.creationMethod, /Kokoro-82M-v1\.0-ONNX revision 1939ad2a8e416c0acfeecc08a694d14ef25f2231/);
+      assert.match(entry.license, /Apache-2\.0/);
+      continue;
+    }
+    assert.match(entry.license, /^CC0 1\.0/);
+    assert.equal(entry.sourceUrl, 'https://kenney.nl/assets/casino-audio');
+    assert.match(entry.sourceSha256, /^[a-f0-9]{64}$/);
+  }
+  // Only the guarded helper touches the adapter, which exists solely in the Android APK.
+  assert.equal(source.match(/window\.MobilePokerAudio\b(?!\s+exists)/g).length, 1, 'one code reference, inside tableAudio()');
+  assert.match(source, /function tableAudio\(\)\{\s*var audio = window\.MobilePokerAudio;\s*return audio && typeof audio\.play === 'function' \? audio : null;/);
+});
+
+test('dealer voice ducking: music and cues dip for at least the longest line and return on stop', async () => {
+  const java = await readFile(new URL('../mobile/poker/PokerAudioPlugin.java', import.meta.url), 'utf8');
+  const manifest = JSON.parse(await readFile(new URL('../mobile/poker/audio/manifest.json', import.meta.url), 'utf8'));
+  const longest = Math.max(...manifest.assets.filter(a => a.channel === 'voice').map(a => a.durationSeconds));
+  const voiceMs = Number(java.match(/VOICE_MS = (\d+);/)[1]);
+  assert.ok(voiceMs > longest * 1000, 'the duck outlasts every dealer line');
+  assert.match(java, /if \(voice\) \{\s*voiceStream = stream;\s*startVoiceDuck\(\);/, 'a started line ducks');
+  assert.match(java, /private void stopCues\(\) \{[\s\S]*?endVoiceDuck\(\);[\s\S]*?\n    \}/, 'mute, background and stop restore the levels');
+  assert.match(java, /fadeTo\(musicLevel\(\)\)/, 'music follows the ducked level');
+});
+

@@ -71,7 +71,7 @@ jobs:
           echo "MOBILE_PREVIEW_BINDING=$RUNNER_TEMP/mobile-preview-binding.json" >> "$GITHUB_ENV"
       # These tests run only here, so test-only synchronize must not skip them.
       - name: Fundamental security checks
-        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs tests/mobile-poker-audio.test.mjs
+        run: node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-preview.test.mjs tests/mobile-poker-audio.test.mjs tests/mobile-poker-channel.test.mjs
       - name: Resolve matching native Preview before build costs
         id: preview
         env:
@@ -97,6 +97,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node mobile/poker/preview-preflight.mjs --verify
+      # #1146: the only step that receives the music key. Missing key, failed authentication or a
+      # checksum mismatch fails the job, so no APK artifact is published without the lobby music.
+      - name: Decrypt licensed lobby music (fails closed)
+        if: steps.preview.outputs.build == 'true'
+        working-directory: mobile/poker
+        env:
+          MOBILE_LOBBY_MUSIC_KEY: ${{ secrets.MOBILE_LOBBY_MUSIC_KEY }}
+        run: node licensed-audio.mjs decrypt
       - name: Package shared frontend and generate Android template
         if: steps.preview.outputs.build == 'true'
         working-directory: mobile/poker

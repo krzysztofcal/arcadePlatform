@@ -209,6 +209,11 @@
   to = "/profile.html"
   status = 200
 
+[[redirects]]
+  from = "/app/auth/callback"
+  to = "/app/auth/callback.html"
+  status = 200
+
 # Player data requires authenticated API access; noindex is not authorization.
 [[headers]]
   for = "/u/*"
