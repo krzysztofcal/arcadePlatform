@@ -6,7 +6,10 @@ const { createPokerTablePhotoHandler } = await import("../netlify/functions/poke
 const viewer = "00000000-0000-4000-8000-000000000001";
 const target = "00000000-0000-4000-8000-000000000002";
 const tableId = "00000000-0000-4000-8000-000000000003";
-const key = "00000000-0000-4000-8000-000000000004.webp";
+const photoId = "00000000-0000-4000-8000-000000000004";
+const key = photoId + ".webp";
+const signedPath = "/storage/v1/object/sign/profile-avatar-uploads/pending/" + photoId;
+const signedUrl = "https://test.supabase.co" + signedPath + "?token=synthetic";
 const enabled = { POKER_TABLE_PHOTO_ENABLED: "1", GOOGLE_PHOTO_IMPORT_ENABLED: "1", UGC_SAFETY_ENABLED: "1" };
 
 test("table photo signs only the WS participant's current, separately consented copy", async () => {
@@ -72,7 +75,12 @@ test("seat photo reauthorizes on expiry, clears on ejection and stops when disab
   const source = await readFile(new URL("../poker/poker-v2.js", import.meta.url), "utf8");
   const renderer = source.slice(source.indexOf("  var seatPhotoReads"), source.indexOf("  function seatAvatarSource("));
   const flush = () => new Promise(resolve => setImmediate(resolve));
-  for (const scenario of ["expiry", "target-ejected", "viewer-ejected", "disabled"]) {
+  const invalidUrls = {
+    "wrong-origin": "https://other.supabase.co" + signedPath + "?token=synthetic",
+    "wrong-path": signedUrl.replace(photoId, key),
+    "no-token": "https://test.supabase.co" + signedPath
+  };
+  for (const scenario of ["expiry", "target-ejected", "viewer-ejected", "disabled", ...Object.keys(invalidUrls)]) {
     let now = 0, requests = 0, shown = false, status = "ACTIVE", timerId = 0;
     const timers = new Map();
     const seats = [{ userId: viewer, seatNo: 1, status }, { userId: target, seatNo: 2, status, profile: {} }];
@@ -93,14 +101,18 @@ test("seat photo reauthorizes on expiry, clears on ejection and stops when disab
         requests++;
         if (scenario === "disabled") return { ok: false, status: 404, json: async () => ({ error: "table_photos_disabled" }) };
         return { ok: true, json: async () => ({
-          url: "https://test.supabase.co/storage/v1/object/sign/profile-avatar-uploads/pending/" + key + "?token=synthetic",
+          url: invalidUrls[scenario] ?? signedUrl,
           expiresInMs: 50000, seatNo: 2
         }) };
       }
     });
     sync(avatar, seats[1]);
     await flush();
-    assert.equal(shown, scenario !== "disabled");
+    assert.equal(shown, scenario !== "disabled" && !(scenario in invalidUrls), scenario);
+    if (scenario in invalidUrls) {
+      assert.equal(timers.size, 0, scenario);
+      continue;
+    }
     if (scenario === "target-ejected") seats[1].status = "EJECTION_PENDING";
     if (scenario === "viewer-ejected") status = "REMOVED";
     if (scenario.endsWith("ejected")) {

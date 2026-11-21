@@ -3783,7 +3783,7 @@
       var source = new URL(photo.url);
       var config = window.SUPABASE_CONFIG;
       if (!config || source.origin !== new URL(config.SUPABASE_URL).origin
-        || !/^\/storage\/v1\/object\/sign\/profile-avatar-uploads\/pending\/[0-9a-f-]{36}[.]webp$/.test(source.pathname)
+        || !/^\/storage\/v1\/object\/sign\/profile-avatar-uploads\/pending\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(source.pathname)
         || !source.searchParams.get('token')) return;
       var image = document.createElement('img');
       image.className = 'poker-seat-avatar__image';
