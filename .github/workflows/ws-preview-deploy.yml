@@ -1,4 +1,5 @@
 name: WS Preview Deploy
+run-name: WS Preview Deploy ${{ inputs.ref }} (requested by ${{ github.actor }})
 
 on:
   workflow_dispatch:
@@ -21,8 +22,11 @@ concurrency:
 
 jobs:
   validate:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
-    environment: ws-preview
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'
+      && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner)
+      || (vars.WS_PREVIEW_AGENT_DEPLOY_ENABLED == 'true' && vars.WS_RELEASE_AGENT == 'arcade-code-agent[bot]'
+      && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,19 +39,31 @@ jobs:
         with:
           node-version: 20
 
-      - name: Validate preview dispatch inputs and secrets
+      - name: Validate preview dispatch inputs
         env:
           PREVIEW_DEPLOY_SHA: ${{ inputs.ref }}
-          PREVIEW_WS_HOST: ${{ secrets.WS_PREVIEW_HOST }}
-          PREVIEW_WS_USER: ${{ secrets.WS_PREVIEW_USER }}
-          PREVIEW_WS_SSH_KEY: ${{ secrets.WS_PREVIEW_SSH_KEY }}
+          XP_REDIS_VERSION: ${{ inputs.xpRedisVersion }}
         run: |
           set -euo pipefail
 
           [[ "$PREVIEW_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test -n "$PREVIEW_WS_HOST"
-          test "$PREVIEW_WS_USER" = arcade-preview-deploy
-          test -n "$PREVIEW_WS_SSH_KEY"
+          test "$XP_REDIS_VERSION" = 3
+
+      - name: Require OWNER protection on ws-preview
+        run: |
+          set -euo pipefail
+          endpoint="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/environments/ws-preview"
+          curl -q -fsS --max-time 15 "$endpoint" | jq -e '
+            .can_admins_bypass == false
+            and .deployment_branch_policy.custom_branch_policies == true
+            and .deployment_branch_policy.protected_branches == false
+            and ([.protection_rules[] | select(.type == "required_reviewers")]
+              | length == 1 and .[0].prevent_self_review == false
+                and (.[0].reviewers | map([.type, .reviewer.login])) == [["User", "krzysztofcal"]])
+          ' >/dev/null
+          curl -q -fsS --max-time 15 "$endpoint/deployment-branch-policies" | jq -e '
+            .total_count == 1 and (.branch_policies | map([.type, .name])) == [["branch", "main"]]
+          ' >/dev/null
 
       - name: Run preview workflow guard tests
         run: |
@@ -55,10 +71,9 @@ jobs:
           node --test ws-tests/ws-preview-deploy.workflow.guard.test.mjs
           node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
 
-  deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+  build:
+    if: ${{ github.run_attempt == '1' }}
     needs: validate
-    environment: ws-preview
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,38 +82,34 @@ jobs:
       PREVIEW_ARTIFACT_FILE: ${{ github.workspace }}/.artifacts/ws-preview/ws-preview-dist.tgz
       PREVIEW_STAGE_DIR: ${{ github.workspace }}/.artifacts/ws-preview/stage
       PREVIEW_STAGE_WS_DIR: ${{ github.workspace }}/.artifacts/ws-preview/stage/ws-server
-      PREVIEW_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-preview-${{ github.run_id }}-${{ github.run_attempt }}
-      PREVIEW_BASE_DIR: /opt/arcade-ws-preview
-      PREVIEW_APP_DIR: /opt/arcade-ws-preview/ws-server
-      PREVIEW_HOST: ws-preview.kcswh.pl
-      PREVIEW_LOCAL_HEALTHZ_URL: http://127.0.0.1:3001/healthz
-      PREVIEW_PUBLIC_HEALTHZ_URL: https://ws-preview.kcswh.pl/healthz
-      PREVIEW_SERVICE_NAME: ws-server-preview.service
-      PREVIEW_PORT: '3001'
     steps:
       - name: Checkout deploy target ref
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
 
-      - name: Resolve selected ref SHA
-        id: selected_ref
-        run: |
-          set -euo pipefail
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Verify selected application SHA
+        env:
+          DEPLOY_REF: ${{ inputs.ref }}
+        run: test "$(git rev-parse HEAD)" = "$DEPLOY_REF"
 
       - name: Build and package preview ws-server artifact
         env:
-          RELEASE_SHA: ${{ steps.selected_ref.outputs.sha }}
+          RELEASE_SHA: ${{ inputs.ref }}
           DEPLOY_REF: ${{ inputs.ref }}
           RELEASE_ENVIRONMENT: preview
           XP_REDIS_VERSION: ${{ inputs.xpRedisVersion }}
         run: |
+          set -euo pipefail
+          # Keep the runner's Git metadata and credentials outside the build.
+          build_tree="$(mktemp -d "$RUNNER_TEMP/ws-preview-build.XXXXXXXX")"
+          git archive HEAD | tar -xf - -C "$build_tree"
+          docker run --rm -i --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
+            --volume "$build_tree:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env HOME=/tmp --env PREVIEW_ARTIFACT_DIR --env PREVIEW_ARTIFACT_FILE \
+            --env PREVIEW_STAGE_DIR --env PREVIEW_STAGE_WS_DIR --env RELEASE_SHA --env DEPLOY_REF \
+            --env RELEASE_ENVIRONMENT --env XP_REDIS_VERSION node:20-bookworm bash -s <<'BUILD'
           set -euo pipefail
           if [[ "$XP_REDIS_VERSION" == "3" ]]; then
             export XP_REDIS_ENV=stage XP_KEY_NS=kcswh:stage:xp:v3
@@ -191,6 +202,66 @@ jobs:
             -czf "$PREVIEW_ARTIFACT_FILE" \
             -C "$PREVIEW_STAGE_DIR" \
             .
+          BUILD
+          test ! -L "$build_tree/.artifacts"
+          test ! -L "$build_tree/.artifacts/ws-preview"
+          archive="$build_tree/.artifacts/ws-preview/ws-preview-dist.tgz"
+          test ! -L "$archive" && test -f "$archive" || exit 1
+          install -m 0644 "$archive" "$RUNNER_TEMP/ws-preview-dist.tgz"
+
+      - name: Store preview deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws-preview-dist
+          path: ${{ runner.temp }}/ws-preview-dist.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'
+      && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner)
+      || (vars.WS_PREVIEW_AGENT_DEPLOY_ENABLED == 'true' && vars.WS_RELEASE_AGENT == 'arcade-code-agent[bot]'
+      && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
+    needs: build
+    environment: ws-preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PREVIEW_REMOTE_TMP_DIR: /tmp/arcadeplatform-ws-preview-${{ github.run_id }}-${{ github.run_attempt }}
+      PREVIEW_BASE_DIR: /opt/arcade-ws-preview
+      PREVIEW_APP_DIR: /opt/arcade-ws-preview/ws-server
+      PREVIEW_HOST: ws-preview.kcswh.pl
+      PREVIEW_LOCAL_HEALTHZ_URL: http://127.0.0.1:3001/healthz
+      PREVIEW_PUBLIC_HEALTHZ_URL: https://ws-preview.kcswh.pl/healthz
+      PREVIEW_SERVICE_NAME: ws-server-preview.service
+      PREVIEW_PORT: '3001'
+    steps:
+      - name: Verify OWNER approved this ws-preview run
+        run: |
+          set -euo pipefail
+          curl -q -fsS --max-time 15 "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" | jq -e '
+            type == "array" and any(.[]; .state == "approved" and .user.login == "krzysztofcal"
+              and any(.environments[]; .name == "ws-preview"))
+          ' >/dev/null
+
+      - name: Validate preview deployment secrets
+        env:
+          PREVIEW_WS_HOST: ${{ secrets.WS_PREVIEW_HOST }}
+          PREVIEW_WS_USER: ${{ secrets.WS_PREVIEW_USER }}
+          PREVIEW_WS_SSH_KEY: ${{ secrets.WS_PREVIEW_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$PREVIEW_WS_HOST"
+          test "$PREVIEW_WS_USER" = arcade-preview-deploy
+          test -n "$PREVIEW_WS_SSH_KEY"
+
+      - name: Download preview deployment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ws-preview-dist
+          path: .artifacts/ws-preview
 
       - name: Upload preview artifact to preview VPS
         uses: appleboy/scp-action@v0.1.7
@@ -204,7 +275,7 @@ jobs:
       - name: Atomic preview release switch + restart + health gates on preview VPS
         uses: appleboy/ssh-action@v1.0.3
         env:
-          RELEASE_SHA: ${{ steps.selected_ref.outputs.sha }}
+          RELEASE_SHA: ${{ inputs.ref }}
           DEPLOY_REF: ${{ inputs.ref }}
           PREVIEW_BASE_DIR: ${{ env.PREVIEW_BASE_DIR }}
           PREVIEW_APP_DIR: ${{ env.PREVIEW_APP_DIR }}

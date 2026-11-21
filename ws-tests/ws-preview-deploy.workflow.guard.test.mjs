@@ -63,23 +63,48 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.doesNotMatch(validateSection, /PREVIEW_RELEASES_DIR/);
 });
 
-test("ws preview secret-using jobs require owner main dispatch", () => {
+test("ws preview validate and deploy allow only a first main dispatch by OWNER or the enabled App", () => {
   const text = workflowText();
-  const guard = "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}";
-  for (const job of ["validate", "deploy"]) assert.ok(text.includes(`  ${job}:\n${guard}\n`), `${job} must require owner/owner main`);
-  assert.doesNotMatch(text, /WS_RELEASE_AGENT/);
+  const guard = [
+    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'",
+    "&& ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner)",
+    "|| (vars.WS_PREVIEW_AGENT_DEPLOY_ENABLED == 'true' && vars.WS_RELEASE_AGENT == 'arcade-code-agent[bot]'",
+    "&& github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}"
+  ].join(" ");
+  for (const job of ["validate", "deploy"]) {
+    const condition = text.match(new RegExp(`^  ${job}:\\n    if: >-\\n((?: {6}[^\\n]+\\n)+)`, "m"));
+    assert.ok(condition, `${job} requires an authorization condition`);
+    assert.equal(condition[1].trim().replace(/\s+/g, " "), guard);
+  }
 });
 
-test("ws preview deploy validates workflow files from workflow ref and builds app from inputs.ref", () => {
+test("ws preview validates the workflow ref and builds the exact app SHA away from SSH credentials", () => {
   const text = workflowText();
-  const validateSection = text.split(/^  deploy:\n/m)[0];
-  const deploySection = text.split(/^  deploy:\n/m)[1] ?? "";
+  const [validateSection, buildSection, deploySection] = text.split(/^  (?:build|deploy):\n/m);
 
   const validateCheckout = stepBlock(validateSection, "Checkout workflow ref");
-  const deployCheckout = stepBlock(deploySection, "Checkout deploy target ref");
+  const buildCheckout = stepBlock(buildSection, "Checkout deploy target ref");
 
   assert.doesNotMatch(validateCheckout, /ref: \$\{\{ inputs\.ref \}\}/);
-  assert.match(deployCheckout, /ref: \$\{\{ inputs\.ref \}\}/);
+  assert.match(buildCheckout, /ref: \$\{\{ inputs\.ref \}\}/);
+  assert.match(buildCheckout, /persist-credentials: false/);
+  assert.match(buildSection, /^    if: \$\{\{ github\.run_attempt == '1' \}\}\n    needs: validate$/m);
+  assert.match(buildSection, /test "\$\(git rev-parse HEAD\)" = "\$DEPLOY_REF"/);
+  assert.doesNotMatch(buildSection, /^    environment:|secrets\./m);
+  assert.match(buildSection, /docker run --rm -i --user .* --cap-drop ALL --security-opt no-new-privileges/);
+  assert.match(buildSection, /git archive HEAD \| tar -xf - -C "\$build_tree"/);
+  assert.match(buildSection, /--volume "\$build_tree:\$GITHUB_WORKSPACE"/);
+  assert.doesNotMatch(buildSection, /ACTIONS_RUNTIME_TOKEN|GITHUB_TOKEN|docker\.sock|--privileged/);
+  assert.match(buildSection, /test ! -L "\$archive" && test -f "\$archive"/);
+  assert.match(buildSection, /install -m 0644 "\$archive" "\$RUNNER_TEMP\/ws-preview-dist\.tgz"/);
+  const upload = stepBlock(buildSection, "Store preview deployment artifact");
+  assert.match(upload, /name: ws-preview-dist\n\s+path: \$\{\{ runner\.temp \}\}\/ws-preview-dist\.tgz/);
+  assert.match(buildSection, /PREVIEW_ARTIFACT_FILE: .*\/\.artifacts\/ws-preview\/ws-preview-dist\.tgz/);
+  assert.match(deploySection, /needs: build/);
+  const download = stepBlock(deploySection, "Download preview deployment artifact");
+  assert.match(download, /name: ws-preview-dist\n\s+path: \.artifacts\/ws-preview/);
+  assert.match(deploySection, /source: \.artifacts\/ws-preview\/ws-preview-dist\.tgz/);
+  assert.doesNotMatch(deploySection, /actions\/checkout|npm (?:ci|run)/);
   assert.match(validateSection, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
   assert.match(validateSection, /node --test ws-tests\/ws-preview-deploy\.remote-shape\.guard\.test\.mjs/);
   assert.doesNotMatch(validateSection, /Validate preview-only workflow contract literals/);
@@ -326,9 +351,70 @@ test("Stage deletion window derives ON from protected OFF and refuses missing, t
   assert.throws(check(on,"on",{baseline_record:"foreign"}));
 });
 
-test("Preview secrets are scoped and the old deployment identity has no fallback", () => {
+test("only Preview deploy uses the Environment and SSH credentials after approval verification", () => {
+  const [beforeDeploy, deploy] = workflowText().split(/^  deploy:\n/m);
+  assert.doesNotMatch(beforeDeploy, /^    environment:|secrets\./m);
+  assert.match(deploy, /^    environment: ws-preview$/m);
+  const approval = deploy.indexOf("- name: Verify OWNER approved this ws-preview run");
+  assert.ok(approval >= 0 && deploy.indexOf("secrets.") > approval);
+  assert.ok(deploy.includes('test "$PREVIEW_WS_USER" = arcade-preview-deploy'));
+  assert.ok(beforeDeploy.includes('[[ "$PREVIEW_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]'));
+  assert.ok(beforeDeploy.includes('test "$XP_REDIS_VERSION" = 3'));
+});
+
+test("Preview approval checks fail closed on policy drift or missing OWNER approval", async () => {
+  const { spawnSync } = await import("node:child_process");
   const text = workflowText();
-  assert.equal((text.match(/environment: ws-preview/g) || []).length, 2);
-  assert.ok(text.includes('test "$PREVIEW_WS_USER" = arcade-preview-deploy'));
-  assert.ok(text.includes('[[ "$PREVIEW_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]'));
+  const policy = stepBlock(text, "Require OWNER protection on ws-preview").split("run: |\n")[1];
+  const approval = stepBlock(text, "Verify OWNER approved this ws-preview run").split("run: |\n")[1];
+  const reviewer = { type: "User", reviewer: { login: "krzysztofcal" } };
+  const rule = { type: "required_reviewers", prevent_self_review: false, reviewers: [reviewer] };
+  const environment = {
+    can_admins_bypass: false,
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+    protection_rules: [rule]
+  };
+  const branches = { total_count: 1, branch_policies: [{ type: "branch", name: "main" }] };
+  const approved = { state: "approved", user: { login: "krzysztofcal" }, environments: [{ name: "ws-preview" }] };
+
+  function run(script, env = environment, refs = branches, reviews = [approved], apiError = "") {
+    assert.ok(script);
+    const mock = `curl() {
+      [ -z "$API_ERROR" ] || return 22
+      local arg
+      for arg; do :; done
+      case "$arg" in
+        */environments/ws-preview) printf '%s' "$ENV_FIXTURE";;
+        */deployment-branch-policies) printf '%s' "$BRANCH_FIXTURE";;
+        */actions/runs/42/approvals) printf '%s' "$APPROVAL_FIXTURE";;
+        *) return 22;;
+      esac
+    }\n`;
+    const result = spawnSync("bash", ["-c", mock + script], {
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_API_URL: "https://api.github.test", GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_RUN_ID: "42", ENV_FIXTURE: JSON.stringify(env), BRANCH_FIXTURE: JSON.stringify(refs),
+        APPROVAL_FIXTURE: JSON.stringify(reviews), API_ERROR: apiError }
+    });
+    assert.ifError(result.error);
+    return result.status;
+  }
+
+  assert.equal(run(policy), 0);
+  for (const changed of [
+    { ...environment, can_admins_bypass: true },
+    { ...environment, protection_rules: [] },
+    { ...environment, protection_rules: [{ ...rule, prevent_self_review: true }] },
+    { ...environment, protection_rules: [{ ...rule, reviewers: [reviewer, reviewer] }] }
+  ]) assert.notEqual(run(policy, changed), 0);
+  assert.notEqual(run(policy, environment, { ...branches, branch_policies: [{ type: "tag", name: "main" }] }), 0);
+  assert.equal(run(approval), 0);
+  for (const reviews of [
+    [],
+    [{ ...approved, state: "rejected" }],
+    [{ ...approved, user: { login: "someone-else" } }],
+    [{ ...approved, environments: [{ name: "ws-production" }] }]
+  ]) assert.notEqual(run(approval, environment, branches, reviews), 0);
+  assert.notEqual(run(policy, environment, branches, [approved], "1"), 0);
+  assert.notEqual(run(approval, environment, branches, [approved], "1"), 0);
 });
