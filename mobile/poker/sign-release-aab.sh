@@ -22,9 +22,9 @@ printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 -d > "$work/upload.p12" 2
 # Passwords reach the JDK tools only by environment variable name (:env), never as arguments or files.
 export ANDROID_UPLOAD_KEY_PASSWORD="${ANDROID_UPLOAD_KEY_PASSWORD:-$ANDROID_UPLOAD_STORE_PASSWORD}"
 
-# The key must be the pinned upload key before anything is signed.
+# The key must be the pinned upload key before anything is signed: the first certificate of the alias chain is its own.
 key_fp="$(keytool -list -v -storetype PKCS12 -keystore "$work/upload.p12" -storepass:env ANDROID_UPLOAD_STORE_PASSWORD -alias "$ALIAS" 2>/dev/null \
-  | awk '$1 == "SHA256:" { print $2 }')" || fail keystore_unreadable
+  | awk '$1 == "SHA256:" && !done { print $2; done = 1 }')" || fail keystore_unreadable
 [ "$key_fp" = "$PIN" ] || fail upload_certificate_mismatch
 
 jarsigner -verify "$UNSIGNED_AAB" 2>/dev/null | grep -q 'jar is unsigned' || fail input_not_unsigned
@@ -35,9 +35,11 @@ jarsigner -storetype PKCS12 -keystore "$work/upload.p12" -storepass:env ANDROID_
 verify="$(jarsigner -verify -verbose "$work/signed.aab" 2>&1)" || fail signature_verify_failed
 grep -q 'jar verified' <<<"$verify" || fail signature_verify_failed
 if grep -qi -e 'unsigned entries' -e 'jar is unsigned' <<<"$verify"; then fail unsigned_entries; fi
-signers="$(keytool -printcert -jarfile "$work/signed.aab" 2>/dev/null | awk '$1 == "SHA256:" { print $2 }')"
-[ "$(printf '%s\n' "$signers" | grep -c .)" = 1 ] || fail signer_count_invalid
-[ "$signers" = "$PIN" ] || fail signed_certificate_mismatch
+# Exactly one signer, and its own (first) certificate is the pinned one; issuer certificates may follow it.
+printcert="$(keytool -printcert -jarfile "$work/signed.aab" 2>/dev/null)" || fail signer_count_invalid
+[ "$(grep -c '^Signer #' <<<"$printcert")" = 1 ] || fail signer_count_invalid
+signer="$(awk '/^Signer #/ { want = 1; next } want && $1 == "SHA256:" { print $2; want = 0 }' <<<"$printcert")"
+[ "$signer" = "$PIN" ] || fail signed_certificate_mismatch
 
 mv "$work/signed.aab" "$SIGNED_AAB"
 echo "sign_release_aab_PASS"

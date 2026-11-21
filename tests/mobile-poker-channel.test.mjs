@@ -612,7 +612,7 @@ test('release workflow: sign-aab after release-aab, protected environment, secre
   assert.doesNotMatch(releaseJob, /ANDROID_UPLOAD|secrets\.ANDROID/, 'no signing secret in the build job');
   assert.match(signJob, /^    needs: release-aab$/m);
   assert.match(signJob, /^    environment: android-signing$/m);
-  assert.match(signJob, /^    if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'$/m);
+  assert.match(signJob, /^    if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main' && github\.run_attempt == 1$/m);
   assert.match(signJob, /environmentFailures\(/, 'protection is verified before secrets are used');
   assert.match(signJob, /ownerApproved\(/);
   assert.doesNotMatch(workflow, /^\s*pull_request/m, 'no PR trigger can reach signing secrets');
@@ -669,6 +669,26 @@ test('sign-release-aab.sh: synthetic upload key signs only with the pinned certi
     assert.equal([...r.stdout.matchAll(/SHA256: ([0-9A-F:]{95})/g)].map(m => m[1]).join(), pin);
     const again = run({ UNSIGNED_AAB: signed, SIGNED_AAB: path.join(work, 'twice.aab') });
     assert.match(again.stderr, /input_not_unsigned/);
+    // An upload entry issued by another certificate: only its own certificate is pinned, not an issuer.
+    const chained = path.join(work, 'chained.p12');
+    const kt = (...args) => { const out = spawnSync('keytool', args, { encoding: 'utf8' }); assert.equal(out.status, 0, out.stderr); return out.stdout; };
+    const store = ['-storetype', 'PKCS12', '-storepass', 'synthetic-pass'];
+    kt('-genkeypair', ...store, '-keystore', path.join(work, 'ca.p12'), '-alias', 'ca', '-keyalg', 'RSA', '-keysize', '2048', '-dname', 'CN=synthetic-ca', '-validity', '1', '-ext', 'bc:c');
+    kt('-exportcert', ...store, '-keystore', path.join(work, 'ca.p12'), '-alias', 'ca', '-rfc', '-file', path.join(work, 'ca.pem'));
+    kt('-genkeypair', ...store, '-keystore', chained, '-alias', 'upload', '-keyalg', 'RSA', '-keysize', '2048', '-dname', 'CN=synthetic-chained', '-validity', '1');
+    kt('-certreq', ...store, '-keystore', chained, '-alias', 'upload', '-file', path.join(work, 'upload.csr'));
+    kt('-gencert', ...store, '-keystore', path.join(work, 'ca.p12'), '-alias', 'ca', '-rfc', '-infile', path.join(work, 'upload.csr'), '-outfile', path.join(work, 'upload.pem'), '-validity', '1');
+    kt('-importcert', ...store, '-keystore', chained, '-alias', 'ca', '-file', path.join(work, 'ca.pem'), '-noprompt');
+    kt('-importcert', ...store, '-keystore', chained, '-alias', 'upload', '-file', path.join(work, 'upload.pem'), '-noprompt');
+    const chain = [...kt('-list', '-v', ...store, '-keystore', chained, '-alias', 'upload').matchAll(/SHA256: ([0-9A-F:]{95})/g)].map(m => m[1]);
+    assert.equal(chain.length, 2, 'upload entry carries leaf and issuer');
+    const chainedEnv = { ANDROID_UPLOAD_KEYSTORE_BASE64: readFileSync(chained).toString('base64') };
+    const issuerPin = run({ ...chainedEnv, EXPECTED_UPLOAD_CERT_SHA256: chain[1], SIGNED_AAB: path.join(work, 'issuer.aab') });
+    assert.match(issuerPin.stderr, /upload_certificate_mismatch/);
+    const chainedSigned = path.join(work, 'chained-signed.aab');
+    const chainedOk = run({ ...chainedEnv, EXPECTED_UPLOAD_CERT_SHA256: chain[0], SIGNED_AAB: chainedSigned });
+    assert.equal(chainedOk.status, 0, chainedOk.stderr);
+    assert.deepEqual([...kt('-printcert', '-jarfile', chainedSigned).matchAll(/SHA256: ([0-9A-F:]{95})/g)].map(m => m[1]), chain);
     assert.deepEqual(readdirSync(runnerTemp), [], 'temporary keystore and password files removed');
   } finally {
     rmSync(work, { recursive: true, force: true });

@@ -259,7 +259,8 @@ jobs:
   # android-signing Environment and only in the signing step; nothing is uploaded to Google Play.
   sign-aab:
     needs: release-aab
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    # Re-runs skip signing (run approvals are not per attempt); dispatch a new run instead.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: android-signing
