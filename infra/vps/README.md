@@ -353,3 +353,50 @@ Production remains untouched until its separate GO. Do not provision or
 recreate a poker-refill VPS timer, GitHub scheduler, PAT, database URL, or SQL
 dispatcher.
 
+
+### WS Preview SQL preflight (#1295)
+
+The optional SQL diagnostic uses the protected Preview environment file and
+checks the Stage connection and SELECT access to the columns used by the
+table-photo eligibility query. It runs `SELECT 1` and fixed `LIMIT 0` queries
+in a read-only transaction. Its result covers connection and SQL access only.
+Netlify Functions credentials, row-level visibility, membership and feature
+readiness are outside this check.
+
+Installation and execution each require separate OWNER authorization through an
+approved maintenance path. This is outside the VPS Admin operation catalog.
+The existing sudo grant accepts no arguments and does not authorize
+`--verify-db`. Keep the current deployed helper and its sudoers rule in place.
+
+1. In a trusted maintenance session, verify the reviewed commit and source
+   SHA-256. Stage its `infra/vps/ws-preview-env-preflight.mjs` as
+   `/usr/local/libexec/arcade-ws-preview-sql/preflight.mjs`, root:root 0644.
+2. Stage the same `postgres` package and version used by WS Preview in that
+   directory as `postgres/`. Verify its package archive against the npm
+   integrity value in the deployed release's reviewed `ws-server/package-lock.json`
+   before extracting. Verify the protected tree and each ancestor are root-owned,
+   without symlinks or group/world write access. Use 0755 directories and 0644
+   regular files so the existing `arcade-preview` identity can read the package.
+   Use a fresh protected destination. Stop on unexpected existing contents,
+   missing provenance, or a mismatched version. The runtime's deploy-writable
+   package tree is unsuitable as a source of executable code for this check.
+3. Verify the staged helper's SHA-256, run `/usr/bin/node --check` on it, and
+   confirm the service still uses `arcade-preview:arcade-preview`. Keep Preview
+   configuration and deployment writers quiescent for the separately approved
+   invocation. In the OWNER maintenance session run once:
+
+   `/usr/bin/node /usr/local/libexec/arcade-ws-preview-sql/preflight.mjs --verify-db`
+
+   Expect `PASS stage_db_readable`. On `BLOCKED <code>`, stop and report the
+   code. The child uses the Preview UID/GID with an empty environment, receives
+   only the DSN over stdin and has a seven-second deadline. Do not trace its
+   execution or record the environment file. Retiring this diagnostic requires
+   removing only its separately staged directory through the same approved
+   maintenance path.
+
+The byte-for-byte `ws-preview-env-preflight.v3-pinned.mjs` is the existing V3
+asset. Bootstrap uses that file. For the previously approved V3 preparation
+and Stage deletion-window bundles, retain the approved installed helper and
+stage the pinned asset under the existing bundle filename
+`ws-preview-env-preflight.mjs` when reconstructing that historical bundle. The
+SQL variant is separate from those hash-pinned procedures.

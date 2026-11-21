@@ -302,3 +302,81 @@ test("ws preview deploy cleanup is scoped to the current run temp directory and 
   assert.match(text, /curl -fsS "\$PREVIEW_LOCAL_HEALTHZ_URL"/);
   assert.match(text, /curl -fsS "\$PREVIEW_PUBLIC_HEALTHZ_URL"/);
 });
+
+for (const [failure, expected] of [
+  [null, "PASS stage_db_readable"],
+  ["42501", "BLOCKED db_access_denied"],
+  ["57014", "BLOCKED db_timeout"],
+  ["ETIMEDOUT", "BLOCKED db_timeout"],
+  ["unexpected", "BLOCKED db_verification_failed"]
+]) {
+  test(`Preview SQL helper reports only the safe result (${failure ?? "success"})`, async () => {
+    const url = "postgresql://postgres:fixtureSecret@db.krydukthwdvccggbyjfw.supabase.co/postgres";
+    const output = [];
+    const queries = [];
+    const process = {
+      argv: ["node", HELPER_PATH, "--verify-db"],
+      stdout: { write: value => output.push(value) },
+      stderr: { write: value => output.push(value) }
+    };
+    const source = helperText().replace(/^#!.*$/m, "").replace(/^import .*;$/gm, "");
+    const metadata = { uid: 0, gid: 0, nlink: 1, mode: 0o600, isFile: () => true, isDirectory: () => true };
+    const fs = {
+      constants: { O_RDONLY: 0, O_NOFOLLOW: 1, O_NONBLOCK: 2 },
+      lstatSync: () => metadata, openSync: () => 5, fstatSync: () => metadata, closeSync() {},
+      readFileSync: () => [
+        "PORT=3001", "WS_AUTHORITATIVE_JOIN_ENABLED=1", "POKER_WS_INTERNAL_TOKEN=fixtureToken",
+        "SUPABASE_STAGE_PROJECT_REF=krydukthwdvccggbyjfw",
+        "SUPABASE_URL=https://krydukthwdvccggbyjfw.supabase.co", `SUPABASE_DB_URL=${url}`
+      ].join("\n")
+    };
+    const postgres = (connection, options) => {
+      assert.equal(connection, url);
+      assert.equal(options.prepare, false);
+      return {
+        begin: async (mode, run) => {
+          assert.equal(mode, "read only");
+          return run(async ([query]) => {
+            queries.push(query);
+            if (query.startsWith("select 1")) return [{ ok: 1 }];
+            if (query.startsWith("select") && failure) throw Object.assign(new Error(url), { code: failure });
+            return [];
+          });
+        },
+        end: async () => queries.push("closed")
+      };
+    };
+    // Execute the actual worker body using a fake driver. Model the parent's hard deadline separately.
+    let workerResult;
+    function spawn(_executable, args, options) {
+      assert.equal(options.input, url);
+      assert.ok(!args.join(" ").includes(url));
+      assert.deepEqual(options.env, {});
+      assert.deepEqual(options.stdio, ["pipe", "ignore", "ignore"]);
+      assert.equal(options.timeout, 7000);
+      if (failure === "ETIMEDOUT") return { error: { code: failure } };
+      const workerSource = args.at(-1);
+      const workerProcess = {};
+      const AsyncFunction = (async () => {}).constructor;
+      workerResult = new AsyncFunction("process", "readFileSync", "createRequire",
+        workerSource.replace(/^\s*const \{ (?:readFileSync|createRequire) \} = await import\(.*\);$/gm, "")
+      )(workerProcess, () => options.input, () => () => postgres).then(() => workerProcess.exitCode ?? 0);
+      // spawnSync blocks in production. Re-run the parent with the worker's result once it resolves.
+      return { status: 1 };
+    }
+    const run = new Function("process", "fs", "spawnSync", source);
+    run(process, fs, spawn);
+    if (workerResult) {
+      const status = await workerResult;
+      output.length = 0;
+      delete process.exitCode;
+      run(process, fs, () => ({ status }));
+      assert.equal(queries.at(-1), "closed");
+      assert.ok(queries.filter(query => query.startsWith("select") && !query.startsWith("select 1"))
+        .every(query => query.endsWith("limit 0")));
+      if (!failure) assert.equal(queries.length, 9);
+    }
+    assert.deepEqual(output, [expected + "\n"]);
+    assert.equal(process.exitCode, expected.startsWith("PASS") ? undefined : 1);
+  });
+}

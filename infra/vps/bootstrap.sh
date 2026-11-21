@@ -149,7 +149,7 @@ install -d -o root -g root -m 0755 /etc/caddy
 install -o root -g arcade-deploy -m 0664 "$REPO_ROOT/infra/vps/Caddyfile" /etc/caddy/Caddyfile
 
 install -D -o root -g root -m 0755 \
-  "$REPO_ROOT/infra/vps/ws-preview-env-preflight.mjs" \
+  "$REPO_ROOT/infra/vps/ws-preview-env-preflight.v3-pinned.mjs" \
   /usr/local/sbin/arcade-ws-preview-env-preflight
 
 install -D -o root -g root -m 0755 \
