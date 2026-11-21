@@ -1,6 +1,7 @@
 (function(){
   'use strict';
-  var config = window.MobilePokerSecurity.validate(window.MOBILE_POKER_CONFIG);
+  var bound = window.MobilePokerSecurity.bind(window.MOBILE_POKER_CONFIG);
+  var config = bound.config;
   var cap = window.Capacitor;
   function klog(kind){
     if (window.KLog && window.KLog.log) window.KLog.log(kind, {});
@@ -32,11 +33,16 @@
   }
   window.MobilePoker = {
     authOptions: { auth: { flowType: 'pkce', detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } },
-    redirectTo: window.MobilePokerSecurity.redirectTo,
+    redirectTo: bound.redirectTo,
     publicProfileUrl: function(handle){ return window.MobilePokerSecurity.publicProfileUrl(config, handle); },
     openOAuth: function(value){
       var url = new URL(value);
-      if (url.origin !== config.supabaseUrl || url.pathname !== '/auth/v1/authorize' || url.searchParams.get('provider') !== 'google' || url.searchParams.get('redirect_to') !== window.MobilePokerSecurity.redirectTo) {
+      if (url.searchParams.getAll('redirect_to').length !== 1 ||
+          url.searchParams.getAll('provider').length !== 1 ||
+          url.origin !== config.supabaseUrl ||
+          url.pathname !== '/auth/v1/authorize' ||
+          url.searchParams.get('provider') !== 'google' ||
+          url.searchParams.get('redirect_to') !== bound.redirectTo) {
         return Promise.reject(new Error('google_failed'));
       }
       return browser.open({ url: url.href });
@@ -46,7 +52,7 @@
   async function callback(value){
     if (exchanging) return;
     try {
-      var code = window.MobilePokerSecurity.callbackCode(value);
+      var code = window.MobilePokerSecurity.callbackCode(value, bound.channel);
       if (sessionStorage.getItem('mobilePokerConsumedAuthCode') === code) return;
       exchanging = true;
       if (window.location.pathname !== '/account.html') {
@@ -75,11 +81,15 @@
       app = plugin('App');
       systemBars = plugin('SystemBars');
       syncSystemBars(true);
-      app.addListener('appUrlOpen', function(event){ callback(event.url); });
       var pendingCode = sessionStorage.getItem('mobilePokerAuthCode');
       sessionStorage.removeItem('mobilePokerAuthCode');
-      if (pendingCode) setTimeout(function(){ callback(window.MobilePokerSecurity.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
-      app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
+      // The shared Supabase client is created after this listener, so callbacks start on a later task.
+      // A code handed over from another page wins: it holds the existing guard until its exchange starts.
+      if (pendingCode) exchanging = true;
+      var urlOpened = false;
+      app.addListener('appUrlOpen', function(event){ urlOpened = true; setTimeout(function(){ callback(event.url); }, 0); });
+      if (pendingCode) setTimeout(function(){ exchanging = false; callback(bound.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
+      else app.getLaunchUrl().then(function(result){ if (result && result.url) setTimeout(function(){ if (!urlOpened) callback(result.url); }, 0); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
         if (window.PokerOffline && window.PokerOffline.cancelDialog && window.PokerOffline.cancelDialog()) return;
         var dialog = document.querySelector('dialog[open]');

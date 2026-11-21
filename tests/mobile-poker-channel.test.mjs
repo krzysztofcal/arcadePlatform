@@ -23,6 +23,12 @@ const rootDir = path.resolve(here, '..');
 const stageConfig = JSON.parse(readFileSync(new URL('../mobile/poker/stage-public.json', import.meta.url), 'utf8'));
 const prodConfig = JSON.parse(readFileSync(new URL('../mobile/poker/production-public.json', import.meta.url), 'utf8'));
 
+function makeJwt(payload, header = { alg: 'HS256', typ: 'JWT' }, sig = 'fakesig') {
+  const h = typeof header === 'string' ? header : Buffer.from(JSON.stringify(header)).toString('base64url');
+  const b = typeof payload === 'string' ? payload : Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${h}.${b}.${sig}`;
+}
+
 test('production config: validateProduction passes, validate throws (#1286 gate), channel === "production", anon JWT ref/role correct', () => {
   assert.equal(security.validateProduction(prodConfig), prodConfig);
   assert.throws(() => security.validate(prodConfig), /Invalid public Stage configuration/);
@@ -31,6 +37,75 @@ test('production config: validateProduction passes, validate throws (#1286 gate)
   const anonPayload = JSON.parse(Buffer.from(prodConfig.supabaseAnonKey.split('.')[1], 'base64url').toString());
   assert.equal(anonPayload.ref, 'otbqfijerkieoxwpxjnm');
   assert.equal(anonPayload.role, 'anon');
+});
+
+test('bind: stage and production bind channel, config, and channel redirect', () => {
+  const boundStage = security.bind(stageConfig);
+  assert.equal(boundStage.channel, 'stage');
+  assert.equal(boundStage.config, stageConfig);
+  assert.equal(boundStage.redirectTo, 'arcadepoker-stage://auth/callback');
+
+  const boundProd = security.bind(prodConfig);
+  assert.equal(boundProd.channel, 'production');
+  assert.equal(boundProd.config, prodConfig);
+  assert.equal(boundProd.redirectTo, 'https://play.kcswh.pl/app/auth/callback');
+});
+
+test('redirectFor returns exact channel redirect string and throws on unknown channel', () => {
+  assert.equal(security.redirectFor('stage'), 'arcadepoker-stage://auth/callback');
+  assert.equal(security.redirectFor('production'), 'https://play.kcswh.pl/app/auth/callback');
+  assert.throws(() => security.redirectFor('unknown'), /Unknown channel/);
+  assert.throws(() => security.redirectFor(''), /Unknown channel/);
+});
+
+test('bind rejects mixed tuples, swapped anon keys, and crafted service_role JWT', () => {
+  // Mixed tuples
+  assert.throws(() => security.bind({ ...stageConfig, apiOrigin: prodConfig.apiOrigin }));
+  assert.throws(() => security.bind({ ...prodConfig, apiOrigin: stageConfig.apiOrigin }));
+  assert.throws(() => security.bind({ ...stageConfig, wsUrl: prodConfig.wsUrl }));
+  assert.throws(() => security.bind({ ...prodConfig, supabaseUrl: stageConfig.supabaseUrl }));
+
+  // Swapped anon keys
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: stageConfig.supabaseAnonKey }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...stageConfig, supabaseAnonKey: prodConfig.supabaseAnonKey }), /Invalid public anon key/);
+
+  // Crafted service_role JWT
+  const serviceRoleJwt = makeJwt({ iss: 'supabase', ref: 'otbqfijerkieoxwpxjnm', role: 'service_role' });
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: serviceRoleJwt }), /Invalid public anon key/);
+
+  // Corrupted / malformed anon keys (segment counts, empty segments)
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'not-a-jwt' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'a.b' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: '.payload.sig' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'h.payload.' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'h..sig' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'h.p.s.extra' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'a.invalid-base64!.c' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: 'a.' + Buffer.from('not json').toString('base64url') + '.c' }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: null }), /Invalid public anon key/);
+
+  // Non-JSON header
+  const badHeaderJwt = `${Buffer.from('not-json').toString('base64url')}.${Buffer.from(JSON.stringify({ ref: 'otbqfijerkieoxwpxjnm', role: 'anon' })).toString('base64url')}.sig`;
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: badHeaderJwt }), /Invalid public anon key/);
+
+  // Header missing or non-string alg
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: makeJwt({ ref: 'otbqfijerkieoxwpxjnm', role: 'anon' }, { typ: 'JWT' }) }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: makeJwt({ ref: 'otbqfijerkieoxwpxjnm', role: 'anon' }, { alg: 123, typ: 'JWT' }) }), /Invalid public anon key/);
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: makeJwt({ ref: 'otbqfijerkieoxwpxjnm', role: 'anon' }, { alg: '', typ: 'JWT' }) }), /Invalid public anon key/);
+
+  // Header with typ present and not 'JWT'
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: makeJwt({ ref: 'otbqfijerkieoxwpxjnm', role: 'anon' }, { alg: 'HS256', typ: 'JWE' }) }), /Invalid public anon key/);
+
+  // Header without typ (typ is optional) passes
+  const noTypJwt = makeJwt({ ref: 'otbqfijerkieoxwpxjnm', role: 'anon' }, { alg: 'HS256' });
+  assert.equal(security.bind({ ...prodConfig, supabaseAnonKey: noTypJwt }).channel, 'production');
+
+  // Payload with wrong ref
+  assert.throws(() => security.bind({ ...prodConfig, supabaseAnonKey: makeJwt({ ref: 'wrongref', role: 'anon' }) }), /Invalid public anon key/);
+
+  // Real Stage and Production keys pass
+  assert.equal(security.bind(stageConfig).channel, 'stage');
+  assert.equal(security.bind(prodConfig).channel, 'production');
 });
 
 test('stage config: validate passes, validateProduction throws, channel === "stage"', () => {
