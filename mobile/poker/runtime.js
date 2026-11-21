@@ -81,11 +81,13 @@
       app = plugin('App');
       systemBars = plugin('SystemBars');
       syncSystemBars(true);
-      app.addListener('appUrlOpen', function(event){ callback(event.url); });
       var pendingCode = sessionStorage.getItem('mobilePokerAuthCode');
       sessionStorage.removeItem('mobilePokerAuthCode');
-      // A code handed over from another page wins; replaying an older launch URL could block it.
-      if (pendingCode) setTimeout(function(){ callback(bound.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
+      // A code handed over from another page wins: hold the existing guard until it starts (the shared
+      // Supabase client is created after this listener), so later callbacks cannot pre-empt it.
+      if (pendingCode) exchanging = true;
+      app.addListener('appUrlOpen', function(event){ callback(event.url); });
+      if (pendingCode) setTimeout(function(){ exchanging = false; callback(bound.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
       else app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
         if (window.PokerOffline && window.PokerOffline.cancelDialog && window.PokerOffline.cancelDialog()) return;

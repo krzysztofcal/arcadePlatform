@@ -395,6 +395,35 @@ test('production runtime recovery handoff from non-account page to account.html'
   assert.equal(node2.textContent.includes('rec-1'), false, 'notice must not leak auth code');
 });
 
+test('pending handoff code starts before an appUrlOpen delivered at listener registration (T2A-07)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const source = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
+  const store = new Map([['mobilePokerAuthCode', 'handoff-1']]);
+  const exchanged = [];
+  let ready;
+  const node = { textContent: '', hidden: true };
+  const window = {
+    MobilePokerSecurity: security, MOBILE_POKER_CONFIG: { ...prodConfig, sha: '12345678' }, KLog: { log() {} },
+    Capacitor: { Plugins: {
+      Browser: { close: async () => {} },
+      SystemBars: { hide: async () => {}, show: async () => {} },
+      // Deliver a different callback synchronously while the listener registers, before the handoff timer.
+      App: { addListener(name, fn) { if (name === 'appUrlOpen') fn({ url: 'https://play.kcswh.pl/app/auth/callback?code=later-2' }); }, getLaunchUrl: async () => null }
+    } },
+    supabaseClient: { auth: { exchangeCodeForSession: async code => { exchanged.push(code); return { data: { session: {} } }; } } },
+    location: { pathname: '/account.html', replace() {} }, addEventListener() {}, dispatchEvent() {}
+  };
+  const sessionStorage = { getItem: key => store.get(key) || null, setItem: (key, value) => { store.set(key, value); }, removeItem: key => { store.delete(key); } };
+  vm.runInNewContext(source, { window, document: { addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; }, getElementById: () => node }, URL, Event, navigator: { onLine: true }, sessionStorage, setTimeout });
+  ready();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(exchanged, ['handoff-1'], 'only the handed-over code is exchanged; the later callback cannot pre-empt it');
+  assert.equal(store.get('mobilePokerAuthCode'), undefined);
+  assert.equal(store.get('mobilePokerConsumedAuthCode'), 'handoff-1');
+  assert.equal(node.textContent.includes('handoff-1') || node.textContent.includes('later-2'), false);
+});
+
 test('js/api-url resolves netlify functions per channel and fails safely on invalid config', async () => {
   const { readFile } = await import('node:fs/promises');
   const vm = await import('node:vm');
