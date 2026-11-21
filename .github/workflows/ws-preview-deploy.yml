@@ -63,6 +63,7 @@ jobs:
           node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
 
   build:
+    if: ${{ github.run_attempt == '1' }}
     needs: validate
     runs-on: ubuntu-latest
     permissions:

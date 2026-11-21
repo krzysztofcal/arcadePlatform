@@ -240,7 +240,7 @@ For OWNER use authenticated `gh`:
 gh workflow run ws-preview-deploy.yml --repo krzysztofcal/arcadePlatform --ref main -f ref="$APP_SHA" -f xpRedisVersion=3
 ```
 
-For the agent use the existing App CLI (`ghx`):
+For the agent, the existing `ghx` invocation is:
 
 ```sh
 GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh /home/copilot/.arcade-code-agent/bin/gh workflow run ws-preview-deploy.yml --repo krzysztofcal/arcadePlatform --ref main -f ref="$APP_SHA" -f xpRedisVersion=3
@@ -250,8 +250,9 @@ Set `APP_SHA` to the approved 40-character application commit. The workflow
 definition comes from `main`; only first-attempt manual dispatches are eligible.
 Verify the run against its workflow, dispatch time, title (application SHA and
 actor), `actor`, `triggering_actor`, and attempt. Wait for the validate, build and
-deploy jobs, then confirm the deployed SHA and health in the job output. Report
-the run ID, URL, application SHA and outcome. An ambiguous or failed run means
+deploy jobs. Verify deploy success, which requires matching release metadata and
+both health checks. The metadata is a consistency check against the approved
+input SHA. Report the run ID, URL, application SHA and outcome. An ambiguous or failed run means
 STOP. A fresh dispatch requires fresh OWNER GO.
 
 The `ws-preview` GitHub Environment currently restricts deployments to `main`
@@ -262,9 +263,11 @@ receives the packaged artifact on a fresh runner. GitHub checks the App identity
 flag. The agent enforces conversation approval before dispatch. Once enabled,
 a dispatch made directly with valid App credentials can pass the workflow
 without that conversation check. This deploy replaces the shared Preview WS
-runtime and restarts its service, which can interrupt players. The deployed
-application runs with the existing Preview runtime access. The workflow
-leaves Caddy configuration to the existing infra workflow.
+runtime and restarts its service, which can interrupt players. Artifact code
+runs under the existing Preview deploy identity during VPS validation and
+under the existing runtime identity after restart. Only approve reviewed
+application SHAs. This workflow remains manual-only, and Caddy configuration
+stays with the existing infra workflow.
 
 ### Preview runtime contract
 
