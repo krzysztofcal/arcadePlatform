@@ -12,8 +12,15 @@ import {
   resolveChannel,
   APPROVED_PRODUCTION_APP_ID,
   assertChannelIdentity,
-  releaseVersion
+  releaseVersion,
+  googleWebClientId,
+  googleSignInResource,
+  GOOGLE_SIGNIN_DEPENDENCIES,
+  removeUnusedLibraryPermissions
 } from '../mobile/poker/configure-android.mjs';
+
+// Synthetic, well-formed public Web OAuth client ID (not a real client).
+const TEST_GOOGLE_WEB_CLIENT_ID = '123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com';
 
 const require = createRequire(import.meta.url);
 const security = require('../mobile/poker/security.cjs');
@@ -386,6 +393,25 @@ test('releaseVersion: stage fixed, production valid, invalid or missing inputs t
   assert.throws(() => releaseVersion('bogus', {}), /Unknown MOBILE_CHANNEL/);
 });
 
+test('googleWebClientId: Stage gets none, Production requires a well-formed public Web client ID, unknown throws', () => {
+  assert.equal(googleWebClientId('stage', { MOBILE_GOOGLE_WEB_CLIENT_ID: TEST_GOOGLE_WEB_CLIENT_ID }), null);
+  assert.equal(googleWebClientId('production', { MOBILE_GOOGLE_WEB_CLIENT_ID: TEST_GOOGLE_WEB_CLIENT_ID }), TEST_GOOGLE_WEB_CLIENT_ID);
+  for (const id of [undefined, '', ' ' + TEST_GOOGLE_WEB_CLIENT_ID, TEST_GOOGLE_WEB_CLIENT_ID + '\n', 'GOCSPX-secretlike', '123456789012-ABC.apps.googleusercontent.com', '123456789012-abcdefghijklmnop.apps.googleusercontent.com.evil', 'abc.apps.googleusercontent.com']) {
+    assert.throws(() => googleWebClientId('production', { MOBILE_GOOGLE_WEB_CLIENT_ID: id }), /Invalid MOBILE_GOOGLE_WEB_CLIENT_ID/);
+  }
+  assert.throws(() => googleWebClientId('bogus', {}), /Unknown MOBILE_CHANNEL/);
+  assert.throws(() => googleSignInResource('<string>x</string>'), /Invalid MOBILE_GOOGLE_WEB_CLIENT_ID/);
+  assert.deepEqual(GOOGLE_SIGNIN_DEPENDENCIES.map((dep) => /^[a-z.]+:[a-z-]+:[0-9]+\.[0-9]+\.[0-9]+$/.test(dep)), GOOGLE_SIGNIN_DEPENDENCIES.map(() => true), 'pinned stable versions only');
+});
+
+test('removeUnusedLibraryPermissions: drops the biometric permissions pulled by Credential Manager, once', () => {
+  const out = removeUnusedLibraryPermissions('<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application></application></manifest>');
+  assert.match(out, /^<manifest xmlns:tools="http:\/\/schemas\.android\.com\/tools" xmlns:android=/);
+  for (const name of ['android.permission.USE_BIOMETRIC', 'android.permission.USE_FINGERPRINT']) assert.ok(out.includes(`<uses-permission android:name="${name}" tools:node="remove" />\n<`), name);
+  assert.throws(() => removeUnusedLibraryPermissions(out), /already configured/);
+  assert.throws(() => removeUnusedLibraryPermissions('<resources/>'), /manifest missing/);
+});
+
 test('capacitor.production.json equals capacitor.config.json except appId and appName', () => {
   const stageCap = JSON.parse(readFileSync(new URL('../mobile/poker/capacitor.config.json', import.meta.url), 'utf8'));
   const prodCap = JSON.parse(readFileSync(new URL('../mobile/poker/capacitor.production.json', import.meta.url), 'utf8'));
@@ -402,12 +428,12 @@ test('capacitor.production.json equals capacitor.config.json except appId and ap
 // Minimal writable copy of the generated Android tree; never touches mobile/poker itself.
 function androidFixture() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'configure-android-'));
-  for (const name of ['configure-android.mjs', 'capacitor.config.json', 'PokerAudioPlugin.java', 'launch-mark.xml']) {
+  for (const name of ['configure-android.mjs', 'capacitor.config.json', 'PokerAudioPlugin.java', 'PokerGoogleSignInPlugin.java', 'launch-mark.xml']) {
     copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(dir, name));
   }
   const files = {
     'android/app/src/main/AndroidManifest.xml': '<manifest><application><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN" /></intent-filter></activity></application></manifest>\n',
-    'android/app/build.gradle': 'defaultConfig {\n  versionCode 1\n  versionName "1.0"\n}\n',
+    'android/app/build.gradle': 'defaultConfig {\n  versionCode 1\n  versionName "1.0"\n}\ndependencies {\n    implementation project(\':capacitor-android\')\n}\n',
     'android/app/src/main/java/pl/kcswh/arcadepoker/stage/MainActivity.java': 'package pl.kcswh.arcadepoker.stage;\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {}\n',
     'android/app/src/main/res/values/styles.xml': '<style><item name="android:background">@null</item><item name="android:background">@drawable/splash</item></style>\n',
   };
@@ -439,13 +465,13 @@ function runConfigure(dir, channel) {
 
 function androidProductionFixture() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'configure-android-prod-'));
-  for (const name of ['configure-android.mjs', 'PokerAudioPlugin.java', 'launch-mark.xml']) {
+  for (const name of ['configure-android.mjs', 'PokerAudioPlugin.java', 'PokerGoogleSignInPlugin.java', 'launch-mark.xml']) {
     copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(dir, name));
   }
   copyFileSync(path.join(rootDir, 'mobile/poker/capacitor.production.json'), path.join(dir, 'capacitor.config.json'));
   const files = {
     'android/app/src/main/AndroidManifest.xml': '<manifest><application><activity android:name=".MainActivity"><intent-filter><action android:name="android.intent.action.MAIN" /></intent-filter></activity></application></manifest>\n',
-    'android/app/build.gradle': 'defaultConfig {\n  versionCode 1\n  versionName "1.0"\n}\n',
+    'android/app/build.gradle': 'defaultConfig {\n  versionCode 1\n  versionName "1.0"\n}\ndependencies {\n    implementation project(\':capacitor-android\')\n}\n',
     'android/app/src/main/java/pl/kcswh/arcadepoker/MainActivity.java': 'package pl.kcswh.arcadepoker;\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {}\n',
     'android/app/src/main/res/values/styles.xml': '<style><item name="android:background">@null</item><item name="android:background">@drawable/splash</item></style>\n',
   };
@@ -484,6 +510,15 @@ test('configure script: Production in temporary tree with production config and 
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /Invalid MOBILE_VERSION_NAME/);
     assert.deepEqual(treeSnapshot(dirMissing), before);
+    // #1300: a Production build without a valid Google Web client ID also fails before any write.
+    for (const id of [undefined, '', 'client-secret-or-junk', 'abc.apps.googleusercontent.com']) {
+      const idEnv = { ...env, MOBILE_VERSION_NAME: '1.0.0', MOBILE_VERSION_CODE: '2' };
+      if (id === undefined) delete idEnv.MOBILE_GOOGLE_WEB_CLIENT_ID; else idEnv.MOBILE_GOOGLE_WEB_CLIENT_ID = id;
+      const idRun = spawnSync(process.execPath, ['configure-android.mjs'], { cwd: dirMissing, env: idEnv, encoding: 'utf8' });
+      assert.notEqual(idRun.status, 0);
+      assert.match(idRun.stderr, /Invalid MOBILE_GOOGLE_WEB_CLIENT_ID/);
+      assert.deepEqual(treeSnapshot(dirMissing), before);
+    }
   } finally {
     rmSync(dirMissing, { recursive: true, force: true });
   }
@@ -495,7 +530,8 @@ test('configure script: Production in temporary tree with production config and 
       ...process.env,
       MOBILE_CHANNEL: 'production',
       MOBILE_VERSION_NAME: '1.2.3',
-      MOBILE_VERSION_CODE: '42'
+      MOBILE_VERSION_CODE: '42',
+      MOBILE_GOOGLE_WEB_CLIENT_ID: TEST_GOOGLE_WEB_CLIENT_ID
     };
     const run = spawnSync(process.execPath, ['configure-android.mjs'], { cwd: dir, env, encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
@@ -505,6 +541,7 @@ test('configure script: Production in temporary tree with production config and 
     assert.ok(manifest.includes('android:autoVerify="true"'));
     assert.ok(manifest.includes('play.kcswh.pl'));
     assert.ok(!manifest.includes('arcadepoker-stage'));
+    assert.ok(manifest.includes('<uses-permission android:name="android.permission.USE_BIOMETRIC" tools:node="remove" />'));
 
     const gradle = readFileSync(path.join(dir, 'android/app/build.gradle'), 'utf8');
     assert.ok(gradle.includes('versionName "1.2.3"'));
@@ -519,6 +556,11 @@ test('configure script: Production in temporary tree with production config and 
     assert.ok(existsSync(activityPath));
     const activitySrc = readFileSync(activityPath, 'utf8');
     assert.ok(activitySrc.includes('registerPlugin(PokerAudioPlugin.class);'));
+    assert.ok(activitySrc.includes('registerPlugin(PokerGoogleSignInPlugin.class);'));
+    const googlePlugin = readFileSync(path.join(dir, 'android/app/src/main/java/pl/kcswh/arcadepoker/PokerGoogleSignInPlugin.java'), 'utf8');
+    assert.equal(googlePlugin.split(/\r?\n/, 1)[0], 'package pl.kcswh.arcadepoker;');
+    for (const dep of GOOGLE_SIGNIN_DEPENDENCIES) assert.ok(gradle.includes(`implementation "${dep}"`), dep);
+    assert.equal(readFileSync(path.join(dir, 'android/app/src/main/res/values/poker_google_signin.xml'), 'utf8'), googleSignInResource(TEST_GOOGLE_WEB_CLIENT_ID));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -541,6 +583,9 @@ test('configure script: unset channel configures Stage, also through a symlinked
       assert.ok(gradle.includes('versionCode 1'));
       const pluginSrc = readFileSync(path.join(dir, 'android/app/src/main/java/pl/kcswh/arcadepoker/stage/PokerAudioPlugin.java'), 'utf8');
       assert.equal(pluginSrc.split(/\r?\n/, 1)[0], 'package pl.kcswh.arcadepoker.stage;');
+      // #1300: Stage compiles the native Google plugin but gets no client ID, so it keeps browser OAuth.
+      assert.ok(existsSync(path.join(dir, 'android/app/src/main/java/pl/kcswh/arcadepoker/stage/PokerGoogleSignInPlugin.java')));
+      assert.equal(existsSync(path.join(dir, 'android/app/src/main/res/values/poker_google_signin.xml')), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

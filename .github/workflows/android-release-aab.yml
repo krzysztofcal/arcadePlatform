@@ -36,6 +36,8 @@ jobs:
       MOBILE_VERSION_NAME: ${{ inputs.versionName }}
       MOBILE_VERSION_CODE: ${{ inputs.versionCode }}
       DISPATCH_INPUT_SHA: ${{ inputs.sourceSha }}
+      # #1300: public Google Web OAuth client ID (repository variable, not a secret); missing/invalid fails configure-android.mjs.
+      MOBILE_GOOGLE_WEB_CLIENT_ID: ${{ vars.MOBILE_GOOGLE_WEB_CLIENT_ID }}
       GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Xmx2g'
     steps:
       - uses: actions/checkout@v4
@@ -124,6 +126,8 @@ jobs:
           cp "$AAB_SRC" "$AAB_DEST"
 
           java -jar "$BUNDLETOOL_JAR" dump manifest --bundle "$AAB_DEST" > artifacts/manifest.txt
+          java -jar "$BUNDLETOOL_JAR" dump resources --bundle "$AAB_DEST" --resource string/poker_google_web_client_id --values > artifacts/google-signin-resource.txt
+          grep -qF "$MOBILE_GOOGLE_WEB_CLIENT_ID" artifacts/google-signin-resource.txt
 
           cp www/build-receipt.json artifacts/
           (node --version; java -version 2>&1; cat android/variables.gradle; cat android/gradle/wrapper/gradle-wrapper.properties; ./android/gradlew -p android --version; df -h .) > artifacts/toolchain.txt
@@ -233,6 +237,7 @@ jobs:
               permissions,
               aabSha256,
               signed: false,
+              googleWebClientId: process.env.MOBILE_GOOGLE_WEB_CLIENT_ID,
               bundletool: {
                 version: "1.18.3",
                 sha256: "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29"

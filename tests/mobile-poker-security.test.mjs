@@ -496,3 +496,228 @@ test('verified binding pins own PR/SHA/site and never reuses parent or Productio
     assert.throws(() => security.forPreview(config, { ...binding, ...patch }, 1160, sha));
   }
 });
+
+test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cancel, no double call, no secrets in logs, WWW routing unchanged', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const { webcrypto, createHash } = await import('node:crypto');
+  const runtimeSource = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
+  const clientSource = await readFile(new URL('../js/auth/supabaseClient.js', import.meta.url), 'utf8');
+  function boot(config, google, cryptoImpl = webcrypto) {
+    const logs = [];
+    const window = {
+      MobilePokerSecurity: security, MOBILE_POKER_CONFIG: { ...config, sha: '12345678' }, KLog: { log(kind, data) { logs.push(JSON.stringify([kind, data])); } },
+      crypto: cryptoImpl,
+      Capacitor: { Plugins: { Browser: { open: async () => {}, close: async () => {} }, SystemBars: { hide: async () => {}, show: async () => {} },
+        App: { addListener() {}, getLaunchUrl: async () => null }, PokerGoogleSignIn: google } },
+      location: { pathname: '/account.html', replace() {} }, addEventListener() {}, dispatchEvent() {}
+    };
+    const document = { addEventListener() {}, getElementById: () => ({ textContent: '', hidden: true }) };
+    vm.runInNewContext(runtimeSource, { window, document, URL, Event, TextEncoder, navigator: { onLine: true }, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} }, setTimeout });
+    return { window, logs };
+  }
+  const sha256Hex = value => createHash('sha256').update(value).digest('hex');
+  const until = async check => { for (let i = 0; i < 100 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 2)); assert.ok(check()); };
+
+  // Production: Google gets only SHA-256(raw nonce); Supabase gets the raw nonce and the ID token.
+  const seenNonces = [], idTokenCalls = [];
+  let release;
+  const google = { signIn: ({ nonce }) => { seenNonces.push(nonce); return new Promise(resolve => { release = () => resolve({ idToken: 'secret-id-token' }); }); }, clearCredential: async () => {} };
+  const prod = boot(prodConfig, google);
+  assert.equal(prod.window.MobilePoker.nativeGoogle, true);
+  const client = { auth: { signInWithIdToken: async args => { idTokenCalls.push(args); return { data: { session: { user: { id: 'u1' } } } }; } } };
+  const first = prod.window.MobilePoker.signInWithGoogle(client);
+  for (let i = 0; i < 50 && !release; i++) await new Promise(resolve => setTimeout(resolve, 2));
+  assert.equal(typeof release, 'function', 'native picker opened');
+  await assert.rejects(prod.window.MobilePoker.signInWithGoogle(client), /google_in_progress/);
+  release();
+  await first;
+  assert.equal(seenNonces.length, 1, 'no parallel native picker');
+  assert.equal(idTokenCalls.length, 1);
+  assert.equal(idTokenCalls[0].provider, 'google');
+  assert.equal(idTokenCalls[0].token, 'secret-id-token');
+  assert.match(idTokenCalls[0].nonce, /^[0-9a-f]{64}$/);
+  assert.equal(seenNonces[0], sha256Hex(idTokenCalls[0].nonce), 'Google receives SHA-256 hex of the raw nonce');
+
+  // Cancel and native failures stay retryable and never reach Supabase.
+  for (const [code, expected] of [['canceled', /google_canceled/], ['no_credential', /google_unavailable/], ['failed', /google_failed/]]) {
+    const failing = boot(prodConfig, { signIn: async () => { const e = new Error('native'); e.code = code; throw e; }, clearCredential: async () => {} });
+    const calls = [];
+    await assert.rejects(failing.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async a => { calls.push(a); return {}; } } }), expected);
+    assert.equal(calls.length, 0);
+  }
+  const rejected = boot(prodConfig, { signIn: async () => ({ idToken: 'secret-id-token' }), clearCredential: async () => {} });
+  await assert.rejects(rejected.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ error: { message: 'secret-id-token invalid' } }) } }), /google_failed/);
+  for (const line of [...prod.logs, ...rejected.logs]) {
+    assert.doesNotMatch(line, /secret-id-token/);
+    assert.doesNotMatch(line, new RegExp(idTokenCalls[0].nonce));
+  }
+
+  // Stage keeps browser OAuth: no native sign-in and no plugin call.
+  let stageCalls = 0;
+  const stage = boot(config, { signIn: async () => { stageCalls++; return { idToken: 'x' }; }, clearCredential: async () => {} });
+  assert.equal(stage.window.MobilePoker.nativeGoogle, false);
+  await assert.rejects(stage.window.MobilePoker.signInWithGoogle(client), /google_unavailable/);
+  assert.equal(stageCalls, 0);
+
+  // js/auth/supabaseClient.js routes to the native method only when MobilePoker.nativeGoogle is true.
+  function loadAuth(mobilePoker) {
+    const oauthCalls = [], idCalls = [], signOuts = [];
+    const fakeClient = { auth: {
+      signInWithOAuth: async args => { oauthCalls.push(args); return { data: { url: 'https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google' } }; },
+      signInWithIdToken: async args => { idCalls.push(args); return { data: { session: {} } }; },
+      signOut: async () => { signOuts.push(1); return {}; },
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), getSession: async () => ({ data: { session: null } })
+    } };
+    const window = { SUPABASE_CONFIG: { SUPABASE_URL: 'https://otbqfijerkieoxwpxjnm.supabase.co', SUPABASE_ANON_KEY: 'anon', AUTH_GOOGLE_ENABLED: true },
+      supabase: { createClient: () => fakeClient }, MobilePoker: mobilePoker, location: { origin: 'https://play.kcswh.pl', protocol: 'https:', assign() {} } };
+    const document = { readyState: 'loading', addEventListener() {}, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] };
+    vm.runInNewContext(clientSource, { window, document, URL, fetch: async () => ({ ok: true, json: async () => ({ external: { google: true } }) }), setTimeout, console: { log() {}, warn() {}, error() {} } });
+    return { auth: window.SupabaseAuth, client: fakeClient, oauthCalls, idCalls, signOuts };
+  }
+  let nativeArg = null, cleared = 0;
+  const native = loadAuth({ nativeGoogle: true, signInWithGoogle: async c => { nativeArg = c; return { data: { session: {} } }; }, clearGoogleCredential: async () => { cleared++; return true; } });
+  await native.auth.signInWithGoogle();
+  assert.ok(nativeArg && nativeArg.auth, 'native method receives the shared Supabase client');
+  assert.equal(native.oauthCalls.length, 0, 'no browser OAuth in the Production APK');
+  const canceled = loadAuth({ nativeGoogle: true, signInWithGoogle: async () => { throw new Error('google_canceled'); } });
+  await assert.rejects(canceled.auth.signInWithGoogle(), /auth_cancelled/, 'cancel reuses the Account page cancel message');
+  await native.auth.signOut();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(native.signOuts.length, 1);
+  assert.equal(cleared, 1, 'explicit sign-out clears the native Google account choice');
+  const www = loadAuth(undefined);
+  await www.auth.signInWithGoogle();
+  assert.equal(www.oauthCalls.length, 1, 'WWW keeps browser OAuth');
+  assert.equal(www.idCalls.length, 0);
+  // GOOGLE-07: Supabase sign-out runs only after a running native exchange settles; its result reaches the caller.
+  let settle;
+  const ordering = loadAuth({ nativeGoogle: true, signInWithGoogle: async () => ({}), clearGoogleCredential: async () => true, googleSettled: () => new Promise(resolve => { settle = resolve; }) });
+  const signOutError = { error: { message: 'network' } };
+  ordering.client.auth.signOut = async () => { ordering.signOuts.push(1); return signOutError; };
+  const orderingSignOut = ordering.auth.signOut();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(ordering.signOuts.length, 0, 'Supabase sign-out waits for the exchange');
+  settle(true);
+  assert.equal(await orderingSignOut, signOutError, 'the caller receives the Supabase sign-out result unchanged');
+  assert.equal(ordering.signOuts.length, 1);
+  ordering.client.auth.signOut = async () => { throw new Error('offline'); };
+  const previousSettle = settle;
+  const rejectedSignOut = ordering.auth.signOut();
+  await until(() => settle !== previousSettle);
+  settle(true);
+  await assert.rejects(rejectedSignOut, /offline/, 'a rejected Supabase sign-out reaches the caller');
+  // GOOGLE-03: nativeGoogle without the native method never falls back to the browser callback.
+  const broken = loadAuth({ nativeGoogle: true });
+  await assert.rejects(broken.auth.signInWithGoogle(), /google_unavailable/);
+  assert.equal(broken.oauthCalls.length, 0);
+
+  // GOOGLE-01a: sign-out while the picker is open discards its result.
+  let openPicker;
+  const pickerBoot = boot(prodConfig, { signIn: () => new Promise(resolve => { openPicker = resolve; }), clearCredential: async () => {} });
+  const pickerExchange = [];
+  const pickerAttempt = pickerBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async a => { pickerExchange.push(a); return { data: { session: {} } }; }, signOut: async () => ({}) } });
+  await until(() => openPicker);
+  await pickerBoot.window.MobilePoker.clearGoogleCredential();
+  openPicker({ idToken: 'secret-id-token' });
+  await assert.rejects(pickerAttempt, /google_canceled/);
+  assert.equal(pickerExchange.length, 0);
+  // GOOGLE-11: a picker that returns after the sign-out's clear finished triggers another clear; the next sign-in waits.
+  let resolvePicker11; const clears11 = []; let picker11 = 0;
+  const boot11 = boot(prodConfig, { signIn: () => { picker11++; return picker11 === 1 ? new Promise(resolve => { resolvePicker11 = resolve; }) : Promise.resolve({ idToken: 'secret-id-token' }); }, clearCredential: () => new Promise(resolve => { clears11.push(resolve); }) });
+  const attempt11 = boot11.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => resolvePicker11);
+  const firstClear11 = boot11.window.MobilePoker.clearGoogleCredential();
+  await until(() => clears11.length === 1);
+  clears11[0]();
+  await firstClear11;
+  resolvePicker11({ idToken: 'secret-id-token' });
+  await assert.rejects(attempt11, /google_canceled/);
+  await until(() => clears11.length === 2);
+  const next11 = boot11.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(picker11, 1, 'next sign-in waits for the clear after the late account choice');
+  clears11[1]();
+  await next11;
+  assert.equal(picker11, 2);
+  // GOOGLE-12: the same holds when the invalidated picker ends with an error instead of a result.
+  let rejectPicker12; const clears12 = []; let picker12 = 0;
+  const boot12 = boot(prodConfig, { signIn: () => { picker12++; return picker12 === 1 ? new Promise((_, reject) => { rejectPicker12 = reject; }) : Promise.resolve({ idToken: 'secret-id-token' }); }, clearCredential: () => new Promise(resolve => { clears12.push(resolve); }) });
+  const attempt12 = boot12.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => rejectPicker12);
+  const firstClear12 = boot12.window.MobilePoker.clearGoogleCredential();
+  await until(() => clears12.length === 1);
+  clears12[0]();
+  await firstClear12;
+  rejectPicker12(Object.assign(new Error('native'), { code: 'failed' }));
+  await assert.rejects(attempt12, /google_canceled/);
+  await until(() => clears12.length === 2);
+  const next12 = boot12.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(picker12, 1, 'next sign-in waits for the clear after the late picker error');
+  clears12[1]();
+  await next12;
+  assert.equal(picker12, 2);
+  // GOOGLE-09: a sign-out queued as the very next microtask after the picker resolves still prevents the exchange.
+  let resolvePicker09; const exchange09 = [];
+  const boot09 = boot(prodConfig, { signIn: () => new Promise(resolve => { resolvePicker09 = resolve; }), clearCredential: async () => {} });
+  const attempt09 = boot09.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async a => { exchange09.push(a); return { data: { session: {} } }; }, signOut: async () => ({}) } });
+  await until(() => resolvePicker09);
+  resolvePicker09({ idToken: 'secret-id-token' });
+  // Two microtasks later lands exactly between the post-picker check and the queued exchange (Node/V8 job order;
+  // the picker promise comes from another realm). The previous code sent the token in this window.
+  queueMicrotask(() => queueMicrotask(() => { boot09.window.MobilePoker.clearGoogleCredential(); }));
+  await assert.rejects(attempt09, /google_canceled/);
+  assert.equal(exchange09.length, 0, 'no token reaches Supabase after the sign-out');
+  // GOOGLE-01b: sign-out during the token exchange ends with a final Supabase sign-out.
+  let finishExchange; const lateSignOuts = [];
+  const exchangeBoot = boot(prodConfig, { signIn: async () => ({ idToken: 'secret-id-token' }), clearCredential: async () => {} });
+  const exchangeAttempt = exchangeBoot.window.MobilePoker.signInWithGoogle({ auth: {
+    signInWithIdToken: () => new Promise(resolve => { finishExchange = () => resolve({ data: { session: {} } }); }),
+    signOut: async () => { lateSignOuts.push(1); return {}; } } });
+  await until(() => finishExchange);
+  await exchangeBoot.window.MobilePoker.clearGoogleCredential();
+  let settled = false;
+  exchangeBoot.window.MobilePoker.googleSettled().then(() => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(settled, false, 'a sign-out waits for the running ID-token exchange');
+  finishExchange();
+  await assert.rejects(exchangeAttempt, /google_canceled/);
+  await until(() => settled);
+  assert.equal(lateSignOuts.length, 0, 'the user sign-out (not the runtime) removes the exchanged session');
+  // GOOGLE-04/08: a sign-out while the nonce digest is still running never opens the picker.
+  let releaseDigest, digestStarted = false, hashingPicker = 0;
+  const slowCrypto = { getRandomValues: a => webcrypto.getRandomValues(a), subtle: { digest: (alg, data) => { digestStarted = true; return new Promise(resolve => { releaseDigest = () => resolve(webcrypto.subtle.digest(alg, data)); }); } } };
+  const hashingBoot = boot(prodConfig, { signIn: async () => { hashingPicker++; return { idToken: 'secret-id-token' }; }, clearCredential: async () => {} }, slowCrypto);
+  const hashingAttempt = hashingBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => digestStarted);
+  await hashingBoot.window.MobilePoker.clearGoogleCredential();
+  releaseDigest();
+  await assert.rejects(hashingAttempt, /google_canceled/);
+  assert.equal(hashingPicker, 0);
+  // GOOGLE-02: the next native sign-in waits until the credential-state clear has finished.
+  let finishClear; let pickerCalls = 0;
+  const clearBoot = boot(prodConfig, { signIn: async () => { pickerCalls++; return { idToken: 'secret-id-token' }; }, clearCredential: () => new Promise(resolve => { finishClear = resolve; }) });
+  clearBoot.window.MobilePoker.clearGoogleCredential();
+  const afterClear = clearBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => finishClear);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(pickerCalls, 0, 'picker stays closed while the previous account is being cleared');
+  finishClear();
+  await afterClear;
+  assert.equal(pickerCalls, 1);
+  // GOOGLE-05: two sign-outs chain their clears; the next sign-in waits for both.
+  const clears = []; let chainPicker = 0;
+  const chainBoot = boot(prodConfig, { signIn: async () => { chainPicker++; return { idToken: 'secret-id-token' }; }, clearCredential: () => new Promise(resolve => { clears.push(resolve); }) });
+  chainBoot.window.MobilePoker.clearGoogleCredential();
+  chainBoot.window.MobilePoker.clearGoogleCredential();
+  const chained = chainBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => clears.length === 1);
+  clears[0]();
+  await until(() => clears.length === 2);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(chainPicker, 0, 'second clear still pending');
+  clears[1]();
+  await chained;
+  assert.equal(chainPicker, 1);
+});
