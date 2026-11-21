@@ -57,7 +57,7 @@
       var cap2 = window.Capacitor;
       var native = cap2 && cap2.Plugins && cap2.Plugins.PokerGoogleSignIn;
       if (bound.channel !== 'production' || !native) return Promise.resolve(false);
-      pendingClear = Promise.resolve().then(function(){ return native.clearCredential(); })
+      pendingClear = pendingClear.then(function(){ return native.clearCredential(); })
         .then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); return false; });
       return pendingClear;
     }
@@ -67,6 +67,15 @@
   var pendingClear = Promise.resolve(true);
   function nonceHex(bytes){
     return Array.prototype.map.call(new Uint8Array(bytes), function(b){ return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+  }
+  // Remove a session created by a canceled attempt; a failed global sign-out keeps the local session, so fall back
+  // to a local-only sign-out, which needs no network.
+  async function dropSession(client){
+    try {
+      var out = await client.auth.signOut();
+      if (!out || !out.error) return;
+    } catch (_err){}
+    try { await client.auth.signOut({ scope: 'local' }); } catch (_err){ klog('mobile:google_session_drop_failed'); }
   }
   // Raw nonce goes to Supabase; Google receives only its SHA-256 hex digest (bound into the ID token).
   async function signInWithGoogle(client){
@@ -82,6 +91,7 @@
       var raw = nonceHex(window.crypto.getRandomValues(new Uint8Array(32)));
       var hashed = nonceHex(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw)));
       var credential;
+      if (generation !== googleGeneration) throw new Error('google_canceled');
       try { credential = await native.signIn({ nonce: hashed }); }
       catch (err){
         var code = err && err.code;
@@ -95,7 +105,7 @@
       var result = await client.auth.signInWithIdToken({ provider: 'google', token: credential.idToken, nonce: raw });
       if (generation !== googleGeneration){
         // Sign-out happened during the token exchange: do not leave a session behind.
-        await Promise.resolve().then(function(){ return client.auth.signOut(); }).catch(function(){});
+        await dropSession(client);
         throw new Error('google_canceled');
       }
       if (!result || result.error || !result.data || !result.data.session) throw new Error('google_failed');

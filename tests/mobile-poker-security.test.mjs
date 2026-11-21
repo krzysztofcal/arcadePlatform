@@ -616,6 +616,24 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   finishExchange();
   await assert.rejects(exchangeAttempt, /google_canceled/);
   assert.equal(lateSignOuts.length, 1, 'no session survives a sign-out during the exchange');
+  // GOOGLE-06: a failed final global sign-out falls back to a local-only sign-out.
+  let finishFailing; const failingSignOuts = [];
+  const failingBoot = boot(prodConfig, { signIn: async () => ({ idToken: 'secret-id-token' }), clearCredential: async () => {} });
+  const failingAttempt = failingBoot.window.MobilePoker.signInWithGoogle({ auth: {
+    signInWithIdToken: () => new Promise(resolve => { finishFailing = () => resolve({ data: { session: {} } }); }),
+    signOut: async options => { failingSignOuts.push(options && options.scope || 'global'); return options && options.scope === 'local' ? {} : { error: { message: 'network' } }; } } });
+  await until(() => finishFailing);
+  await failingBoot.window.MobilePoker.clearGoogleCredential();
+  finishFailing();
+  await assert.rejects(failingAttempt, /google_canceled/);
+  assert.deepEqual(failingSignOuts, ['global', 'local']);
+  // GOOGLE-04: a sign-out during nonce hashing never opens the picker.
+  let hashingPicker = 0;
+  const hashingBoot = boot(prodConfig, { signIn: async () => { hashingPicker++; return { idToken: 'secret-id-token' }; }, clearCredential: async () => {} });
+  const hashingAttempt = hashingBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  hashingBoot.window.MobilePoker.clearGoogleCredential();
+  await assert.rejects(hashingAttempt, /google_canceled/);
+  assert.equal(hashingPicker, 0);
   // GOOGLE-02: the next native sign-in waits until the credential-state clear has finished.
   let finishClear; let pickerCalls = 0;
   const clearBoot = boot(prodConfig, { signIn: async () => { pickerCalls++; return { idToken: 'secret-id-token' }; }, clearCredential: () => new Promise(resolve => { finishClear = resolve; }) });
@@ -627,4 +645,18 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   finishClear();
   await afterClear;
   assert.equal(pickerCalls, 1);
+  // GOOGLE-05: two sign-outs chain their clears; the next sign-in waits for both.
+  const clears = []; let chainPicker = 0;
+  const chainBoot = boot(prodConfig, { signIn: async () => { chainPicker++; return { idToken: 'secret-id-token' }; }, clearCredential: () => new Promise(resolve => { clears.push(resolve); }) });
+  chainBoot.window.MobilePoker.clearGoogleCredential();
+  chainBoot.window.MobilePoker.clearGoogleCredential();
+  const chained = chainBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => clears.length === 1);
+  clears[0]();
+  await until(() => clears.length === 2);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(chainPicker, 0, 'second clear still pending');
+  clears[1]();
+  await chained;
+  assert.equal(chainPicker, 1);
 });
