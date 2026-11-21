@@ -302,3 +302,104 @@ test("ws preview deploy cleanup is scoped to the current run temp directory and 
   assert.match(text, /curl -fsS "\$PREVIEW_LOCAL_HEALTHZ_URL"/);
   assert.match(text, /curl -fsS "\$PREVIEW_PUBLIC_HEALTHZ_URL"/);
 });
+
+for (const [failure, expected] of [
+  [null, "PASS stage_db_readable"],
+  ["42501", "BLOCKED db_access_denied"],
+  ["57014", "BLOCKED db_timeout"],
+  ["ETIMEDOUT", "BLOCKED db_timeout"],
+  ["unexpected", "BLOCKED db_verification_failed"],
+  ["invalid-config", "BLOCKED preview_config_invalid"]
+]) {
+  test(`Preview SQL helper reports only the safe result (${failure ?? "success"})`, async () => {
+    const url = "postgresql://postgres:fixtureSecret@db.krydukthwdvccggbyjfw.supabase.co/postgres";
+    const output = [];
+    const queries = [];
+    const process = {
+      argv: ["node", HELPER_PATH, "--verify-db"],
+      stdout: { write: value => output.push(value) },
+      stderr: { write: value => output.push(value) }
+    };
+    const source = helperText().replace(/^#!.*$/m, "").replace(/^import .*;$/gm, "");
+    const metadata = { uid: 0, gid: 0, nlink: 1, mode: 0o600, isFile: () => true, isDirectory: () => true };
+    const fs = {
+      constants: { O_RDONLY: 0, O_NOFOLLOW: 1, O_NONBLOCK: 2 },
+      lstatSync: () => metadata, openSync: () => 5, fstatSync: () => metadata, closeSync() {},
+      readFileSync: () => [
+        "PORT=3001", "WS_AUTHORITATIVE_JOIN_ENABLED=1", "POKER_WS_INTERNAL_TOKEN=fixtureToken",
+        `SUPABASE_STAGE_PROJECT_REF=${failure === "invalid-config" ? "fixtureWrongRef" : "krydukthwdvccggbyjfw"}`,
+        "SUPABASE_URL=https://krydukthwdvccggbyjfw.supabase.co", `SUPABASE_DB_URL=${url}`
+      ].join("\n")
+    };
+    const postgres = (connection, options) => {
+      assert.equal(connection, url);
+      assert.equal(options.prepare, false);
+      return {
+        begin: async (mode, run) => {
+          assert.equal(mode, "read only");
+          return run(async ([query]) => {
+            queries.push(query);
+            if (query.startsWith("select 1")) return [{ ok: 1 }];
+            if (query.startsWith("select") && failure) throw Object.assign(new Error(url), { code: failure });
+            return [];
+          });
+        },
+        end: async () => queries.push("closed")
+      };
+    };
+    // Execute the actual worker body using a fake driver. Model the parent's hard deadline separately.
+    let workerResult;
+    function spawn(executable, args, options) {
+      assert.notEqual(failure, "invalid-config");
+      assert.equal(executable, "/usr/bin/setpriv");
+      assert.deepEqual(args.slice(0, -1), [
+        "--reuid=arcade-preview", "--regid=arcade-preview", "--clear-groups", "--no-new-privs",
+        "/usr/bin/node", "--input-type=module", "-e"
+      ]);
+      assert.equal(options.input, url);
+      assert.ok(!args.join(" ").includes(url));
+      assert.deepEqual(options.env, {});
+      assert.deepEqual(options.stdio, ["pipe", "ignore", "ignore"]);
+      assert.equal(options.timeout, 7000);
+      if (failure === "ETIMEDOUT") return { error: { code: failure } };
+      const workerSource = args.at(-1);
+      const workerProcess = {};
+      const AsyncFunction = (async () => {}).constructor;
+      workerResult = new AsyncFunction("process", "readFileSync", "createRequire",
+        workerSource.replace(/^\s*const \{ (?:readFileSync|createRequire) \} = await import\(.*\);$/gm, "")
+      )(workerProcess, () => options.input, anchor => {
+        assert.equal(anchor, "/usr/local/libexec/arcade-ws-preview-sql/preflight.mjs");
+        return packagePath => {
+          assert.equal(packagePath, "/usr/local/libexec/arcade-ws-preview-sql/postgres");
+          return postgres;
+        };
+      }).then(() => workerProcess.exitCode ?? 0);
+      // spawnSync blocks in production. Re-run the parent with the worker's result once it resolves.
+      return { status: 1 };
+    }
+    const run = new Function("process", "fs", "spawnSync", source);
+    run(process, fs, spawn);
+    if (workerResult) {
+      const status = await workerResult;
+      output.length = 0;
+      delete process.exitCode;
+      run(process, fs, () => ({ status }));
+      assert.equal(queries.at(-1), "closed");
+      assert.ok(queries.filter(query => query.startsWith("select") && !query.startsWith("select 1"))
+        .every(query => query.endsWith("limit 0")));
+      if (!failure) assert.deepEqual(queries, [
+        "set local statement_timeout = '2s'",
+        "select 1 as ok",
+        "select user_id, avatar_key, google_photo_suppressed, public_profile_blocked from public.user_profiles limit 0",
+        "select user_id, consent_revision, notice_version, decision, imported_avatar_key from private.profile_photo_consents limit 0",
+        "select id, public from storage.buckets limit 0",
+        "select user_id from private.ugc_avatar_holds limit 0",
+        "select old_user_id from public.account_deletion_requests limit 0",
+        "select blocker_user_id, blocked_user_id from private.user_blocks limit 0",
+        "closed"
+      ]);
+    }
+    assert.deepEqual(output, [expected + "\n"]);
+    assert.equal(process.exitCode, expected.startsWith("PASS") ? undefined : 1);
+  });
+}

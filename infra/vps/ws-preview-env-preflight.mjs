@@ -1,6 +1,7 @@
 #!/usr/bin/node
 
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 const ENV_FILE = "/opt/arcade-ws-preview/.env.preview";
@@ -97,11 +98,59 @@ function assertProtectedParents() {
   }
 }
 
+// Runs with the WS Preview service identity and the protected copy of its PostgreSQL driver.
+async function checkStageDb(postgres, url) {
+  const { hostname, port } = new URL(url);
+  const sql = postgres(url, { hostname, port: Number(port || 5432), max: 1, connect_timeout: 3, prepare: false, fetch_types: false });
+  try {
+    await sql.begin("read only", async tx => {
+      await tx`set local statement_timeout = '2s'`;
+      const [probe] = await tx`select 1 as ok`;
+      if (probe?.ok !== 1) throw new Error();
+      // Check the exact columns used by the #1295 table-photo eligibility query.
+      await tx`select user_id, avatar_key, google_photo_suppressed, public_profile_blocked from public.user_profiles limit 0`;
+      await tx`select user_id, consent_revision, notice_version, decision, imported_avatar_key from private.profile_photo_consents limit 0`;
+      await tx`select id, public from storage.buckets limit 0`;
+      await tx`select user_id from private.ugc_avatar_holds limit 0`;
+      await tx`select old_user_id from public.account_deletion_requests limit 0`;
+      await tx`select blocker_user_id, blocked_user_id from private.user_blocks limit 0`;
+    });
+  } finally {
+    await sql.end({ timeout: 1 });
+  }
+}
+
+function verifyStageDb(url) {
+  const worker = `
+    try {
+      const { readFileSync } = await import("node:fs");
+      const { createRequire } = await import("node:module");
+      const postgres = createRequire("/usr/local/libexec/arcade-ws-preview-sql/preflight.mjs")(
+        "/usr/local/libexec/arcade-ws-preview-sql/postgres");
+      await (${checkStageDb.toString()})(postgres, readFileSync(0, "utf8"));
+    } catch (error) {
+      process.exitCode = error?.code === "42501" ? 2
+        : ["57014", "CONNECT_TIMEOUT"].includes(error?.code) ? 3 : 1;
+    }
+  `;
+  const child = spawnSync("/usr/bin/setpriv", [
+    "--reuid=arcade-preview", "--regid=arcade-preview", "--clear-groups", "--no-new-privs",
+    "/usr/bin/node", "--input-type=module", "-e", worker
+  ], {
+    cwd: "/", env: {}, input: url, stdio: ["pipe", "ignore", "ignore"],
+    timeout: 7000, killSignal: "SIGKILL"
+  });
+  if (child.error?.code === "ETIMEDOUT" || child.status === 3) return "BLOCKED db_timeout";
+  if (child.status === 2) return "BLOCKED db_access_denied";
+  return child.status === 0 && !child.error ? "PASS stage_db_readable" : "BLOCKED db_verification_failed";
+}
+
+const verifyDb = process.argv.length === 3 && process.argv[2] === "--verify-db";
 let fd;
 try {
   const explicitLive = process.argv.length === 3 && process.argv[2] === "--verify-redis";
   const configOnly = process.argv.length === 3 && process.argv[2] === "--config-only";
-  if (process.argv.length !== 2 && !explicitLive && !configOnly) reject("unexpected arguments");
+  if (process.argv.length !== 2 && !explicitLive && !configOnly && !verifyDb) reject("unexpected arguments");
   if (
     typeof fs.constants.O_NOFOLLOW !== "number"
     || typeof fs.constants.O_NONBLOCK !== "number"
@@ -183,7 +232,13 @@ try {
   if (values.ACCOUNT_DELETION_ENABLED === "1" && !v3) reject("deletion window requires Stage V3");
   if (v3) assertApprovedSource(originalSource);
   // The existing exact no-argument sudo contract must authenticate V3 on every deploy.
-  if (explicitLive || (v3 && !configOnly)) {
+  if (verifyDb) {
+    fs.closeSync(fd);
+    fd = undefined;
+    const result = verifyStageDb(values.SUPABASE_DB_URL);
+    process.stdout.write(result + "\n");
+    if (result.startsWith("BLOCKED ")) process.exitCode = 1;
+  } else if (explicitLive || (v3 && !configOnly)) {
     if (!v3) reject("Redis V3 is required for live verification");
     // Explicit read-only mode: no redirects, key values, SCAN, V2 commands or writes.
     fetch(values.UPSTASH_REDIS_REST_URL.replace(/\/$/, "") + "/pipeline", {
@@ -218,7 +273,8 @@ try {
   const reason = error instanceof PreflightError
     ? error.message
     : "preview env preflight failed";
-  process.stderr.write(`${reason}\n`);
+  if (verifyDb) process.stdout.write("BLOCKED preview_config_invalid\n");
+  else process.stderr.write(`${reason}\n`);
   process.exitCode = 1;
 } finally {
   if (fd !== undefined) fs.closeSync(fd);

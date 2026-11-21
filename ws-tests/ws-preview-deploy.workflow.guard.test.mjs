@@ -187,7 +187,7 @@ test("poker deployment doc states the unified preview Caddy ownership model", ()
 
 test("protected Preview env preflight validates Stage V3 without disclosing credentials", async () => {
   const { runInNewContext } = await import("node:vm");
-  const source = helperText().replace(/^#!.*\n/, "").replace('import fs from "node:fs";', "").replace('import { createHash } from "node:crypto";', "");
+  const source = helperText().replace(/^#!.*\n/, "").replace(/^import .*;$/gm, "");
   const base = { SUPABASE_STAGE_PROJECT_REF:"krydukthwdvccggbyjfw",
     SUPABASE_URL:"https://krydukthwdvccggbyjfw.supabase.co",
     SUPABASE_DB_URL:"postgres://postgres.krydukthwdvccggbyjfw@aws-0-eu-west-3.pooler.supabase.com:6543/postgres",
@@ -224,7 +224,7 @@ test("protected Preview env preflight validates Stage V3 without disclosing cred
 
 test("explicit Redis live verification uses only PING and Stage EXISTS and redacts failures", async () => {
   const { runInNewContext } = await import("node:vm");
-  const source = helperText().replace(/^#!.*\n/, "").replace('import fs from "node:fs";', "").replace('import { createHash } from "node:crypto";', "");
+  const source = helperText().replace(/^#!.*\n/, "").replace(/^import .*;$/gm, "");
   const text = ["SUPABASE_STAGE_PROJECT_REF=krydukthwdvccggbyjfw",
     "SUPABASE_URL=https://krydukthwdvccggbyjfw.supabase.co",
     "SUPABASE_DB_URL=postgres://postgres.krydukthwdvccggbyjfw@aws-0-eu-west-3.pooler.supabase.com/postgres",

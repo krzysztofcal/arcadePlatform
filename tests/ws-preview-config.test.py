@@ -178,7 +178,7 @@ class DeletionWindow(unittest.TestCase):
                               self.window, b'window helper', files or self.files)
 
     def test_reviewed_helper_pins_match_bundle(self):
-        helper_bytes = (Path(__file__).parents[1] / 'infra/vps/ws-preview-env-preflight.mjs').read_bytes()
+        helper_bytes = (Path(__file__).parents[1] / 'infra/vps/ws-preview-env-preflight.v3-pinned.mjs').read_bytes()
         self.assertEqual(config.digest(helper_bytes), config.HELPER_SHA256)
         self.assertEqual(config.digest(helper_bytes), window.HELPER_SHA256)
 
