@@ -224,8 +224,9 @@
     authCallbackError = null;
     var client = getClient();
     // #1300: the Production APK uses native Credential Manager + signInWithIdToken (no browser callback).
-    if (window.MobilePoker && window.MobilePoker.nativeGoogle === true && typeof window.MobilePoker.signInWithGoogle === 'function'){
-      if (!isGoogleEnabled() || !client || !client.auth) return Promise.reject(new Error('google_unavailable'));
+    if (window.MobilePoker && window.MobilePoker.nativeGoogle === true){
+      // Never fall back to the browser callback in the Production APK.
+      if (typeof window.MobilePoker.signInWithGoogle !== 'function' || !isGoogleEnabled() || !client || !client.auth) return Promise.reject(new Error('google_unavailable'));
       return window.MobilePoker.signInWithGoogle(client).then(function(result){
         authCallbackError = null;
         return result;
@@ -304,12 +305,12 @@
     }
     recoveryPending = false;
     recoverySession = null;
-    var signedOut = client.auth.signOut();
-    // Forget the native Google account choice too (best effort; never blocks or fails Supabase sign-out).
+    // Invalidate an in-flight native Google sign-in and forget the account choice (best effort; the result of the
+    // Supabase sign-out is unchanged, and the next native sign-in waits for this clear).
     if (window.MobilePoker && typeof window.MobilePoker.clearGoogleCredential === 'function'){
-      Promise.resolve(signedOut).then(function(){ return window.MobilePoker.clearGoogleCredential(); }, function(){}).catch(function(){});
+      try { Promise.resolve(window.MobilePoker.clearGoogleCredential()).catch(function(){}); } catch (_err){}
     }
-    return signedOut;
+    return client.auth.signOut();
   }
 
   function computeInitials(name){

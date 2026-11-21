@@ -50,14 +50,21 @@
     // #1300: Production APK signs in with Google natively (Credential Manager ID token), never via a browser callback.
     nativeGoogle: bound.channel === 'production',
     signInWithGoogle: signInWithGoogle,
+    // Explicit sign-out: invalidate any in-flight native sign-in and forget the account choice. The next native
+    // sign-in waits until this clear has finished.
     clearGoogleCredential: function(){
+      googleGeneration++;
       var cap2 = window.Capacitor;
       var native = cap2 && cap2.Plugins && cap2.Plugins.PokerGoogleSignIn;
       if (bound.channel !== 'production' || !native) return Promise.resolve(false);
-      return Promise.resolve(native.clearCredential()).then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); return false; });
+      pendingClear = Promise.resolve().then(function(){ return native.clearCredential(); })
+        .then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); return false; });
+      return pendingClear;
     }
   };
   var googleSigningIn = false;
+  var googleGeneration = 0;
+  var pendingClear = Promise.resolve(true);
   function nonceHex(bytes){
     return Array.prototype.map.call(new Uint8Array(bytes), function(b){ return (b < 16 ? '0' : '') + b.toString(16); }).join('');
   }
@@ -67,7 +74,10 @@
     if (googleSigningIn) throw new Error('google_in_progress');
     if (!client || !client.auth || typeof client.auth.signInWithIdToken !== 'function') throw new Error('google_unavailable');
     googleSigningIn = true;
+    var generation = googleGeneration;
     try {
+      await pendingClear;
+      if (generation !== googleGeneration) throw new Error('google_canceled');
       var native = plugin('PokerGoogleSignIn');
       var raw = nonceHex(window.crypto.getRandomValues(new Uint8Array(32)));
       var hashed = nonceHex(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw)));
@@ -80,7 +90,14 @@
         throw new Error('google_failed');
       }
       if (!credential || typeof credential.idToken !== 'string' || !credential.idToken) throw new Error('google_failed');
+      // A sign-out while the picker was open discards its result.
+      if (generation !== googleGeneration) throw new Error('google_canceled');
       var result = await client.auth.signInWithIdToken({ provider: 'google', token: credential.idToken, nonce: raw });
+      if (generation !== googleGeneration){
+        // Sign-out happened during the token exchange: do not leave a session behind.
+        await Promise.resolve().then(function(){ return client.auth.signOut(); }).catch(function(){});
+        throw new Error('google_canceled');
+      }
       if (!result || result.error || !result.data || !result.data.session) throw new Error('google_failed');
       return result;
     } catch (err){

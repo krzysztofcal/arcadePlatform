@@ -589,4 +589,42 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   await www.auth.signInWithGoogle();
   assert.equal(www.oauthCalls.length, 1, 'WWW keeps browser OAuth');
   assert.equal(www.idCalls.length, 0);
+  // GOOGLE-03: nativeGoogle without the native method never falls back to the browser callback.
+  const broken = loadAuth({ nativeGoogle: true });
+  await assert.rejects(broken.auth.signInWithGoogle(), /google_unavailable/);
+  assert.equal(broken.oauthCalls.length, 0);
+
+  const until = async check => { for (let i = 0; i < 100 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 2)); assert.ok(check()); };
+  // GOOGLE-01a: sign-out while the picker is open discards its result.
+  let openPicker;
+  const pickerBoot = boot(prodConfig, { signIn: () => new Promise(resolve => { openPicker = resolve; }), clearCredential: async () => {} });
+  const pickerExchange = [];
+  const pickerAttempt = pickerBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async a => { pickerExchange.push(a); return { data: { session: {} } }; }, signOut: async () => ({}) } });
+  await until(() => openPicker);
+  await pickerBoot.window.MobilePoker.clearGoogleCredential();
+  openPicker({ idToken: 'secret-id-token' });
+  await assert.rejects(pickerAttempt, /google_canceled/);
+  assert.equal(pickerExchange.length, 0);
+  // GOOGLE-01b: sign-out during the token exchange ends with a final Supabase sign-out.
+  let finishExchange; const lateSignOuts = [];
+  const exchangeBoot = boot(prodConfig, { signIn: async () => ({ idToken: 'secret-id-token' }), clearCredential: async () => {} });
+  const exchangeAttempt = exchangeBoot.window.MobilePoker.signInWithGoogle({ auth: {
+    signInWithIdToken: () => new Promise(resolve => { finishExchange = () => resolve({ data: { session: {} } }); }),
+    signOut: async () => { lateSignOuts.push(1); return {}; } } });
+  await until(() => finishExchange);
+  await exchangeBoot.window.MobilePoker.clearGoogleCredential();
+  finishExchange();
+  await assert.rejects(exchangeAttempt, /google_canceled/);
+  assert.equal(lateSignOuts.length, 1, 'no session survives a sign-out during the exchange');
+  // GOOGLE-02: the next native sign-in waits until the credential-state clear has finished.
+  let finishClear; let pickerCalls = 0;
+  const clearBoot = boot(prodConfig, { signIn: async () => { pickerCalls++; return { idToken: 'secret-id-token' }; }, clearCredential: () => new Promise(resolve => { finishClear = resolve; }) });
+  clearBoot.window.MobilePoker.clearGoogleCredential();
+  const afterClear = clearBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => finishClear);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(pickerCalls, 0, 'picker stays closed while the previous account is being cleared');
+  finishClear();
+  await afterClear;
+  assert.equal(pickerCalls, 1);
 });
