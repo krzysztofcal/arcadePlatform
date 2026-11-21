@@ -88,7 +88,7 @@
       if (pendingCode) exchanging = true;
       app.addListener('appUrlOpen', function(event){ setTimeout(function(){ callback(event.url); }, 0); });
       if (pendingCode) setTimeout(function(){ exchanging = false; callback(bound.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
-      else app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
+      else app.getLaunchUrl().then(function(result){ if (result && result.url) setTimeout(function(){ callback(result.url); }, 0); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
         if (window.PokerOffline && window.PokerOffline.cancelDialog && window.PokerOffline.cancelDialog()) return;
         var dialog = document.querySelector('dialog[open]');

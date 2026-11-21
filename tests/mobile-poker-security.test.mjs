@@ -436,6 +436,16 @@ test('pending handoff code starts before an appUrlOpen delivered at listener reg
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(exchanged, ['later-2'], 'a callback delivered during boot waits for the shared client');
   assert.equal(store.get('mobilePokerConsumedAuthCode'), 'later-2');
+
+  // Variant (T2A-09): nothing pending and an older launch URL resolves at once; the callback delivered
+  // during registration still starts first.
+  store.clear();
+  exchanged.length = 0;
+  window.Capacitor.Plugins.App.getLaunchUrl = async () => ({ url: 'https://play.kcswh.pl/app/auth/callback?code=older-0' });
+  vm.runInNewContext(source, { window, document: { addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; }, getElementById: () => node }, URL, Event, navigator: { onLine: true }, sessionStorage, setTimeout });
+  ready();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(exchanged[0], 'later-2', 'the fresh callback is exchanged before an older launch URL');
 });
 
 test('js/api-url resolves netlify functions per channel and fails safely on invalid config', async () => {
