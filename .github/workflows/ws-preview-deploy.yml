@@ -102,9 +102,11 @@ jobs:
           XP_REDIS_VERSION: ${{ inputs.xpRedisVersion }}
         run: |
           set -euo pipefail
-          # Keep the runner's Actions runtime token and command files outside the build.
+          # Keep the runner's Git metadata and credentials outside the build.
+          build_tree="$(mktemp -d "$RUNNER_TEMP/ws-preview-build.XXXXXXXX")"
+          git archive HEAD | tar -xf - -C "$build_tree"
           docker run --rm -i --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
-            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$build_tree:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env HOME=/tmp --env PREVIEW_ARTIFACT_DIR --env PREVIEW_ARTIFACT_FILE \
             --env PREVIEW_STAGE_DIR --env PREVIEW_STAGE_WS_DIR --env RELEASE_SHA --env DEPLOY_REF \
             --env RELEASE_ENVIRONMENT --env XP_REDIS_VERSION node:20-bookworm bash -s <<'BUILD'
@@ -201,18 +203,18 @@ jobs:
             -C "$PREVIEW_STAGE_DIR" \
             .
           BUILD
-          test ! -L "$GITHUB_WORKSPACE/.artifacts"
-          test ! -L "$PREVIEW_ARTIFACT_DIR"
-          test ! -L "$PREVIEW_ARTIFACT_FILE"
-          test -f "$PREVIEW_ARTIFACT_FILE"
+          test ! -L "$build_tree/.artifacts"
+          test ! -L "$build_tree/.artifacts/ws-preview"
+          archive="$build_tree/.artifacts/ws-preview/ws-preview-dist.tgz"
+          test ! -L "$archive" && test -f "$archive" || exit 1
+          install -m 0644 "$archive" "$RUNNER_TEMP/ws-preview-dist.tgz"
 
       - name: Store preview deployment artifact
         uses: actions/upload-artifact@v4
         with:
           name: ws-preview-dist
-          path: ${{ env.PREVIEW_ARTIFACT_FILE }}
+          path: ${{ runner.temp }}/ws-preview-dist.tgz
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 1
 
   deploy:

@@ -92,11 +92,13 @@ test("ws preview validates the workflow ref and builds the exact app SHA away fr
   assert.match(buildSection, /test "\$\(git rev-parse HEAD\)" = "\$DEPLOY_REF"/);
   assert.doesNotMatch(buildSection, /^    environment:|secrets\./m);
   assert.match(buildSection, /docker run --rm -i --user .* --cap-drop ALL --security-opt no-new-privileges/);
-  assert.match(buildSection, /--volume "\$GITHUB_WORKSPACE:\$GITHUB_WORKSPACE"/);
+  assert.match(buildSection, /git archive HEAD \| tar -xf - -C "\$build_tree"/);
+  assert.match(buildSection, /--volume "\$build_tree:\$GITHUB_WORKSPACE"/);
   assert.doesNotMatch(buildSection, /ACTIONS_RUNTIME_TOKEN|GITHUB_TOKEN|docker\.sock|--privileged/);
-  assert.match(buildSection, /test ! -L "\$PREVIEW_ARTIFACT_FILE"/);
+  assert.match(buildSection, /test ! -L "\$archive" && test -f "\$archive"/);
+  assert.match(buildSection, /install -m 0644 "\$archive" "\$RUNNER_TEMP\/ws-preview-dist\.tgz"/);
   const upload = stepBlock(buildSection, "Store preview deployment artifact");
-  assert.match(upload, /name: ws-preview-dist\n\s+path: \$\{\{ env\.PREVIEW_ARTIFACT_FILE \}\}/);
+  assert.match(upload, /name: ws-preview-dist\n\s+path: \$\{\{ runner\.temp \}\}\/ws-preview-dist\.tgz/);
   assert.match(buildSection, /PREVIEW_ARTIFACT_FILE: .*\/\.artifacts\/ws-preview\/ws-preview-dist\.tgz/);
   assert.match(deploySection, /needs: build/);
   const download = stepBlock(deploySection, "Download preview deployment artifact");

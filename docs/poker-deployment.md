@@ -279,8 +279,9 @@ or missing evidence block the run. The application SHA is an explicit input,
 while the branch rule applies to the workflow definition.
 
 Only `deploy` uses the Environment and SSH secrets. The build runs on a separate
-runner. Application code executes in a container with only the checkout mounted
-and no runner credentials, then the job sends the packaged artifact to `deploy`. The deploy replaces and
+runner. Application code executes in a container with a copy of the tracked files and
+no Git metadata or runner credentials. The runner transfers only the packaged
+artifact to `deploy`. The deploy replaces and
 restarts the shared Preview runtime, which can interrupt players. Artifact code
 runs with the existing Preview deploy identity during VPS validation and with
 the runtime identity after restart. Only approve reviewed application SHAs.
