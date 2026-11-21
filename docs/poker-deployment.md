@@ -224,37 +224,37 @@ expecting graceful retirement. Existing tables keep their persisted stakes and
 capacity; replacements use the new construction values.
 Repo-side Caddy ownership is unified: `infra/vps/Caddyfile` is the single source of truth for both production and preview WS routing, so any Caddy change for either host must be made in that file.
 
-### Dispatch a preview deploy for a selected ref
+### Dispatch a preview deploy for an approved SHA
 
-Run the workflow from GitHub CLI and pass the target ref explicitly:
+OWNER can dispatch directly. The agent requires explicit OWNER GO in the
+conversation for the exact application SHA and uses the existing GitHub App.
+The App path defaults to off. After the workflow reaches `main`, OWNER can
+separately enable it with the repository variable
+`WS_PREVIEW_AGENT_DEPLOY_ENABLED=true`. The existing `WS_RELEASE_AGENT` must
+name `arcade-code-agent[bot]`. Unsetting the Preview flag disables App dispatch
+eligibility for subsequent jobs. It does not cancel an already running deploy.
 
-```sh
-gh workflow run ws-preview-deploy.yml --ref main -f ref=<branch-or-sha>
-```
-
-From Termux, trigger the current poker-avatar PR and wait for its result with this complete command (requires an authenticated GitHub CLI with Actions write permission):
-
-```sh
-REPO=krzysztofcal/arcadePlatform; DEPLOY_REF=agent/plan-poker-profile-avatars; gh workflow run ws-preview-deploy.yml --repo "$REPO" --ref main -f ref="$DEPLOY_REF" && sleep 3 && RUN_ID="$(gh run list --repo "$REPO" --workflow 'WS Preview Deploy' --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')" && gh run watch --repo "$REPO" "$RUN_ID" --exit-status
-```
-
-If `gh` returns `403 Resource not accessible by personal access token`, re-authenticate in Termux with an account/token allowed to run Actions:
+For OWNER use authenticated `gh`. For the agent use the existing App CLI:
 
 ```sh
-gh auth login --hostname github.com --git-protocol https --web
+GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh /home/copilot/.arcade-code-agent/bin/gh workflow run ws-preview-deploy.yml --repo krzysztofcal/arcadePlatform --ref main -f ref="$APP_SHA" -f xpRedisVersion=3
 ```
 
-Examples:
+Set `APP_SHA` to the approved 40-character application commit. The workflow
+definition comes from `main`; only first-attempt manual dispatches are eligible.
+Verify the run against its workflow, dispatch time, title (application SHA and
+actor), `actor`, `triggering_actor`, and attempt. Wait for the validate and
+deploy jobs, then confirm the deployed SHA and health in the job output. Report
+the run ID, URL, application SHA and outcome. An ambiguous or failed run means
+STOP. A fresh dispatch requires fresh OWNER GO.
 
-```sh
-gh workflow run ws-preview-deploy.yml --ref main -f ref=feature/ws-preview-health-fix
-gh workflow run ws-preview-deploy.yml --ref main -f ref=3b6f2d4
-```
-
-- `--ref main` selects the branch that contains `.github/workflows/ws-preview-deploy.yml`.
-- `-f ref=...` is the application ref that the workflow checks out and deploys.
-- The workflow remains `workflow_dispatch`-only and is not wired into the existing WS PR or production deploy workflows.
-- The workflow does not write `/etc/caddy/Caddyfile`; infra applies Caddy and uses `infra/vps/Caddyfile` for both `ws.kcswh.pl` and `ws-preview.kcswh.pl`.
+The `ws-preview` GitHub Environment currently restricts deployments to `main`
+and has no required reviewers. GitHub checks the App identity and activation
+flag. The agent enforces conversation approval before dispatch. Once enabled,
+a dispatch made directly with valid App credentials can pass the workflow
+without that conversation check. This deploy replaces the shared Preview WS
+runtime and restarts its service, which can interrupt players. The workflow
+leaves Caddy configuration to the existing infra workflow.
 
 ### Preview runtime contract
 

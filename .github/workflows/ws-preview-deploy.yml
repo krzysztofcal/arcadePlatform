@@ -1,4 +1,5 @@
 name: WS Preview Deploy
+run-name: WS Preview Deploy ${{ inputs.ref }} (requested by ${{ github.actor }})
 
 on:
   workflow_dispatch:
@@ -21,7 +22,11 @@ concurrency:
 
 jobs:
   validate:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'
+      && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner)
+      || (vars.WS_PREVIEW_AGENT_DEPLOY_ENABLED == 'true' && vars.WS_RELEASE_AGENT == 'arcade-code-agent[bot]'
+      && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
     environment: ws-preview
     runs-on: ubuntu-latest
     permissions:
@@ -56,7 +61,11 @@ jobs:
           node --test ws-tests/ws-preview-deploy.remote-shape.guard.test.mjs
 
   deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'
+      && ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner)
+      || (vars.WS_PREVIEW_AGENT_DEPLOY_ENABLED == 'true' && vars.WS_RELEASE_AGENT == 'arcade-code-agent[bot]'
+      && github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}
     needs: validate
     environment: ws-preview
     runs-on: ubuntu-latest

@@ -63,11 +63,19 @@ test("ws preview deploy workflow keeps the preview-only manual contract", () => 
   assert.doesNotMatch(validateSection, /PREVIEW_RELEASES_DIR/);
 });
 
-test("ws preview secret-using jobs require owner main dispatch", () => {
+test("ws preview secret-using jobs allow only a first main dispatch by OWNER or the enabled App", () => {
   const text = workflowText();
-  const guard = "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}";
-  for (const job of ["validate", "deploy"]) assert.ok(text.includes(`  ${job}:\n${guard}\n`), `${job} must require owner/owner main`);
-  assert.doesNotMatch(text, /WS_RELEASE_AGENT/);
+  const guard = [
+    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1'",
+    "&& ((github.actor == github.repository_owner && github.triggering_actor == github.repository_owner)",
+    "|| (vars.WS_PREVIEW_AGENT_DEPLOY_ENABLED == 'true' && vars.WS_RELEASE_AGENT == 'arcade-code-agent[bot]'",
+    "&& github.actor == vars.WS_RELEASE_AGENT && github.triggering_actor == vars.WS_RELEASE_AGENT)) }}"
+  ].join(" ");
+  for (const job of ["validate", "deploy"]) {
+    const condition = text.match(new RegExp(`^  ${job}:\\n    if: >-\\n((?: {6}[^\\n]+\\n)+)`, "m"));
+    assert.ok(condition, `${job} requires an authorization condition`);
+    assert.equal(condition[1].trim().replace(/\s+/g, " "), guard);
+  }
 });
 
 test("ws preview deploy validates workflow files from workflow ref and builds app from inputs.ref", () => {
