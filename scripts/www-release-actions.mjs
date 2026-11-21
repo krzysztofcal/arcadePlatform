@@ -286,17 +286,32 @@ export async function resolveCandidate(runId, sha, { read = gh, download = downl
   if (runId) return loadCandidate(runId, read, download, now()); // Keep explicit-ID recovery/discard semantics.
   if (!SHA.test(sha || '')) fail('invalid_main_sha');
   // At most five successful trusted runs in total across both identities, never an arbitrary latest deploy.
-  const runs = [];
+  const byId = new Map();
   for (const actor of ['krzysztofcal', AGENT]) {
     const result = read(`actions/workflows/www-candidate.yml/runs?branch=main&event=workflow_dispatch&status=success&actor=${encodeURIComponent(actor)}&head_sha=${sha}&per_page=5`);
-    if (!Array.isArray(result.workflow_runs) || !Number.isInteger(result.total_count) || result.total_count > 5
-      || result.total_count !== result.workflow_runs.length || runs.length + result.total_count > 5) fail('candidate_search_incomplete');
-    if (result.workflow_runs.some(r => r.actor?.login !== actor)) fail('candidate_search_actor_mismatch');
-    runs.push(...result.workflow_runs);
+    if (!Array.isArray(result?.workflow_runs) || !Number.isInteger(result?.total_count) || result.total_count > 5
+      || result.total_count !== result.workflow_runs.length) fail('candidate_search_incomplete');
+    // GitHub's actor filter is not an exact run-actor match; both trusted identities are permitted in either query response.
+    if (result.workflow_runs.some(r => !['krzysztofcal', AGENT].includes(r.actor?.login))) fail('candidate_search_actor_mismatch');
+    const querySeen = new Set();
+    for (const r of result.workflow_runs) {
+      const id = String(r.id);
+      if (querySeen.has(id)) fail('candidate_search_incomplete');
+      querySeen.add(id);
+      const existing = byId.get(id);
+      if (existing) {
+        if (existing.actor?.login !== r.actor?.login
+          || existing.triggering_actor?.login !== r.triggering_actor?.login
+          || existing.head_sha !== r.head_sha
+          || String(existing.run_attempt) !== String(r.run_attempt)) fail('candidate_search_incomplete');
+      } else {
+        byId.set(id, r);
+      }
+    }
   }
-  if (new Set(runs.map(r => String(r.id))).size !== runs.length) fail('candidate_search_incomplete');
+  if (byId.size > 5) fail('candidate_search_incomplete');
   const eligible = [];
-  for (const run of runs) {
+  for (const run of byId.values()) {
     if (Number(run.run_attempt) > 1) continue;
     trustedCandidateRun(run, 'krzysztofcal');
     if (run.head_sha !== sha) fail('candidate_search_sha_mismatch');
