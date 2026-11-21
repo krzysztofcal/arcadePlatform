@@ -92,7 +92,7 @@ test('native PKCE callback uses injected plugins and preserves recovery document
     supabaseClient: { auth: { startAutoRefresh() { refreshStarts++; }, stopAutoRefresh() {}, exchangeCodeForSession: async code => { exchanged = code; exchangeCount++; return { data: { session: {} } }; } } },
     location: { pathname: '/account.html', replace() { navigated = true; } }, addEventListener(name, fn) { pageListeners[name] = fn; }, dispatchEvent(event) { events.push(event.type); }
   };
-  vm.runInNewContext(source, { window, document, URL, Event, navigator: connectivity, sessionStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { storage.set(key, value); }, removeItem(key) { storage.delete(key); } } });
+  vm.runInNewContext(source, { window, document, URL, Event, navigator: connectivity, sessionStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { storage.set(key, value); }, removeItem(key) { storage.delete(key); } }, setTimeout });
   ready();
   assert.equal(node.textContent, '', 'normal boot has no developer/connectivity status');
   if (pageListeners.offline) pageListeners.offline();
@@ -107,11 +107,11 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   assert.deepEqual(events, ['online']);
   await listeners.appUrlOpen({ url: 'arcadepoker-stage://auth/callback?code=recovery-code' });
   // Listener deliberately schedules asynchronous completion; drain promise chain.
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(exchanged, 'recovery-code');
   assert.equal(navigated, false, 'do not discard shared PASSWORD_RECOVERY state');
   await listeners.appUrlOpen({ url: 'arcadepoker-stage://auth/callback?code=recovery-code' });
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(exchangeCount, 1, 'ignore a repeated launch callback after successful consumption');
   // Table-only lifecycle routing, independent of Auth availability; no layout assertions.
   barCalls.length = 0;
@@ -128,7 +128,7 @@ test('native PKCE callback uses injected plugins and preserves recovery document
   ready();
   assert.deepEqual(barCalls, ['hide','show','hide','show','hide','show']);
   await listeners.appUrlOpen({ url: 'https://evil.test/?code=invalid' });
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 5));
   assert.match(node.textContent, /Sign-in return failed/);
   assert.equal(node.hidden, false);
   window.Capacitor.Plugins = {};
@@ -194,7 +194,8 @@ test('production native PKCE callback uses HTTPS App Link, rejects Stage scheme,
       getItem(key) { return storage.get(key) || null; },
       setItem(key, value) { storage.set(key, value); },
       removeItem(key) { storage.delete(key); }
-    }
+    },
+    setTimeout
   });
 
   ready();
@@ -236,7 +237,7 @@ test('production native PKCE callback uses HTTPS App Link, rejects Stage scheme,
   // HTTPS callback exchanges code
   const prodSecretCode = 'prod-auth-code-12345';
   await listeners.appUrlOpen({ url: `https://play.kcswh.pl/app/auth/callback?code=${prodSecretCode}` });
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(exchanged, prodSecretCode);
   assert.equal(exchangeCount, 1);
   assert.equal(closedBrowser, true);
@@ -246,7 +247,7 @@ test('production native PKCE callback uses HTTPS App Link, rejects Stage scheme,
   const strayStageCode = 'stray-stage-code-67890';
   node.textContent = '';
   await listeners.appUrlOpen({ url: `arcadepoker-stage://auth/callback?code=${strayStageCode}` });
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(exchangeCount, 1, 'rejected callback must not exchange code');
   assert.match(node.textContent, /Sign-in return failed or expired/);
   assert.equal(node.textContent.includes(strayStageCode), false, 'notice text must never contain auth code');
@@ -255,7 +256,7 @@ test('production native PKCE callback uses HTTPS App Link, rejects Stage scheme,
   const leakCode = 'leak-code-99999';
   node.textContent = '';
   await listeners.appUrlOpen({ url: `https://play.kcswh.pl/app/auth/callback?error=access_denied&code=${leakCode}` });
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(exchangeCount, 1, 'error callback must not exchange code');
   assert.match(node.textContent, /Sign-in return failed or expired/);
   assert.equal(node.textContent.includes(leakCode), false, 'notice text must never contain code');
@@ -330,7 +331,7 @@ test('production runtime recovery handoff from non-account page to account.html'
 
   // Trigger appUrlOpen with recovery callback while on lobby
   await listeners1.appUrlOpen({ url: 'https://play.kcswh.pl/app/auth/callback?code=rec-1' });
-  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 5));
 
   assert.equal(sessionStorage.getItem('mobilePokerAuthCode'), 'rec-1');
   assert.equal(replacedUrl1, '/account.html');
@@ -422,6 +423,19 @@ test('pending handoff code starts before an appUrlOpen delivered at listener reg
   assert.equal(store.get('mobilePokerAuthCode'), undefined);
   assert.equal(store.get('mobilePokerConsumedAuthCode'), 'handoff-1');
   assert.equal(node.textContent.includes('handoff-1') || node.textContent.includes('later-2'), false);
+
+  // Variant (T2A-08): nothing pending, the same synchronous delivery, and the shared client is created
+  // only after the runtime boot (as supabaseClient.js does later in DOMContentLoaded).
+  store.clear();
+  exchanged.length = 0;
+  const client = window.supabaseClient;
+  window.supabaseClient = null;
+  vm.runInNewContext(source, { window, document: { addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; }, getElementById: () => node }, URL, Event, navigator: { onLine: true }, sessionStorage, setTimeout });
+  ready();
+  window.supabaseClient = client;
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(exchanged, ['later-2'], 'a callback delivered during boot waits for the shared client');
+  assert.equal(store.get('mobilePokerConsumedAuthCode'), 'later-2');
 });
 
 test('js/api-url resolves netlify functions per channel and fails safely on invalid config', async () => {

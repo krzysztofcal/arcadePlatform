@@ -83,10 +83,10 @@
       syncSystemBars(true);
       var pendingCode = sessionStorage.getItem('mobilePokerAuthCode');
       sessionStorage.removeItem('mobilePokerAuthCode');
-      // A code handed over from another page wins: hold the existing guard until it starts (the shared
-      // Supabase client is created after this listener), so later callbacks cannot pre-empt it.
+      // The shared Supabase client is created after this listener, so callbacks start on a later task.
+      // A code handed over from another page wins: it holds the existing guard until its exchange starts.
       if (pendingCode) exchanging = true;
-      app.addListener('appUrlOpen', function(event){ callback(event.url); });
+      app.addListener('appUrlOpen', function(event){ setTimeout(function(){ callback(event.url); }, 0); });
       if (pendingCode) setTimeout(function(){ exchanging = false; callback(bound.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
       else app.getLaunchUrl().then(function(result){ if (result && result.url) callback(result.url); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
