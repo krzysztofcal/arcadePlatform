@@ -640,6 +640,24 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   clears11[1]();
   await next11;
   assert.equal(picker11, 2);
+  // GOOGLE-12: the same holds when the invalidated picker ends with an error instead of a result.
+  let rejectPicker12; const clears12 = []; let picker12 = 0;
+  const boot12 = boot(prodConfig, { signIn: () => { picker12++; return picker12 === 1 ? new Promise((_, reject) => { rejectPicker12 = reject; }) : Promise.resolve({ idToken: 'secret-id-token' }); }, clearCredential: () => new Promise(resolve => { clears12.push(resolve); }) });
+  const attempt12 = boot12.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => rejectPicker12);
+  const firstClear12 = boot12.window.MobilePoker.clearGoogleCredential();
+  await until(() => clears12.length === 1);
+  clears12[0]();
+  await firstClear12;
+  rejectPicker12(Object.assign(new Error('native'), { code: 'failed' }));
+  await assert.rejects(attempt12, /google_canceled/);
+  await until(() => clears12.length === 2);
+  const next12 = boot12.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(picker12, 1, 'next sign-in waits for the clear after the late picker error');
+  clears12[1]();
+  await next12;
+  assert.equal(picker12, 2);
   // GOOGLE-09: a sign-out queued as the very next microtask after the picker resolves still prevents the exchange.
   let resolvePicker09; const exchange09 = [];
   const boot09 = boot(prodConfig, { signIn: () => new Promise(resolve => { resolvePicker09 = resolve; }), clearCredential: async () => {} });

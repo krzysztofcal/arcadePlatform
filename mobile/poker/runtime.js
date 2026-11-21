@@ -89,20 +89,22 @@
       var hashed = nonceHex(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw)));
       var credential;
       if (generation !== googleGeneration) throw new Error('google_canceled');
+      var pickerError = null;
       try { credential = await native.signIn({ nonce: hashed }); }
-      catch (err){
-        var code = err && err.code;
+      catch (err){ pickerError = err || {}; }
+      // A sign-out while the picker was open discards its outcome (result or error), and clears again in case the
+      // provider stored this late account choice after the sign-out's clear had finished; the next sign-in waits.
+      if (generation !== googleGeneration){
+        queueClear(native);
+        throw new Error('google_canceled');
+      }
+      if (pickerError){
+        var code = pickerError.code;
         if (code === 'canceled') throw new Error('google_canceled');
         if (code === 'no_credential' || code === 'unavailable') throw new Error('google_unavailable');
         throw new Error('google_failed');
       }
       if (!credential || typeof credential.idToken !== 'string' || !credential.idToken) throw new Error('google_failed');
-      // A sign-out while the picker was open discards its result, and clears again in case the provider stored
-      // this late account choice after the sign-out's clear had finished; the next sign-in waits for it.
-      if (generation !== googleGeneration){
-        queueClear(native);
-        throw new Error('google_canceled');
-      }
       var exchange = Promise.resolve().then(function(){
         // Re-check right before the exchange: a sign-out queued just after the picker resolved must win.
         if (generation !== googleGeneration) throw new Error('google_canceled');
