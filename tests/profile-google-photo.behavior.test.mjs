@@ -638,3 +638,41 @@ test('a missing moderation table keeps select and owner preview fail-closed with
  const env=await database();const id=await env.user();const net=network(env);await photo.importGooglePhoto(id,input(),net.deps);await env.db.exec('drop table private.ugc_avatar_holds');
  const calls=net.calls.length;await assert.rejects(photo.selectGooglePhoto(id,{action:'select',expectedRevision:2},net.deps),{code:'photo_import_unavailable'});await assert.rejects(photo.ownerGooglePhotoPreview(id,net.deps),{code:'photo_import_unavailable'});assert.equal(net.calls.length,calls);
 });
+
+test("g2 keeps WWW visibility and can confirm g3 for the same copy without reimport", async () => {
+  const env = await database();
+  const user = await env.user();
+  const net = network(env);
+  await photo.importGooglePhoto(user, input(), net.deps);
+  const original = await consentRow(env, user);
+  const g3 = photo.GOOGLE_PHOTO_TABLE_NOTICE_VERSION;
+  const upgraded = { ...net.deps, env: { ...net.deps.env, POKER_TABLE_PHOTO_ENABLED: "1" } };
+  const { createPokerTablePhotoHandler } = await import("../netlify/functions/poker-table-photo.mjs");
+  await env.executeSql("create table private.user_blocks(blocker_user_id uuid, blocked_user_id uuid)");
+  const tableId = randomUUID();
+  const membership = { tableId, viewerUserId: user, targetUserId: user, viewerSeatNo: 1, targetSeatNo: 1, stateVersion: 1 };
+  const table = createPokerTablePhotoHandler({
+    env: upgraded.env, verify: async () => ({ valid: true, userId: user }),
+    sql: env.executeSql, membership: async () => membership, allow: async () => true,
+    sign: async keys => new Map(keys.map(key => [key, "https://test.supabase.co/photo"]))
+  });
+  const read = () => table({ httpMethod: "GET", headers: { authorization: "Bearer synthetic" }, queryStringParameters: { tableId, targetUserId: user } });
+  assert.equal((await publishedPhotoKeys([user], net.deps)).get(user), original.imported_avatar_key);
+  assert.equal((await read()).statusCode, 404);
+  const grant = { action: "upgrade-consent", consent: true, noticeVersion: g3, expectedConsentRevision: original.consent_revision };
+  await assert.rejects(photo.importGooglePhoto(user, input({ noticeVersion: g3 }), upgraded), { code: "notice_version_changed" });
+  await assert.rejects(photo.upgradeGooglePhotoConsent(user, { ...grant, expectedConsentRevision: 0 }, upgraded), { code: "avatar_revision_conflict" });
+  const calls = net.calls.length;
+  await photo.upgradeGooglePhotoConsent(user, grant, upgraded);
+  assert.equal(net.calls.length, calls);
+  assert.equal((await consentRow(env, user)).imported_avatar_key, original.imported_avatar_key);
+  assert.equal((await read()).statusCode, 200);
+  await env.executeSql("update public.user_profiles set google_photo_suppressed = true where user_id=$1", [user]);
+  assert.equal((await read()).statusCode, 404);
+  assert.equal((await publishedPhotoKeys([user], net.deps)).size, 0);
+  await env.executeSql("update public.user_profiles set google_photo_suppressed = false where user_id=$1", [user]);
+  assert.equal((await read()).statusCode, 200);
+  await photo.withdrawGooglePhoto(user, upgraded);
+  assert.equal((await read()).statusCode, 404);
+  assert.equal((await publishedPhotoKeys([user], net.deps)).size, 0);
+});

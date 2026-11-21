@@ -3735,7 +3735,7 @@
       return !!(token && token === currentAccessToken && room === state.tableId && state.wsReady
         && !state.reconnectGate && isSeatedAtLiveTable() && !isClosedTableStatus(state.tableStatus)
         && viewer && state.seats.some(function(entry){ return entry.userId === state.currentUserId && entry.seatNo === viewer.seatNo && !/LEFT|INACTIVE|EMPTY/.test(entry.status || ''); }) && seat && !seat.isBot && seat.profile
-        && !ugcBlocked(seat.userId) && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''));
+        && seatAvatarSource(seat) !== 'blocked' && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''));
     }
     if (!eligible()) { clearSeatPhoto(avatar); return; }
     var key = [room, state.currentUserId, viewer.seatNo, seat.userId, seat.seatNo].join(':');

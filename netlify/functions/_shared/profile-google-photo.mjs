@@ -14,6 +14,12 @@ import { beginSql, executeSql } from "./supabase-admin.mjs";
 // - A moderator avatar hold (phase C) refuses the import; without the phase C table the import fails closed.
 export { googlePhotoEnabled };
 export const GOOGLE_PHOTO_NOTICE_VERSION = "2026-11-17-g2";
+export const GOOGLE_PHOTO_TABLE_NOTICE_VERSION = "2026-11-21-g3";
+
+function currentNotice(env) {
+  return env.POKER_TABLE_PHOTO_ENABLED === "1" ? GOOGLE_PHOTO_TABLE_NOTICE_VERSION : GOOGLE_PHOTO_NOTICE_VERSION;
+}
+
 const USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 const PHOTO_HOST_RE = /^lh[3-6]\.googleusercontent\.com$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -148,7 +154,7 @@ export async function googlePhotoStatus(userId, deps = {}) {
   const user = requireUser(userId);
   const runSql = deps.executeSql || executeSql;
   const [row] = await runSql(
-    `select c.decision, c.notice_version, c.granted_at, c.withdrawn_at, c.imported_avatar_key,
+    `select c.decision, c.notice_version, c.granted_at, c.withdrawn_at, c.imported_avatar_key, c.consent_revision,
             p.avatar_key, p.avatar_revision, p.google_photo_suppressed,
             exists(select 1 from private.profile_photo_pending_deletions d where d.user_id = $1) as pending_copy,
             exists(select 1 from auth.identities i where i.user_id = $1 and i.provider = 'google') as google_linked
@@ -160,7 +166,8 @@ export async function googlePhotoStatus(userId, deps = {}) {
   const iso = (value) => (value ? new Date(value).toISOString() : null);
   return {
     avatarRevision: row?.avatar_revision ? Number(row.avatar_revision) : null,
-    noticeVersion: GOOGLE_PHOTO_NOTICE_VERSION,
+    noticeVersion: currentNotice(deps.env || process.env),
+    consentRevision: row?.consent_revision ?? null,
     googleLinked: row?.google_linked === true,
     consent: row?.decision ? { decision: row.decision, noticeVersion: row.notice_version, grantedAt: iso(row.granted_at), withdrawnAt: iso(row.withdrawn_at) } : null,
     photoInUse: row?.decision === "granted" && !!row.imported_avatar_key && row.imported_avatar_key === row.avatar_key && row.google_photo_suppressed === false,
@@ -240,12 +247,31 @@ export async function selectGooglePhoto(userId, input = {}, deps = {}) {
   return googlePhotoStatus(user, deps);
 }
 
+export async function upgradeGooglePhotoConsent(userId, input, deps = {}) {
+  const user = requireUser(userId);
+  const env = deps.env || process.env;
+  if (currentNotice(env) !== GOOGLE_PHOTO_TABLE_NOTICE_VERSION || !googlePhotoEnabled(env)) throw photoError("photo_import_unavailable");
+  if (input.consent !== true || input.noticeVersion !== GOOGLE_PHOTO_TABLE_NOTICE_VERSION
+    || !Number.isInteger(input.expectedConsentRevision) || Object.keys(input).length !== 4) throw photoError("invalid_request", 400);
+  await (deps.beginSql || beginSql)(async tx => {
+    const copy = await existingCopy(tx, user, deps);
+    if (copy.consentRevision !== input.expectedConsentRevision) throw photoError("avatar_revision_conflict", 409);
+    const rows = await tx.unsafe(`update private.profile_photo_consents
+      set notice_version = $2, consent_revision = consent_revision + 1, granted_at = now()
+      where user_id = $1 and notice_version = $3 and decision = 'granted' and imported_avatar_key = $4
+      returning user_id`, [user, GOOGLE_PHOTO_TABLE_NOTICE_VERSION, GOOGLE_PHOTO_NOTICE_VERSION, copy.key]);
+    if (!rows.length) throw photoError("notice_version_changed", 409);
+  });
+  return googlePhotoStatus(user, deps);
+}
+
 export async function importGooglePhoto(userId, input = {}, deps = {}) {
   const user = requireUser(userId);
-  const allowed = new Set(["action", "consent", "noticeVersion", "providerToken"]);
+  const allowed = new Set(["action", "consent", "noticeVersion", "providerToken", "scope"]);
   if (!input || typeof input !== "object" || Object.keys(input).some((key) => !allowed.has(key))) throw photoError("invalid_request", 400);
   if (input.consent !== true) throw photoError("consent_required", 400);
-  if (input.noticeVersion !== GOOGLE_PHOTO_NOTICE_VERSION) throw photoError("notice_version_changed");
+  if (input.noticeVersion !== currentNotice(deps.env || process.env)) throw photoError("notice_version_changed");
+  if (input.noticeVersion === GOOGLE_PHOTO_TABLE_NOTICE_VERSION && input.scope !== "web-leaderboard-poker") throw photoError("notice_version_changed");
   if (typeof input.providerToken !== "string" || !/^[\x21-\x7e]{16,4096}$/.test(input.providerToken)) throw photoError("google_proof_required", 400);
   const env = deps.env || process.env;
   if (env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED !== '1' && !accountDeletionEnabled(env)) throw photoError('avatar_tracking_unavailable',503);
@@ -300,7 +326,7 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
          on conflict (user_id) do update set notice_version = excluded.notice_version, decision = 'granted',
            consent_revision = private.profile_photo_consents.consent_revision + 1, granted_at = now(), withdrawn_at = null,
            imported_avatar_key = excluded.imported_avatar_key;`,
-        [user, GOOGLE_PHOTO_NOTICE_VERSION, key],
+        [user, input.noticeVersion, key],
       );
       await tx.unsafe("update public.user_profiles set avatar_key = $2, google_photo_suppressed = false, avatar_revision = avatar_revision + 1 where user_id = $1;", [user, key]);
       await tx.unsafe("delete from private.profile_photo_pending_deletions where user_id = $1 and avatar_key = $2;", [user, key]);

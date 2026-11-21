@@ -26,10 +26,10 @@ test("table photo signs only the WS participant's current, separately consented 
         return { ...query, viewerSeatNo: 1, targetSeatNo: subject === viewer ? 1 : scenario === "seat-changed" && projections === 2 ? 3 : 2, stateVersion: projections };
       },
       sql: async (_query, params) => {
-        assert.deepEqual(params.slice(0, 2), [viewer, subject]);
+        assert.deepEqual(params, [viewer, subject, "2026-11-21-g3"]);
         reads++;
         if (scenario === "no-consent" || scenario === "withdrawn" && reads === 2) return [];
-        return [{ avatar_key: key, consent_revision: 1, table_grant: "grant" }];
+        return [{ avatar_key: key, consent_revision: 1 }];
       },
       sign: async keys => {
         signed++;
@@ -44,28 +44,6 @@ test("table photo signs only the WS participant's current, separately consented 
     assert.equal(signed, ["ok", "own", "withdrawn", "seat-changed"].includes(scenario) ? 1 : 0, scenario);
     if (!allowed) assert.doesNotMatch(response.body, /signed/);
   }
-});
-
-test("table consent uses only the authenticated owner's account and never grants from g2 alone", async () => {
-  const calls = [];
-  const handler = createPokerTablePhotoHandler({
-    env: enabled,
-    verify: async () => ({ valid: true, userId: viewer }),
-    allow: async () => true,
-    sql: async (query, params) => {
-      calls.push({ query, params });
-      return query.startsWith("insert") ? [{ user_id: viewer }] : [{ available: true, granted: false }];
-    }
-  });
-  const post = body => handler({ httpMethod: "POST", headers: { authorization: "Bearer synthetic" }, body: JSON.stringify(body) });
-  assert.equal((await post({ action: "grant", noticeVersion: "2026-11-17-g2" })).statusCode, 400);
-  assert.equal((await post({ action: "grant", noticeVersion: "2026-11-21-p1", userId: target })).statusCode, 400);
-  assert.equal(calls.length, 0);
-  assert.equal((await post({ action: "grant", noticeVersion: "2026-11-21-p1" })).statusCode, 200);
-  assert.match(calls[0].query, /select c.user_id, c.imported_avatar_key/);
-  assert.equal((await post({ action: "withdraw" })).statusCode, 200);
-  assert.match(calls[2].query, /^delete from private.poker_table_photo_consents/);
-  assert.ok(calls.every(call => call.params[0] === viewer));
 });
 
 test("internal table photo client never accepts absent or malformed authorization", async () => {
@@ -84,24 +62,4 @@ test("internal table photo client never accepts absent or malformed authorizatio
   } });
   assert.equal(match.targetUserId, target);
   assert.equal(match.targetSeatNo, 2);
-});
-
-test("table permission is deleted with g2 withdrawal even if the same copy key is later reused", async () => {
-  const { PGlite } = await import("@electric-sql/pglite");
-  const { readFile } = await import("node:fs/promises");
-  const db = new PGlite();
-  try {
-    await db.exec(`create role anon; create role authenticated; create role service_role;
-      create schema private;
-      create table private.profile_photo_consents (user_id uuid primary key, decision text, imported_avatar_key text);`);
-    await db.exec(await readFile(new URL("../supabase/migrations/20261121120000_poker_table_photo_consent.sql", import.meta.url), "utf8"));
-    await db.query("insert into private.profile_photo_consents values ($1, 'granted', $2)", [viewer, key]);
-    await db.query("insert into private.poker_table_photo_consents (user_id, avatar_key, notice_version) values ($1, $2, '2026-11-21-p1')", [viewer, key]);
-    await db.query("update private.profile_photo_consents set decision = 'withdrawn' where user_id = $1", [viewer]);
-    await db.query("update private.profile_photo_consents set decision = 'granted' where user_id = $1", [viewer]);
-    const { rows } = await db.query("select user_id from private.poker_table_photo_consents");
-    assert.deepEqual(rows, []);
-  } finally {
-    await db.close();
-  }
 });

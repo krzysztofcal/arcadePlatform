@@ -112,7 +112,7 @@
 
   function render(next, needsProof, unresolvedState){
     status = next || null;
-    if(!status){photoState=unresolvedState||null;profileFailed=false;if(!owner)show('tablePhotoConsentPanel',false);}
+    if(!status){photoState=unresolvedState||null;profileFailed=false;}
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
     var consent = node('googlePhotoConsent');
     if (consent) consent.checked = false;
@@ -134,15 +134,33 @@
     }
     show('googlePhotoPanel', true);
     show('arcadeAvatarPhotoHint', true);
-    var offer = !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
-    show('googlePhotoOffer', offer && !needsProof);
+    var offer = !!status && !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
+    var upgrade = granted && stored && status.importEnabled !== false
+      && status.noticeVersion === '2026-11-21-g3' && status.consent.noticeVersion === '2026-11-17-g2'
+      && Number.isInteger(status.consentRevision);
+    show('googlePhotoOffer', upgrade || (offer && !needsProof));
+    var label = node('googlePhotoConsentText');
+    if (label && label.dataset) {
+      var useG3 = status && status.noticeVersion === '2026-11-21-g3';
+      var consentKey = useG3 ? 'googlePhotoConsentG3' : 'googlePhotoConsent';
+      if (!label.dataset.defaultText) label.dataset.defaultText = label.textContent;
+      label.dataset.i18n = consentKey;
+      label.textContent = t(consentKey, useG3
+        ? 'I agree to use my Google photo as my avatar in the web profile, leaderboard and for signed-in players seated at my Poker table. If needed, Arcade Hub imports a private copy. Links last up to 60 seconds. Anyone with a valid link can view or save the photo. I can withdraw consent, but saved copies cannot be recalled.'
+        : label.dataset.defaultText);
+    }
+    if (importButton && importButton.dataset) {
+      importButton.dataset.action = upgrade ? 'upgrade-consent' : 'import';
+      importButton.dataset.i18n = upgrade ? 'googlePhotoUpgrade' : 'googlePhotoImport';
+      importButton.textContent = upgrade ? t('googlePhotoUpgrade', 'Confirm use of my photo') : t('googlePhotoImport', 'Use my Google photo');
+    }
     show('googlePhotoReconnect', offer && !!needsProof);
     show('googlePhotoWithdraw', granted || stored || active);
     show('googlePhotoRetry', photoState==='unavailable'||profileFailed);
     if(photoState==='pending')setState(t('googlePhotoPreviewPending','Waiting for the Google photo preview…'));
     else if(photoState==='unavailable')setState(t('googlePhotoPreviewUnavailable','The Google photo preview is unavailable. Retry the read; no photo will be imported again.'));
     else if(profileFailed)setState(t('googlePhotoProfileRefreshFailed','Photo status was read, but the profile could not be refreshed. Retry the read.'));
-    else if (status.photoInUse === true) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
+    else if (active) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
     else if (!granted && stored) setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
     else if (granted) setState(t('googlePhotoNotInUse', 'Your copy is stored with consent. Choose Google in the avatar gallery and save to use it again.'));
     else setState(t('googlePhotoOffer', 'Optional: use your Google profile photo instead of an Arcade avatar.'));
@@ -179,10 +197,14 @@
     try {
       var result = action === 'withdraw'
         ? await request('POST', { action: 'withdraw' }, expectedUser, false)
-        : await request('POST', { action: 'import', consent: true, noticeVersion: status && status.noticeVersion }, expectedUser, true);
+        : action === 'upgrade-consent'
+          ? await request('POST', { action: action, consent: true, noticeVersion: status.noticeVersion, expectedConsentRevision: status.consentRevision }, expectedUser, false)
+          : await request('POST', Object.assign({ action: 'import', consent: true, noticeVersion: status && status.noticeVersion },
+            status && status.noticeVersion === '2026-11-21-g3' ? { scope: 'web-leaderboard-poker' } : {}), expectedUser, true);
       if (expectedGeneration !== generation) return;
       statusResolved=true;photoState=hasCopy(result)?'pending':null;render(result);
-      if (action !== 'withdraw' && result.photoInUse === true) setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
+      if (action === 'upgrade-consent') setState(t('googlePhotoUpgradeSaved', 'Photo consent updated.'));
+      else if (action !== 'withdraw' && result.photoInUse === true) setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
       else if (action === 'withdraw' && result && result.copyDeleted === true) setState(t('googlePhotoWithdrawn', 'Your Google photo is no longer used and our copy was deleted.'));
       else if (action === 'withdraw') setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
       if(action==='withdraw')clearPhotoPresentation();
@@ -292,11 +314,6 @@
   }
 
   async function readStatus(expectedUser,current){
-    var preferencePanel = node('tablePhotoConsentPanel');
-    if (preferencePanel && preferencePanel.dataset) {
-      preferencePanel.hidden = true;
-      tablePhotoPreference(expectedUser, current).catch(function(){});
-    }
     var previousStatus=status;
     statusResolved=false;
     if(!statusKnown||hasCopy(status)||photoState)photoState='pending';
@@ -350,48 +367,7 @@
     else await readStatus(owner,current);
   }
 
-  async function tablePhotoPreference(expectedUser, expectedGeneration, body){
-    var panel = node('tablePhotoConsentPanel');
-    if (!panel) return;
-    var session = await currentSession();
-    if (!session || !session.access_token || session.user?.id !== expectedUser
-      || owner !== expectedUser || generation !== expectedGeneration) throw staleError();
-    var endpoint = '/.netlify/functions/poker-table-photo' + (body ? '' : '?scope=own');
-    var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(endpoint) : endpoint, {
-      method: body ? 'POST' : 'GET', cache: 'no-store', credentials: 'omit',
-      headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined
-    });
-    if (!response.ok) throw new Error('table_photo_preference_failed');
-    var result = await response.json();
-    if (owner !== expectedUser || generation !== expectedGeneration) throw staleError();
-    panel.hidden = !result.available && !result.granted;
-    node('tablePhotoConsent').checked = result.granted === true;
-    node('tablePhotoConsent').disabled = !result.available && !result.granted;
-    panel.dataset.noticeVersion = result.noticeVersion;
-    panel.dataset.available = String(result.available === true);
-    node('tablePhotoSave').disabled = false;
-  }
-
   function wire(){
-    var saveTable = node('tablePhotoSave');
-    if (saveTable) saveTable.addEventListener('click', async function(){
-      if (!owner || busy || saveTable.disabled) return;
-      var expectedUser = owner, expectedGeneration = generation;
-      var panel = node('tablePhotoConsentPanel'), box = node('tablePhotoConsent');
-      if (box.checked && panel.dataset.available !== 'true') return;
-      saveTable.disabled = true;
-      try {
-        await tablePhotoPreference(expectedUser, expectedGeneration, box.checked
-          ? { action: 'grant', noticeVersion: panel.dataset.noticeVersion } : { action: 'withdraw' });
-        node('tablePhotoStatus').textContent = t('tablePhotoSaved', 'Table photo preference saved.');
-      } catch (_error) {
-        if (owner === expectedUser && generation === expectedGeneration)
-          node('tablePhotoStatus').textContent = t('tablePhotoFailed', 'Could not save the table photo preference.');
-      } finally {
-        if (owner === expectedUser && generation === expectedGeneration) saveTable.disabled = false;
-      }
-    });
     var consent = node('googlePhotoConsent');
     if (consent) consent.addEventListener('change', function(){
       var importButton = node('googlePhotoImport');
@@ -401,7 +377,7 @@
     if (importButton) importButton.addEventListener('click', function(){
       var box = node('googlePhotoConsent');
       if (!box || !box.checked) return;
-      run('import');
+      run(importButton.dataset && importButton.dataset.action === 'upgrade-consent' ? 'upgrade-consent' : 'import');
     });
     var withdraw = node('googlePhotoWithdraw');
     if (withdraw) withdraw.addEventListener('click', async function(){
