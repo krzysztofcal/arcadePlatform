@@ -223,6 +223,18 @@
   function signInWithGoogle(){
     authCallbackError = null;
     var client = getClient();
+    // #1300: the Production APK uses native Credential Manager + signInWithIdToken (no browser callback).
+    if (window.MobilePoker && window.MobilePoker.nativeGoogle === true && typeof window.MobilePoker.signInWithGoogle === 'function'){
+      if (!isGoogleEnabled() || !client || !client.auth) return Promise.reject(new Error('google_unavailable'));
+      return window.MobilePoker.signInWithGoogle(client).then(function(result){
+        authCallbackError = null;
+        return result;
+      }, function(error){
+        var code = error && error.message;
+        // Reuse the Account page's existing cancel/unavailable messages; everything else is a generic retryable failure.
+        throw new Error(code === 'google_canceled' ? 'auth_cancelled' : code === 'google_unavailable' ? 'google_unavailable' : 'google_failed');
+      });
+    }
     var redirectTo = getAuthRedirectTo();
     if (!isGoogleEnabled() || !redirectTo || !client || !client.auth || !client.auth.signInWithOAuth){
       return Promise.reject(new Error('google_unavailable'));
@@ -292,7 +304,12 @@
     }
     recoveryPending = false;
     recoverySession = null;
-    return client.auth.signOut();
+    var signedOut = client.auth.signOut();
+    // Forget the native Google account choice too (best effort; never blocks or fails Supabase sign-out).
+    if (window.MobilePoker && typeof window.MobilePoker.clearGoogleCredential === 'function'){
+      Promise.resolve(signedOut).then(function(){ return window.MobilePoker.clearGoogleCredential(); }, function(){}).catch(function(){});
+    }
+    return signedOut;
   }
 
   function computeInitials(name){

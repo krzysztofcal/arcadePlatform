@@ -92,6 +92,31 @@ export function releaseVersion(channel, env = process.env) {
   throw new Error('Unknown MOBILE_CHANNEL');
 }
 
+// #1300: public Google Web OAuth client ID (Supabase/Google token audience) for native sign-in. Production requires it;
+// Stage keeps its existing browser OAuth and gets no client ID. Never a client secret.
+export const GOOGLE_WEB_CLIENT_ID = /^[0-9]{6,32}-[0-9a-z]{16,64}\.apps\.googleusercontent\.com$/;
+export function googleWebClientId(channel, env = process.env) {
+  if (channel === 'stage') return null;
+  if (channel === 'production') {
+    const id = env?.MOBILE_GOOGLE_WEB_CLIENT_ID;
+    if (typeof id !== 'string' || !GOOGLE_WEB_CLIENT_ID.test(id)) throw new Error('Invalid MOBILE_GOOGLE_WEB_CLIENT_ID');
+    return id;
+  }
+  throw new Error('Unknown MOBILE_CHANNEL');
+}
+
+// Pinned Credential Manager + Sign in with Google libraries used by PokerGoogleSignInPlugin.java.
+export const GOOGLE_SIGNIN_DEPENDENCIES = [
+  'androidx.credentials:credentials:1.6.0',
+  'androidx.credentials:credentials-play-services-auth:1.6.0',
+  'com.google.android.libraries.identity.googleid:googleid:1.2.1',
+];
+
+export function googleSignInResource(clientId) {
+  if (typeof clientId !== 'string' || !GOOGLE_WEB_CLIENT_ID.test(clientId)) throw new Error('Invalid MOBILE_GOOGLE_WEB_CLIENT_ID');
+  return `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="poker_google_web_client_id" translatable="false">${clientId}</string>\n</resources>\n`;
+}
+
 // Compare canonical paths so a symlinked invocation still configures (never a silent no-op).
 function isDirectRun() {
   if (!process.argv[1]) return false;
@@ -104,6 +129,7 @@ if (isDirectRun()) {
   const appId = capacitorConfig?.appId;
   assertChannelIdentity(channel, appId);
   const version = releaseVersion(channel, process.env);
+  const googleClientId = googleWebClientId(channel, process.env);
   const packagePath = appId.split('.').join('/');
 
   const file = new URL('./android/app/src/main/AndroidManifest.xml', import.meta.url);
@@ -116,6 +142,9 @@ if (isDirectRun()) {
   if (!gradle.includes('versionName "1.0"') || !gradle.includes('versionCode 1')) throw new Error('Unexpected Android template version');
   gradle = gradle.replace('versionName "1.0"', `versionName "${version.name}"`);
   gradle = gradle.replace('versionCode 1', `versionCode ${version.code}`);
+  const capacitorDependency = "    implementation project(':capacitor-android')\n";
+  if (!gradle.includes(capacitorDependency)) throw new Error('Unexpected Android template dependencies');
+  gradle = gradle.replace(capacitorDependency, capacitorDependency + GOOGLE_SIGNIN_DEPENDENCIES.map(dep => `    implementation "${dep}"\n`).join(''));
   await writeFile(gradleFile, gradle);
 
   // One inset owner: full table background, safe content; native margins elsewhere.
@@ -146,6 +175,7 @@ import com.getcapacitor.WebViewListener;`);
     protected void onCreate(Bundle savedInstanceState) {
         SplashScreen.installSplashScreen(this);
         registerPlugin(PokerAudioPlugin.class);
+        registerPlugin(PokerGoogleSignInPlugin.class);
         super.onCreate(savedInstanceState);
         getWindow().getDecorView().setBackgroundColor(android.graphics.Color.rgb(10, 15, 20));
         EdgeToEdge.enable(this);
@@ -205,14 +235,16 @@ import com.getcapacitor.WebViewListener;`);
     }
 }`);
   await writeFile(activityFile, activity);
-  const pluginFile = new URL('./PokerAudioPlugin.java', import.meta.url);
-  let pluginSrc = await readFile(pluginFile, 'utf8');
-  const firstLine = pluginSrc.split(/\r?\n/, 1)[0];
-  if (firstLine !== 'package pl.kcswh.arcadepoker.stage;') {
-    throw new Error('PokerAudioPlugin package header missing');
+  for (const name of ['PokerAudioPlugin', 'PokerGoogleSignInPlugin']) {
+    let pluginSrc = await readFile(new URL(`./${name}.java`, import.meta.url), 'utf8');
+    const firstLine = pluginSrc.split(/\r?\n/, 1)[0];
+    if (firstLine !== 'package pl.kcswh.arcadepoker.stage;') {
+      throw new Error(`${name} package header missing`);
+    }
+    pluginSrc = pluginSrc.replace('package pl.kcswh.arcadepoker.stage;', `package ${appId};`);
+    await writeFile(new URL(`./android/app/src/main/java/${packagePath}/${name}.java`, import.meta.url), pluginSrc);
   }
-  pluginSrc = pluginSrc.replace('package pl.kcswh.arcadepoker.stage;', `package ${appId};`);
-  await writeFile(new URL(`./android/app/src/main/java/${packagePath}/PokerAudioPlugin.java`, import.meta.url), pluginSrc);
+  if (googleClientId) await writeFile(new URL('./android/app/src/main/res/values/poker_google_signin.xml', import.meta.url), googleSignInResource(googleClientId));
 
   // Keep the launch window and WebView on the same dark brand surface.
   const stylesFile = new URL('./android/app/src/main/res/values/styles.xml', import.meta.url);

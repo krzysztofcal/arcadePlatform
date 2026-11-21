@@ -496,3 +496,97 @@ test('verified binding pins own PR/SHA/site and never reuses parent or Productio
     assert.throws(() => security.forPreview(config, { ...binding, ...patch }, 1160, sha));
   }
 });
+
+test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cancel, no double call, no secrets in logs, WWW routing unchanged', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const { webcrypto, createHash } = await import('node:crypto');
+  const runtimeSource = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
+  const clientSource = await readFile(new URL('../js/auth/supabaseClient.js', import.meta.url), 'utf8');
+  function boot(config, google) {
+    const logs = [];
+    const window = {
+      MobilePokerSecurity: security, MOBILE_POKER_CONFIG: { ...config, sha: '12345678' }, KLog: { log(kind, data) { logs.push(JSON.stringify([kind, data])); } },
+      crypto: webcrypto,
+      Capacitor: { Plugins: { Browser: { open: async () => {}, close: async () => {} }, SystemBars: { hide: async () => {}, show: async () => {} },
+        App: { addListener() {}, getLaunchUrl: async () => null }, PokerGoogleSignIn: google } },
+      location: { pathname: '/account.html', replace() {} }, addEventListener() {}, dispatchEvent() {}
+    };
+    const document = { addEventListener() {}, getElementById: () => ({ textContent: '', hidden: true }) };
+    vm.runInNewContext(runtimeSource, { window, document, URL, Event, TextEncoder, navigator: { onLine: true }, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} }, setTimeout });
+    return { window, logs };
+  }
+  const sha256Hex = value => createHash('sha256').update(value).digest('hex');
+
+  // Production: Google gets only SHA-256(raw nonce); Supabase gets the raw nonce and the ID token.
+  const seenNonces = [], idTokenCalls = [];
+  let release;
+  const google = { signIn: ({ nonce }) => { seenNonces.push(nonce); return new Promise(resolve => { release = () => resolve({ idToken: 'secret-id-token' }); }); }, clearCredential: async () => {} };
+  const prod = boot(prodConfig, google);
+  assert.equal(prod.window.MobilePoker.nativeGoogle, true);
+  const client = { auth: { signInWithIdToken: async args => { idTokenCalls.push(args); return { data: { session: { user: { id: 'u1' } } } }; } } };
+  const first = prod.window.MobilePoker.signInWithGoogle(client);
+  for (let i = 0; i < 50 && !release; i++) await new Promise(resolve => setTimeout(resolve, 2));
+  assert.equal(typeof release, 'function', 'native picker opened');
+  await assert.rejects(prod.window.MobilePoker.signInWithGoogle(client), /google_in_progress/);
+  release();
+  await first;
+  assert.equal(seenNonces.length, 1, 'no parallel native picker');
+  assert.equal(idTokenCalls.length, 1);
+  assert.equal(idTokenCalls[0].provider, 'google');
+  assert.equal(idTokenCalls[0].token, 'secret-id-token');
+  assert.match(idTokenCalls[0].nonce, /^[0-9a-f]{64}$/);
+  assert.equal(seenNonces[0], sha256Hex(idTokenCalls[0].nonce), 'Google receives SHA-256 hex of the raw nonce');
+
+  // Cancel and native failures stay retryable and never reach Supabase.
+  for (const [code, expected] of [['canceled', /google_canceled/], ['no_credential', /google_unavailable/], ['failed', /google_failed/]]) {
+    const failing = boot(prodConfig, { signIn: async () => { const e = new Error('native'); e.code = code; throw e; }, clearCredential: async () => {} });
+    const calls = [];
+    await assert.rejects(failing.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async a => { calls.push(a); return {}; } } }), expected);
+    assert.equal(calls.length, 0);
+  }
+  const rejected = boot(prodConfig, { signIn: async () => ({ idToken: 'secret-id-token' }), clearCredential: async () => {} });
+  await assert.rejects(rejected.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ error: { message: 'secret-id-token invalid' } }) } }), /google_failed/);
+  for (const line of [...prod.logs, ...rejected.logs]) {
+    assert.doesNotMatch(line, /secret-id-token/);
+    assert.doesNotMatch(line, new RegExp(idTokenCalls[0].nonce));
+  }
+
+  // Stage keeps browser OAuth: no native sign-in and no plugin call.
+  let stageCalls = 0;
+  const stage = boot(config, { signIn: async () => { stageCalls++; return { idToken: 'x' }; }, clearCredential: async () => {} });
+  assert.equal(stage.window.MobilePoker.nativeGoogle, false);
+  await assert.rejects(stage.window.MobilePoker.signInWithGoogle(client), /google_unavailable/);
+  assert.equal(stageCalls, 0);
+
+  // js/auth/supabaseClient.js routes to the native method only when MobilePoker.nativeGoogle is true.
+  function loadAuth(mobilePoker) {
+    const oauthCalls = [], idCalls = [], signOuts = [];
+    const fakeClient = { auth: {
+      signInWithOAuth: async args => { oauthCalls.push(args); return { data: { url: 'https://otbqfijerkieoxwpxjnm.supabase.co/auth/v1/authorize?provider=google' } }; },
+      signInWithIdToken: async args => { idCalls.push(args); return { data: { session: {} } }; },
+      signOut: async () => { signOuts.push(1); return {}; },
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), getSession: async () => ({ data: { session: null } })
+    } };
+    const window = { SUPABASE_CONFIG: { SUPABASE_URL: 'https://otbqfijerkieoxwpxjnm.supabase.co', SUPABASE_ANON_KEY: 'anon', AUTH_GOOGLE_ENABLED: true },
+      supabase: { createClient: () => fakeClient }, MobilePoker: mobilePoker, location: { origin: 'https://play.kcswh.pl', protocol: 'https:', assign() {} } };
+    const document = { readyState: 'loading', addEventListener() {}, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] };
+    vm.runInNewContext(clientSource, { window, document, URL, fetch: async () => ({ ok: true, json: async () => ({ external: { google: true } }) }), setTimeout, console: { log() {}, warn() {}, error() {} } });
+    return { auth: window.SupabaseAuth, oauthCalls, idCalls, signOuts };
+  }
+  let nativeArg = null, cleared = 0;
+  const native = loadAuth({ nativeGoogle: true, signInWithGoogle: async c => { nativeArg = c; return { data: { session: {} } }; }, clearGoogleCredential: async () => { cleared++; return true; } });
+  await native.auth.signInWithGoogle();
+  assert.ok(nativeArg && nativeArg.auth, 'native method receives the shared Supabase client');
+  assert.equal(native.oauthCalls.length, 0, 'no browser OAuth in the Production APK');
+  const canceled = loadAuth({ nativeGoogle: true, signInWithGoogle: async () => { throw new Error('google_canceled'); } });
+  await assert.rejects(canceled.auth.signInWithGoogle(), /auth_cancelled/, 'cancel reuses the Account page cancel message');
+  await native.auth.signOut();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(native.signOuts.length, 1);
+  assert.equal(cleared, 1, 'explicit sign-out clears the native Google account choice');
+  const www = loadAuth(undefined);
+  await www.auth.signInWithGoogle();
+  assert.equal(www.oauthCalls.length, 1, 'WWW keeps browser OAuth');
+  assert.equal(www.idCalls.length, 0);
+});

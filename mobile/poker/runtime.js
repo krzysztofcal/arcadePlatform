@@ -46,8 +46,51 @@
         return Promise.reject(new Error('google_failed'));
       }
       return browser.open({ url: url.href });
+    },
+    // #1300: Production APK signs in with Google natively (Credential Manager ID token), never via a browser callback.
+    nativeGoogle: bound.channel === 'production',
+    signInWithGoogle: signInWithGoogle,
+    clearGoogleCredential: function(){
+      var cap2 = window.Capacitor;
+      var native = cap2 && cap2.Plugins && cap2.Plugins.PokerGoogleSignIn;
+      if (bound.channel !== 'production' || !native) return Promise.resolve(false);
+      return Promise.resolve(native.clearCredential()).then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); return false; });
     }
   };
+  var googleSigningIn = false;
+  function nonceHex(bytes){
+    return Array.prototype.map.call(new Uint8Array(bytes), function(b){ return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+  }
+  // Raw nonce goes to Supabase; Google receives only its SHA-256 hex digest (bound into the ID token).
+  async function signInWithGoogle(client){
+    if (bound.channel !== 'production') throw new Error('google_unavailable');
+    if (googleSigningIn) throw new Error('google_in_progress');
+    if (!client || !client.auth || typeof client.auth.signInWithIdToken !== 'function') throw new Error('google_unavailable');
+    googleSigningIn = true;
+    try {
+      var native = plugin('PokerGoogleSignIn');
+      var raw = nonceHex(window.crypto.getRandomValues(new Uint8Array(32)));
+      var hashed = nonceHex(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw)));
+      var credential;
+      try { credential = await native.signIn({ nonce: hashed }); }
+      catch (err){
+        var code = err && err.code;
+        if (code === 'canceled') throw new Error('google_canceled');
+        if (code === 'no_credential' || code === 'unavailable') throw new Error('google_unavailable');
+        throw new Error('google_failed');
+      }
+      if (!credential || typeof credential.idToken !== 'string' || !credential.idToken) throw new Error('google_failed');
+      var result = await client.auth.signInWithIdToken({ provider: 'google', token: credential.idToken, nonce: raw });
+      if (!result || result.error || !result.data || !result.data.session) throw new Error('google_failed');
+      return result;
+    } catch (err){
+      var known = err && /^google_(canceled|unavailable|failed|in_progress)$/.test(err.message);
+      klog(known ? 'mobile:' + err.message : 'mobile:google_failed');
+      throw known ? err : new Error('google_failed');
+    } finally {
+      googleSigningIn = false;
+    }
+  }
   var exchanging = false;
   async function callback(value){
     if (exchanging) return;
