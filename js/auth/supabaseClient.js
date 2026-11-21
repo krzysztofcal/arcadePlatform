@@ -305,12 +305,14 @@
     }
     recoveryPending = false;
     recoverySession = null;
-    // Invalidate an in-flight native Google sign-in and forget the account choice (best effort; the result of the
-    // Supabase sign-out is unchanged, and the next native sign-in waits for this clear).
-    if (window.MobilePoker && typeof window.MobilePoker.clearGoogleCredential === 'function'){
-      try { Promise.resolve(window.MobilePoker.clearGoogleCredential()).catch(function(){}); } catch (_err){}
-    }
-    return client.auth.signOut();
+    var mobile = window.MobilePoker;
+    if (!mobile || typeof mobile.clearGoogleCredential !== 'function') return client.auth.signOut();
+    // Invalidate an in-flight native Google sign-in and forget the account choice (best effort; the next native
+    // sign-in waits for this clear). Then sign out after any running ID-token exchange, so its session is removed
+    // by this normal sign-out, whose result reaches the caller unchanged.
+    try { Promise.resolve(mobile.clearGoogleCredential()).catch(function(){}); } catch (_err){}
+    var settled = typeof mobile.googleSettled === 'function' ? Promise.resolve().then(function(){ return mobile.googleSettled(); }).catch(function(){}) : Promise.resolve();
+    return settled.then(function(){ return client.auth.signOut(); });
   }
 
   function computeInitials(name){

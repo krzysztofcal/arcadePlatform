@@ -503,11 +503,11 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   const { webcrypto, createHash } = await import('node:crypto');
   const runtimeSource = await readFile(new URL('../mobile/poker/runtime.js', import.meta.url), 'utf8');
   const clientSource = await readFile(new URL('../js/auth/supabaseClient.js', import.meta.url), 'utf8');
-  function boot(config, google) {
+  function boot(config, google, cryptoImpl = webcrypto) {
     const logs = [];
     const window = {
       MobilePokerSecurity: security, MOBILE_POKER_CONFIG: { ...config, sha: '12345678' }, KLog: { log(kind, data) { logs.push(JSON.stringify([kind, data])); } },
-      crypto: webcrypto,
+      crypto: cryptoImpl,
       Capacitor: { Plugins: { Browser: { open: async () => {}, close: async () => {} }, SystemBars: { hide: async () => {}, show: async () => {} },
         App: { addListener() {}, getLaunchUrl: async () => null }, PokerGoogleSignIn: google } },
       location: { pathname: '/account.html', replace() {} }, addEventListener() {}, dispatchEvent() {}
@@ -589,6 +589,15 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   await www.auth.signInWithGoogle();
   assert.equal(www.oauthCalls.length, 1, 'WWW keeps browser OAuth');
   assert.equal(www.idCalls.length, 0);
+  // GOOGLE-07: Supabase sign-out runs only after a running native exchange settles; its result reaches the caller.
+  let settle;
+  const ordering = loadAuth({ nativeGoogle: true, signInWithGoogle: async () => ({}), clearGoogleCredential: async () => true, googleSettled: () => new Promise(resolve => { settle = resolve; }) });
+  const orderingSignOut = ordering.auth.signOut();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(ordering.signOuts.length, 0, 'Supabase sign-out waits for the exchange');
+  settle(true);
+  await orderingSignOut;
+  assert.equal(ordering.signOuts.length, 1);
   // GOOGLE-03: nativeGoogle without the native method never falls back to the browser callback.
   const broken = loadAuth({ nativeGoogle: true });
   await assert.rejects(broken.auth.signInWithGoogle(), /google_unavailable/);
@@ -613,25 +622,22 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
     signOut: async () => { lateSignOuts.push(1); return {}; } } });
   await until(() => finishExchange);
   await exchangeBoot.window.MobilePoker.clearGoogleCredential();
+  let settled = false;
+  exchangeBoot.window.MobilePoker.googleSettled().then(() => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(settled, false, 'a sign-out waits for the running ID-token exchange');
   finishExchange();
   await assert.rejects(exchangeAttempt, /google_canceled/);
-  assert.equal(lateSignOuts.length, 1, 'no session survives a sign-out during the exchange');
-  // GOOGLE-06: a failed final global sign-out falls back to a local-only sign-out.
-  let finishFailing; const failingSignOuts = [];
-  const failingBoot = boot(prodConfig, { signIn: async () => ({ idToken: 'secret-id-token' }), clearCredential: async () => {} });
-  const failingAttempt = failingBoot.window.MobilePoker.signInWithGoogle({ auth: {
-    signInWithIdToken: () => new Promise(resolve => { finishFailing = () => resolve({ data: { session: {} } }); }),
-    signOut: async options => { failingSignOuts.push(options && options.scope || 'global'); return options && options.scope === 'local' ? {} : { error: { message: 'network' } }; } } });
-  await until(() => finishFailing);
-  await failingBoot.window.MobilePoker.clearGoogleCredential();
-  finishFailing();
-  await assert.rejects(failingAttempt, /google_canceled/);
-  assert.deepEqual(failingSignOuts, ['global', 'local']);
-  // GOOGLE-04: a sign-out during nonce hashing never opens the picker.
-  let hashingPicker = 0;
-  const hashingBoot = boot(prodConfig, { signIn: async () => { hashingPicker++; return { idToken: 'secret-id-token' }; }, clearCredential: async () => {} });
+  await until(() => settled);
+  assert.equal(lateSignOuts.length, 0, 'the user sign-out (not the runtime) removes the exchanged session');
+  // GOOGLE-04/08: a sign-out while the nonce digest is still running never opens the picker.
+  let releaseDigest, digestStarted = false, hashingPicker = 0;
+  const slowCrypto = { getRandomValues: a => webcrypto.getRandomValues(a), subtle: { digest: (alg, data) => { digestStarted = true; return new Promise(resolve => { releaseDigest = () => resolve(webcrypto.subtle.digest(alg, data)); }); } } };
+  const hashingBoot = boot(prodConfig, { signIn: async () => { hashingPicker++; return { idToken: 'secret-id-token' }; }, clearCredential: async () => {} }, slowCrypto);
   const hashingAttempt = hashingBoot.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
-  hashingBoot.window.MobilePoker.clearGoogleCredential();
+  await until(() => digestStarted);
+  await hashingBoot.window.MobilePoker.clearGoogleCredential();
+  releaseDigest();
   await assert.rejects(hashingAttempt, /google_canceled/);
   assert.equal(hashingPicker, 0);
   // GOOGLE-02: the next native sign-in waits until the credential-state clear has finished.
