@@ -15,7 +15,8 @@ import {
   releaseVersion,
   googleWebClientId,
   googleSignInResource,
-  GOOGLE_SIGNIN_DEPENDENCIES
+  GOOGLE_SIGNIN_DEPENDENCIES,
+  removeUnusedLibraryPermissions
 } from '../mobile/poker/configure-android.mjs';
 
 // Synthetic, well-formed public Web OAuth client ID (not a real client).
@@ -403,6 +404,14 @@ test('googleWebClientId: Stage gets none, Production requires a well-formed publ
   assert.deepEqual(GOOGLE_SIGNIN_DEPENDENCIES.map((dep) => /^[a-z.]+:[a-z-]+:[0-9]+\.[0-9]+\.[0-9]+$/.test(dep)), GOOGLE_SIGNIN_DEPENDENCIES.map(() => true), 'pinned stable versions only');
 });
 
+test('removeUnusedLibraryPermissions: drops the biometric permissions pulled by Credential Manager, once', () => {
+  const out = removeUnusedLibraryPermissions('<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application></application></manifest>');
+  assert.match(out, /^<manifest xmlns:tools="http:\/\/schemas\.android\.com\/tools" xmlns:android=/);
+  for (const name of ['android.permission.USE_BIOMETRIC', 'android.permission.USE_FINGERPRINT']) assert.ok(out.includes(`<uses-permission android:name="${name}" tools:node="remove" />\n<`), name);
+  assert.throws(() => removeUnusedLibraryPermissions(out), /already configured/);
+  assert.throws(() => removeUnusedLibraryPermissions('<resources/>'), /manifest missing/);
+});
+
 test('capacitor.production.json equals capacitor.config.json except appId and appName', () => {
   const stageCap = JSON.parse(readFileSync(new URL('../mobile/poker/capacitor.config.json', import.meta.url), 'utf8'));
   const prodCap = JSON.parse(readFileSync(new URL('../mobile/poker/capacitor.production.json', import.meta.url), 'utf8'));
@@ -532,6 +541,7 @@ test('configure script: Production in temporary tree with production config and 
     assert.ok(manifest.includes('android:autoVerify="true"'));
     assert.ok(manifest.includes('play.kcswh.pl'));
     assert.ok(!manifest.includes('arcadepoker-stage'));
+    assert.ok(manifest.includes('<uses-permission android:name="android.permission.USE_BIOMETRIC" tools:node="remove" />'));
 
     const gradle = readFileSync(path.join(dir, 'android/app/build.gradle'), 'utf8');
     assert.ok(gradle.includes('versionName "1.2.3"'));

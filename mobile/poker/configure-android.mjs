@@ -112,6 +112,17 @@ export const GOOGLE_SIGNIN_DEPENDENCIES = [
   'com.google.android.libraries.identity.googleid:googleid:1.2.1',
 ];
 
+// Credential Manager pulls androidx.biometric, whose manifest requests biometric permissions that Google ID-token
+// sign-in never uses. Drop them in the merged manifest so the release permission allowlist stays unchanged.
+export const REMOVED_LIBRARY_PERMISSIONS = ['android.permission.USE_BIOMETRIC', 'android.permission.USE_FINGERPRINT'];
+export function removeUnusedLibraryPermissions(xml) {
+  if (!/<manifest\b/.test(xml) || !xml.includes('<application')) throw new Error('Android template manifest missing');
+  if (xml.includes('tools:node="remove"')) throw new Error('Library permissions already configured');
+  let out = xml.includes('xmlns:tools=') ? xml : xml.replace(/<manifest\b/, '<manifest xmlns:tools="http://schemas.android.com/tools"');
+  const removals = REMOVED_LIBRARY_PERMISSIONS.map(name => `<uses-permission android:name="${name}" tools:node="remove" />\n`).join('');
+  return out.replace('<application', removals + '<application');
+}
+
 export function googleSignInResource(clientId) {
   if (typeof clientId !== 'string' || !GOOGLE_WEB_CLIENT_ID.test(clientId)) throw new Error('Invalid MOBILE_GOOGLE_WEB_CLIENT_ID');
   return `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="poker_google_web_client_id" translatable="false">${clientId}</string>\n</resources>\n`;
@@ -135,6 +146,7 @@ if (isDirectRun()) {
   const file = new URL('./android/app/src/main/AndroidManifest.xml', import.meta.url);
   let xml = await readFile(file, 'utf8');
   xml = configureManifest(xml, channel);
+  xml = removeUnusedLibraryPermissions(xml);
   await writeFile(file, xml);
 
   const gradleFile = new URL('./android/app/build.gradle', import.meta.url);
