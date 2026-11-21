@@ -6,6 +6,7 @@ import { googlePhotoEnabled, googlePhotoStatus, importGooglePhoto, withdrawGoogl
 // #1140 UGC phase D, signed-in accounts only, 404 unless GOOGLE_PHOTO_IMPORT_ENABLED=1:
 // GET -> { noticeVersion, googleLinked, consent, photoInUse }
 // POST { action: "import", consent: true, noticeVersion, providerToken } (at most 5 imports per account and hour)
+// POST { action: "upgrade-consent", consent: true, noticeVersion, expectedConsentRevision } confirms g4 for the stored copy.
 // POST { action: "select", expectedRevision } reuses the owned consented copy; no Google proof/download.
 // POST { action: "withdraw" }
 // The request body carries a Google provider token: it is never logged.
@@ -51,13 +52,13 @@ function createProfileGooglePhotoHandler(deps = {}) {
         const statusStarted=Date.now();
         try {
           let current;
-          try { current = await status(auth.userId); }
+          try { current = await status(auth.userId, { env }); }
           catch (error) { if (!importEnabled && error?.code === '42P01') return json(404, cors, {error:'not_found'}); throw error; }
           if (!importEnabled && !current.consent && !current.copyStored) return json(404, cors, {error:'not_found'});
           readTimings.statusMs=Date.now()-statusStarted;
           let ownPreview = {};
           if (importEnabled && current.consent?.decision === 'granted' && current.copyStored) {
-            try { ownPreview = await preview(auth.userId,{timings:readTimings}); } catch { /* Status/withdrawal remain available; no preview on uncertain eligibility. */ }
+            try { ownPreview = await preview(auth.userId,{env,timings:readTimings}); } catch { /* Status/withdrawal remain available; no preview on uncertain eligibility. */ }
           }
           return json(200, cors, {...current, ...ownPreview, photoInUse: importEnabled && (ownPreview.photoInUse ?? current.photoInUse) === true, importEnabled});
         }finally{log('google_photo_read_timing',{...readTimings,totalMs:Date.now()-readStarted});}
@@ -72,7 +73,7 @@ function createProfileGooglePhotoHandler(deps = {}) {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(400, cors, { error: "invalid_request" });
       if (body.action === "withdraw") {
         if (Object.keys(body).length !== 1) return json(400, cors, { error: "invalid_request" });
-        const result = await withdraw(auth.userId);
+        const result = await withdraw(auth.userId, { env });
         klog("google_photo_withdrawn", {});
         return json(200, cors, {...result,importEnabled});
       }
@@ -81,7 +82,7 @@ function createProfileGooglePhotoHandler(deps = {}) {
         return json(200, cors, { ...await upgradeConsent(auth.userId, body, { env }), importEnabled });
       }
       if (body.action === "select") {
-        const result = await selectPhoto(auth.userId, body);
+        const result = await selectPhoto(auth.userId, body, { env });
         klog('google_photo_selected', {});
         return json(200, cors, {...result, importEnabled});
       }
@@ -96,7 +97,7 @@ function createProfileGooglePhotoHandler(deps = {}) {
         return json(503, cors, { error: "rate_limit_unavailable" });
       }
       if (!allowed) return json(429, cors, { error: "rate_limit_exceeded" });
-      const result = await importPhoto(auth.userId, body);
+      const result = await importPhoto(auth.userId, body, { env });
       klog("google_photo_imported", {});
       return json(200, cors, {...result,importEnabled});
     } catch (error) {

@@ -399,35 +399,3 @@ export async function notifyWsPokerAccessMutation({
     clearTimeout(timer);
   }
 }
-
-export async function loadWsTablePhotoMembership({
-  tableId, viewerUserId, targetUserId, env = process.env, fetchImpl = globalThis.fetch
-} = {}) {
-  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (![tableId, viewerUserId, targetUserId].every(value => typeof value === "string" && uuid.test(value))) return null;
-  const baseUrl = resolveBaseUrl(env);
-  const token = resolveToken(env);
-  if (!baseUrl || !token || typeof fetchImpl !== "function") return null;
-  const query = new URLSearchParams({ mode: "table-photo", tableId, userId: viewerUserId, targetUserId });
-  try {
-    const response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/internal/account/poker?${query}`, {
-      method: "GET",
-      headers: { Accept: "application/json", authorization: `Bearer ${token}` },
-      redirect: "error",
-      signal: AbortSignal.timeout(resolveTimeoutMs(env))
-    });
-    if (!response?.ok) return null;
-    const result = await response.json();
-    if (result?.authorized !== true || result.tableId !== tableId
-      || !Number.isSafeInteger(result.viewerSeatNo) || result.viewerSeatNo < 1
-      || !Number.isSafeInteger(result.targetSeatNo) || result.targetSeatNo < 1
-      || !Number.isSafeInteger(result.stateVersion) || result.stateVersion < 0
-      || (result.viewerSeatNo === result.targetSeatNo) !== (viewerUserId === targetUserId)) return null;
-    return {
-      tableId, viewerUserId, targetUserId,
-      viewerSeatNo: result.viewerSeatNo, targetSeatNo: result.targetSeatNo, stateVersion: result.stateVersion
-    };
-  } catch {
-    return null;
-  }
-}

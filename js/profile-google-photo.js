@@ -136,17 +136,17 @@
     show('arcadeAvatarPhotoHint', true);
     var offer = !!status && !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
     var upgrade = granted && stored && status.importEnabled !== false
-      && status.noticeVersion === '2026-11-21-g3' && status.consent.noticeVersion === '2026-11-17-g2'
+      && status.noticeVersion === '2026-11-21-g4' && ['2026-11-17-g2', '2026-11-21-g3'].includes(status.consent.noticeVersion)
       && Number.isInteger(status.consentRevision);
     show('googlePhotoOffer', upgrade || (offer && !needsProof));
     var label = node('googlePhotoConsentText');
     if (label && label.dataset) {
-      var useG3 = status && status.noticeVersion === '2026-11-21-g3';
-      var consentKey = useG3 ? 'googlePhotoConsentG3' : 'googlePhotoConsent';
+      var useG4 = status && status.noticeVersion === '2026-11-21-g4';
+      var consentKey = useG4 ? 'googlePhotoConsentG4' : 'googlePhotoConsent';
       if (!label.dataset.defaultText) label.dataset.defaultText = label.textContent;
       label.dataset.i18n = consentKey;
-      label.textContent = t(consentKey, useG3
-        ? 'I agree to use my Google photo as my avatar in the web profile, leaderboard and for signed-in players seated at my Poker table. If needed, Arcade Hub imports a private copy. Links last up to 60 seconds. Anyone with a valid link can view or save the photo. I can withdraw consent, but saved copies cannot be recalled.'
+      label.textContent = t(consentKey, useG4
+        ? 'I agree to use my Google photo as my avatar in the web profile, leaderboard and Poker tables, visible to signed-in Arcade Hub users including spectators who have not joined. Arcade Hub stores a private copy. A short-lived download link may be shared while it works. I can withdraw consent to stop new links, but already displayed photos may remain until the next check and saved copies cannot be recalled.'
         : label.dataset.defaultText);
     }
     if (importButton && importButton.dataset) {
@@ -200,7 +200,7 @@
         : action === 'upgrade-consent'
           ? await request('POST', { action: action, consent: true, noticeVersion: status.noticeVersion, expectedConsentRevision: status.consentRevision }, expectedUser, false)
           : await request('POST', Object.assign({ action: 'import', consent: true, noticeVersion: status && status.noticeVersion },
-            status && status.noticeVersion === '2026-11-21-g3' ? { scope: 'web-leaderboard-poker' } : {}), expectedUser, true);
+            status && status.noticeVersion === '2026-11-21-g4' ? { scope: 'web-leaderboard-poker-signed-in' } : {}), expectedUser, true);
       if (expectedGeneration !== generation) return;
       statusResolved=true;photoState=hasCopy(result)?'pending':null;render(result);
       if (action === 'upgrade-consent') setState(t('googlePhotoUpgradeSaved', 'Photo consent updated.'));

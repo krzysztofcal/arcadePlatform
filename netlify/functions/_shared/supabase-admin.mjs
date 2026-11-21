@@ -199,7 +199,7 @@ async function verifySupabaseJwtRemote(token) {
     return buildJwtAuthResult({ provided: true, valid: false, reason: "remote_verify_failed" });
   }
   if (!response || !response.ok) {
-    return buildJwtAuthResult({ provided: true, valid: false, reason: "remote_verify_rejected" });
+    return buildJwtAuthResult({ provided: true, valid: false, reason: response?.status >= 500 || response?.status === 429 ? "remote_verify_failed" : "remote_verify_rejected" });
   }
   let user;
   try {

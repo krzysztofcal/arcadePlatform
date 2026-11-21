@@ -14,7 +14,8 @@ import { beginSql, executeSql } from "./supabase-admin.mjs";
 // - A moderator avatar hold (phase C) refuses the import; without the phase C table the import fails closed.
 export { googlePhotoEnabled };
 export const GOOGLE_PHOTO_NOTICE_VERSION = "2026-11-17-g2";
-export const GOOGLE_PHOTO_TABLE_NOTICE_VERSION = "2026-11-21-g3";
+export const GOOGLE_PHOTO_TABLE_NOTICE_VERSION = "2026-11-21-g4";
+const PREVIOUS_TABLE_NOTICE_VERSION = "2026-11-21-g3";
 
 function currentNotice(env) {
   return env.POKER_TABLE_PHOTO_ENABLED === "1" ? GOOGLE_PHOTO_TABLE_NOTICE_VERSION : GOOGLE_PHOTO_NOTICE_VERSION;
@@ -258,8 +259,8 @@ export async function upgradeGooglePhotoConsent(userId, input, deps = {}) {
     if (copy.consentRevision !== input.expectedConsentRevision) throw photoError("avatar_revision_conflict", 409);
     const rows = await tx.unsafe(`update private.profile_photo_consents
       set notice_version = $2, consent_revision = consent_revision + 1, granted_at = now()
-      where user_id = $1 and notice_version = $3 and decision = 'granted' and imported_avatar_key = $4
-      returning user_id`, [user, GOOGLE_PHOTO_TABLE_NOTICE_VERSION, GOOGLE_PHOTO_NOTICE_VERSION, copy.key]);
+      where user_id = $1 and notice_version = any($3::text[]) and decision = 'granted' and imported_avatar_key = $4
+      returning user_id`, [user, GOOGLE_PHOTO_TABLE_NOTICE_VERSION, [GOOGLE_PHOTO_NOTICE_VERSION, PREVIOUS_TABLE_NOTICE_VERSION], copy.key]);
     if (!rows.length) throw photoError("notice_version_changed", 409);
   });
   return googlePhotoStatus(user, deps);
@@ -271,7 +272,7 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
   if (!input || typeof input !== "object" || Object.keys(input).some((key) => !allowed.has(key))) throw photoError("invalid_request", 400);
   if (input.consent !== true) throw photoError("consent_required", 400);
   if (input.noticeVersion !== currentNotice(deps.env || process.env)) throw photoError("notice_version_changed");
-  if (input.scope !== (input.noticeVersion === GOOGLE_PHOTO_TABLE_NOTICE_VERSION ? "web-leaderboard-poker" : undefined)) throw photoError("notice_version_changed");
+  if (input.scope !== (input.noticeVersion === GOOGLE_PHOTO_TABLE_NOTICE_VERSION ? "web-leaderboard-poker-signed-in" : undefined)) throw photoError("notice_version_changed");
   if (typeof input.providerToken !== "string" || !/^[\x21-\x7e]{16,4096}$/.test(input.providerToken)) throw photoError("google_proof_required", 400);
   const env = deps.env || process.env;
   if (env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED !== '1' && !accountDeletionEnabled(env)) throw photoError('avatar_tracking_unavailable',503);
