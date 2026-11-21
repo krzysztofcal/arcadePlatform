@@ -54,7 +54,7 @@ Use the existing read-only SSH mechanism, not the WS deployment account/key. Eph
 6. Automatic GET-only LIVE verification and immutable Release Record follow publication; no separate dispatch.
 
 Automatic selection reads **at most five successful trusted OWNER/App main candidate runs in total (two bounded actor queries) for the exact current main SHA**,
-then requires the API's total count to match the complete returned list. It deliberately does not filter by run
+then requires the API's total count to match the complete returned list. GitHub's `actor` filter can return runs of the other trusted identity; results are merged by run id, any other identity stops, and the five-run bound applies to unique runs. It deliberately does not filter by run
 creation time: a long Environment approval wait must not hide a fresh candidate. Reruns are excluded. Each candidate
 needs an authentic unexpired artifact, matching `candidate_ready` provenance and dry-run/static-check receipts,
 age at most 48 hours from provenance `createdAt` (before the build hook, not approval or build completion;
