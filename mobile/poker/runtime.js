@@ -96,7 +96,11 @@
       if (!credential || typeof credential.idToken !== 'string' || !credential.idToken) throw new Error('google_failed');
       // A sign-out while the picker was open discards its result.
       if (generation !== googleGeneration) throw new Error('google_canceled');
-      var exchange = Promise.resolve().then(function(){ return client.auth.signInWithIdToken({ provider: 'google', token: credential.idToken, nonce: raw }); });
+      var exchange = Promise.resolve().then(function(){
+        // Re-check right before the exchange: a sign-out queued just after the picker resolved must win.
+        if (generation !== googleGeneration) throw new Error('google_canceled');
+        return client.auth.signInWithIdToken({ provider: 'google', token: credential.idToken, nonce: raw });
+      });
       exchangeInFlight = exchange;
       var result = await exchange;
       // A sign-out during the exchange waits for googleSettled() and then removes this session itself.

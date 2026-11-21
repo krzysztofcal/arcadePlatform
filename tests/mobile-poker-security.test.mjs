@@ -517,6 +517,7 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
     return { window, logs };
   }
   const sha256Hex = value => createHash('sha256').update(value).digest('hex');
+  const until = async check => { for (let i = 0; i < 100 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 2)); assert.ok(check()); };
 
   // Production: Google gets only SHA-256(raw nonce); Supabase gets the raw nonce and the ID token.
   const seenNonces = [], idTokenCalls = [];
@@ -572,7 +573,7 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
       supabase: { createClient: () => fakeClient }, MobilePoker: mobilePoker, location: { origin: 'https://play.kcswh.pl', protocol: 'https:', assign() {} } };
     const document = { readyState: 'loading', addEventListener() {}, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] };
     vm.runInNewContext(clientSource, { window, document, URL, fetch: async () => ({ ok: true, json: async () => ({ external: { google: true } }) }), setTimeout, console: { log() {}, warn() {}, error() {} } });
-    return { auth: window.SupabaseAuth, oauthCalls, idCalls, signOuts };
+    return { auth: window.SupabaseAuth, client: fakeClient, oauthCalls, idCalls, signOuts };
   }
   let nativeArg = null, cleared = 0;
   const native = loadAuth({ nativeGoogle: true, signInWithGoogle: async c => { nativeArg = c; return { data: { session: {} } }; }, clearGoogleCredential: async () => { cleared++; return true; } });
@@ -592,18 +593,25 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   // GOOGLE-07: Supabase sign-out runs only after a running native exchange settles; its result reaches the caller.
   let settle;
   const ordering = loadAuth({ nativeGoogle: true, signInWithGoogle: async () => ({}), clearGoogleCredential: async () => true, googleSettled: () => new Promise(resolve => { settle = resolve; }) });
+  const signOutError = { error: { message: 'network' } };
+  ordering.client.auth.signOut = async () => { ordering.signOuts.push(1); return signOutError; };
   const orderingSignOut = ordering.auth.signOut();
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(ordering.signOuts.length, 0, 'Supabase sign-out waits for the exchange');
   settle(true);
-  await orderingSignOut;
+  assert.equal(await orderingSignOut, signOutError, 'the caller receives the Supabase sign-out result unchanged');
   assert.equal(ordering.signOuts.length, 1);
+  ordering.client.auth.signOut = async () => { throw new Error('offline'); };
+  const previousSettle = settle;
+  const rejectedSignOut = ordering.auth.signOut();
+  await until(() => settle !== previousSettle);
+  settle(true);
+  await assert.rejects(rejectedSignOut, /offline/, 'a rejected Supabase sign-out reaches the caller');
   // GOOGLE-03: nativeGoogle without the native method never falls back to the browser callback.
   const broken = loadAuth({ nativeGoogle: true });
   await assert.rejects(broken.auth.signInWithGoogle(), /google_unavailable/);
   assert.equal(broken.oauthCalls.length, 0);
 
-  const until = async check => { for (let i = 0; i < 100 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 2)); assert.ok(check()); };
   // GOOGLE-01a: sign-out while the picker is open discards its result.
   let openPicker;
   const pickerBoot = boot(prodConfig, { signIn: () => new Promise(resolve => { openPicker = resolve; }), clearCredential: async () => {} });
@@ -614,6 +622,17 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   openPicker({ idToken: 'secret-id-token' });
   await assert.rejects(pickerAttempt, /google_canceled/);
   assert.equal(pickerExchange.length, 0);
+  // GOOGLE-09: a sign-out queued as the very next microtask after the picker resolves still prevents the exchange.
+  let resolvePicker09; const exchange09 = [];
+  const boot09 = boot(prodConfig, { signIn: () => new Promise(resolve => { resolvePicker09 = resolve; }), clearCredential: async () => {} });
+  const attempt09 = boot09.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async a => { exchange09.push(a); return { data: { session: {} } }; }, signOut: async () => ({}) } });
+  await until(() => resolvePicker09);
+  resolvePicker09({ idToken: 'secret-id-token' });
+  // Two microtasks later lands exactly between the post-picker check and the queued exchange (Node/V8 job order;
+  // the picker promise comes from another realm). The previous code sent the token in this window.
+  queueMicrotask(() => queueMicrotask(() => { boot09.window.MobilePoker.clearGoogleCredential(); }));
+  await assert.rejects(attempt09, /google_canceled/);
+  assert.equal(exchange09.length, 0, 'no token reaches Supabase after the sign-out');
   // GOOGLE-01b: sign-out during the token exchange ends with a final Supabase sign-out.
   let finishExchange; const lateSignOuts = [];
   const exchangeBoot = boot(prodConfig, { signIn: async () => ({ idToken: 'secret-id-token' }), clearCredential: async () => {} });
