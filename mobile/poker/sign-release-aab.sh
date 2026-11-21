@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # #1302: sign a verified unsigned Production AAB with the Google Play upload key (PKCS#12, alias "upload").
-# Inputs come only from the environment; secrets never appear in arguments, output or files outside a private temp dir.
+# Inputs come only from the environment; secrets never appear in arguments or output; the keystore exists only in a private temp dir.
 #   UNSIGNED_AAB, SIGNED_AAB, EXPECTED_UPLOAD_CERT_SHA256 (public, AA:BB:... upper case)
 #   ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, optional ANDROID_UPLOAD_KEY_PASSWORD (defaults to the store password)
 set -euo pipefail
@@ -19,16 +19,16 @@ work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/sign-aab.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 -d > "$work/upload.p12" 2>/dev/null || fail keystore_secret_malformed
 [ -s "$work/upload.p12" ] || fail keystore_secret_malformed
-printf '%s' "$ANDROID_UPLOAD_STORE_PASSWORD" > "$work/store.pass"
-printf '%s' "${ANDROID_UPLOAD_KEY_PASSWORD:-$ANDROID_UPLOAD_STORE_PASSWORD}" > "$work/key.pass"
+# Passwords reach the JDK tools only by environment variable name (:env), never as arguments or files.
+export ANDROID_UPLOAD_KEY_PASSWORD="${ANDROID_UPLOAD_KEY_PASSWORD:-$ANDROID_UPLOAD_STORE_PASSWORD}"
 
 # The key must be the pinned upload key before anything is signed.
-key_fp="$(keytool -list -v -storetype PKCS12 -keystore "$work/upload.p12" -storepass:file "$work/store.pass" -alias "$ALIAS" 2>/dev/null \
+key_fp="$(keytool -list -v -storetype PKCS12 -keystore "$work/upload.p12" -storepass:env ANDROID_UPLOAD_STORE_PASSWORD -alias "$ALIAS" 2>/dev/null \
   | awk '$1 == "SHA256:" { print $2 }')" || fail keystore_unreadable
 [ "$key_fp" = "$PIN" ] || fail upload_certificate_mismatch
 
 jarsigner -verify "$UNSIGNED_AAB" 2>/dev/null | grep -q 'jar is unsigned' || fail input_not_unsigned
-jarsigner -storetype PKCS12 -keystore "$work/upload.p12" -storepass:file "$work/store.pass" -keypass:file "$work/key.pass" \
+jarsigner -storetype PKCS12 -keystore "$work/upload.p12" -storepass:env ANDROID_UPLOAD_STORE_PASSWORD -keypass:env ANDROID_UPLOAD_KEY_PASSWORD \
   -sigalg SHA256withRSA -digestalg SHA-256 -signedjar "$work/signed.aab" "$UNSIGNED_AAB" "$ALIAS" >/dev/null 2>&1 || fail signing_failed
 
 # No -strict: the upload certificate is self-signed. Identity is proven by the single pinned signer instead.

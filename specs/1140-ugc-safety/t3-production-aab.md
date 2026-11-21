@@ -77,7 +77,7 @@ The current task ends with a verified unsigned AAB. After a separate OWNER decis
    )
    ```
 4. First upload, to **Internal testing** (separate OWNER GO): accept Play App Signing (Google-managed app signing key). Copy the **app signing** certificate SHA-256 from Play Console → App integrity for T2d. The **upload** certificate is a different value and is not used in assetlinks.
-5. `versionCode` must be strictly higher on every upload. Use the next integer for each dispatch and record it in the release notes.
+5. `versionCode` must be strictly higher on every upload. A new dispatch before any upload may reuse the same value; record the uploaded value in the release notes.
 
 The manual procedure above stays a fallback. #1302 adds the CI-signed variant below.
 
@@ -86,11 +86,11 @@ OWNER GO 2026-11-21 (#1302). Not authorized: creating, rotating or reading the u
 - Job `sign-aab` (`needs: release-aab`, same `workflow_dispatch`/`main` condition, `environment: android-signing`, `contents: read` + `actions: read`).
 - GitHub creates a referenced Environment without protection, so the first step fails closed unless the API shows: required reviewer only `krzysztofcal`, admin bypass off, deployment branch policy `main` only, and an OWNER approval for this run (shared `environmentFailures`/`ownerApproved` from `scripts/www-release-actions.mjs`). It runs before any secret is read.
 - Input: only the unsigned artifact of the same run (`actions/download-artifact`), checked with `SHA256SUMS` and `release-receipt.json` (source SHA, run id/attempt, channel, appId, version, `signed:false`, AAB hash).
-- `mobile/poker/sign-release-aab.sh` (the only step with signing secrets): decodes the PKCS#12 into a private temp dir (removed on exit), passwords only via `-storepass:file`/`-keypass:file`, fixed alias `upload`, key password defaults to the store password. Checks the key certificate SHA-256 against the pin before signing, signs with SHA256withRSA/SHA-256, then requires `jar verified`, no unsigned entries and exactly one signer equal to the pin. No `-strict` (self-signed upload certificate).
+- `mobile/poker/sign-release-aab.sh` (the only step with signing secrets): decodes the PKCS#12 into a private temp dir (removed on exit), passwords only via `-storepass:env`/`-keypass:env`, fixed alias `upload`, key password defaults to the store password. Checks the key certificate SHA-256 against the pin before signing, signs with SHA256withRSA/SHA-256, then requires `jar verified`, no unsigned entries and exactly one signer equal to the pin. No `-strict` (self-signed upload certificate).
 - Pin `ANDROID_UPLOAD_CERT_SHA256` in the workflow: upload certificate SHA-256 (public). The OWNER confirms it in Play Console → App integrity → Upload key certificate before merge. It is not the app signing certificate in `assetlinks.json`.
 - Artifact (7 days): `arcade-poker-production-aab-signed-<versionCode>-<sourceSha>` with the signed AAB, `signed-release-receipt.json`, `SHA256SUMS`. No Play upload in CI.
 - One-time OWNER steps before the first dispatch: create `android-signing` with required reviewer `krzysztofcal` only, **Prevent self-review off** (the gate requires it, so the OWNER can approve their own dispatch), admin bypass off, deployment branches `main` only; add the secrets `ANDROID_UPLOAD_KEYSTORE_BASE64` (base64 of the existing PKCS#12 upload keystore), `ANDROID_UPLOAD_STORE_PASSWORD`, optional `ANDROID_UPLOAD_KEY_PASSWORD` as **Environment** secrets only. Never create these names as repository secrets: a missing Environment secret would fall back to a repository secret of the same name, and `GITHUB_TOKEN` cannot list secrets to detect that. The first real signed run is a separate OWNER GO.
-- Re-runs: `sign-aab` signs only the build of the same run attempt. If signing fails or the approval is rejected, dispatch a new run (new `versionCode` is not needed until an upload); re-running only `sign-aab` stops with `unsigned_build_from_other_attempt_dispatch_new_run`.
+- Re-runs: run approvals are not per attempt, so `sign-aab` signs only in the first run attempt and only the build of that attempt. Any re-run stops with `rerun_not_allowed_dispatch_new_run`; dispatch a new run instead (the same `versionCode` is fine while nothing was uploaded).
 - Tests: `tests/mobile-poker-channel.test.mjs` checks the job structure and signs a synthetic disposable PKCS#12 (skipped without a JDK).
 
 ## Galaxy S24+ internal-testing plan (OWNER, after the gates above)

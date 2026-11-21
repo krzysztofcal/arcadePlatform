@@ -290,8 +290,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_SHA: ${{ github.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          # Run approvals are not per attempt, so only the first attempt may sign; re-runs need a new dispatch.
+          [ "$RUN_ATTEMPT" = 1 ] || { echo "sign_aab_STOP rerun_not_allowed_dispatch_new_run"; exit 1; }
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$SOURCE_SHA" = "$EXPECTED_SHA"
           node --input-type=module -e '
@@ -326,8 +329,7 @@ jobs:
             const r = JSON.parse(fs.readFileSync("unsigned/release-receipt.json", "utf8"));
             const sha = crypto.createHash("sha256").update(fs.readFileSync(process.env.UNSIGNED_AAB)).digest("hex");
             const expected = { sourceSha: process.env.SOURCE_SHA, runId: Number(process.env.RUN_ID), runAttempt: Number(process.env.RUN_ATTEMPT), channel: "production", appId: "pl.kcswh.arcadepoker", versionName: process.env.MOBILE_VERSION_NAME, versionCode: Number(process.env.MOBILE_VERSION_CODE), signed: false, aabSha256: sha };
-            // Signing requires the build of this exact attempt; re-running only sign-aab stops here (dispatch a new run).
-            for (const [key, value] of Object.entries(expected)) if (r[key] !== value) throw new Error(key === "runAttempt" ? "unsigned_build_from_other_attempt_dispatch_new_run" : "unsigned_receipt_mismatch_" + key);
+            for (const [key, value] of Object.entries(expected)) if (r[key] !== value) throw new Error("unsigned_receipt_mismatch_" + key);
           '
           echo "UNSIGNED_AAB=$UNSIGNED_AAB" >> "$GITHUB_ENV"
       - name: Sign with the Play upload key (only step with signing secrets)

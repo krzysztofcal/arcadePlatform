@@ -145,7 +145,7 @@ Poker Offline now uses the same presentation code: `scripts/build-poker-offline-
   - The bundled `config.js` must equal the pinned Production endpoints exactly.
   - `jarsigner -verify` must report `jar is unsigned`.
   - The licensed lobby music decrypt stays fail-closed.
-- **Signing (#1302):** the `sign-aab` job runs after `release-aab` in the same dispatch, in the protected `android-signing` Environment (OWNER approval required for every run).
+- **Signing (#1302):** the `sign-aab` job runs after `release-aab` in the same dispatch, in the protected `android-signing` Environment (OWNER approval required for every run; only the first run attempt may sign, so a failed run is replaced by a new dispatch).
   - Before any secret is used, it checks at runtime that the Environment requires the OWNER as reviewer, has admin bypass off and allows only `main`, and that the OWNER approved this run; otherwise it stops.
   - It signs only the verified unsigned AAB of the same run (SHA256SUMS and receipt fields) with the Play upload key (PKCS#12, alias `upload`, Environment secrets `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_UPLOAD_STORE_PASSWORD`, optional `ANDROID_UPLOAD_KEY_PASSWORD`) via `mobile/poker/sign-release-aab.sh`.
   - The key certificate and the single signer of the signed AAB must equal the pinned upload certificate SHA-256 in the workflow (public value, verified by the OWNER in Play Console; it is not the Play App Signing certificate used in `assetlinks.json`).
