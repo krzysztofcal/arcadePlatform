@@ -3712,6 +3712,102 @@
     return seat.displayName || (seat.isBot ? 'Bot' : shortId(seat.userId)) || 'Player';
   }
 
+  var seatPhotoReads = new WeakMap();
+  var seatPhotosDisabled = false;
+
+  function photoSeatEligible(seat){
+    return seat && !seat.isBot && !/LEFT|INACTIVE|EMPTY|EJECTION_PENDING|REMOVED/.test(seat.status || '');
+  }
+
+
+  function clearSeatPhoto(avatar){
+    var read = seatPhotoReads.get(avatar);
+    if (!read) return;
+    if (read.image) read.image.remove();
+    if (read.timer) window.clearTimeout(read.timer);
+    if (read.controller) read.controller.abort();
+    seatPhotoReads.delete(avatar);
+  }
+
+  function clearTablePhotos(){
+    Object.keys(renderedSeatAvatars).forEach(function(key){ clearSeatPhoto(renderedSeatAvatars[key]); });
+  }
+
+  function syncSeatPhoto(avatar, seat){
+    var viewer = deriveCurrentSeat();
+    var token = currentAccessToken;
+    var room = state.tableId;
+    function eligible(){
+      if (seatPhotosDisabled || !token || token !== currentAccessToken || room !== state.tableId
+        || !state.wsReady || state.reconnectGate || !isSeatedAtLiveTable() || isClosedTableStatus(state.tableStatus)
+        || /EJECTION_PENDING|REMOVED/.test(currentPlayerStatus()) || !viewer || !seat) return false;
+      var currentViewer = state.seats.find(function(entry){
+        return entry.userId === state.currentUserId && entry.seatNo === viewer.seatNo;
+      });
+      var currentTarget = state.seats.find(function(entry){
+        return entry.userId === seat.userId && entry.seatNo === seat.seatNo;
+      });
+      return !!(photoSeatEligible(currentViewer) && photoSeatEligible(currentTarget) && currentTarget.profile
+        && seatAvatarSource(currentTarget) !== 'blocked');
+    }
+    if (!eligible()) { clearSeatPhoto(avatar); return; }
+    var key = [room, state.currentUserId, viewer.seatNo, seat.userId, seat.seatNo].join(':');
+    var previous = seatPhotoReads.get(avatar);
+    if (previous && previous.key === key && previous.token === token && performance.now() < previous.nextRead) return;
+    clearSeatPhoto(avatar);
+    var controller = new AbortController();
+    var startedAt = performance.now();
+    var read = { key: key, token: token, controller: controller, nextRead: startedAt + 60_000 };
+    seatPhotoReads.set(avatar, read);
+    var url = '/.netlify/functions/poker-table-photo?tableId=' + encodeURIComponent(room)
+      + '&targetUserId=' + encodeURIComponent(seat.userId);
+    var timeout = window.setTimeout(function(){ controller.abort(); }, 15000);
+    fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, {
+      headers: { Authorization: 'Bearer ' + token }, credentials: 'omit', cache: 'no-store', signal: controller.signal
+    }).then(function(response){
+      if (response.status === 404) return response.json().then(function(body){
+        if (body && body.error === 'table_photos_disabled' && eligible() && seatPhotoReads.get(avatar) === read) {
+          seatPhotosDisabled = true;
+          clearTablePhotos();
+        }
+        return null;
+      });
+      return response.ok ? response.json() : null;
+    }).then(function(photo){
+      if (!photo || !eligible() || !avatar.isConnected || seatPhotoReads.get(avatar) !== read
+        || renderedSeatAvatars[seat.seatNo] !== avatar || photo.seatNo !== seat.seatNo) return;
+      if (!Number.isInteger(photo.expiresInMs) || photo.expiresInMs <= 0 || photo.expiresInMs > 60_000) return;
+      // Deduct the entire local round trip so network delay cannot extend the server deadline.
+      var expiresIn = photo.expiresInMs - (performance.now() - startedAt);
+      if (expiresIn <= 0) return;
+      var source = new URL(photo.url);
+      var config = window.SUPABASE_CONFIG;
+      if (!config || source.origin !== new URL(config.SUPABASE_URL).origin
+        || !/^\/storage\/v1\/object\/sign\/profile-avatar-uploads\/pending\/[0-9a-f-]{36}[.]webp$/.test(source.pathname)
+        || !source.searchParams.get('token')) return;
+      var image = document.createElement('img');
+      image.className = 'poker-seat-avatar__image';
+      image.alt = '';
+      image.referrerPolicy = 'no-referrer';
+      image.addEventListener('error', function(){
+        image.remove();
+        window.clearTimeout(read.timer);
+        read.image = null;
+        read.timer = null;
+      }, { once: true });
+      image.src = source.href;
+      read.image = image;
+      avatar.appendChild(image);
+      read.timer = window.setTimeout(function(){
+        image.remove();
+        read.image = null;
+        if (seatPhotoReads.get(avatar) !== read || !eligible() || !avatar.isConnected
+          || renderedSeatAvatars[seat.seatNo] !== avatar) return;
+        read.timer = window.setTimeout(function(){ syncSeatPhoto(avatar, seat); }, Math.max(0, read.nextRead - performance.now()));
+      }, expiresIn);
+    }).catch(function(){}).finally(function(){ window.clearTimeout(timeout); });
+  }
+
   function seatAvatarSource(seat){
     if (!seat) return '';
     if (seat.isBot && seat.botPresentation) return seat.botPresentation.avatarPath || '';
@@ -5297,6 +5393,8 @@
       if (seat && !reuseAvatar) renderSeatAvatar(avatar, seat);
       else if (!seat) { avatar.classList.add('poker-seat-avatar--open'); avatar.textContent = 'OPEN'; }
       if (seat && Number.isInteger(seat.seatNo)) renderedSeatAvatars[seat.seatNo] = avatar;
+      if (previousAvatar && !reuseAvatar) clearSeatPhoto(previousAvatar);
+      if (seat) syncSeatPhoto(avatar, seat);
       if (reuseAvatar){
         var initialsNode = Array.from(avatar.children).find(function(node){ return node.classList.contains('poker-seat-avatar__initials'); });
         if (initialsNode) initialsNode.textContent = initials(getDisplayName(seat));
@@ -5440,6 +5538,9 @@
         (choice && !choice.disabled ? choice : picker).focus();
       }
     }
+    Object.keys(previousAvatars).forEach(function(seatNo){
+      if (previousAvatars[seatNo] !== renderedSeatAvatars[seatNo]) clearSeatPhoto(previousAvatars[seatNo]);
+    });
   }
 
   function clearReactionRenderNodes(){
@@ -7355,6 +7456,7 @@
   }
 
   function applySignedOutState(){
+    clearTablePhotos();
     resetInactivityExitForIdentity();
     lastKnownCurrentSeatNo = null;
     heroLifecycleTransition = 'signed_out';
@@ -7371,6 +7473,7 @@
   }
 
   function applyAuthenticatedPendingState(user, options){
+    clearTablePhotos();
     if (!user || String(user.id || '') !== String(state.currentUserId || '')) resetInactivityExitForIdentity();
     heroLifecycleTransition = user && String(user.id || '') === state.currentUserId ? 'auth_pending_same_user' : 'auth_pending_identity';
     var preservingState = !!(user && state.mode === 'live' && state.hasAppliedAuthoritativeSnapshot
@@ -7398,6 +7501,7 @@
   }
 
   function restartAuthenticatedLiveMode(token){
+    clearTablePhotos();
     if (!tableId || !token){
       currentAccessToken = null;
       stopLiveMode();
@@ -7574,6 +7678,7 @@
         heroLifecycleTransition = status;
         if (status === 'hello_ack' || status === 'minting_token' || status === 'authenticating'){
           state.wsReady = false;
+          clearTablePhotos();
           state.statusText = LIVE_STATUS_COPY.connecting;
           renderInfoPanel();
           renderControls();
@@ -7611,6 +7716,7 @@
           clearReactionBubbles();
           rememberSeatForReconnect();
           state.wsReady = false;
+          clearTablePhotos();
           state.statusText = LIVE_STATUS_COPY.connecting;
           state.reconnectGate = true;
           renderInfoPanel();
@@ -7619,6 +7725,7 @@
           if(info && info.reason==='terms_required')document.dispatchEvent(new CustomEvent('profile:terms-required'));
           syncClosedTableRedirectFromSignal(info && info.reason ? info.reason : null);
         } else if (status === 'resync'){
+          clearTablePhotos();
           cancelSettlementAnimations();
           clearCardFx();
           suppressSettlementAnimationUntilAuthoritativeSnapshot = true;
@@ -7627,6 +7734,7 @@
           renderControls();
           startSnapshotRecovery(gen);
         } else if (status === 'failed'){
+          clearTablePhotos();
           stopSnapshotRecoveryTimer();
           cancelSettlementAnimations();
           clearCardFx();
@@ -7634,6 +7742,7 @@
           state.statusText = LIVE_STATUS_COPY.error;
           setError(info && info.code ? info.code : 'Live connection failed');
         } else if (status === 'error'){
+          clearTablePhotos();
           stopSnapshotRecoveryTimer();
           cancelSettlementAnimations();
           clearCardFx();
@@ -7642,6 +7751,7 @@
           syncClosedTableRedirectFromSignal(info && info.code ? info.code : null);
           setError(info && info.code ? info.code : 'Live table unavailable');
         } else if (status === 'closed'){
+          clearTablePhotos();
           stopSnapshotRecoveryTimer();
           cancelSettlementAnimations();
           clearCardFx();

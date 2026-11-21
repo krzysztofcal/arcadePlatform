@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { atomicRateLimitIncr, xpStoreUnavailableResponse } from "./_shared/store-upstash.mjs";
 import { baseHeaders, corsHeaders, extractBearerToken, klog, verifySupabaseJwt } from "./_shared/supabase-admin.mjs";
-import { googlePhotoEnabled, googlePhotoStatus, importGooglePhoto, withdrawGooglePhoto, selectGooglePhoto, ownerGooglePhotoPreview } from "./_shared/profile-google-photo.mjs";
+import { googlePhotoEnabled, googlePhotoStatus, importGooglePhoto, withdrawGooglePhoto, selectGooglePhoto, upgradeGooglePhotoConsent, ownerGooglePhotoPreview } from "./_shared/profile-google-photo.mjs";
 
 // #1140 UGC phase D, signed-in accounts only, 404 unless GOOGLE_PHOTO_IMPORT_ENABLED=1:
 // GET -> { noticeVersion, googleLinked, consent, photoInUse }
@@ -29,6 +29,7 @@ function createProfileGooglePhotoHandler(deps = {}) {
   const importPhoto = deps.importGooglePhoto || importGooglePhoto;
   const withdraw = deps.withdrawGooglePhoto || withdrawGooglePhoto;
   const selectPhoto = deps.selectGooglePhoto || selectGooglePhoto;
+  const upgradeConsent = deps.upgradeGooglePhotoConsent || upgradeGooglePhotoConsent;
   const preview = deps.ownerGooglePhotoPreview || ownerGooglePhotoPreview;
   const log = deps.klog || klog;
   const allow = deps.allowImport || allowImport;
@@ -76,6 +77,9 @@ function createProfileGooglePhotoHandler(deps = {}) {
         return json(200, cors, {...result,importEnabled});
       }
       if (!importEnabled) return json(404, cors, { error: "not_found" });
+      if (body.action === "upgrade-consent") {
+        return json(200, cors, { ...await upgradeConsent(auth.userId, body, { env }), importEnabled });
+      }
       if (body.action === "select") {
         const result = await selectPhoto(auth.userId, body);
         klog('google_photo_selected', {});

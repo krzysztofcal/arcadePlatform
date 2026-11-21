@@ -1,0 +1,13 @@
+{
+  "candidateVersion": "2026-11-21-a5",
+  "status": "CANDIDATE_OWNER_APPROVAL_PENDING_NOT_PUBLISHED",
+  "previousVersion": "2026-11-20-a4",
+  "basedOn": {
+    "legal/privacy.2026-11-20-a4.en.html": "ae770adddcc89ce4b96e20954ed4295f327063530501c26f837e9203624c7175",
+    "legal/privacy.2026-11-20-a4.pl.html": "c58006cf29fa52dd0e4ef22d234c2a06672481e5b24d2e85d00cec1d6a3f6187"
+  },
+  "files": {
+    "privacy.2026-11-21-a5.en.html": "8c6d1d5735181eb880ce0656ba64a210821995dd6675e3f4efc5810370bfc115",
+    "privacy.2026-11-21-a5.pl.html": "843e34b817dac34bc2225e193fdf54280c7672d9f24f069e72f41db3c988ab00"
+  }
+}

@@ -4877,6 +4877,21 @@ async function handleInternalAccountPoker(req, res) {
   }
 
   try {
+    if (requestUrl.searchParams.has("mode")) {
+      const params = requestUrl.searchParams;
+      const tableId = params.get("tableId");
+      const targetUserId = params.get("targetUserId");
+      const expected = ["mode", "userId", "tableId", "targetUserId"];
+      if (params.get("mode") !== "table-photo" || [...params].length !== expected.length
+        || expected.some(key => params.getAll(key).length !== 1)
+        || ![params.get("userId"), tableId, targetUserId].every(isUuid)) {
+        sendInternalJson(res, 400, { error: "invalid_photo_membership_request" });
+        return;
+      }
+      const membership = tableManager.projectTablePhotoMembership({ tableId, viewerUserId: userId, targetUserId });
+      sendInternalJson(res, 200, membership ? { authorized: true, ...membership } : { authorized: false, tableId });
+      return;
+    }
     const poker = tableManager.projectUserTables(userId);
     sendInternalJson(res, 200, { ok: true, userId, poker });
   } catch (error) {

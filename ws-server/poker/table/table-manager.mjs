@@ -2368,6 +2368,34 @@ export function createTableManager({
     return [...userIds];
   }
 
+  function projectTablePhotoMembership({ tableId, viewerUserId, targetUserId }) {
+    if (mutationBlockedTableIds.has(tableId) || pendingBootstrapByTableId.has(tableId)) return null;
+    const table = tables.get(tableId);
+    const core = table?.coreState;
+    if (table?.tableStatus !== "OPEN" || core?.roomId !== tableId
+      || !Number.isSafeInteger(core.version) || core.version < 0
+      || !Number.isSafeInteger(core.maxSeats)) return null;
+
+    const members = normalizeAuthoritativeMembers(table);
+    const poker = core.pokerState;
+    function eligibleSeat(userId) {
+      if (!userId || isCoreStateBotUser(core, userId) || core.seatDetailsByUserId?.[userId]?.leaveAfterHand
+        || poker?.leftTableByUserId?.[userId] || poker?.pendingDetachByUserId?.[userId]
+        || poker?.inactivityEjectionByUserId?.[userId]) return null;
+      const matches = members.filter(member => member.userId === userId);
+      if (matches.length !== 1) return null;
+      const seat = matches[0].seat;
+      if (seat < 1 || seat > core.maxSeats || core.seats?.[userId] !== seat
+        || members.some(member => member.seat === seat && member.userId !== userId)) return null;
+      return seat;
+    }
+
+    const viewerSeatNo = eligibleSeat(viewerUserId);
+    const targetSeatNo = eligibleSeat(targetUserId);
+    if (viewerSeatNo === null || targetSeatNo === null) return null;
+    return { tableId, viewerSeatNo, targetSeatNo, stateVersion: core.version };
+  }
+
   function projectUserTables(userId) {
     const normalizedUserId = typeof userId === "string" ? userId.trim() : "";
     if (!normalizedUserId) {
@@ -2571,6 +2599,7 @@ export function createTableManager({
     listTableIds,
     activeHumanUserIds,
     projectUserTables,
+    projectTablePhotoMembership,
     blockTableMutations: (id) => { if (pendingBootstrapByTableId.has(id)) throw new Error("table_bootstrap_pending"); mutationBlockedTableIds.add(id); privacyReadGeneration.set(id,(privacyReadGeneration.get(id)||0)+1); },
     unblockTableMutations: (id) => mutationBlockedTableIds.delete(id),
     isTableViewCurrent,
