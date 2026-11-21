@@ -86,9 +86,10 @@
       // The shared Supabase client is created after this listener, so callbacks start on a later task.
       // A code handed over from another page wins: it holds the existing guard until its exchange starts.
       if (pendingCode) exchanging = true;
-      app.addListener('appUrlOpen', function(event){ setTimeout(function(){ callback(event.url); }, 0); });
+      var urlOpened = false;
+      app.addListener('appUrlOpen', function(event){ urlOpened = true; setTimeout(function(){ callback(event.url); }, 0); });
       if (pendingCode) setTimeout(function(){ exchanging = false; callback(bound.redirectTo + '?code=' + encodeURIComponent(pendingCode)); }, 0);
-      else app.getLaunchUrl().then(function(result){ if (result && result.url) setTimeout(function(){ callback(result.url); }, 0); }).catch(function(){ klog('mobile:launch_url_failed'); });
+      else app.getLaunchUrl().then(function(result){ if (result && result.url) setTimeout(function(){ if (!urlOpened) callback(result.url); }, 0); }).catch(function(){ klog('mobile:launch_url_failed'); });
       app.addListener('backButton', function(){
         if (window.PokerOffline && window.PokerOffline.cancelDialog && window.PokerOffline.cancelDialog()) return;
         var dialog = document.querySelector('dialog[open]');

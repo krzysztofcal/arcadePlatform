@@ -445,7 +445,7 @@ test('pending handoff code starts before an appUrlOpen delivered at listener reg
   vm.runInNewContext(source, { window, document: { addEventListener(name, fn) { if (name === 'DOMContentLoaded') ready = fn; }, getElementById: () => node }, URL, Event, navigator: { onLine: true }, sessionStorage, setTimeout });
   ready();
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(exchanged[0], 'later-2', 'the fresh callback is exchanged before an older launch URL');
+  assert.deepEqual(exchanged, ['later-2'], 'the fresh callback wins and the older launch URL is not replayed');
 });
 
 test('js/api-url resolves netlify functions per channel and fails safely on invalid config', async () => {
