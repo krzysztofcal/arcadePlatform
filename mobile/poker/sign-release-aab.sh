@@ -8,6 +8,9 @@ umask 077
 fail() { echo "sign_release_aab_STOP $1" >&2; exit 1; }
 
 ALIAS=upload
+# JDK tool output is parsed below, so force English messages regardless of the runner locale.
+keytool() { command keytool -J-Duser.language=en -J-Duser.country=US "$@"; }
+jarsigner() { command jarsigner -J-Duser.language=en -J-Duser.country=US "$@"; }
 [ -n "${UNSIGNED_AAB:-}" ] && [ -f "$UNSIGNED_AAB" ] || fail unsigned_aab_missing
 [ -n "${SIGNED_AAB:-}" ] && [ ! -e "$SIGNED_AAB" ] || fail signed_aab_target_invalid
 PIN="${EXPECTED_UPLOAD_CERT_SHA256:-}"

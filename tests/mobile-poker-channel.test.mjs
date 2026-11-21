@@ -632,7 +632,7 @@ test('sign-release-aab.sh: synthetic upload key signs only with the pinned certi
     // Disposable test-only key; never the real Play upload key.
     let r = spawnSync('keytool', ['-genkeypair', '-storetype', 'PKCS12', '-keystore', keystore, '-alias', 'upload', '-keyalg', 'RSA', '-keysize', '2048', '-dname', 'CN=synthetic-test', '-validity', '1', '-storepass', 'synthetic-pass', '-keypass', 'synthetic-pass'], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
-    r = spawnSync('keytool', ['-list', '-v', '-storetype', 'PKCS12', '-keystore', keystore, '-storepass', 'synthetic-pass', '-alias', 'upload'], { encoding: 'utf8' });
+    r = spawnSync('keytool', ['-J-Duser.language=en', '-J-Duser.country=US', '-list', '-v', '-storetype', 'PKCS12', '-keystore', keystore, '-storepass', 'synthetic-pass', '-alias', 'upload'], { encoding: 'utf8' });
     const pin = /SHA256: ([0-9A-F:]{95})/.exec(r.stdout)[1];
     mkdirSync(path.join(work, 'content'));
     writeFileSync(path.join(work, 'content', 'payload.txt'), 'unsigned bundle payload\n');
@@ -665,13 +665,13 @@ test('sign-release-aab.sh: synthetic upload key signs only with the pinned certi
     const ok = run({ SIGNED_AAB: signed });
     assert.equal(ok.status, 0, ok.stderr);
     assert.match(ok.stdout, /sign_release_aab_PASS/);
-    r = spawnSync('keytool', ['-printcert', '-jarfile', signed], { encoding: 'utf8' });
+    r = spawnSync('keytool', ['-J-Duser.language=en', '-J-Duser.country=US', '-printcert', '-jarfile', signed], { encoding: 'utf8' });
     assert.equal([...r.stdout.matchAll(/SHA256: ([0-9A-F:]{95})/g)].map(m => m[1]).join(), pin);
     const again = run({ UNSIGNED_AAB: signed, SIGNED_AAB: path.join(work, 'twice.aab') });
     assert.match(again.stderr, /input_not_unsigned/);
     // An upload entry issued by another certificate: only its own certificate is pinned, not an issuer.
     const chained = path.join(work, 'chained.p12');
-    const kt = (...args) => { const out = spawnSync('keytool', args, { encoding: 'utf8' }); assert.equal(out.status, 0, out.stderr); return out.stdout; };
+    const kt = (...args) => { const out = spawnSync('keytool', ['-J-Duser.language=en', '-J-Duser.country=US', ...args], { encoding: 'utf8' }); assert.equal(out.status, 0, out.stderr); return out.stdout; };
     const store = ['-storetype', 'PKCS12', '-storepass', 'synthetic-pass'];
     kt('-genkeypair', ...store, '-keystore', path.join(work, 'ca.p12'), '-alias', 'ca', '-keyalg', 'RSA', '-keysize', '2048', '-dname', 'CN=synthetic-ca', '-validity', '1', '-ext', 'bc:c');
     kt('-exportcert', ...store, '-keystore', path.join(work, 'ca.p12'), '-alias', 'ca', '-rfc', '-file', path.join(work, 'ca.pem'));
