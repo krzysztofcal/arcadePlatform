@@ -180,7 +180,11 @@ const assetLinks = JSON.parse(await readFile(path.join(root, '.well-known', 'ass
 assert.deepEqual(assetLinks, [{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: APPROVED_PRODUCTION_APP_ID, sha256_cert_fingerprints: ['A2:63:D1:F8:C5:93:3F:C6:16:09:2E:43:BB:AE:BE:59:49:EB:52:F9:61:27:21:6A:0E:3A:86:2D:79:34:B9:2A'] } }], 'assetlinks.json should hold exactly the Play App Signing statement for the Production package');
 assert.match(callbackIntentFilter('production'), /android:autoVerify="true"[\s\S]*android:host="play\.kcswh\.pl"/, 'verified App Link host should be the site serving assetlinks.json');
 assert.match(headersFile, /\n\/\.well-known\/assetlinks\.json\n  Content-Type: application\/json\n/, 'assetlinks.json should be served as application/json');
-assert.doesNotMatch(netlifyToml, /from = "\/\.well-known/, 'assetlinks.json must not be redirected or rewritten');
+for (const [, from] of netlifyToml.matchAll(/^\s*from\s*=\s*"([^"]+)"/gm)) {
+  const pattern = new RegExp('^' + from.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/:[A-Za-z]\w*/g, '[^/]+') + '$');
+  assert.equal(pattern.test('/.well-known/assetlinks.json'), false, `redirect ${from} must not match assetlinks.json`);
+}
+assert.equal(existsSync(path.join(root, '_redirects')), false, 'no _redirects file may rewrite assetlinks.json');
 const portalHeaders = headerBlocks.filter((block) => !callbackBlocks.includes(block)).join('\n');
 const cspBlocks = [...portalHeaders.matchAll(/Content-Security-Policy:\s*([^\n]+)/g)].map((match) => match[1]);
 assert.equal(cspBlocks.length > 0, true, 'canonical headers should define CSP blocks');
