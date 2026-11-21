@@ -665,6 +665,7 @@ test("g2 keeps WWW visibility and can confirm g3 for the same copy without reimp
   const calls = net.calls.length;
   await photo.upgradeGooglePhotoConsent(user, grant, upgraded);
   assert.equal(net.calls.length, calls);
+  assert.equal((await publishedPhotoKeys([user], net.deps)).get(user), original.imported_avatar_key);
   assert.equal((await consentRow(env, user)).imported_avatar_key, original.imported_avatar_key);
   assert.equal((await read()).statusCode, 200);
   await env.executeSql("update public.user_profiles set google_photo_suppressed = true where user_id=$1", [user]);

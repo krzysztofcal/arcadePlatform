@@ -58,15 +58,16 @@ export function createPokerTablePhotoHandler({
       if (!before) return absent();
       const photo = await eligiblePhoto(sql, auth.userId, targetUserId);
       if (!photo) return absent();
-      const expiresAt = Date.now() + 60_000;
+      const expiresAt = performance.now() + 60_000;
       const url = (await sign([photo.avatar_key])).get(photo.avatar_key);
       if (!url) return absent();
       const current = await eligiblePhoto(sql, auth.userId, targetUserId);
       if (!current || current.avatar_key !== photo.avatar_key || current.consent_revision !== photo.consent_revision) return absent();
       const after = await membership(query);
+      const expiresInMs = Math.floor(expiresAt - performance.now());
       if (!after || ["tableId", "viewerUserId", "targetUserId", "viewerSeatNo", "targetSeatNo"].some(key => before[key] !== after[key])
-        || Date.now() >= expiresAt) return absent();
-      return reply(200, { url, expiresAt, seatNo: after.targetSeatNo });
+        || expiresInMs <= 0) return absent();
+      return reply(200, { url, expiresInMs, seatNo: after.targetSeatNo });
     } catch {
       klog("poker_table_photo_read_failed", {});
       return absent();

@@ -43,6 +43,7 @@ test("table photo signs only the WS participant's current, separately consented 
     assert.equal(response.statusCode, allowed ? 200 : scenario === "unauthorized" ? 401 : 404, scenario);
     assert.equal(signed, ["ok", "own", "withdrawn", "seat-changed"].includes(scenario) ? 1 : 0, scenario);
     if (!allowed) assert.doesNotMatch(response.body, /signed/);
+    if (allowed) assert.ok(JSON.parse(response.body).expiresInMs > 0 && JSON.parse(response.body).expiresInMs <= 60000);
     if (scenario === "off") assert.equal(JSON.parse(response.body).error, "table_photos_disabled");
   }
 });
@@ -81,7 +82,7 @@ test("seat photo reauthorizes on expiry, clears on ejection and stops when disab
       currentAccessToken: "synthetic", renderedSeatAvatars: { 2: avatar },
       deriveCurrentSeat: () => seats[0], isSeatedAtLiveTable: () => true,
       currentPlayerStatus: () => status, isClosedTableStatus: () => false, seatAvatarSource: () => "",
-      AbortController, URL, Date: { now: () => now },
+      AbortController, URL, performance: { now: () => now },
       document: { createElement: () => ({ addEventListener() {}, remove() { shown = false; } }) },
       window: {
         SUPABASE_CONFIG: { SUPABASE_URL: "https://test.supabase.co" },
@@ -93,7 +94,7 @@ test("seat photo reauthorizes on expiry, clears on ejection and stops when disab
         if (scenario === "disabled") return { ok: false, status: 404, json: async () => ({ error: "table_photos_disabled" }) };
         return { ok: true, json: async () => ({
           url: "https://test.supabase.co/storage/v1/object/sign/profile-avatar-uploads/pending/" + key + "?token=synthetic",
-          expiresAt: now + 50000, seatNo: 2
+          expiresInMs: 50000, seatNo: 2
         }) };
       }
     });

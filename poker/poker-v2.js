@@ -3753,10 +3753,11 @@
     if (!eligible()) { clearSeatPhoto(avatar); return; }
     var key = [room, state.currentUserId, viewer.seatNo, seat.userId, seat.seatNo].join(':');
     var previous = seatPhotoReads.get(avatar);
-    if (previous && previous.key === key && previous.token === token && Date.now() < previous.nextRead) return;
+    if (previous && previous.key === key && previous.token === token && performance.now() < previous.nextRead) return;
     clearSeatPhoto(avatar);
     var controller = new AbortController();
-    var read = { key: key, token: token, controller: controller, nextRead: Date.now() + 60_000 };
+    var startedAt = performance.now();
+    var read = { key: key, token: token, controller: controller, nextRead: startedAt + 60_000 };
     seatPhotoReads.set(avatar, read);
     var url = '/.netlify/functions/poker-table-photo?tableId=' + encodeURIComponent(room)
       + '&targetUserId=' + encodeURIComponent(seat.userId);
@@ -3775,8 +3776,10 @@
     }).then(function(photo){
       if (!photo || !eligible() || !avatar.isConnected || seatPhotoReads.get(avatar) !== read
         || renderedSeatAvatars[seat.seatNo] !== avatar || photo.seatNo !== seat.seatNo) return;
-      var expiresIn = photo.expiresAt - Date.now();
-      if (!Number.isFinite(expiresIn) || expiresIn <= 0 || expiresIn > 60_000) return;
+      if (!Number.isInteger(photo.expiresInMs) || photo.expiresInMs <= 0 || photo.expiresInMs > 60_000) return;
+      // Deduct the entire local round trip so network delay cannot extend the server deadline.
+      var expiresIn = photo.expiresInMs - (performance.now() - startedAt);
+      if (expiresIn <= 0) return;
       var source = new URL(photo.url);
       var config = window.SUPABASE_CONFIG;
       if (!config || source.origin !== new URL(config.SUPABASE_URL).origin
@@ -3800,7 +3803,7 @@
         read.image = null;
         if (seatPhotoReads.get(avatar) !== read || !eligible() || !avatar.isConnected
           || renderedSeatAvatars[seat.seatNo] !== avatar) return;
-        read.timer = window.setTimeout(function(){ syncSeatPhoto(avatar, seat); }, Math.max(0, read.nextRead - Date.now()));
+        read.timer = window.setTimeout(function(){ syncSeatPhoto(avatar, seat); }, Math.max(0, read.nextRead - performance.now()));
       }, expiresIn);
     }).catch(function(){}).finally(function(){ window.clearTimeout(timeout); });
   }

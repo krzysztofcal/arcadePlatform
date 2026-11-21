@@ -271,7 +271,7 @@ export async function importGooglePhoto(userId, input = {}, deps = {}) {
   if (!input || typeof input !== "object" || Object.keys(input).some((key) => !allowed.has(key))) throw photoError("invalid_request", 400);
   if (input.consent !== true) throw photoError("consent_required", 400);
   if (input.noticeVersion !== currentNotice(deps.env || process.env)) throw photoError("notice_version_changed");
-  if (input.noticeVersion === GOOGLE_PHOTO_TABLE_NOTICE_VERSION && input.scope !== "web-leaderboard-poker") throw photoError("notice_version_changed");
+  if (input.scope !== (input.noticeVersion === GOOGLE_PHOTO_TABLE_NOTICE_VERSION ? "web-leaderboard-poker" : undefined)) throw photoError("notice_version_changed");
   if (typeof input.providerToken !== "string" || !/^[\x21-\x7e]{16,4096}$/.test(input.providerToken)) throw photoError("google_proof_required", 400);
   const env = deps.env || process.env;
   if (env.ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED !== '1' && !accountDeletionEnabled(env)) throw photoError('avatar_tracking_unavailable',503);
