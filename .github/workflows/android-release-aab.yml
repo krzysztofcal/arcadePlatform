@@ -254,3 +254,114 @@ jobs:
           path: mobile/poker/artifacts/
           if-no-files-found: error
           retention-days: 7
+
+  # #1302: sign the verified unsigned AAB of this same run with the Play upload key. Secrets exist only in the protected
+  # android-signing Environment and only in the signing step; nothing is uploaded to Google Play.
+  sign-aab:
+    needs: release-aab
+    # Re-runs skip signing (run approvals are not per attempt); dispatch a new run instead.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: android-signing
+    permissions:
+      contents: read
+      actions: read
+    env:
+      SOURCE_SHA: ${{ inputs.sourceSha }}
+      MOBILE_VERSION_NAME: ${{ inputs.versionName }}
+      MOBILE_VERSION_CODE: ${{ inputs.versionCode }}
+      # Public SHA-256 of the Play UPLOAD certificate (not the Play App Signing certificate, not the OAuth SHA-1).
+      # OWNER verifies it against Play Console -> App integrity -> Upload key certificate before first use.
+      ANDROID_UPLOAD_CERT_SHA256: '29:0D:12:CA:4B:AE:71:56:AC:36:35:AE:D9:7B:F8:3D:C1:E1:DC:B7:F5:21:4E:75:A2:6C:89:1C:F2:70:58:7E'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.1'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21.0.10+7.0.LTS'
+      # GitHub auto-creates a referenced Environment without protection, so verify it before any secret is used.
+      - name: Protected environment and OWNER approval (fails closed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Run approvals are not per attempt, so only the first attempt may sign; re-runs need a new dispatch.
+          [ "$RUN_ATTEMPT" = 1 ] || { echo "sign_aab_STOP rerun_not_allowed_dispatch_new_run"; exit 1; }
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$SOURCE_SHA" = "$EXPECTED_SHA"
+          node --input-type=module -e '
+            import { environmentFailures, ownerApproved } from "./scripts/www-release-actions.mjs";
+            const api = async path => {
+              const r = await fetch("https://api.github.com/repos/krzysztofcal/arcadePlatform/" + path, { headers: { authorization: "Bearer " + process.env.GH_TOKEN, accept: "application/vnd.github+json" } });
+              if (!r.ok) throw new Error("environment_api_" + r.status);
+              return r.json();
+            };
+            if (process.env.GITHUB_REPOSITORY !== "krzysztofcal/arcadePlatform") throw new Error("repository_mismatch");
+            const failures = environmentFailures(await api("environments/android-signing"), await api("environments/android-signing/deployment-branch-policies"), "krzysztofcal");
+            if (failures.length) throw new Error(failures.join(","));
+            if (!ownerApproved(await api("actions/runs/" + process.env.GITHUB_RUN_ID + "/approvals"), "android-signing", "krzysztofcal")) throw new Error("owner_environment_approval_missing");
+            process.stdout.write("android-signing protected and approved by OWNER\n");
+          '
+      - uses: actions/download-artifact@v4
+        with:
+          name: arcade-poker-production-aab-unsigned-${{ inputs.versionCode }}-${{ inputs.sourceSha }}
+          path: unsigned
+      - name: Verify the unsigned artifact of this run
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          UNSIGNED_AAB="unsigned/arcade-poker-production-${MOBILE_VERSION_NAME}-${MOBILE_VERSION_CODE}-${SOURCE_SHA}-unsigned.aab"
+          test -f "$UNSIGNED_AAB"
+          (cd unsigned && sha256sum -c SHA256SUMS)
+          export UNSIGNED_AAB
+          node -e '
+            const fs = require("node:fs"), crypto = require("node:crypto");
+            const r = JSON.parse(fs.readFileSync("unsigned/release-receipt.json", "utf8"));
+            const sha = crypto.createHash("sha256").update(fs.readFileSync(process.env.UNSIGNED_AAB)).digest("hex");
+            const expected = { sourceSha: process.env.SOURCE_SHA, runId: Number(process.env.RUN_ID), runAttempt: Number(process.env.RUN_ATTEMPT), channel: "production", appId: "pl.kcswh.arcadepoker", versionName: process.env.MOBILE_VERSION_NAME, versionCode: Number(process.env.MOBILE_VERSION_CODE), signed: false, aabSha256: sha };
+            for (const [key, value] of Object.entries(expected)) if (r[key] !== value) throw new Error("unsigned_receipt_mismatch_" + key);
+          '
+          echo "UNSIGNED_AAB=$UNSIGNED_AAB" >> "$GITHUB_ENV"
+      - name: Sign with the Play upload key (only step with signing secrets)
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          EXPECTED_UPLOAD_CERT_SHA256: ${{ env.ANDROID_UPLOAD_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          mkdir signed
+          SIGNED_AAB="signed/arcade-poker-production-${MOBILE_VERSION_NAME}-${MOBILE_VERSION_CODE}-${SOURCE_SHA}-signed.aab" bash mobile/poker/sign-release-aab.sh
+      - name: Signed receipt
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          SIGNED_AAB="signed/arcade-poker-production-${MOBILE_VERSION_NAME}-${MOBILE_VERSION_CODE}-${SOURCE_SHA}-signed.aab"
+          export SIGNED_AAB
+          node -e '
+            const fs = require("node:fs"), crypto = require("node:crypto");
+            const hash = file => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+            const receipt = { sourceSha: process.env.SOURCE_SHA, runId: Number(process.env.RUN_ID), runAttempt: Number(process.env.RUN_ATTEMPT), channel: "production", appId: "pl.kcswh.arcadepoker", versionName: process.env.MOBILE_VERSION_NAME, versionCode: Number(process.env.MOBILE_VERSION_CODE), signed: true, unsignedAabSha256: hash(process.env.UNSIGNED_AAB), signedAabSha256: hash(process.env.SIGNED_AAB), uploadCertificateSha256: process.env.ANDROID_UPLOAD_CERT_SHA256 };
+            fs.writeFileSync("signed/signed-release-receipt.json", JSON.stringify(receipt, null, 2) + "\n");
+          '
+          (cd signed && sha256sum "$(basename "$SIGNED_AAB")" > SHA256SUMS)
+          cat signed/signed-release-receipt.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcade-poker-production-aab-signed-${{ inputs.versionCode }}-${{ inputs.sourceSha }}
+          path: signed/
+          if-no-files-found: error
+          retention-days: 7
