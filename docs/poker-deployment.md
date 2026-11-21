@@ -229,7 +229,8 @@ Repo-side Caddy ownership is unified: `infra/vps/Caddyfile` is the single source
 OWNER can dispatch directly. The agent requires explicit OWNER GO in the
 conversation for the exact application SHA and uses the existing GitHub App.
 The App path defaults to off. After the workflow reaches `main`, OWNER can
-separately enable it with the repository variable
+separately enable it after the environment protection below has been independently
+verified, using the repository variable
 `WS_PREVIEW_AGENT_DEPLOY_ENABLED=true`. The existing `WS_RELEASE_AGENT` must
 name `arcade-code-agent[bot]`. Unsetting the Preview flag disables App dispatch
 eligibility for subsequent jobs. It does not cancel an already running deploy.
@@ -249,25 +250,39 @@ GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh /home/copilot/.arcade-code-age
 Set `APP_SHA` to the approved 40-character application commit. The workflow
 definition comes from `main`; only first-attempt manual dispatches are eligible.
 Verify the run against its workflow, dispatch time, title (application SHA and
-actor), `actor`, `triggering_actor`, and attempt. Wait for the validate, build and
-deploy jobs. Verify deploy success, which requires matching release metadata and
-both health checks. The metadata is a consistency check against the approved
-input SHA. Report the run ID, URL, application SHA and outcome. An ambiguous or failed run means
-STOP. A fresh dispatch requires fresh OWNER GO.
+actor), `actor`, `triggering_actor`, and attempt. Wait for `validate` and `build`
+to succeed and for `deploy` to wait for
+`ws-preview` approval. Report the run ID, URL and application SHA to OWNER.
+OWNER checks the SHA and actors, then selects **Review deployments** →
+**ws-preview** → **Approve and deploy** in GitHub. This applies to OWNER's
+direct dispatches as well. The agent never approves. After approval, verify
+deploy success, which requires matching release metadata and both health checks.
+Report the outcome. An ambiguous or failed run means STOP. A fresh dispatch
+requires fresh OWNER GO.
 
-The `ws-preview` GitHub Environment currently restricts deployments to `main`
-and has no required reviewers. The branch rule applies to the workflow
-definition. The application SHA is an explicit input. The build runs on its
-own runner without the SSH deployment credentials. The deployment job
-receives the packaged artifact on a fresh runner. GitHub checks the App identity and activation
-flag. The agent enforces conversation approval before dispatch. Once enabled,
-a dispatch made directly with valid App credentials can pass the workflow
-without that conversation check. This deploy replaces the shared Preview WS
-runtime and restarts its service, which can interrupt players. Artifact code
-runs under the existing Preview deploy identity during VPS validation and
-under the existing runtime identity after restart. Only approve reviewed
-application SHAs. This workflow remains manual-only, and Caddy configuration
-stays with the existing infra workflow.
+#### Configure the approval gate before activation
+
+In repository **Settings → Environments → ws-preview**:
+
+1. Under **Required reviewers**, add only `krzysztofcal`.
+2. Leave **Prevent self-review** unchecked so OWNER can approve an OWNER-initiated run.
+3. Disable **Allow administrators to bypass configured protection rules**.
+4. Under **Deployment branches and tags**, use **Selected branches and tags**
+   with exactly one branch rule, `main`, and no tag rules.
+
+Independently read back the environment and its deployment branch policies
+before enabling the App. Keep the activation flag off if any requirement cannot
+be verified. The workflow checks those settings in `validate` and checks this
+run's OWNER approval record in `deploy` before using SSH secrets. API errors
+or missing evidence block the run. The application SHA is an explicit input,
+while the branch rule applies to the workflow definition.
+
+Only `deploy` uses the Environment and SSH secrets. The build runs on a separate
+runner and sends the packaged artifact to `deploy`. The deploy replaces and
+restarts the shared Preview runtime, which can interrupt players. Artifact code
+runs with the existing Preview deploy identity during VPS validation and with
+the runtime identity after restart. Only approve reviewed application SHAs.
+This workflow remains manual-only. Caddy stays with the existing infra workflow.
 
 ### Preview runtime contract
 
