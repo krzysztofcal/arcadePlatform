@@ -7984,10 +7984,10 @@
       window.addEventListener('scroll', positionCelebration, { passive: true });
     }
     if (els.actionBar) els.actionBar.addEventListener('pointerdown', deemphasizeCelebration);
-    document.addEventListener('visibilitychange', function(){
+    document.addEventListener('visibilitychange', function(){ // xp-lifecycle-allow:poker-v2-celebration-visibility(2027-01-01)
       if (document.hidden){ interruptTablePhotoRead(); clearCardFx(); clearCelebration(); }
       else reconcileTablePhotos(true);
-    }); // xp-lifecycle-allow:poker-v2-celebration-visibility(2027-01-01)
+    });
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches){ clearCardFx(false, true); clearCelebration(); } });
     renderSocialPreferences();

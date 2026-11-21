@@ -156,7 +156,23 @@ test("poker table filters only presentation of blocked players", async () => {
   assert.match(poker, /if \(ugcBlocked\(currentSeatOwnerUserId\(event\.senderSeatNo\)\)\) return;/, "live gifts of a blocked sender are not shown");
   assert.match(poker, /if \(ugcBlocked\(seat\.userId\)\) return 'blocked';/, "the avatar source changes so a shown avatar is replaced");
   assert.match(poker, /var profileAvatar = !seat\.isBot && !ugcBlocked\(seat\.userId\) && seat\.profile && seat\.profile\.avatar;/);
-  assert.equal((poker.match(/ugcBlocked\(/g) || []).length, 6, "no other code path consults blocks (no seat, turn or chips logic)");
+  // Track callers by renderer-level function so an added gameplay check cannot
+  // hide behind a removed presentation check elsewhere in the file.
+  const blockChecks = new Map();
+  let caller;
+  for (const [, name] of poker.matchAll(/^  (?:async )?function (\w+)\s*\(|\bugcBlocked\s*\(/gm)) {
+    if (name) caller = name;
+    else blockChecks.set(caller, (blockChecks.get(caller) || 0) + 1);
+  }
+  assert.deepEqual(blockChecks, new Map([
+    ["handleTableReaction", 1],
+    ["attachTablePhoto", 1],
+    ["reconcileTablePhotos", 2],
+    ["seatAvatarSource", 1],
+    ["renderSeatAvatar", 1],
+    ["visibleGifts", 1],
+    ["handleTableGift", 1]
+  ]), "block checks belong only to avatar, photo, gift and reaction presentation");
 });
 
 test("gift badges received live from a player disappear once that player is blocked", async () => {
