@@ -372,9 +372,20 @@ The existing sudo grant accepts no arguments and does not authorize
    SHA-256. Stage its `infra/vps/ws-preview-env-preflight.mjs` as
    `/usr/local/libexec/arcade-ws-preview-sql/preflight.mjs`, root:root 0644.
 2. Stage the same `postgres` package and version used by WS Preview in that
-   directory as `postgres/`. Verify its package archive against the npm
-   integrity value in the deployed release's reviewed `ws-server/package-lock.json`
-   before extracting. Verify the protected tree and each ancestor are root-owned,
+   directory as `postgres/`. Read the package's `version`, `resolved`, and
+   `integrity` from the lockfile blob at the independently verified, reviewed
+   WS Preview release commit (`git show <release-sha>:ws-server/package-lock.json`).
+   Use the live lockfile only as a consistency check. Fetch the exact HTTPS npm
+   archive as a non-root user and compare
+   `openssl dgst -sha512 -binary postgres.tgz | openssl base64 -A` with the
+   pinned integrity value after `sha512-`. Refuse unexpected archive paths
+   (absolute paths, traversal or paths outside `package/`), symlinks, hard
+   links or special files. Extract as a non-root user in an empty staging
+   directory with `tar --no-same-owner --no-same-permissions -xzf postgres.tgz`.
+   Verify the staged `package.json` version and that the package has no runtime
+   dependencies. Copy only the verified files into protected custody, checking
+   installed bytes against the verified archive. Verify the protected tree and
+   each ancestor are root-owned,
    without symlinks or group/world write access. Use 0755 directories and 0644
    regular files so the existing `arcade-preview` identity can read the package.
    Use a fresh protected destination. Stop on unexpected existing contents,
@@ -389,7 +400,9 @@ The existing sudo grant accepts no arguments and does not authorize
 
    Expect `PASS stage_db_readable`. On `BLOCKED <code>`, stop and report the
    code. The child uses the Preview UID/GID with an empty environment, receives
-   only the DSN over stdin and has a seven-second deadline. Do not trace its
+   only the DSN over stdin and has a seven-second deadline. Confirm the WS
+   connection is fully specified by the DSN before relying on this result.
+   Do not trace its
    execution or record the environment file. Retiring this diagnostic requires
    removing only its separately staged directory through the same approved
    maintenance path.

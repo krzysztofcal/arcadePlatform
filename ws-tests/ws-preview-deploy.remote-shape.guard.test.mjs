@@ -308,7 +308,8 @@ for (const [failure, expected] of [
   ["42501", "BLOCKED db_access_denied"],
   ["57014", "BLOCKED db_timeout"],
   ["ETIMEDOUT", "BLOCKED db_timeout"],
-  ["unexpected", "BLOCKED db_verification_failed"]
+  ["unexpected", "BLOCKED db_verification_failed"],
+  ["invalid-config", "BLOCKED preview_config_invalid"]
 ]) {
   test(`Preview SQL helper reports only the safe result (${failure ?? "success"})`, async () => {
     const url = "postgresql://postgres:fixtureSecret@db.krydukthwdvccggbyjfw.supabase.co/postgres";
@@ -326,7 +327,7 @@ for (const [failure, expected] of [
       lstatSync: () => metadata, openSync: () => 5, fstatSync: () => metadata, closeSync() {},
       readFileSync: () => [
         "PORT=3001", "WS_AUTHORITATIVE_JOIN_ENABLED=1", "POKER_WS_INTERNAL_TOKEN=fixtureToken",
-        "SUPABASE_STAGE_PROJECT_REF=krydukthwdvccggbyjfw",
+        `SUPABASE_STAGE_PROJECT_REF=${failure === "invalid-config" ? "fixtureWrongRef" : "krydukthwdvccggbyjfw"}`,
         "SUPABASE_URL=https://krydukthwdvccggbyjfw.supabase.co", `SUPABASE_DB_URL=${url}`
       ].join("\n")
     };
@@ -348,7 +349,13 @@ for (const [failure, expected] of [
     };
     // Execute the actual worker body using a fake driver. Model the parent's hard deadline separately.
     let workerResult;
-    function spawn(_executable, args, options) {
+    function spawn(executable, args, options) {
+      assert.notEqual(failure, "invalid-config");
+      assert.equal(executable, "/usr/bin/setpriv");
+      assert.deepEqual(args.slice(0, -1), [
+        "--reuid=arcade-preview", "--regid=arcade-preview", "--clear-groups", "--no-new-privs",
+        "/usr/bin/node", "--input-type=module", "-e"
+      ]);
       assert.equal(options.input, url);
       assert.ok(!args.join(" ").includes(url));
       assert.deepEqual(options.env, {});
@@ -360,7 +367,13 @@ for (const [failure, expected] of [
       const AsyncFunction = (async () => {}).constructor;
       workerResult = new AsyncFunction("process", "readFileSync", "createRequire",
         workerSource.replace(/^\s*const \{ (?:readFileSync|createRequire) \} = await import\(.*\);$/gm, "")
-      )(workerProcess, () => options.input, () => () => postgres).then(() => workerProcess.exitCode ?? 0);
+      )(workerProcess, () => options.input, anchor => {
+        assert.equal(anchor, "/usr/local/libexec/arcade-ws-preview-sql/preflight.mjs");
+        return packagePath => {
+          assert.equal(packagePath, "/usr/local/libexec/arcade-ws-preview-sql/postgres");
+          return postgres;
+        };
+      }).then(() => workerProcess.exitCode ?? 0);
       // spawnSync blocks in production. Re-run the parent with the worker's result once it resolves.
       return { status: 1 };
     }
@@ -374,7 +387,17 @@ for (const [failure, expected] of [
       assert.equal(queries.at(-1), "closed");
       assert.ok(queries.filter(query => query.startsWith("select") && !query.startsWith("select 1"))
         .every(query => query.endsWith("limit 0")));
-      if (!failure) assert.equal(queries.length, 9);
+      if (!failure) assert.deepEqual(queries, [
+        "set local statement_timeout = '2s'",
+        "select 1 as ok",
+        "select user_id, avatar_key, google_photo_suppressed, public_profile_blocked from public.user_profiles limit 0",
+        "select user_id, consent_revision, notice_version, decision, imported_avatar_key from private.profile_photo_consents limit 0",
+        "select id, public from storage.buckets limit 0",
+        "select user_id from private.ugc_avatar_holds limit 0",
+        "select old_user_id from public.account_deletion_requests limit 0",
+        "select blocker_user_id, blocked_user_id from private.user_blocks limit 0",
+        "closed"
+      ]);
     }
     assert.deepEqual(output, [expected + "\n"]);
     assert.equal(process.exitCode, expected.startsWith("PASS") ? undefined : 1);
