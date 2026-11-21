@@ -57,9 +57,7 @@
       var cap2 = window.Capacitor;
       var native = cap2 && cap2.Plugins && cap2.Plugins.PokerGoogleSignIn;
       if (bound.channel !== 'production' || !native) return Promise.resolve(false);
-      pendingClear = pendingClear.then(function(){ return native.clearCredential(); })
-        .then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); return false; });
-      return pendingClear;
+      return queueClear(native);
     },
     // Resolves once no Google ID-token exchange is running, so a sign-out can run after it and remove its session.
     googleSettled: function(){ return exchangeInFlight.then(function(){ return true; }, function(){ return true; }); }
@@ -68,6 +66,11 @@
   var googleGeneration = 0;
   var pendingClear = Promise.resolve(true);
   var exchangeInFlight = Promise.resolve(true);
+  function queueClear(native){
+    pendingClear = pendingClear.then(function(){ return native.clearCredential(); })
+      .then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); return false; });
+    return pendingClear;
+  }
   function nonceHex(bytes){
     return Array.prototype.map.call(new Uint8Array(bytes), function(b){ return (b < 16 ? '0' : '') + b.toString(16); }).join('');
   }
@@ -94,8 +97,12 @@
         throw new Error('google_failed');
       }
       if (!credential || typeof credential.idToken !== 'string' || !credential.idToken) throw new Error('google_failed');
-      // A sign-out while the picker was open discards its result.
-      if (generation !== googleGeneration) throw new Error('google_canceled');
+      // A sign-out while the picker was open discards its result, and clears again in case the provider stored
+      // this late account choice after the sign-out's clear had finished; the next sign-in waits for it.
+      if (generation !== googleGeneration){
+        queueClear(native);
+        throw new Error('google_canceled');
+      }
       var exchange = Promise.resolve().then(function(){
         // Re-check right before the exchange: a sign-out queued just after the picker resolved must win.
         if (generation !== googleGeneration) throw new Error('google_canceled');

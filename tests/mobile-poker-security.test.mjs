@@ -622,6 +622,24 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   openPicker({ idToken: 'secret-id-token' });
   await assert.rejects(pickerAttempt, /google_canceled/);
   assert.equal(pickerExchange.length, 0);
+  // GOOGLE-11: a picker that returns after the sign-out's clear finished triggers another clear; the next sign-in waits.
+  let resolvePicker11; const clears11 = []; let picker11 = 0;
+  const boot11 = boot(prodConfig, { signIn: () => { picker11++; return picker11 === 1 ? new Promise(resolve => { resolvePicker11 = resolve; }) : Promise.resolve({ idToken: 'secret-id-token' }); }, clearCredential: () => new Promise(resolve => { clears11.push(resolve); }) });
+  const attempt11 = boot11.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await until(() => resolvePicker11);
+  const firstClear11 = boot11.window.MobilePoker.clearGoogleCredential();
+  await until(() => clears11.length === 1);
+  clears11[0]();
+  await firstClear11;
+  resolvePicker11({ idToken: 'secret-id-token' });
+  await assert.rejects(attempt11, /google_canceled/);
+  await until(() => clears11.length === 2);
+  const next11 = boot11.window.MobilePoker.signInWithGoogle({ auth: { signInWithIdToken: async () => ({ data: { session: {} } }) } });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(picker11, 1, 'next sign-in waits for the clear after the late account choice');
+  clears11[1]();
+  await next11;
+  assert.equal(picker11, 2);
   // GOOGLE-09: a sign-out queued as the very next microtask after the picker resolves still prevents the exchange.
   let resolvePicker09; const exchange09 = [];
   const boot09 = boot(prodConfig, { signIn: () => new Promise(resolve => { resolvePicker09 = resolve; }), clearCredential: async () => {} });
