@@ -145,7 +145,12 @@ Poker Offline now uses the same presentation code: `scripts/build-poker-offline-
   - The bundled `config.js` must equal the pinned Production endpoints exactly.
   - `jarsigner -verify` must report `jar is unsigned`.
   - The licensed lobby music decrypt stays fail-closed.
-- **Signing:** a future OWNER step (separate GO), done locally with the Play upload key; Google signs the delivered app through Play App Signing. Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts.
+- **Signing (#1302):** the `sign-aab` job runs after `release-aab` in the same dispatch, in the protected `android-signing` Environment (OWNER approval required for every run).
+  - Before any secret is used, it checks at runtime that the Environment requires the OWNER as reviewer, has admin bypass off and allows only `main`, and that the OWNER approved this run; otherwise it stops.
+  - It signs only the verified unsigned AAB of the same run (SHA256SUMS and receipt fields) with the Play upload key (PKCS#12, alias `upload`, Environment secrets `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_UPLOAD_STORE_PASSWORD`, optional `ANDROID_UPLOAD_KEY_PASSWORD`) via `mobile/poker/sign-release-aab.sh`.
+  - The key certificate and the single signer of the signed AAB must equal the pinned upload certificate SHA-256 in the workflow (public value, verified by the OWNER in Play Console; it is not the Play App Signing certificate used in `assetlinks.json`).
+  - Output artifact (7 days): signed AAB, `signed-release-receipt.json`, `SHA256SUMS`. CI never uploads to Google Play: the OWNER uploads manually and raises `versionCode` for every upload.
+  - Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts. Provisioning the Environment and secrets is a one-time OWNER step.
 - **Status:** online play and sign-in in the Production app need T2a (channel-aware runtime/OAuth), the WWW Production release of T2b, the Supabase redirect allowlist and T2d (`assetlinks.json` with the Play app signing fingerprint). Until then only Poker Offline is expected to work.
 - **Details:** procedure, blockers and the Galaxy S24+ plan are in `specs/1140-ugc-safety/t3-production-aab.md`.
 

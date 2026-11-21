@@ -602,3 +602,75 @@ test('importing configure-android.mjs performs no file writes', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// #1302: the signing secrets exist only in the protected sign-aab job's signing step; the unsigned build keeps its checks.
+test('release workflow: sign-aab after release-aab, protected environment, secrets only in the signing step', () => {
+  const workflow = readFileSync(path.join(rootDir, '.github/workflows/android-release-aab.yml'), 'utf8');
+  const [releaseJob, signJob] = workflow.split('\n  sign-aab:\n');
+  assert.ok(signJob, 'sign-aab job exists');
+  assert.match(releaseJob, /jar is unsigned/, 'the unsigned build still asserts an unsigned AAB');
+  assert.doesNotMatch(releaseJob, /ANDROID_UPLOAD|secrets\.ANDROID/, 'no signing secret in the build job');
+  assert.match(signJob, /^    needs: release-aab$/m);
+  assert.match(signJob, /^    environment: android-signing$/m);
+  assert.match(signJob, /^    if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'$/m);
+  assert.match(signJob, /environmentFailures\(/, 'protection is verified before secrets are used');
+  assert.match(signJob, /ownerApproved\(/);
+  assert.doesNotMatch(workflow, /^\s*pull_request/m, 'no PR trigger can reach signing secrets');
+  const secretSteps = signJob.split('\n      - ').filter(step => step.includes('secrets.'));
+  assert.equal(secretSteps.length, 1, 'exactly one step receives secrets');
+  assert.match(secretSteps[0], /sign-release-aab\.sh/);
+  assert.ok(signJob.indexOf('environmentFailures(') < signJob.indexOf('secrets.'), 'protection check runs before the signing step');
+  assert.match(signJob, /ANDROID_UPLOAD_CERT_SHA256: '(?:[0-9A-F]{2}:){31}[0-9A-F]{2}'/);
+  assert.doesNotMatch(signJob, /A2:63:D1:F8/, 'never the Play App Signing certificate');
+  assert.doesNotMatch(signJob, /google-play|r0adkll|play\.googleapis/i, 'no automatic Play upload');
+});
+
+test('sign-release-aab.sh: synthetic upload key signs only with the pinned certificate and leaves no key material', { skip: spawnSync('keytool', ['-help']).error ? 'JDK keytool not available' : false }, () => {
+  const work = mkdtempSync(path.join(os.tmpdir(), 'sign-aab-test-'));
+  try {
+    const keystore = path.join(work, 'synthetic.p12');
+    // Disposable test-only key; never the real Play upload key.
+    let r = spawnSync('keytool', ['-genkeypair', '-storetype', 'PKCS12', '-keystore', keystore, '-alias', 'upload', '-keyalg', 'RSA', '-keysize', '2048', '-dname', 'CN=synthetic-test', '-validity', '1', '-storepass', 'synthetic-pass', '-keypass', 'synthetic-pass'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    r = spawnSync('keytool', ['-list', '-v', '-storetype', 'PKCS12', '-keystore', keystore, '-storepass', 'synthetic-pass', '-alias', 'upload'], { encoding: 'utf8' });
+    const pin = /SHA256: ([0-9A-F:]{95})/.exec(r.stdout)[1];
+    mkdirSync(path.join(work, 'content'));
+    writeFileSync(path.join(work, 'content', 'payload.txt'), 'unsigned bundle payload\n');
+    const unsigned = path.join(work, 'unsigned.aab');
+    r = spawnSync('jar', ['cf', unsigned, '-C', path.join(work, 'content'), '.'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const runnerTemp = path.join(work, 'runner-temp');
+    mkdirSync(runnerTemp);
+    const run = (extra) => spawnSync('bash', [path.join(rootDir, 'mobile/poker/sign-release-aab.sh')], { encoding: 'utf8', env: {
+      PATH: process.env.PATH, RUNNER_TEMP: runnerTemp, UNSIGNED_AAB: unsigned,
+      ANDROID_UPLOAD_KEYSTORE_BASE64: readFileSync(keystore).toString('base64'), ANDROID_UPLOAD_STORE_PASSWORD: 'synthetic-pass',
+      EXPECTED_UPLOAD_CERT_SHA256: pin, ...extra } });
+    const signed = path.join(work, 'signed.aab');
+    // Fail closed: wrong pin, missing or malformed secrets, already signed input.
+    const wrongPin = pin.replace(/^../, pin.startsWith('00') ? '11' : '00');
+    for (const [extra, code] of [
+      [{ SIGNED_AAB: signed, EXPECTED_UPLOAD_CERT_SHA256: wrongPin }, /upload_certificate_mismatch/],
+      [{ SIGNED_AAB: signed, ANDROID_UPLOAD_STORE_PASSWORD: '' }, /store_password_secret_missing/],
+      [{ SIGNED_AAB: signed, ANDROID_UPLOAD_KEYSTORE_BASE64: '' }, /keystore_secret_missing/],
+      [{ SIGNED_AAB: signed, ANDROID_UPLOAD_KEYSTORE_BASE64: '%%%not-base64%%%' }, /keystore_secret_malformed|keystore_unreadable/],
+      [{ SIGNED_AAB: signed, ANDROID_UPLOAD_STORE_PASSWORD: 'wrong-pass' }, /keystore_unreadable|upload_certificate_mismatch/],
+      [{ SIGNED_AAB: signed, EXPECTED_UPLOAD_CERT_SHA256: pin.toLowerCase() }, /upload_certificate_pin_invalid/],
+    ]) {
+      const out = run(extra);
+      assert.notEqual(out.status, 0);
+      assert.match(out.stderr, code);
+      assert.equal(existsSync(signed), false, 'no signed output on failure');
+      assert.doesNotMatch(out.stdout + out.stderr, /synthetic-pass/, 'passwords never printed');
+    }
+    const ok = run({ SIGNED_AAB: signed });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, /sign_release_aab_PASS/);
+    r = spawnSync('keytool', ['-printcert', '-jarfile', signed], { encoding: 'utf8' });
+    assert.equal([...r.stdout.matchAll(/SHA256: ([0-9A-F:]{95})/g)].map(m => m[1]).join(), pin);
+    const again = run({ UNSIGNED_AAB: signed, SIGNED_AAB: path.join(work, 'twice.aab') });
+    assert.match(again.stderr, /input_not_unsigned/);
+    assert.deepEqual(readdirSync(runnerTemp), [], 'temporary keystore and password files removed');
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
