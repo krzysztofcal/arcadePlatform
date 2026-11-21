@@ -43,6 +43,7 @@ test("table photo signs only the WS participant's current, separately consented 
     assert.equal(response.statusCode, allowed ? 200 : scenario === "unauthorized" ? 401 : 404, scenario);
     assert.equal(signed, ["ok", "own", "withdrawn", "seat-changed"].includes(scenario) ? 1 : 0, scenario);
     if (!allowed) assert.doesNotMatch(response.body, /signed/);
+    if (scenario === "off") assert.equal(JSON.parse(response.body).error, "table_photos_disabled");
   }
 });
 
@@ -62,4 +63,62 @@ test("internal table photo client never accepts absent or malformed authorizatio
   } });
   assert.equal(match.targetUserId, target);
   assert.equal(match.targetSeatNo, 2);
+});
+
+test("seat photo reauthorizes on expiry, clears on ejection and stops when disabled", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { runInNewContext } = await import("node:vm");
+  const source = await readFile(new URL("../poker/poker-v2.js", import.meta.url), "utf8");
+  const renderer = source.slice(source.indexOf("  var seatPhotoReads"), source.indexOf("  function seatAvatarSource("));
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  for (const scenario of ["expiry", "target-ejected", "viewer-ejected", "disabled"]) {
+    let now = 0, requests = 0, shown = false, status = "ACTIVE", timerId = 0;
+    const timers = new Map();
+    const seats = [{ userId: viewer, seatNo: 1, status }, { userId: target, seatNo: 2, status, profile: {} }];
+    const avatar = { isConnected: true, appendChild() { shown = true; } };
+    const sync = runInNewContext(renderer + "\nsyncSeatPhoto;", {
+      state: { tableId, currentUserId: viewer, wsReady: true, seats },
+      currentAccessToken: "synthetic", renderedSeatAvatars: { 2: avatar },
+      deriveCurrentSeat: () => seats[0], isSeatedAtLiveTable: () => true,
+      currentPlayerStatus: () => status, isClosedTableStatus: () => false, seatAvatarSource: () => "",
+      AbortController, URL, Date: { now: () => now },
+      document: { createElement: () => ({ addEventListener() {}, remove() { shown = false; } }) },
+      window: {
+        SUPABASE_CONFIG: { SUPABASE_URL: "https://test.supabase.co" },
+        setTimeout(fn, delay) { timers.set(++timerId, { fn, due: now + delay }); return timerId; },
+        clearTimeout(id) { timers.delete(id); }
+      },
+      fetch: async () => {
+        requests++;
+        if (scenario === "disabled") return { ok: false, status: 404, json: async () => ({ error: "table_photos_disabled" }) };
+        return { ok: true, json: async () => ({
+          url: "https://test.supabase.co/storage/v1/object/sign/profile-avatar-uploads/pending/" + key + "?token=synthetic",
+          expiresAt: now + 50000, seatNo: 2
+        }) };
+      }
+    });
+    sync(avatar, seats[1]);
+    await flush();
+    assert.equal(shown, scenario !== "disabled");
+    if (scenario === "target-ejected") seats[1].status = "EJECTION_PENDING";
+    if (scenario === "viewer-ejected") status = "REMOVED";
+    if (scenario.endsWith("ejected")) {
+      sync(avatar, seats[1]);
+      assert.equal(shown, false);
+      assert.equal(timers.size, 0);
+    } else if (scenario === "expiry") {
+      for (const when of [50000, 60000]) {
+        now = when;
+        for (const [id, timer] of timers) if (timer.due <= now) { timers.delete(id); timer.fn(); }
+        await flush();
+        assert.equal(shown, when === 60000);
+      }
+      assert.equal(requests, 2);
+    } else {
+      assert.equal(timers.size, 0);
+      now = 120000;
+      sync(avatar, seats[1]);
+      assert.equal(requests, 1);
+    }
+  }
 });

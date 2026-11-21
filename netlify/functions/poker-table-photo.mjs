@@ -49,7 +49,7 @@ export function createPokerTablePhotoHandler({
     try {
       const auth = await verify(extractBearerToken(event.headers));
       if (!auth?.valid || !UUID.test(auth.userId || "")) return reply(401, { error: "unauthorized" });
-      if (!enabled) return absent();
+      if (!enabled) return reply(404, { error: "table_photos_disabled" });
       const { tableId, targetUserId } = event.queryStringParameters || {};
       if (!UUID.test(tableId || "") || !UUID.test(targetUserId || "")) return absent();
       if (!await allow(auth.userId)) return reply(429, { error: "rate_limit_exceeded" });

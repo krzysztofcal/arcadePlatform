@@ -3713,6 +3713,12 @@
   }
 
   var seatPhotoReads = new WeakMap();
+  var seatPhotosDisabled = false;
+
+  function photoSeatEligible(seat){
+    return seat && !seat.isBot && !/LEFT|INACTIVE|EMPTY|EJECTION_PENDING|REMOVED/.test(seat.status || '');
+  }
+
 
   function clearSeatPhoto(avatar){
     var read = seatPhotoReads.get(avatar);
@@ -3732,10 +3738,17 @@
     var token = currentAccessToken;
     var room = state.tableId;
     function eligible(){
-      return !!(token && token === currentAccessToken && room === state.tableId && state.wsReady
-        && !state.reconnectGate && isSeatedAtLiveTable() && !isClosedTableStatus(state.tableStatus)
-        && viewer && state.seats.some(function(entry){ return entry.userId === state.currentUserId && entry.seatNo === viewer.seatNo && !/LEFT|INACTIVE|EMPTY/.test(entry.status || ''); }) && seat && !seat.isBot && seat.profile
-        && seatAvatarSource(seat) !== 'blocked' && !/LEFT|INACTIVE|EMPTY/.test(seat.status || ''));
+      if (seatPhotosDisabled || !token || token !== currentAccessToken || room !== state.tableId
+        || !state.wsReady || state.reconnectGate || !isSeatedAtLiveTable() || isClosedTableStatus(state.tableStatus)
+        || /EJECTION_PENDING|REMOVED/.test(currentPlayerStatus()) || !viewer || !seat) return false;
+      var currentViewer = state.seats.find(function(entry){
+        return entry.userId === state.currentUserId && entry.seatNo === viewer.seatNo;
+      });
+      var currentTarget = state.seats.find(function(entry){
+        return entry.userId === seat.userId && entry.seatNo === seat.seatNo;
+      });
+      return !!(photoSeatEligible(currentViewer) && photoSeatEligible(currentTarget) && currentTarget.profile
+        && seatAvatarSource(currentTarget) !== 'blocked');
     }
     if (!eligible()) { clearSeatPhoto(avatar); return; }
     var key = [room, state.currentUserId, viewer.seatNo, seat.userId, seat.seatNo].join(':');
@@ -3750,7 +3763,16 @@
     var timeout = window.setTimeout(function(){ controller.abort(); }, 15000);
     fetch(window.ArcadeApi ? window.ArcadeApi.url(url) : url, {
       headers: { Authorization: 'Bearer ' + token }, credentials: 'omit', cache: 'no-store', signal: controller.signal
-    }).then(function(response){ return response.ok ? response.json() : null; }).then(function(photo){
+    }).then(function(response){
+      if (response.status === 404) return response.json().then(function(body){
+        if (body && body.error === 'table_photos_disabled' && eligible() && seatPhotoReads.get(avatar) === read) {
+          seatPhotosDisabled = true;
+          clearTablePhotos();
+        }
+        return null;
+      });
+      return response.ok ? response.json() : null;
+    }).then(function(photo){
       if (!photo || !eligible() || !avatar.isConnected || seatPhotoReads.get(avatar) !== read
         || renderedSeatAvatars[seat.seatNo] !== avatar || photo.seatNo !== seat.seatNo) return;
       var expiresIn = photo.expiresAt - Date.now();
@@ -3764,11 +3786,22 @@
       image.className = 'poker-seat-avatar__image';
       image.alt = '';
       image.referrerPolicy = 'no-referrer';
-      image.addEventListener('error', function(){ image.remove(); }, { once: true });
+      image.addEventListener('error', function(){
+        image.remove();
+        window.clearTimeout(read.timer);
+        read.image = null;
+        read.timer = null;
+      }, { once: true });
       image.src = source.href;
       read.image = image;
       avatar.appendChild(image);
-      read.timer = window.setTimeout(function(){ image.remove(); read.image = null; }, expiresIn);
+      read.timer = window.setTimeout(function(){
+        image.remove();
+        read.image = null;
+        if (seatPhotoReads.get(avatar) !== read || !eligible() || !avatar.isConnected
+          || renderedSeatAvatars[seat.seatNo] !== avatar) return;
+        read.timer = window.setTimeout(function(){ syncSeatPhoto(avatar, seat); }, Math.max(0, read.nextRead - Date.now()));
+      }, expiresIn);
     }).catch(function(){}).finally(function(){ window.clearTimeout(timeout); });
   }
 
