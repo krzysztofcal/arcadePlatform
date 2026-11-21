@@ -81,7 +81,7 @@ for (const version of ['2026-10-26-a1', '2026-10-28-a2']) {
   }
 }
 // Keep immutable Privacy a3 and a4 alongside the current aliases. Bundling does not publish a policy.
-for (const version of ['2026-11-12-a3', '2026-11-20-a4']) {
+for (const version of ['2026-11-12-a3', '2026-11-20-a4', '2026-11-21-a5']) {
   for (const lang of ['en', 'pl']) legalPages.push(`legal/privacy.${version}.${lang}.html`);
 }
 const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html', ...legalPages];

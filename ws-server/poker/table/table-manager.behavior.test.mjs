@@ -3679,3 +3679,36 @@ test('privacy quarantine blocks materialization and mutations until canonical re
  manager.unblockTableMutations(tableId);
  assert.equal(manager.isTableMutationBlocked(tableId),false);
 });
+
+test("photo membership uses the current WS seats and rejects departures and observers", () => {
+  const manager = createTableManager({ maxSeats: 6 });
+  const tableId = "4c5d94ad-72c8-4054-9cf2-ac0220f904d7";
+  const restore = (extra = {}, targetSeat = 2, tableStatus = "OPEN") => manager.restoreTableFromPersisted(tableId, {
+    tableStatus,
+    coreState: {
+      version: 4, roomId: tableId, maxSeats: 6,
+      members: [{ userId: "viewer", seat: 1 }, { userId: "target", seat: targetSeat }],
+      seats: { viewer: 1, target: targetSeat },
+      pokerState: { tableId, seats: [{ userId: "viewer", seatNo: 1 }, { userId: "target", seatNo: targetSeat }], ...extra }
+    }
+  });
+  const read = (viewerUserId = "viewer", targetUserId = "target") =>
+    manager.projectTablePhotoMembership({ tableId, viewerUserId, targetUserId });
+  restore();
+  assert.deepEqual(read(), { tableId, viewerSeatNo: 1, targetSeatNo: 2, stateVersion: 4 });
+  assert.equal(read("viewer", "viewer").targetSeatNo, 1);
+  assert.equal(read("observer"), null);
+  for (const key of ["leftTableByUserId", "pendingDetachByUserId", "inactivityEjectionByUserId"]) {
+    restore({ [key]: { target: key === "inactivityEjectionByUserId" ? {} : true } });
+    assert.equal(read(), null, key);
+    assert.equal(read("target", "viewer"), null, key);
+  }
+  restore({}, 3);
+  assert.equal(read().targetSeatNo, 3);
+  manager.blockTableMutations(tableId);
+  assert.equal(read(), null);
+  manager.unblockTableMutations(tableId);
+  assert.equal(read().targetSeatNo, 3);
+  restore({}, 3, "CLOSED");
+  assert.equal(read(), null);
+});

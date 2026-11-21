@@ -50,7 +50,7 @@
   <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/account-page.js" defer></script>
-  <script src="js/profile-google-photo.js" integrity="sha256-+V7WZUGWStRxJona4UOMUNfh0gL18r4vGPfZ3lXXoLs=" crossorigin="anonymous" defer></script>
+  <script src="js/profile-google-photo.js" integrity="sha256-Muaz+QqZCWGorPl+/zK4NJRdKLbsecDeHtkU9C4VfTs=" crossorigin="anonymous" defer></script>
   <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
   <script src="js/klaro-config.js" defer></script>
   <script src="js/vendor/klaro/klaro.js" defer></script>
@@ -253,6 +253,11 @@
                   </div>
                   <button type="button" class="btn sm gh" id="googlePhotoReconnect" hidden data-i18n="googlePhotoReconnect">Confirm with Google</button>
                   <button type="button" class="btn sm gh" id="googlePhotoWithdraw" aria-haspopup="dialog" aria-controls="googlePhotoWithdrawDialog" hidden data-i18n="googlePhotoWithdraw">Stop using my Google photo</button>
+                  <div id="tablePhotoConsentPanel" hidden>
+                    <label><input type="checkbox" id="tablePhotoConsent"> <span data-i18n="tablePhotoConsent">I agree to show my saved Google photo to seated players at my Poker table. Links last up to 60 seconds and recipients can save the photo. I can withdraw this permission separately.</span></label>
+                    <button type="button" class="btn sm gh" id="tablePhotoSave" data-i18n="tablePhotoSave">Save table photo preference</button>
+                    <p id="tablePhotoStatus" role="status"></p>
+                  </div>
                 </fieldset>
                 <form class="account-form" id="publicProfileForm">
                   <fieldset class="public-profile-editor__privacy" style="border:0;padding:0;margin:0;"><label style="display:flex;align-items:center;gap:8px;font-weight:600;"><input id="hideFromLeaderboard" type="checkbox"> <span data-i18n="hideFromLeaderboard">Hide my profile from the leaderboard</span></label><p class="account-note sub" style="margin-top:4px;" data-i18n="profileRemainsPublic">This does not hide your player profile from signed-in users.</p></fieldset>

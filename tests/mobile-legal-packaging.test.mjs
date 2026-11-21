@@ -77,6 +77,20 @@ test('approved legal content, historical policies and active a4 survive the real
       assert.match(packaged, /id="account-deletion"/);
       assert.match(packaged, /href="mailto:contact@kcswh\.pl"/);
     }
+    const a5 = JSON.parse(await readFile(path.join(root, 'specs/1140-ugc-safety/legal-candidate-a5/manifest.json'), 'utf8'));
+    assert.equal(a5.candidateVersion, '2026-11-21-a5');
+    assert.equal(a5.previousVersion, a4.candidateVersion);
+    for (const lang of ['pl', 'en']) {
+      const file = `privacy.${a5.candidateVersion}.${lang}.html`;
+      const page = `legal/${file}`;
+      const source = await readFile(path.join(root, page), 'utf8');
+      assert.equal(createHash('sha256').update(source).digest('hex'), a5.files[file]);
+      assert.equal(a5.basedOn[`legal/privacy.${a4.candidateVersion}.${lang}.html`], a4.files[`privacy.${a4.candidateVersion}.${lang}.html`]);
+      assert.ok(receipt.sourcePages.includes(page));
+      const packaged = await readFile(path.join(fixture, 'mobile/poker/www', page), 'utf8');
+      assert.equal(main(packaged), main(source));
+      assert.match(packaged, /id="account-deletion"/);
+    }
     assert.ok(!receipt.sourcePages.some(page => page.startsWith('legal/terms.') && page.includes(a4.candidateVersion)), 'a4 adds no Terms page');
     for (const lang of ['pl', 'en']) {
       for (const version of ['2026-10-26-a1', manifest.candidateVersion]) {

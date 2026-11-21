@@ -112,7 +112,7 @@
 
   function render(next, needsProof, unresolvedState){
     status = next || null;
-    if(!status){photoState=unresolvedState||null;profileFailed=false;}
+    if(!status){photoState=unresolvedState||null;profileFailed=false;if(!owner)show('tablePhotoConsentPanel',false);}
     document.dispatchEvent(new CustomEvent('profile:photo-status'));
     var consent = node('googlePhotoConsent');
     if (consent) consent.checked = false;
@@ -292,6 +292,11 @@
   }
 
   async function readStatus(expectedUser,current){
+    var preferencePanel = node('tablePhotoConsentPanel');
+    if (preferencePanel && preferencePanel.dataset) {
+      preferencePanel.hidden = true;
+      tablePhotoPreference(expectedUser, current).catch(function(){});
+    }
     var previousStatus=status;
     statusResolved=false;
     if(!statusKnown||hasCopy(status)||photoState)photoState='pending';
@@ -345,7 +350,48 @@
     else await readStatus(owner,current);
   }
 
+  async function tablePhotoPreference(expectedUser, expectedGeneration, body){
+    var panel = node('tablePhotoConsentPanel');
+    if (!panel) return;
+    var session = await currentSession();
+    if (!session || !session.access_token || session.user?.id !== expectedUser
+      || owner !== expectedUser || generation !== expectedGeneration) throw staleError();
+    var endpoint = '/.netlify/functions/poker-table-photo' + (body ? '' : '?scope=own');
+    var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(endpoint) : endpoint, {
+      method: body ? 'POST' : 'GET', cache: 'no-store', credentials: 'omit',
+      headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (!response.ok) throw new Error('table_photo_preference_failed');
+    var result = await response.json();
+    if (owner !== expectedUser || generation !== expectedGeneration) throw staleError();
+    panel.hidden = !result.available && !result.granted;
+    node('tablePhotoConsent').checked = result.granted === true;
+    node('tablePhotoConsent').disabled = !result.available && !result.granted;
+    panel.dataset.noticeVersion = result.noticeVersion;
+    panel.dataset.available = String(result.available === true);
+    node('tablePhotoSave').disabled = false;
+  }
+
   function wire(){
+    var saveTable = node('tablePhotoSave');
+    if (saveTable) saveTable.addEventListener('click', async function(){
+      if (!owner || busy || saveTable.disabled) return;
+      var expectedUser = owner, expectedGeneration = generation;
+      var panel = node('tablePhotoConsentPanel'), box = node('tablePhotoConsent');
+      if (box.checked && panel.dataset.available !== 'true') return;
+      saveTable.disabled = true;
+      try {
+        await tablePhotoPreference(expectedUser, expectedGeneration, box.checked
+          ? { action: 'grant', noticeVersion: panel.dataset.noticeVersion } : { action: 'withdraw' });
+        node('tablePhotoStatus').textContent = t('tablePhotoSaved', 'Table photo preference saved.');
+      } catch (_error) {
+        if (owner === expectedUser && generation === expectedGeneration)
+          node('tablePhotoStatus').textContent = t('tablePhotoFailed', 'Could not save the table photo preference.');
+      } finally {
+        if (owner === expectedUser && generation === expectedGeneration) saveTable.disabled = false;
+      }
+    });
     var consent = node('googlePhotoConsent');
     if (consent) consent.addEventListener('change', function(){
       var importButton = node('googlePhotoImport');
