@@ -53,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           endpoint="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/environments/ws-preview"
-          curl -qfsS --max-time 15 "$endpoint" | jq -e '
+          curl -q -fsS --max-time 15 "$endpoint" | jq -e '
             .can_admins_bypass == false
             and .deployment_branch_policy.custom_branch_policies == true
             and .deployment_branch_policy.protected_branches == false
@@ -61,7 +61,7 @@ jobs:
               | length == 1 and .[0].prevent_self_review == false
                 and (.[0].reviewers | map([.type, .reviewer.login])) == [["User", "krzysztofcal"]])
           ' >/dev/null
-          curl -qfsS --max-time 15 "$endpoint/deployment-branch-policies" | jq -e '
+          curl -q -fsS --max-time 15 "$endpoint/deployment-branch-policies" | jq -e '
             .total_count == 1 and (.branch_policies | map([.type, .name])) == [["branch", "main"]]
           ' >/dev/null
 
@@ -94,11 +94,6 @@ jobs:
           DEPLOY_REF: ${{ inputs.ref }}
         run: test "$(git rev-parse HEAD)" = "$DEPLOY_REF"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Build and package preview ws-server artifact
         env:
           RELEASE_SHA: ${{ inputs.ref }}
@@ -106,6 +101,13 @@ jobs:
           RELEASE_ENVIRONMENT: preview
           XP_REDIS_VERSION: ${{ inputs.xpRedisVersion }}
         run: |
+          set -euo pipefail
+          # Keep the runner's Actions runtime token and command files outside the build.
+          docker run --rm -i --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env HOME=/tmp --env PREVIEW_ARTIFACT_DIR --env PREVIEW_ARTIFACT_FILE \
+            --env PREVIEW_STAGE_DIR --env PREVIEW_STAGE_WS_DIR --env RELEASE_SHA --env DEPLOY_REF \
+            --env RELEASE_ENVIRONMENT --env XP_REDIS_VERSION node:20-bookworm bash -s <<'BUILD'
           set -euo pipefail
           if [[ "$XP_REDIS_VERSION" == "3" ]]; then
             export XP_REDIS_ENV=stage XP_KEY_NS=kcswh:stage:xp:v3
@@ -198,6 +200,11 @@ jobs:
             -czf "$PREVIEW_ARTIFACT_FILE" \
             -C "$PREVIEW_STAGE_DIR" \
             .
+          BUILD
+          test ! -L "$GITHUB_WORKSPACE/.artifacts"
+          test ! -L "$PREVIEW_ARTIFACT_DIR"
+          test ! -L "$PREVIEW_ARTIFACT_FILE"
+          test -f "$PREVIEW_ARTIFACT_FILE"
 
       - name: Store preview deployment artifact
         uses: actions/upload-artifact@v4
@@ -232,7 +239,7 @@ jobs:
       - name: Verify OWNER approved this ws-preview run
         run: |
           set -euo pipefail
-          curl -qfsS --max-time 15 "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" | jq -e '
+          curl -q -fsS --max-time 15 "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" | jq -e '
             type == "array" and any(.[]; .state == "approved" and .user.login == "krzysztofcal"
               and any(.environments[]; .name == "ws-preview"))
           ' >/dev/null

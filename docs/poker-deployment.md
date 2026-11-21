@@ -233,7 +233,8 @@ separately enable it after the environment protection below has been independent
 verified, using the repository variable
 `WS_PREVIEW_AGENT_DEPLOY_ENABLED=true`. The existing `WS_RELEASE_AGENT` must
 name `arcade-code-agent[bot]`. Unsetting the Preview flag disables App dispatch
-eligibility for subsequent jobs. It does not cancel an already running deploy.
+eligibility for new dispatches. Cancel a waiting run in GitHub if it should no
+longer deploy.
 
 For OWNER use authenticated `gh`:
 
@@ -278,7 +279,8 @@ or missing evidence block the run. The application SHA is an explicit input,
 while the branch rule applies to the workflow definition.
 
 Only `deploy` uses the Environment and SSH secrets. The build runs on a separate
-runner and sends the packaged artifact to `deploy`. The deploy replaces and
+runner. Application code executes in a container with only the checkout mounted
+and no runner credentials, then the job sends the packaged artifact to `deploy`. The deploy replaces and
 restarts the shared Preview runtime, which can interrupt players. Artifact code
 runs with the existing Preview deploy identity during VPS validation and with
 the runtime identity after restart. Only approve reviewed application SHAs.

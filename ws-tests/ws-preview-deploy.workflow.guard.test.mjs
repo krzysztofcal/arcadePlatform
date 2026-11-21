@@ -91,6 +91,10 @@ test("ws preview validates the workflow ref and builds the exact app SHA away fr
   assert.match(buildSection, /^    if: \$\{\{ github\.run_attempt == '1' \}\}\n    needs: validate$/m);
   assert.match(buildSection, /test "\$\(git rev-parse HEAD\)" = "\$DEPLOY_REF"/);
   assert.doesNotMatch(buildSection, /^    environment:|secrets\./m);
+  assert.match(buildSection, /docker run --rm -i --user .* --cap-drop ALL --security-opt no-new-privileges/);
+  assert.match(buildSection, /--volume "\$GITHUB_WORKSPACE:\$GITHUB_WORKSPACE"/);
+  assert.doesNotMatch(buildSection, /ACTIONS_RUNTIME_TOKEN|GITHUB_TOKEN|docker\.sock|--privileged/);
+  assert.match(buildSection, /test ! -L "\$PREVIEW_ARTIFACT_FILE"/);
   const upload = stepBlock(buildSection, "Store preview deployment artifact");
   assert.match(upload, /name: ws-preview-dist\n\s+path: \$\{\{ env\.PREVIEW_ARTIFACT_FILE \}\}/);
   assert.match(buildSection, /PREVIEW_ARTIFACT_FILE: .*\/\.artifacts\/ws-preview\/ws-preview-dist\.tgz/);
