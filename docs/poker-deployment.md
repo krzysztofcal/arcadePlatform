@@ -234,7 +234,13 @@ separately enable it with the repository variable
 name `arcade-code-agent[bot]`. Unsetting the Preview flag disables App dispatch
 eligibility for subsequent jobs. It does not cancel an already running deploy.
 
-For OWNER use authenticated `gh`. For the agent use the existing App CLI:
+For OWNER use authenticated `gh`:
+
+```sh
+gh workflow run ws-preview-deploy.yml --repo krzysztofcal/arcadePlatform --ref main -f ref="$APP_SHA" -f xpRedisVersion=3
+```
+
+For the agent use the existing App CLI (`ghx`):
 
 ```sh
 GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh /home/copilot/.arcade-code-agent/bin/gh workflow run ws-preview-deploy.yml --repo krzysztofcal/arcadePlatform --ref main -f ref="$APP_SHA" -f xpRedisVersion=3
@@ -243,17 +249,21 @@ GH_CONFIG_DIR=/home/copilot/.arcade-code-agent/gh /home/copilot/.arcade-code-age
 Set `APP_SHA` to the approved 40-character application commit. The workflow
 definition comes from `main`; only first-attempt manual dispatches are eligible.
 Verify the run against its workflow, dispatch time, title (application SHA and
-actor), `actor`, `triggering_actor`, and attempt. Wait for the validate and
+actor), `actor`, `triggering_actor`, and attempt. Wait for the validate, build and
 deploy jobs, then confirm the deployed SHA and health in the job output. Report
 the run ID, URL, application SHA and outcome. An ambiguous or failed run means
 STOP. A fresh dispatch requires fresh OWNER GO.
 
 The `ws-preview` GitHub Environment currently restricts deployments to `main`
-and has no required reviewers. GitHub checks the App identity and activation
+and has no required reviewers. The branch rule applies to the workflow
+definition. The application SHA is an explicit input. The build runs on its
+own runner without the SSH deployment credentials. The deployment job
+receives the packaged artifact on a fresh runner. GitHub checks the App identity and activation
 flag. The agent enforces conversation approval before dispatch. Once enabled,
 a dispatch made directly with valid App credentials can pass the workflow
 without that conversation check. This deploy replaces the shared Preview WS
-runtime and restarts its service, which can interrupt players. The workflow
+runtime and restarts its service, which can interrupt players. The deployed
+application runs with the existing Preview runtime access. The workflow
 leaves Caddy configuration to the existing infra workflow.
 
 ### Preview runtime contract

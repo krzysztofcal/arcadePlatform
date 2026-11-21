@@ -78,16 +78,23 @@ test("ws preview secret-using jobs allow only a first main dispatch by OWNER or 
   }
 });
 
-test("ws preview deploy validates workflow files from workflow ref and builds app from inputs.ref", () => {
+test("ws preview validates the workflow ref and builds the exact app SHA away from SSH credentials", () => {
   const text = workflowText();
-  const validateSection = text.split(/^  deploy:\n/m)[0];
-  const deploySection = text.split(/^  deploy:\n/m)[1] ?? "";
+  const [validateSection, buildSection, deploySection] = text.split(/^  (?:build|deploy):\n/m);
 
   const validateCheckout = stepBlock(validateSection, "Checkout workflow ref");
-  const deployCheckout = stepBlock(deploySection, "Checkout deploy target ref");
+  const buildCheckout = stepBlock(buildSection, "Checkout deploy target ref");
 
   assert.doesNotMatch(validateCheckout, /ref: \$\{\{ inputs\.ref \}\}/);
-  assert.match(deployCheckout, /ref: \$\{\{ inputs\.ref \}\}/);
+  assert.match(buildCheckout, /ref: \$\{\{ inputs\.ref \}\}/);
+  assert.match(buildCheckout, /persist-credentials: false/);
+  assert.match(buildSection, /needs: validate/);
+  assert.match(buildSection, /test "\$\(git rev-parse HEAD\)" = "\$DEPLOY_REF"/);
+  assert.doesNotMatch(buildSection, /^    environment:|secrets\./m);
+  assert.match(buildSection, /uses: actions\/upload-artifact@v4/);
+  assert.match(deploySection, /needs: build/);
+  assert.match(deploySection, /uses: actions\/download-artifact@v4/);
+  assert.doesNotMatch(deploySection, /actions\/checkout|npm (?:ci|run)/);
   assert.match(validateSection, /node --test ws-tests\/ws-preview-deploy\.workflow\.guard\.test\.mjs/);
   assert.match(validateSection, /node --test ws-tests\/ws-preview-deploy\.remote-shape\.guard\.test\.mjs/);
   assert.doesNotMatch(validateSection, /Validate preview-only workflow contract literals/);
@@ -339,4 +346,5 @@ test("Preview secrets are scoped and the old deployment identity has no fallback
   assert.equal((text.match(/environment: ws-preview/g) || []).length, 2);
   assert.ok(text.includes('test "$PREVIEW_WS_USER" = arcade-preview-deploy'));
   assert.ok(text.includes('[[ "$PREVIEW_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]'));
+  assert.ok(text.includes('test "$XP_REDIS_VERSION" = 3'));
 });
