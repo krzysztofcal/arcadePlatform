@@ -41,7 +41,10 @@ In both cases the tile is a stable placeholder that only changes state.
   - `updateMe`, `clear` and `invalidate` advance `writeSeq`.
   - `parse` rejects a 2xx response whose body is lost, unreadable or not an object, with the code `invalid_response`.
   - `updateMe` announces `profile:updated` only when no other write is in flight and no write or invalidation happened since it started.
-- **FR-003** `js/profile-google-photo.js::request` calls `ProfileClient.invalidate()` before and after every non-GET photo action. `getPresentation` adds `copyKnown`.
+- **FR-003** `js/profile-google-photo.js::request` opens a profile write with `ProfileClient.beginWrite()` for every non-GET photo action. It closes the write with the returned `done()` in `finally`.
+  - While the action runs, no in-flight read is shared across it and no overlapping PATCH answer is announced.
+  - `getPresentation` adds `copyKnown`.
+  - **Known limitation:** a PATCH whose response is lost can still be applied by the server after a later write has been announced. The announced view is then outdated until the next read. This is accepted as a rare, self-correcting case. It is no regression: before #1309 every answer was announced.
 - **FR-004** `js/account-page.js::renderAvatarGallery` adds the Google tile only for a known copy or for an uploaded avatar already in use. It never fakes catalog variants.
 - **FR-005** `netlify/functions/profile-me.mjs` GET verifies the JWT with `allowDeleting: true` and relies on the account-lifecycle check that `ensureUserProfile` already runs inside its own transaction. This is one transaction instead of two. `account_not_active` maps to the unchanged 401.
   - PATCH keeps the JWT lifecycle check.
