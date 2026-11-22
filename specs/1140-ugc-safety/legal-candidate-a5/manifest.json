@@ -1,6 +1,6 @@
 {
   "candidateVersion": "2026-11-21-a5",
-  "status": "CANDIDATE_OWNER_APPROVAL_PENDING_NOT_PUBLISHED",
+  "status": "OWNER_APPROVED_PRODUCTION_PUBLICATION_PENDING",
   "previousVersion": "2026-11-20-a4",
   "basedOn": {
     "legal/privacy.2026-11-20-a4.en.html": "ae770adddcc89ce4b96e20954ed4295f327063530501c26f837e9203624c7175",
