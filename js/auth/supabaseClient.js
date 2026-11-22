@@ -9,6 +9,7 @@
   var recoverySession = null;
   var recoveryPending = false;
   var profileConfirmedUserId = null;
+  var profileSessionGeneration = 0;
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -396,6 +397,7 @@
 
   function refreshProfile(user, uiGeneration, hadCachedProfile){
     if (!user) return;
+    var sessionGen = profileSessionGeneration;
     var hasProfileClient = !!(window.ProfileClient && typeof window.ProfileClient.getMe === 'function');
     var load = hasProfileClient
       ? window.ProfileClient.getMe()
@@ -407,6 +409,7 @@
         });
       });
     load.then(function(profile){
+      if (profileSessionGeneration !== sessionGen) return;
       var ui = userUiState();
       if (!state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
       if (ui) ui.publish(user.id, 'profile', profile, Date.now());
@@ -416,6 +419,7 @@
       }
       renderUser(user, profile);
     }).catch(function(error){
+      if (profileSessionGeneration !== sessionGen) return;
       var ui = userUiState();
       var isCurrent = state.user && String(state.user.id) === String(user.id) && (!ui || ui.isCurrent(user.id, uiGeneration));
       logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });
@@ -435,6 +439,7 @@
     // Token refresh and repeated sign-in events do not change the profile owner.
     if (previousUserId !== nextUserId && window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
     if (!user || !user.id){
+      profileSessionGeneration += 1;
       profileConfirmedUserId = null;
       if (ui && previousUserId) ui.clearUser(previousUserId);
       if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
@@ -443,6 +448,7 @@
     }
     var userId = String(user.id);
     if (previousUserId !== userId){
+      profileSessionGeneration += 1;
       profileConfirmedUserId = null;
     }
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);

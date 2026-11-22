@@ -674,6 +674,18 @@ assert.equal(typeof windowStub.XPClient.postWindowServerCalc, 'function', 'autho
 
   windowStub.KLog = originalKLog;
   windowStub.XPClient.fetchStatus = originalFetchStatus;
+
+  // R3/F2 in core.js: if getStatusGeneration changes before refreshStatus continuation, payload is dropped
+  let gen = 10;
+  windowStub.XPClient.getStatusGeneration = () => gen;
+  windowStub.XPClient.fetchStatus = async () => {
+    gen += 1;
+    return { ok: true, status: 'statusOnly', totalLifetime: 9999 };
+  };
+  const genRes = await windowStub.XP.refreshStatus();
+  assert.equal(genRes, null, 'refreshStatus must drop payload if generation changed before continuation');
+  assert.equal(xpState.badge.getAttribute('aria-busy'), 'false', 'badge loading must be cleared');
+  windowStub.XPClient.fetchStatus = originalFetchStatus;
 }
 
 console.log('xp-client tests passed');

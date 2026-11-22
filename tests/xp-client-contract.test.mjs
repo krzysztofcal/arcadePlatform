@@ -581,6 +581,105 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'subsequent status must continue sending token B, not overwritten by late token A');
   }
 
+  // R3/F1: In same authVersion, forced read 2 replaces read 1; read 1 resolving late does not overwrite token B, and late error does not null token B
+  {
+    let releaseA;
+    const holdA = new Promise(resolve => { releaseA = resolve; });
+    let tokenCalls = 0;
+    let sentAuthHeader = null;
+
+    const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
+    const tokenB = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-b' })).toString('base64url') + '.s';
+    let currentSessionToken = tokenA;
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const headers = opts?.headers || {};
+      sentAuthHeader = headers.Authorization || null;
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => {
+            tokenCalls++;
+            if (tokenCalls === 1) {
+              await holdA;
+              return tokenA;
+            }
+            return currentSessionToken;
+          },
+          getCurrentUserId: async () => 'user-test',
+        },
+      },
+    });
+
+    // Read 1 starts (non-forced) and is held on holdA
+    const call1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && tokenCalls === 0; i++) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(tokenCalls, 1, 'read 1 must start');
+
+    // Session switches to B (in the same authVersion, no onAuthChange event)
+    currentSessionToken = tokenB;
+
+    // Forced read 2 returns B and resolves first
+    const call2 = await XPClient.fetchStatus(true);
+    assert.ok(call2);
+    assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'call 2 must send token B');
+
+    // Then read 1 resolves with token A; its fetchStatus rejects with stale_identity because token B became active
+    releaseA();
+    await assert.rejects(call1, err => err.code === 'stale_identity');
+
+    // Subsequent fetchStatus must still send token B, not overwritten by token A
+    sentAuthHeader = null;
+    await XPClient.fetchStatus();
+    assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'subsequent fetchStatus must send token B, not overwritten by late-resolving token A in same authVersion');
+
+    // Error branch test: a late-failing non-owner read must not null B's cached token
+    let rejectErr;
+    const holdErr = new Promise((_, reject) => { rejectErr = reject; });
+    tokenCalls = 0;
+    const XPClientErr = await loadClientWithFetch(async (url, opts) => {
+      const headers = opts?.headers || {};
+      sentAuthHeader = headers.Authorization || null;
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => {
+            tokenCalls++;
+            if (tokenCalls === 1) {
+              await holdErr;
+              throw new Error('late_read_failed');
+            }
+            return tokenB;
+          },
+          getCurrentUserId: async () => 'user-test',
+        },
+      },
+    });
+
+    const pendingCall1 = XPClientErr.fetchStatus();
+    for (let i = 0; i < 20 && tokenCalls === 0; i++) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(tokenCalls, 1, 'read 1 must start');
+
+    // Forced read 2 sets token B
+    await XPClientErr.fetchStatus(true);
+    assert.equal(sentAuthHeader, `Bearer ${tokenB}`);
+
+    // Read 1 rejects late: must not null token B
+    rejectErr(new Error('fail'));
+    await pendingCall1.catch(() => {});
+
+    // Subsequent status must still send token B
+    sentAuthHeader = null;
+    await XPClientErr.fetchStatus();
+    assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'late-failing read must not null token B');
+  }
+
   // R2-F4: Old bootstrap ending with stale_identity does not clear newer bootstrap's promise
   {
     let release1;
@@ -663,6 +762,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     let release;
     const hold = new Promise(resolve => { release = resolve; });
     let markedState = null;
+    let applied = null;
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const body = JSON.parse(opts?.body || '{}');
       if (body.operation === 'status') {
@@ -673,8 +773,16 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       return response(200, { ok: true });
     }, {
       window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => 'test-token',
+          getCurrentUserId: async () => 'auth-user',
+        },
         UserUiState: {
+          hydrate: () => ({}),
           markSliceApplied(_uid, _slice, appliedState) { markedState = appliedState; },
+        },
+        XP: {
+          refreshFromServerStatus(payload, meta) { applied = { payload, meta }; },
         },
       },
     });
@@ -687,8 +795,93 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     XPClient.clearServerSession();
     release();
     const result = await pending;
+    // Await async UI update in getAuthenticatedUserId().then()
+    await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(result, null, 'refreshBadgeFromServer returns null on stale_identity');
     assert.equal(markedState, null, 'no error or stale state marked on stale_identity');
+    assert.equal(applied, null, 'refreshFromServerStatus must not be called on stale_identity');
+
+    // Positive control: normal error DOES call markSliceApplied with loading/stale
+    markedState = null;
+    const XPClientErr = await loadClientWithFetch(async () => {
+      throw new Error('network_failure');
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => 'test-token',
+          getCurrentUserId: async () => 'auth-user',
+        },
+        UserUiState: {
+          hydrate: () => ({}),
+          markSliceApplied(_uid, _slice, appliedState) { markedState = appliedState; },
+        },
+      },
+    });
+    const errRes = await XPClientErr.refreshBadgeFromServer();
+    assert.equal(errRes, null);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(markedState, 'loading', 'normal error must call markSliceApplied with loading');
+
+    // Positive control: current, valid payload DOES update the XP state
+    let validApplied = null;
+    const XPClientValid = await loadClientWithFetch(async () => {
+      return response(200, { ok: true, status: 'statusOnly', totalLifetime: 888 });
+    }, {
+      window: {
+        XP: {
+          refreshFromServerStatus(payload, meta) { validApplied = { payload, meta }; },
+        },
+      },
+    });
+    const validRes = await XPClientValid.refreshBadgeFromServer();
+    assert.ok(validRes);
+    assert.equal(validApplied?.payload?.totalLifetime, 888, 'valid payload must update XP state');
+    assert.equal(validApplied?.meta?.source, 'status');
+  }
+
+  // R3/F2: Caller drops status payload if statusGeneration changed after fetchStatus resolved but before caller continuation
+  {
+    let applied = null;
+    let bumpOnResolve = true;
+
+    const XPClient = await loadClientWithFetch(async () => {
+      const payload = {
+        ok: true,
+        status: 'statusOnly',
+        totalLifetime: 1234,
+        get capDelta() {
+          if (bumpOnResolve) {
+            queueMicrotask(() => {
+              XPClient.clearServerSession();
+            });
+          }
+          return 100;
+        },
+      };
+      return {
+        status: 200,
+        ok: true,
+        async json() { return payload; },
+        async text() { return JSON.stringify(payload); },
+      };
+    }, {
+      window: {
+        XP: {
+          refreshFromServerStatus(payload, meta) { applied = { payload, meta }; },
+        },
+      },
+    });
+
+    const res = await XPClient.refreshBadgeFromServer();
+    assert.equal(res, null, 'refreshBadgeFromServer must return null when generation changed before continuation');
+    assert.equal(applied, null, 'refreshFromServerStatus must not be called when generation changed before continuation');
+
+    // Positive control: without the generation change, the payload is applied
+    bumpOnResolve = false;
+    applied = null;
+    const posRes = await XPClient.refreshBadgeFromServer();
+    assert.ok(posRes);
+    assert.equal(applied?.payload?.totalLifetime, 1234, 'positive control: payload must be applied without generation change');
   }
 
   console.log('xp-client contract tests passed');

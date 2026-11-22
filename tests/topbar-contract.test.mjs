@@ -401,3 +401,73 @@ test('topbar without ProfileClient does not suppress profile fetch on same-user 
   await f.flush();
   assert.equal(fallbackFetches, 2, 'same-user event without ProfileClient must re-fetch profile');
 });
+
+test('topbar A -> sign-out -> A race without UserUiState does not clear mark or overwrite profile on late resolution', async () => {
+  let releaseA1, rejectA1;
+  const holdA1 = new Promise((resolve, reject) => { releaseA1 = resolve; rejectA1 = reject; });
+  let readCount = 0;
+
+  const f = await topbarProfileFixture({
+    respond: () => {
+      readCount++;
+      if (readCount === 1) return holdA1;
+      return { displayName: 'User A Fresh' };
+    },
+  });
+  assert.equal(f.profileReads, 1);
+
+  // Sign out
+  f.emit('SIGNED_OUT', null);
+  await f.flush();
+
+  // Sign in as user A again (session 2)
+  f.emit('SIGNED_IN', { id: 'user-a' });
+  await f.flush();
+  assert.equal(f.profileReads, 2);
+  assert.equal(f.topbar.getAttribute('data-user-ui-state'), 'ready');
+
+  // Late rejection of session 1 read: must not clear user A mark and UI state must stay ready
+  rejectA1(new Error('read_1_aborted'));
+  await f.flush();
+
+  assert.equal(f.topbar.getAttribute('data-user-ui-state'), 'ready', 'state must stay ready after late rejection of session 1 read');
+
+  // Then a same-user event makes no new read
+  f.emit('TOKEN_REFRESHED', { id: 'user-a' });
+  await f.flush();
+  assert.equal(f.profileReads, 2, 'same-user event after session 2 confirmation must not make a new read');
+});
+
+test('topbar A -> sign-out -> A race without UserUiState: late success does not overwrite fresh profile', async () => {
+  let releaseA1;
+  const holdA1 = new Promise((resolve) => { releaseA1 = resolve; });
+  let readCount = 0;
+
+  const f = await topbarProfileFixture({
+    respond: () => {
+      readCount++;
+      if (readCount === 1) return holdA1;
+      return { displayName: 'User A Fresh' };
+    },
+  });
+  assert.equal(f.profileReads, 1);
+
+  // Sign out
+  f.emit('SIGNED_OUT', null);
+  await f.flush();
+
+  // Sign in as user A again (session 2)
+  f.emit('SIGNED_IN', { id: 'user-a' });
+  await f.flush();
+  assert.equal(f.profileReads, 2);
+  assert.equal(f.topbar.getAttribute('data-user-ui-state'), 'ready');
+
+  // Late resolution of session 1 read: must not overwrite fresh profile
+  releaseA1({ displayName: 'Old A' });
+  await f.flush();
+
+  // Mark must still be from second session, same-user event makes no new read
+  f.emit('TOKEN_REFRESHED', { id: 'user-a' });
+  await f.flush();
+  assert.equal(f.profileReads, 2, 'same-user event must not make a new read');
+});
