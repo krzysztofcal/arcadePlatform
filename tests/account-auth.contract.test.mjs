@@ -349,14 +349,21 @@ test('ProfileClient coalesces identical reads, even forced ones, but never acros
 
 test('ProfileClient caches no answer of overlapping writes whose server order is unknown', async () => {
   const requests = [];
-  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
-  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(){} }, Promise, URL, Date, CustomEvent: class {},
+  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s' } };
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(){} }, Promise, URL, Date, CustomEvent: class {}, atob: value => Buffer.from(value, 'base64').toString('binary'),
     fetch: async (url, options) => { const entry = { method: options.method, body: options.body }; requests.push(entry); await new Promise(resolve => { entry.release = resolve; }); return { ok: true, json: async () => ({ displayName: entry.method === 'GET' ? 'server-A' : JSON.parse(entry.body).leaderboardVisible ? 'A' : 'B' }) }; } });
   const until = async count => { for (let i = 0; i < 200 && requests.length < count; i++) await new Promise(resolve => setImmediate(resolve)); assert.equal(requests.length, count); };
   const writeA = window.ProfileClient.updateMe({ leaderboardVisible: true }); await until(1);
   const writeB = window.ProfileClient.updateMe({ leaderboardVisible: false }); await until(2);
   requests[1].release(); await writeB; requests[0].release(); await writeA;   // A, started first, lands last on the server
   const next = window.ProfileClient.getMe(false); await until(3); requests[2].release(); assert.equal((await next).displayName, 'server-A');
+  // B (started second) answers first while A runs; A then lands last and ends with a local stale guard.
+  let current = true; const guard = { userId: 'user-a', isCurrent: () => current };
+  const writeA2 = window.ProfileClient.updateMe({ leaderboardVisible: true }, guard); await until(4);
+  const writeB2 = window.ProfileClient.updateMe({ leaderboardVisible: false }); await until(5);
+  requests[4].release(); await writeB2; current = false; requests[3].release();
+  await assert.rejects(writeA2, error => error.code === 'stale_profile');
+  const again = window.ProfileClient.getMe(false); await until(6); requests[5].release(); assert.equal((await again).displayName, 'server-A');
 });
 
 test('A forced Account refresh after an invalidation renders only its own newer read', async () => {

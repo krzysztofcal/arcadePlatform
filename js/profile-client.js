@@ -8,6 +8,7 @@
   // profile write or invalidation happened since it started; such a read is as fresh as a new one.
   var inFlight = { base: null, poker: null };
   var writeSeq = 0;
+  var writesInFlight = 0;
   var publicGeneration = 0;
 
   function klog(kind, data){
@@ -156,18 +157,26 @@
     if (!userId) throw staleIdentityError();
     var generation = publicGeneration;
     var seq = writeSeq += 1;
+    var cached = false;
     var response;
+    writesInFlight += 1;
     try { response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard); }
-    finally { writeSeq += 1; seq += 1; }
-    var profile = await parse(response);
-    if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
-    if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
-    // A later write or invalidation (for example a Google photo withdrawal) wins over this answer. The server
-    // order of overlapping writes is unknown, so their answers are not cached; the next read fetches.
-    if (seq !== writeSeq){ cache = null; return profile; }
-    cache = { userId: userId, profile: profile, includePoker: false };
-    notify(profile);
-    return profile;
+    finally { writeSeq += 1; seq += 1; writesInFlight -= 1; }
+    try {
+      var profile = await parse(response);
+      if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
+      if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
+      // Another write still running or finished meanwhile, or an invalidation (for example a Google photo
+      // withdrawal): the server order is unknown, so this answer is neither cached nor announced.
+      if (writesInFlight > 0 || seq !== writeSeq) return profile;
+      cache = { userId: userId, profile: profile, includePoker: false };
+      cached = true;
+      notify(profile);
+      return profile;
+    } finally {
+      // Any sent write whose answer is not cached (overlap, rejection, stale guard) leaves no older profile behind.
+      if (!cached) cache = null;
+    }
   }
 
   async function getPublic(handle){
