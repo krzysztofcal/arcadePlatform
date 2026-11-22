@@ -1373,8 +1373,19 @@ test('One Google click during revalidation preserves draft while Save waits for 
 });
 
 
+test('An unresolved photo status adds no Google tile, so the catalog keeps its count and images (#1309)',async()=>{
+ const h=await avatarPickerHarness();let presentation={state:'pending',avatar:null};h.windowObj.ProfileGooglePhoto={getPresentation:()=>presentation,getChoice:()=>null,isArcadeSelectionLocked:()=>false};
+ h.setPolicy(6);const gallery=h.get('arcadeAvatarGallery');assert.equal(gallery.children.length,6);const first=gallery.children[0];
+ presentation=null;h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.length,6);assert.equal(gallery.children[0],first);
+ presentation={state:'pending',avatar:null};h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children[0],first);
+ // A Google photo already in use keeps a stable placeholder tile while its status is still loading.
+ h.setProfile({handle:'first',avatarVariant:h.variants[0],avatarRevision:4,avatar:{type:'uploaded'}});assert.equal(gallery.children.length,7);const google=gallery.children.find(b=>b.dataset.variant==='google');
+ assert.equal(google.children[0].dataset.avatarLoading,'true');assert.equal(google.disabled,true);
+ presentation=null;h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),google);
+});
+
 test('Google pending, ready and unavailable states update the same tile and preserve the sixteen catalog choices',async()=>{
- const h=await avatarPickerHarness();let presentation={state:'pending',avatar:null};h.windowObj.ProfileGooglePhoto={getPresentation:()=>presentation,getChoice:()=>presentation&&presentation.state==='ready'?presentation.avatar:null,isArcadeSelectionLocked:()=>false};
+ const h=await avatarPickerHarness();let presentation={state:'pending',avatar:null,copyKnown:true};h.windowObj.ProfileGooglePhoto={getPresentation:()=>presentation,getChoice:()=>presentation&&presentation.state==='ready'?presentation.avatar:null,isArcadeSelectionLocked:()=>false};
  h.setPolicy(16);const gallery=h.get('arcadeAvatarGallery');assert.equal(gallery.children.length,17);const initialGoogle=gallery.children.find(b=>b.dataset.variant==='google');h.document.dispatchEvent({type:'profile:photo-status'});assert.equal(gallery.children.find(b=>b.dataset.variant==='google'),initialGoogle);
  const google=gallery.children.find(b=>b.dataset.variant==='google'),image=google.children[0],catalog=gallery.children.filter(b=>b!==google);
  assert.equal(gallery.children.length,17);assert.equal(image.dataset.avatarLoading,'true');assert.equal(google.attributes['data-saved'],'false');assert.equal(google.disabled,true);

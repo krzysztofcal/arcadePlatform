@@ -8,6 +8,7 @@
   var chipsInFlight = null;
   var welcomeBonusInFlight = null;
   var publicProfileInFlight = null;
+  var pokerProjectionInFlight = null;
   var publicProfile = null;
   var avatarSelection = null;
   var avatarSaving = null;
@@ -280,6 +281,7 @@
       publicProfileGeneration += 1;
       profileLoadState = 'idle';
       publicProfileInFlight = null;
+      pokerProjectionInFlight = null;
     }
 
     // Toggle panels
@@ -305,7 +307,9 @@
     if (nodes.userEmail){ nodes.userEmail.textContent = user.email || 'Unknown email'; }
     if (nodes.userName){ nodes.userName.textContent = displayName; }
     clearPokerProjection();
+    // #1309: the basic profile never waits for the slower Poker projection (balance + WS); each renders itself.
     loadPublicProfile(true);
+    loadPokerProjection(true);
   }
 
   function setPublicProfileErrors(errors){
@@ -505,6 +509,10 @@
     var gallery=doc.getElementById('arcadeAvatarGallery');
     if(!gallery)return;
     var allowed=allowedAvatarVariants(true),presentation=googleAvatarPresentation(),choices=[];
+    // #1309: an unresolved photo status alone adds no tile, so the gallery does not flip 6/7 (16/17) and rebuild.
+    // A tile appears for a known consented copy or a Google photo already in use; it then only changes its state.
+    if(presentation&&presentation.state==='pending'&&presentation.copyKnown!==true&&!hasGoogleAvatar())presentation=null;
+    else if(!presentation&&hasGoogleAvatar())presentation={state:'pending',avatar:null};
     if(window.ArcadeAvatars&&publicProfile&&currentUser){
       choices=window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;});
       if(presentation)choices.push('google');
@@ -608,12 +616,10 @@
     var stage = 'read';
     profileLoadState = 'loading';
     setStatus(t('profileLoading', 'Loading your profile…'), 'info', 'profile');
-    var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
+    var request = window.ProfileClient.getMe(!!force).then(function(profile){
       if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
       stage = 'render_public_profile';
       renderPublicProfile(profile);
-      stage = 'render_poker_projection';
-      renderPokerProjection(profile);
       stage = 'status';
       profileLoadState = 'success';
       if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus(t('signedIn', 'Signed in.'), 'success', 'profile');
@@ -641,13 +647,38 @@
       }, requestedUserKey, requestedGeneration);
       if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
         setBlockVisibility(nodes.publicProfileEditor, false);
-        clearPokerProjection();
         profileLoadState = 'error';
         setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error', 'profile');
       }
       return null;
     }).finally(function(){ if (publicProfileInFlight === request) publicProfileInFlight = null; });
     publicProfileInFlight = request;
+    return request;
+  }
+
+  // The Poker section loads and fails on its own: unavailable Poker never hides the profile or the avatar.
+  function loadPokerProjection(force, retried){
+    if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
+    if (pokerProjectionInFlight) return pokerProjectionInFlight;
+    var requestedUserKey = getUserKey(currentUser);
+    var requestedGeneration = publicProfileGeneration;
+    function isCurrent(){ return requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration; }
+    var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
+      if (isCurrent()) renderPokerProjection(profile);
+      return profile;
+    }).catch(function(error){
+      if (!isCurrent()) return null;
+      // A cancelled read is not a Poker failure: one fresh read for the same identity, as for the profile.
+      if (error && error.code === 'stale_identity' && !retried){
+        if (pokerProjectionInFlight === request) pokerProjectionInFlight = null;
+        return loadPokerProjection(true, true);
+      }
+      if (!(error && error.code === 'stale_identity')){
+        try { renderPokerProjection(null); } catch (_err){ klog('account:poker_render_failed', {}); }
+      }
+      return null;
+    }).finally(function(){ if (pokerProjectionInFlight === request) pokerProjectionInFlight = null; });
+    pokerProjectionInFlight = request;
     return request;
   }
 

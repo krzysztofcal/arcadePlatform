@@ -252,14 +252,14 @@ async function accountReadFixture(getMe) {
   const end = source.indexOf('\n  function handlePublicProfileSave', start);
   const events = { rendered: [], hidden: 0, errors: 0, logs: [], states: [], access: [], flushes: [] };
   const statusNode = { dataset: { source: 'profile' } };
-  const context = vm.createContext({ currentUser: { id: 'user-a' }, publicProfileGeneration: 1, publicProfileInFlight: null,
+  const context = vm.createContext({ currentUser: { id: 'user-a' }, publicProfileGeneration: 1, publicProfileInFlight: null, pokerProjectionInFlight: null,
     window: { ProfileClient: { getMe }, SupabaseAuthBridge:{getAccessToken:async()=> 'private-token'}, KLog:{syncAdminAccess(active){events.access.push(active);},flush(force){events.flushes.push(force);}} }, auth:{getCurrentUser:async()=>context.currentUser}, fetch:async()=>({ok:true,json:async()=>({isAdmin:true,userId:context.currentUser.id})}), AbortController,setTimeout,clearTimeout, profileLoadState: 'idle', nodes: { status: statusNode }, getUserKey: user => user?.id,
     renderPublicProfile: profile => events.rendered.push(profile), renderPokerProjection(){}, clearPokerProjection(){},
     setBlockVisibility(){ events.hidden++; }, setStatus(message,tone,source){ if(tone==='error')events.errors++;events.states.push(context.profileLoadState);statusNode.dataset.source=source||'auth'; },
     t: (_, fallback) => fallback, klog: (kind, data) => events.logs.push({ kind, data }), Promise
   });
   vm.runInContext(source.slice(fixtureStart, end), context);
-  return { context, events, load: async () => {const value=await vm.runInContext('loadPublicProfile(true)', context);await new Promise(resolve=>setImmediate(resolve));return value;} };
+  return { context, events, load: async () => {const value=await vm.runInContext('loadPublicProfile(true)', context);await new Promise(resolve=>setImmediate(resolve));return value;}, loadPoker: () => vm.runInContext('loadPokerProjection(true)', context) };
 }
 const cancelledRead = () => Object.assign(new Error('stale_identity'), { code: 'stale_identity' });
 
@@ -302,6 +302,45 @@ test('ProfileClient rejects old responses even after switching A to B and back t
   const profile = await window.ProfileClient.getMe(); assert.equal(profile.displayName, 'Fresh A'); assert.equal(calls, 2);
 });
 
+
+test('Account profile renders before a slow Poker projection, and failed Poker stays in its own section', async () => {
+  let releasePoker, holdPoker = true; const reads = [];
+  const f = await accountReadFixture(async (force, options) => {
+    reads.push(options && options.includePoker === true ? 'poker' : 'base');
+    if (options && options.includePoker && holdPoker) { await new Promise(resolve => { releasePoker = resolve; }); throw new TypeError('synthetic WS timeout'); }
+    return { avatar: { type: 'default', variant: 'wizard-indigo' } };
+  });
+  const poker = []; f.context.renderPokerProjection = value => poker.push(value);
+  const pokerLoad = f.loadPoker(); await f.load();
+  assert.deepEqual(reads, ['poker', 'base']); assert.equal(f.events.rendered.length, 1); assert.equal(f.context.profileLoadState, 'success'); assert.equal(poker.length, 0);
+  releasePoker(); await pokerLoad;
+  assert.deepEqual(poker, [null]); assert.equal(f.events.errors, 0); assert.equal(f.context.profileLoadState, 'success');
+  // A throwing Poker renderer is contained: no rejection escapes and the profile state is unchanged.
+  holdPoker = false; f.context.renderPokerProjection = () => { throw new TypeError('private render failure'); };
+  await f.loadPoker(); assert.equal(f.events.errors, 0); assert.equal(f.events.rendered.length, 1);
+});
+
+test('ProfileClient coalesces identical reads, even forced ones, but never across a profile write or invalidation', async () => {
+  const requests = []; let serverName = 'v1';
+  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(){} }, Promise, URL, Date, CustomEvent: class {},
+    fetch: async (url, options) => { const entry = { url, method: options.method, name: serverName }; requests.push(entry); await new Promise(resolve => { entry.release = resolve; }); return { ok: true, json: async () => ({ displayName: entry.name }) }; } });
+  const until = async count => { while (requests.length < count) await new Promise(resolve => setImmediate(resolve)); };
+  const client = window.ProfileClient;
+  const a = client.getMe(true), b = client.getMe(false), c = client.getMe(true, { includePoker: true }), d = client.getMe(true, { includePoker: true });
+  await until(2); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(requests.map(r => r.url), ['/.netlify/functions/profile-me', '/.netlify/functions/profile-me?includePoker=1']);
+  requests[0].release(); requests[1].release(); assert.equal((await a).displayName, 'v1'); assert.equal(await b, await a); assert.equal(await c, await d);
+  // A read started before a write is not reused afterwards, and its late answer never replaces the written profile.
+  const old = client.getMe(true); await until(3);
+  serverName = 'v2'; const write = client.updateMe({ leaderboardVisible: false }); await until(4); requests[3].release(); assert.equal((await write).displayName, 'v2');
+  const fresh = client.getMe(true); await until(5); assert.equal(requests[4].method, 'GET');
+  requests[2].release(); assert.equal((await old).displayName, 'v1'); assert.equal((await client.getMe(false)).displayName, 'v2');
+  requests[4].release(); assert.equal((await fresh).displayName, 'v2');
+  // Another endpoint's profile change (Google photo action) also starts a fresh read.
+  const before = client.getMe(true); await until(6); client.invalidate(); const after = client.getMe(true); await until(7);
+  requests[5].release(); requests[6].release(); await before; await after; assert.equal(requests.length, 7);
+});
 
 test('profile read states clear an old error after a new successful read', async () => {
   let fail = true; const f = await accountReadFixture(async()=>{if(fail)throw new Error('server_error');return {avatar:{variant:'wizard-indigo'}};});
@@ -360,12 +399,11 @@ test('an import copy conflict refreshes status once and offers withdrawal withou
 });
 
 test('Profile failures identify read versus rendering without logging private exception contents', async () => {
-  for (const stage of ['read', 'render_public_profile', 'render_poker_projection']) {
+  for (const stage of ['read', 'render_public_profile']) {
     const failure = Object.assign(new TypeError('private response or account data'), {code:'private-value'});
     let reads = 0;
     const f = await accountReadFixture(async () => { reads++; if(stage==='read')throw failure;return {avatar:{variant:'wizard-indigo'}}; });
     if(stage==='render_public_profile')f.context.renderPublicProfile=()=>{throw failure;};
-    if(stage==='render_poker_projection')f.context.renderPokerProjection=()=>{throw failure;};
     await f.load();
     assert.equal(reads,1);
     assert.equal(f.events.errors,1);

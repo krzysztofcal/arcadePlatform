@@ -4,6 +4,9 @@ import { loadWsAccountPokerProjection, normalizeAccountPokerProjection } from ".
 import { ensureUserProfile, ownerProfile, updateUserProfile } from "./_shared/user-profile.mjs";
 import { attachPublishedPhotos } from "./_shared/profile-photo-publication.mjs";
 
+// Aggregate durations only (no user or account data), and only for slow requests.
+const PROFILE_ME_SLOW_MS = 1000;
+
 function json(statusCode, headers, body) {
   return { statusCode, headers, body: JSON.stringify(body) };
 }
@@ -80,14 +83,32 @@ function createProfileMeHandler(deps = {}) {
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
     if (event.httpMethod !== "GET" && event.httpMethod !== "PATCH") return json(405, cors, { error: "method_not_allowed" });
 
-    const auth = await verifyJwt(extractBearerToken(event.headers));
+    // #1309: a GET checks the account lifecycle once, inside ensureUserProfile's own transaction, instead of a
+    // second transaction in the JWT check. The check and its 401 answer are unchanged; PATCH keeps both.
+    const read = event.httpMethod === "GET";
+    const startedAt = Date.now();
+    const auth = await verifyJwt(extractBearerToken(event.headers), { allowDeleting: read });
     if (!auth.valid || !auth.userId) return json(401, cors, { error: "unauthorized" });
+    const authMs = Date.now() - startedAt;
+    const withPoker = read && wantsPokerProjection(event);
+    const timing = (profileMs) => {
+      const totalMs = Date.now() - startedAt;
+      if (totalMs >= PROFILE_ME_SLOW_MS) log("profile_me_timing", { method: event.httpMethod, poker: withPoker, authMs, profileMs, totalMs });
+    };
 
     try {
-      const [profile] = await attachPhotos([event.httpMethod === "GET"
-        ? await ensureProfile(auth.userId)
-        : await updateProfile(auth.userId, validatePatch(parseBody(event.body)))]);
-      if (event.httpMethod !== "GET" || !wantsPokerProjection(event)) {
+      let profile;
+      try {
+        [profile] = await attachPhotos([read
+          ? await ensureProfile(auth.userId)
+          : await updateProfile(auth.userId, validatePatch(parseBody(event.body)))]);
+      } catch (error) {
+        if (read && error?.code === "account_not_active") return json(401, cors, { error: "unauthorized" });
+        throw error;
+      }
+      const profileMs = Date.now() - startedAt - authMs;
+      if (!withPoker) {
+        timing(profileMs);
         return json(200, cors, ownerProfile(profile));
       }
 
@@ -112,6 +133,7 @@ function createProfileMeHandler(deps = {}) {
         });
       }
 
+      timing(profileMs);
       return json(200, cors, {
         ...ownerProfile(profile),
         balance: normalizeBalanceSnapshot(balanceResult.value),
