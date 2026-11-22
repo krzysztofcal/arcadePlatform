@@ -38,7 +38,31 @@
     migrationNoticeLangBound: false,
     awardSessionId: null,
     xpCacheHydrated: false,
+    statusGeneration: 0,
+    statusInFlight: null,
   };
+
+  function decodeJwtSub(token) {
+    if (!token || typeof token !== "string") return "";
+    try {
+      const parts = token.split(".");
+      if (parts.length < 2) return "";
+      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      let json = "";
+      if (typeof atob === "function") {
+        json = atob(b64);
+      } else if (typeof window !== "undefined" && typeof window.atob === "function") {
+        json = window.atob(b64);
+      } else if (typeof Buffer !== "undefined") {
+        json = Buffer.from(b64, "base64").toString("utf8");
+      }
+      if (!json) return "";
+      const parsed = JSON.parse(json);
+      return parsed && parsed.sub ? String(parsed.sub) : "";
+    } catch (_) {
+      return "";
+    }
+  }
 
   function isDiagEnabled() {
     if (typeof window === "undefined" || !window) return false;
@@ -305,6 +329,7 @@
   }
 
   function clearServerSession() {
+    state.statusGeneration += 1;
     try {
       const ls = window.localStorage;
       ls.removeItem(SERVER_SESSION_KEY);
@@ -325,6 +350,7 @@
   }
 
   function clearIdentityBoundXpCache(options) {
+    state.statusGeneration += 1;
     if (!options || options.preserveLegacy !== true) {
       clearIdentityBoundStorage();
     }
@@ -532,6 +558,7 @@
   }
 
   function handleAuthChange(event) {
+    state.statusGeneration += 1;
     const eventName = typeof event === "string" ? event : "unknown";
     const isGameHost = window.XP_IS_GAME_HOST === true
       || (typeof document !== "undefined" && !!(document && document.body && document.body.hasAttribute("data-game-host")));
@@ -772,7 +799,9 @@
           if (Number.isFinite(payload.capDelta)) setClientCap(Number(payload.capDelta));
           else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
         }
-      }).catch(() => {}).finally(() => {
+      }).catch(err => {
+        if (err && err.code === "stale_identity") return;
+      }).finally(() => {
         state.statusPromise = null;
       });
     }
@@ -792,27 +821,67 @@
   }
 
   async function fetchStatus() {
-    const { userId, sessionId } = ensureIds();
-    const body = { anonId: userId, sessionId, operation: "status" };
+    const requestGeneration = state.statusGeneration;
+    const { userId: anonId, sessionId } = ensureIds();
+    const knownSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
+    const knownKey = knownSubject + "|" + anonId + "|" + sessionId;
+    if (state.statusInFlight && state.statusInFlight.key === knownKey && state.statusInFlight.generation === requestGeneration) {
+      return state.statusInFlight.promise;
+    }
+
     const authToken = await ensureAuthTokenWithRetry();
     if (!authToken && await isUserLoggedIn()) {
       throw new Error("XP status requires an authenticated token");
     }
-    const headers = await buildAuthHeaders({ "content-type": "application/json" });
-    const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      cache: "no-store",
-      credentials: "omit",
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`XP status failed (${res.status}) ${text}`.trim());
+
+    const currentIds = ensureIds();
+    const authSubject = authToken ? decodeJwtSub(authToken) : "";
+    const key = authSubject + "|" + currentIds.userId + "|" + currentIds.sessionId;
+
+    if (state.statusInFlight && state.statusInFlight.key === key && state.statusInFlight.generation === requestGeneration) {
+      return state.statusInFlight.promise;
     }
-    const payload = await res.json();
-    updateCapFromPayload(payload);
-    return payload;
+
+    const inFlightEntry = { key, generation: requestGeneration, promise: null };
+    const promise = (async () => {
+      const body = { anonId: currentIds.userId, sessionId: currentIds.sessionId, operation: "status" };
+      const headers = await buildAuthHeaders({ "content-type": "application/json" });
+      const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        cache: "no-store",
+        credentials: "omit",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`XP status failed (${res.status}) ${text}`.trim());
+      }
+      const payload = await res.json();
+
+      const latestIds = ensureIds();
+      const latestSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
+      const latestKey = latestSubject + "|" + latestIds.userId + "|" + latestIds.sessionId;
+      if (state.statusGeneration !== requestGeneration || latestKey !== key) {
+        const err = new Error("stale_identity");
+        err.code = "stale_identity";
+        throw err;
+      }
+
+      updateCapFromPayload(payload);
+      return payload;
+    })();
+
+    inFlightEntry.promise = promise;
+    state.statusInFlight = inFlightEntry;
+
+    try {
+      return await promise;
+    } finally {
+      if (state.statusInFlight === inFlightEntry) {
+        state.statusInFlight = null;
+      }
+    }
   }
 
   async function refreshBadgeFromServer(options) {
@@ -831,6 +900,9 @@
       await publishConfirmedXp(payload);
       return payload;
     } catch (err) {
+      if (err && err.code === "stale_identity") {
+        return null;
+      }
       getAuthenticatedUserId().then((userId) => {
         const ui = getUserUiState();
         if (userId && ui && typeof ui.markSliceApplied === "function") ui.markSliceApplied(userId, "xp", state.xpCacheHydrated ? "stale" : "loading");
