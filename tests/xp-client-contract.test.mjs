@@ -689,6 +689,50 @@ process.on('exit', (code) => {
     assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'late-failing read must not null token B');
   }
 
+  // R5/F1: Overlapping forced reads in same authVersion: newer returns null, older returns token A late
+  {
+    let releaseA;
+    const holdA = new Promise(resolve => { releaseA = resolve; });
+    let tokenCalls = 0;
+    const recordedPosts = [];
+    const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const headers = opts?.headers || {};
+      recordedPosts.push(headers.Authorization || null);
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => {
+            tokenCalls++;
+            if (tokenCalls === 1) return null; // initial read
+            if (tokenCalls === 2) return null; // call 1 retry 1
+            if (tokenCalls === 3) return null; // call 2 retry 1
+            if (tokenCalls === 4) {            // call 1 retry 2 (final retry held)
+              await holdA;
+              return tokenA;
+            }
+            if (tokenCalls === 5) return null; // call 2 retry 2 (owner, returns null)
+            return null;
+          },
+          getCurrentUserId: async () => 'user-test',
+        },
+      },
+    });
+
+    const call1 = XPClient.fetchStatus();
+    const call2 = XPClient.fetchStatus();
+
+    // Call 2 gets null on retry and rejects XP status requires authenticated token
+    await call2.catch(() => {});
+
+    // Read 2 resolves with token A late
+    releaseA();
+    await assert.rejects(call1, err => err.code === 'stale_identity', 'late caller with token A must reject with stale_identity');
+    assert.equal(recordedPosts.some(h => h === `Bearer ${tokenA}`), false, 'no POST with token A must be sent');
+  }
+
   // R2-F4: Old bootstrap ending with stale_identity does not clear newer bootstrap's promise
   {
     let release1;
@@ -1022,6 +1066,136 @@ process.on('exit', (code) => {
     assert.ok(!postedAuth.includes('Bearer ' + tokenA), 'no status POST may carry the previous identity token');
   }
 
+  // R5/F2: anonymous status in flight must not be applied if token A becomes cached after earlier anonymous check
+  {
+    let applied = null;
+    let now = 1000000;
+    const FakeDate = class extends Date {
+      constructor(...args) {
+        if (args.length) super(...args);
+        else super(now);
+      }
+      static now() { return now; }
+    };
+
+    let tokenToReturn = null;
+    const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
+
+    let triggered = false;
+    const XPClient = await loadClientWithFetch(async () => {
+      const payload = {
+        ok: true,
+        status: 'statusOnly',
+        totalLifetime: 999,
+        get capDelta() {
+          if (!triggered) {
+            triggered = true;
+            now += 70_000;
+            tokenToReturn = tokenA;
+            XPClient.fetchStatus().catch(() => {});
+          }
+          return 100;
+        },
+      };
+      return {
+        status: 200,
+        ok: true,
+        async json() { return payload; },
+        async text() { return JSON.stringify(payload); },
+      };
+    }, {
+      Date: FakeDate,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => tokenToReturn,
+          getCurrentUserId: async () => tokenToReturn ? 'user-a' : null,
+        },
+        XP: {
+          refreshFromServerStatus(payload, meta) { applied = { payload, meta }; },
+        },
+      },
+    });
+
+    // Step 1: establish anonymous state (authCheckedAt > 0, authToken = null)
+    await XPClient.fetchStatus();
+
+    // Step 2: anonymous status in-flight
+    const res = await XPClient.refreshBadgeFromServer();
+    assert.equal(res, null, 'anonymous payload must be dropped when token A became cached');
+    assert.equal(applied, null, 'refreshFromServerStatus must not be called with anonymous payload');
+
+    // Positive control: first-ever logged-in status (fresh client) is applied normally, not self-staled
+    applied = null;
+    const XPClientFresh = await loadClientWithFetch(async () => {
+      return response(200, { ok: true, status: 'statusOnly', totalLifetime: 1234 });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => tokenA,
+          getCurrentUserId: async () => 'user-a',
+        },
+        XP: {
+          refreshFromServerStatus(payload, meta) { applied = { payload, meta }; },
+        },
+      },
+    });
+    const freshRes = await XPClientFresh.refreshBadgeFromServer();
+    assert.ok(freshRes, 'fresh client must apply status');
+    assert.equal(applied?.payload?.totalLifetime, 1234, 'positive control: status applied on fresh client');
+  }
+
+  // R5/F4: initial refresh A pending, gen changes, B starts and sets pending. A finishes, isInitialStatusPending stays true until B finishes.
+  {
+    let releaseA, releaseB;
+    const holdA = new Promise(r => { releaseA = r; });
+    const holdB = new Promise(r => { releaseB = r; });
+    let count = 0;
+    let authHandler = null;
+    const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
+
+    const XPClient = await loadClientWithFetch(async () => {
+      count++;
+      if (count === 1) {
+        await holdA;
+      } else {
+        await holdB;
+      }
+      return response(200, { ok: true, status: 'statusOnly', totalLifetime: 10 });
+    }, {
+      window: {
+        SupabaseAuth: { onAuthChange: (fn) => { authHandler = fn; } },
+        SupabaseAuthBridge: {
+          getAccessToken: async () => tokenA,
+          getCurrentUserId: async () => 'user-a',
+        },
+        XP: { refreshFromServerStatus: () => {} },
+      },
+    });
+
+    // Trigger A via auth change
+    authHandler('SIGNED_IN');
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(XPClient.isInitialStatusPending(), true, 'initial status A must be pending');
+
+    // Generation changes, trigger B via another auth change
+    authHandler('SIGNED_IN');
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(XPClient.isInitialStatusPending(), true, 'initial status B must be pending');
+
+    // A finishes
+    releaseA();
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(XPClient.isInitialStatusPending(), true, 'isInitialStatusPending must still be true after A finishes while B is pending');
+
+    // B finishes
+    releaseB();
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(XPClient.isInitialStatusPending(), false, 'isInitialStatusPending must be false when B finishes');
+  }
+
   contractCompleted = true;
   console.log('xp-client contract tests passed');
-})();
+})().catch(err => {
+  console.error('FAILED IN CONTRACT TEST:', err);
+  process.exit(1);
+});

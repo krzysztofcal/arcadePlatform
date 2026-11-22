@@ -481,3 +481,35 @@ test('topbar A -> sign-out -> A race without UserUiState: late success does not 
   assert.equal(f.profileReads, 2, 'same-user event must not make a new read');
   assert.equal(f.renderedName, 'User A Fresh', 'rendered name must stay User A Fresh');
 });
+
+test('topbar without ProfileClient: late fallback success renders because only user-id check applies', async () => {
+  let releaseA1;
+  const holdA1 = new Promise((resolve) => { releaseA1 = resolve; });
+  let fetchCount = 0;
+
+  const f = await topbarProfileFixture({
+    withoutProfileClient: true,
+    fetch: async () => {
+      fetchCount++;
+      if (fetchCount === 1) {
+        await holdA1;
+        return { ok: true, json: async () => ({ displayName: 'User A Overwritten' }) };
+      }
+      return { ok: true, json: async () => ({ displayName: 'User A Fresh' }) };
+    },
+  });
+
+  // Sign out
+  f.emit('SIGNED_OUT', null);
+  await f.flush();
+
+  // Sign in as user A again (session 2)
+  f.emit('SIGNED_IN', { id: 'user-a' });
+  await f.flush();
+  assert.equal(f.renderedName, 'User A Fresh');
+
+  // Late resolution of session 1 read: with no ProfileClient, old main behaviour renders
+  releaseA1();
+  await f.flush();
+  assert.equal(f.renderedName, 'User A Overwritten', 'without ProfileClient, old main behaviour renders late response');
+});

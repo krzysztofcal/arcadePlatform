@@ -409,7 +409,7 @@
         });
       });
     load.then(function(profile){
-      if (profileSessionGeneration !== sessionGen) return;
+      if (hasProfileClient && profileSessionGeneration !== sessionGen) return;
       var ui = userUiState();
       if (!state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
       if (ui) ui.publish(user.id, 'profile', profile, Date.now());
@@ -419,7 +419,7 @@
       }
       renderUser(user, profile);
     }).catch(function(error){
-      if (profileSessionGeneration !== sessionGen) return;
+      if (hasProfileClient && profileSessionGeneration !== sessionGen) return;
       var ui = userUiState();
       var isCurrent = state.user && String(state.user.id) === String(user.id) && (!ui || ui.isCurrent(user.id, uiGeneration));
       logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });

@@ -32,6 +32,7 @@
     authPromise: null,
     authVersion: 0,
     authChangeBound: false,
+    initialStatusSeq: 0,
     initialStatusPending: false,
     migrationNotice: null,
     migrationNoticeText: null,
@@ -40,6 +41,7 @@
     awardSessionId: null,
     xpCacheHydrated: false,
     statusGeneration: 0,
+    anonTransitionGeneration: 0,
     statusInFlight: null,
   };
 
@@ -167,11 +169,14 @@
 
         if (state.authVersion === version && state.authPromise === promise) {
           const previousSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
+          const wasChecked = state.authCheckedAt > 0;
           const nextToken = token || null;
           const nextSubject = nextToken ? decodeJwtSub(nextToken) : "";
-          // A switch between two cached identities changes the key; the first cached token does not.
-          if (previousSubject !== "" && previousSubject !== nextSubject) {
+          if (previousSubject !== nextSubject && (previousSubject !== "" || wasChecked)) {
             state.statusGeneration += 1;
+            if (previousSubject === "" && nextSubject !== "") {
+              state.anonTransitionGeneration = state.statusGeneration;
+            }
           }
           state.authToken = nextToken;
           state.authCheckedAt = Date.now();
@@ -632,6 +637,12 @@
   }
 
   async function refreshInitialStatus(legacyOverride, attempt) {
+    const seq = ++state.initialStatusSeq;
+    function clearPending() {
+      if (seq === state.initialStatusSeq) {
+        state.initialStatusPending = false;
+      }
+    }
     const gen = state.statusGeneration;
     state.initialStatusPending = true;
     const legacy = legacyOverride && typeof legacyOverride === "object"
@@ -647,11 +658,11 @@
         if (retryAttempt < 4) {
           schedule(() => refreshInitialStatus(legacy, retryAttempt + 1), 500);
         } else {
-          state.initialStatusPending = false;
+          clearPending();
         }
         return;
       }
-      state.initialStatusPending = false;
+      clearPending();
       await refreshBadgeFromServer();
       return;
     }
@@ -659,30 +670,30 @@
     const identity = (await getAuthenticatedUserId()) || ensureIds().sessionId;
     const payload = await refreshBadgeFromServer({ allowServerRegression: true });
     if (state.statusGeneration !== gen) {
-      state.initialStatusPending = false;
+      clearPending();
       return;
     }
     const serverTotal = Number(payload?.totalLifetime);
     if (payload?.ok !== true || payload?.status !== "statusOnly"
       || !Number.isSafeInteger(serverTotal) || serverTotal < 0) {
-      state.initialStatusPending = false;
+      clearPending();
       return;
     }
     if (!window.XP || typeof window.XP.refreshFromServerStatus !== "function") {
       if (retryAttempt < 4) {
         schedule(() => refreshInitialStatus(legacy, retryAttempt + 1), 250);
       } else {
-        state.initialStatusPending = false;
+        clearPending();
       }
       return;
     }
     if (state.statusGeneration !== gen) {
-      state.initialStatusPending = false;
+      clearPending();
       return;
     }
     clearIdentityBoundStorage();
     showMigrationNoticeIfNeeded(legacy.total, serverTotal, identity);
-    state.initialStatusPending = false;
+    clearPending();
   }
 
   async function startServerSession(force = false) {
@@ -868,10 +879,20 @@
   }
 
   async function fetchStatus() {
-    const requestGeneration = state.statusGeneration;
+    let requestGeneration = state.statusGeneration;
+    const initialToken = state.authToken;
     const authToken = await ensureAuthTokenWithRetry();
     if (state.statusGeneration !== requestGeneration) {
-      throw staleIdentityError();
+      if (
+        !initialToken &&
+        authToken &&
+        state.anonTransitionGeneration === state.statusGeneration &&
+        state.statusGeneration === requestGeneration + 1
+      ) {
+        requestGeneration = state.statusGeneration;
+      } else {
+        throw staleIdentityError();
+      }
     }
     if (!authToken && await isUserLoggedIn()) {
       if (state.statusGeneration !== requestGeneration) {
@@ -906,7 +927,11 @@
       throw staleIdentityError();
     }
 
-    if (state.authToken) {
+    if (tokenForSubject) {
+      if (!state.authToken || decodeJwtSub(state.authToken) !== authSubject) {
+        throw staleIdentityError();
+      }
+    } else if (state.authToken) {
       const cachedSubject = decodeJwtSub(state.authToken);
       if (authSubject !== cachedSubject) {
         throw staleIdentityError();
@@ -923,7 +948,11 @@
     const inFlightEntry = { key, generation: requestGeneration, promise: null };
     const promise = (async () => {
       const body = { anonId: currentIds.userId, sessionId: currentIds.sessionId, operation: "status" };
-      if (state.authToken) {
+      if (tokenForSubject) {
+        if (!state.authToken || decodeJwtSub(state.authToken) !== authSubject) {
+          throw staleIdentityError();
+        }
+      } else if (state.authToken) {
         const cachedSubject = decodeJwtSub(state.authToken);
         if (authSubject !== cachedSubject) {
           throw staleIdentityError();
