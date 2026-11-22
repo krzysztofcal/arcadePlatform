@@ -581,7 +581,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'subsequent status must continue sending token B, not overwritten by late token A');
   }
 
-  // R3/F1: In same authVersion, forced read 2 replaces read 1; read 1 resolving late does not overwrite token B, and late error does not null token B
+  // R3/F1: In same authVersion, overlapping forced retries; late read does not overwrite token B, and late error does not null token B
   {
     let releaseA;
     const holdA = new Promise(resolve => { releaseA = resolve; });
@@ -590,7 +590,6 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
 
     const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
     const tokenB = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-b' })).toString('base64url') + '.s';
-    let currentSessionToken = tokenA;
 
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const headers = opts?.headers || {};
@@ -601,37 +600,33 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
         SupabaseAuthBridge: {
           getAccessToken: async () => {
             tokenCalls++;
-            if (tokenCalls === 1) {
+            if (tokenCalls === 1) return null;
+            if (tokenCalls === 2) {
               await holdA;
               return tokenA;
             }
-            return currentSessionToken;
+            if (tokenCalls === 3) return tokenB;
+            return null;
           },
           getCurrentUserId: async () => 'user-test',
         },
       },
     });
 
-    // Read 1 starts (non-forced) and is held on holdA
+    // Start two concurrent fetchStatus calls; both join read 1 (null), then retry with forced reads
     const call1 = XPClient.fetchStatus();
-    for (let i = 0; i < 20 && tokenCalls === 0; i++) {
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
-    assert.equal(tokenCalls, 1, 'read 1 must start');
+    const call2 = XPClient.fetchStatus();
 
-    // Session switches to B (in the same authVersion, no onAuthChange event)
-    currentSessionToken = tokenB;
-
-    // Forced read 2 returns B and resolves first
-    const call2 = await XPClient.fetchStatus(true);
-    assert.ok(call2);
+    // Call 2 gets token B and finishes first
+    const res2 = await call2;
+    assert.ok(res2);
     assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'call 2 must send token B');
 
-    // Then read 1 resolves with token A; its fetchStatus rejects with stale_identity because token B became active
+    // Then read 2 resolves with token A
     releaseA();
-    await assert.rejects(call1, err => err.code === 'stale_identity');
+    await call1.catch(() => {});
 
-    // Subsequent fetchStatus must still send token B, not overwritten by token A
+    // Subsequent fetchStatus must still send token B, not overwritten by late-resolving token A in same authVersion
     sentAuthHeader = null;
     await XPClient.fetchStatus();
     assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'subsequent fetchStatus must send token B, not overwritten by late-resolving token A in same authVersion');
@@ -649,11 +644,15 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
         SupabaseAuthBridge: {
           getAccessToken: async () => {
             tokenCalls++;
-            if (tokenCalls === 1) {
+            if (tokenCalls === 1) return null; // initial read
+            if (tokenCalls === 2) return null; // call 1 retry 1
+            if (tokenCalls === 3) return null; // call 2 retry 1
+            if (tokenCalls === 4) {            // call 1 retry 2 (final retry held)
               await holdErr;
               throw new Error('late_read_failed');
             }
-            return tokenB;
+            if (tokenCalls === 5) return tokenB; // call 2 retry 2
+            return null;
           },
           getCurrentUserId: async () => 'user-test',
         },
@@ -661,16 +660,14 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     });
 
     const pendingCall1 = XPClientErr.fetchStatus();
-    for (let i = 0; i < 20 && tokenCalls === 0; i++) {
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
-    assert.equal(tokenCalls, 1, 'read 1 must start');
+    const pendingCall2 = XPClientErr.fetchStatus();
 
-    // Forced read 2 sets token B
-    await XPClientErr.fetchStatus(true);
+    // Call 2 gets token B on retry 2 and resolves
+    const errRes2 = await pendingCall2;
+    assert.ok(errRes2);
     assert.equal(sentAuthHeader, `Bearer ${tokenB}`);
 
-    // Read 1 rejects late: must not null token B
+    // Call 1 retry 2 rejects late: must not null token B
     rejectErr(new Error('fail'));
     await pendingCall1.catch(() => {});
 

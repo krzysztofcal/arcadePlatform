@@ -224,8 +224,8 @@
     return false;
   }
 
-  async function ensureAuthTokenWithRetry(force) {
-    let token = await fetchAuthToken(force === true);
+  async function ensureAuthTokenWithRetry() {
+    let token = await fetchAuthToken(false);
     let attempts = 0;
     while (!token && attempts < 2) {
       token = await fetchAuthToken(true);
@@ -855,11 +855,10 @@
     return err;
   }
 
-  async function fetchStatus(options) {
+  async function fetchStatus() {
     const requestGeneration = state.statusGeneration;
-    const forceAuth = options === true || (options && options.forceAuth === true);
 
-    const authToken = await ensureAuthTokenWithRetry(forceAuth);
+    const authToken = await ensureAuthTokenWithRetry();
     if (state.statusGeneration !== requestGeneration) {
       throw staleIdentityError();
     }
