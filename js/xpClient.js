@@ -137,6 +137,8 @@
     const version = state.authVersion;
     let promise;
     promise = (async () => {
+      // Yield once so `promise` is assigned before `finally` can compare it, even when no getter awaits.
+      await null;
       try {
         let token = null;
 
