@@ -938,7 +938,7 @@ test('Account switch or sign-out followed by sign-in reloads both profile and po
   assert.equal(f.events.pokerReads, 3, 'sign-in after sign-out must reload poker projection');
 });
 
-test('Account profile save still forces reload', async () => {
+test('Account avatar save conflict forces profile reload', async () => {
   const f = await accountRenderFixture();
   await f.render({ id: 'user-1' });
   assert.equal(f.events.baseReads, 1);
@@ -957,4 +957,34 @@ test('Account profile save still forces reload', async () => {
   await f.loadProfile(true);
   assert.equal(f.events.baseReads, 3, 'explicit profile refresh must reload');
   assert.equal(f.events.pokerReads, 1, 'explicit profile reload must not force poker reload');
+});
+
+test('Successful avatar save through real handler renders profile and clears ProfileClient without extra reload', async () => {
+  const f = await accountRenderFixture();
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1);
+  assert.equal(f.events.pokerReads, 1);
+
+  // Drive real avatar save handler with a successful response
+  f.context.avatarSelection = 'knight-cyan';
+  f.context.window.ProfileClient.updateMe = async (data) => {
+    return {
+      displayName: 'Player',
+      avatarVariant: data.avatarVariant,
+      avatarRevision: 2,
+      avatar: { variant: data.avatarVariant },
+    };
+  };
+
+  await f.saveAvatar();
+  assert.equal(f.events.baseReads, 1, 'successful avatar save must not trigger redundant base read');
+  assert.equal(f.events.pokerReads, 1, 'successful avatar save must not reload poker');
+  assert.equal(f.events.clientCleared, true, 'ProfileClient.clear() must be called on successful avatar save');
+  assert.equal(f.context.avatarMessage, 'arcadeAvatarSaved', 'avatar message must be arcadeAvatarSaved');
+  assert.equal(f.context.publicProfile.avatarVariant, 'knight-cyan', 'publicProfile must be updated with new variant');
+
+  // Subsequent same-user event after successful save does not re-read
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1, 'same-user render after successful avatar save must not re-read');
+  assert.equal(f.events.pokerReads, 1, 'same-user render after successful avatar save must not reload poker');
 });

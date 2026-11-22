@@ -263,36 +263,60 @@ test('poker pages boot the XP renderer after loading the XP core', () => {
   }
 });
 
-async function topbarProfileFixture(respond) {
+async function topbarProfileFixture(options) {
   const vm = await import('node:vm');
+  const opts = typeof options === 'function' ? { respond: options } : (options || {});
   let user = { id: 'user-a' }, callback, profileReads = 0;
-  const document = { readyState: 'complete', getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, documentElement: { dataset: {} } };
+  const topbar = opts.topbar || {
+    attributes: {},
+    setAttribute(k, v) { this.attributes[k] = String(v); },
+    getAttribute(k) { return this.attributes[k]; },
+  };
+  const document = {
+    readyState: 'complete',
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: (sel) => sel === '.topbar' ? [topbar] : [],
+    addEventListener() {},
+    documentElement: { dataset: {} },
+  };
   const window = {
     document,
     location: { origin: 'https://arcade.test', protocol: 'https:', search: '', hash: '' },
     SUPABASE_CONFIG: { SUPABASE_URL: 'https://stage.supabase.co', SUPABASE_ANON_KEY: 'anon' },
-    ProfileClient: {
-      clear() {},
-      getMe: async () => {
-        profileReads++;
-        if (typeof respond === 'function') return respond();
-        return { displayName: 'Player', avatar: { variant: 'wizard-indigo' } };
-      },
-    },
     supabase: {
       createClient: () => ({
         auth: {
-          getSession() { return Promise.resolve({ data: { session: user ? { user } : null } }); },
+          getSession() { return Promise.resolve({ data: { session: user ? { user, access_token: 'test-token' } : null } }); },
           onAuthStateChange(fn) { callback = fn; return { data: { subscription: { unsubscribe() {} } } }; },
         },
       }),
     },
   };
-  vm.runInNewContext(await readFile(path.join(repoRoot, 'js', 'auth', 'supabaseClient.js'), 'utf8'), { window, document, Promise, console });
+  if (!opts.withoutProfileClient) {
+    window.ProfileClient = {
+      clear() {},
+      getMe: async () => {
+        profileReads++;
+        if (typeof opts.respond === 'function') return opts.respond();
+        return { displayName: 'Player', avatar: { variant: 'wizard-indigo' } };
+      },
+    };
+  }
+  const fetchImpl = opts.fetch || (async () => ({ ok: true, json: async () => ({ displayName: 'Player' }) }));
+  window.fetch = fetchImpl;
+  vm.runInNewContext(await readFile(path.join(repoRoot, 'js', 'auth', 'supabaseClient.js'), 'utf8'), {
+    window,
+    document,
+    fetch: fetchImpl,
+    Promise,
+    console,
+  });
   const flush = () => new Promise(resolve => setImmediate(resolve));
   await flush();
   return {
     flush,
+    topbar,
     get profileReads() { return profileReads; },
     emit(event, next = user) {
       user = next;
@@ -332,7 +356,7 @@ test('topbar reads profile again after user change', async () => {
   assert.equal(f.profileReads, 2, 'user change must trigger new profile read');
 });
 
-test('topbar late failure of user A after user B profile confirmed does not clear B mark', async () => {
+test('topbar late failure of user A after user B profile confirmed does not clear B mark or change UI state', async () => {
   let rejectA;
   const holdA = new Promise((_, reject) => { rejectA = reject; });
   let readCount = 0;
@@ -348,6 +372,7 @@ test('topbar late failure of user A after user B profile confirmed does not clea
   f.emit('SIGNED_IN', { id: 'user-b' });
   await f.flush();
   assert.equal(f.profileReads, 2);
+  assert.equal(f.topbar.getAttribute('data-user-ui-state'), 'ready');
 
   rejectA(new Error('user_a_network_failure'));
   await f.flush();
@@ -355,4 +380,24 @@ test('topbar late failure of user A after user B profile confirmed does not clea
   f.emit('TOKEN_REFRESHED', { id: 'user-b' });
   await f.flush();
   assert.equal(f.profileReads, 2, 'late failure of user A must not clear user B confirmation mark');
+  assert.equal(f.topbar.getAttribute('data-user-ui-state'), 'ready', 'user B UI state must remain ready after late failure of user A');
+});
+
+test('topbar without ProfileClient does not suppress profile fetch on same-user event', async () => {
+  let fallbackFetches = 0;
+  const f = await topbarProfileFixture({
+    withoutProfileClient: true,
+    fetch: async () => {
+      fallbackFetches++;
+      return {
+        ok: true,
+        json: async () => ({ displayName: 'Legal User' }),
+      };
+    },
+  });
+  assert.equal(fallbackFetches, 1, 'initial user load performs fallback fetch');
+
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  assert.equal(fallbackFetches, 2, 'same-user event without ProfileClient must re-fetch profile');
 });
