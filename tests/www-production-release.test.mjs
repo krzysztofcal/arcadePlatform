@@ -603,7 +603,18 @@ test('missing or unreadable execute receipts always mean uncertainty, preventing
 const selectionProvenance = (over = {}) => { const p = { ...provenance(), ...over }; return { ...p,
   validation: { status: 'dry_run_pass', sha: p.sha, deployId: p.deployId },
   staticValidation: { status: 'candidate_static_verified', sha: p.sha, deployId: p.deployId } }; };
-function selectionFixture(items = [{ run: ownerRun(), p: selectionProvenance() }], total = items.length) {
+const agentLogin = 'arcade-code-agent[bot]';
+const agentRun = (over = {}) => ownerRun({ actor: { login: agentLogin }, triggering_actor: { login: agentLogin }, ...over });
+const agentProvenance = (over = {}) => selectionProvenance({ actor: agentLogin, triggeringActor: agentLogin,
+  environment: 'www-candidate-agent', executionPolicy: 't007-agent-candidate-v1', ...over });
+function selectionFixture(items = [{ run: ownerRun(), p: selectionProvenance() }], total = items.length, options = {}) {
+  let overlap = false;
+  if (typeof total === 'object' && total !== null) {
+    overlap = Boolean(total.overlap);
+    total = items.length;
+  } else if (typeof options === 'object' && options !== null) {
+    overlap = Boolean(options.overlap);
+  }
   const routes = [], verified = [];
   return { routes, verified,
     options: { now: () => Date.parse('2026-11-15T10:05:00Z'),
@@ -611,7 +622,10 @@ function selectionFixture(items = [{ run: ownerRun(), p: selectionProvenance() }
         routes.push(route);
         if (route.startsWith('actions/workflows/www-candidate.yml/runs?')) {
           const actor = new URLSearchParams(route.split('?')[1]).get('actor');
-          const runs = items.map(x => x.run).filter(r => r.actor.login === actor);
+          const runs = items.map(x => x.run).filter(r => {
+            if (overlap && actor === 'krzysztofcal') return r.actor?.login === 'krzysztofcal' || r.actor?.login === agentLogin;
+            return r.actor?.login === actor;
+          });
           return { total_count: total === items.length ? runs.length : total, workflow_runs: runs };
         }
         const match = /actions\/runs\/(\d+)\/(attempts\/1|artifacts\?per_page=100)/.exec(route);
@@ -701,10 +715,6 @@ test('automatic selection enforces the 48-hour boundary and refuses a changed cu
 
 
 // T007: only Candidate trust expands; Publish/record ownership never does.
-const agentLogin = 'arcade-code-agent[bot]';
-const agentRun = (over = {}) => ownerRun({ actor: { login: agentLogin }, triggering_actor: { login: agentLogin }, ...over });
-const agentProvenance = (over = {}) => selectionProvenance({ actor: agentLogin, triggeringActor: agentLogin,
-  environment: 'www-candidate-agent', executionPolicy: 't007-agent-candidate-v1', ...over });
 test('T007 Candidate accepts only exact OWNER or App actor pairs and binds artifact provenance to the real run', () => {
   const now = Date.parse('2026-11-15T10:05:00Z');
   assert.doesNotThrow(() => actions.validateCandidate(agentRun(), agentProvenance(), 'krzysztofcal', now));
@@ -832,7 +842,7 @@ test('T007 missing history after discard/artifact expiry remains STOP and requir
   const expired = selectionFixture([{ run: ownerRun(), p: selectionProvenance(), artifacts: [{ name: 'www-candidate-1', expired: true }] }]);
   await assert.rejects(actions.ensureNoExistingCandidate(sha, expired.options), /candidate_artifact_missing_or_ambiguous/);
   const wrongActor = selectionFixture(); const read = wrongActor.options.read;
-  wrongActor.options.read = route => route.includes('/workflows/') ? { total_count: 1, workflow_runs: [agentRun()] } : read(route);
+  wrongActor.options.read = route => route.includes('/workflows/') ? { total_count: 1, workflow_runs: [ownerRun({ actor: { login: 'attacker' } })] } : read(route);
   await assert.rejects(actions.resolveCandidate('', sha, wrongActor.options), /candidate_search_actor_mismatch/);
 });
 
@@ -851,4 +861,78 @@ test('T007 real Git-ignore shape is not a Candidate, while marker intents stay b
   const bounded = [];
   await assert.rejects(actions.readCandidateInventory(sha, async page => { bounded.push(page); return Array(100).fill(skipped); }), /candidate_inventory_unknown/);
   assert.deepEqual(bounded, [1, 2, 3]);
+});
+
+test('automatic candidate discovery tolerates GitHub actor filter overlap and enforces safeguards', async () => {
+  // (a) only an App candidate exists and both queries return it → resolves to that candidate, verify called once
+  const bot = { run: agentRun(), p: agentProvenance() };
+  const fxApp = selectionFixture([bot], { overlap: true });
+  const resolved = await actions.resolveCandidate('', sha, fxApp.options);
+  assert.equal(resolved.deployId, bot.p.deployId);
+  assert.equal(resolved.runId, '42');
+  assert.deepEqual(fxApp.verified, [bot.p.deployId]);
+
+  // (b) a run with a third actor in either response → candidate_search_actor_mismatch
+  const thirdInOwnerQuery = selectionFixture();
+  const readThirdOwner = thirdInOwnerQuery.options.read;
+  thirdInOwnerQuery.options.read = route => {
+    if (route.includes('actor=krzysztofcal')) return { total_count: 1, workflow_runs: [ownerRun({ actor: { login: 'attacker' } })] };
+    return readThirdOwner(route);
+  };
+  await assert.rejects(actions.resolveCandidate('', sha, thirdInOwnerQuery.options), /candidate_search_actor_mismatch/);
+
+  const thirdInAgentQuery = selectionFixture();
+  const readThirdAgent = thirdInAgentQuery.options.read;
+  thirdInAgentQuery.options.read = route => {
+    if (route.includes(`actor=${encodeURIComponent(agentLogin)}`)) return { total_count: 1, workflow_runs: [agentRun({ actor: { login: 'attacker' } })] };
+    return readThirdAgent(route);
+  };
+  await assert.rejects(actions.resolveCandidate('', sha, thirdInAgentQuery.options), /candidate_search_actor_mismatch/);
+
+  // (c) same id in both queries with differing actor/head_sha → candidate_search_incomplete
+  const diffActor = selectionFixture();
+  diffActor.options.read = route => {
+    if (route.includes('actor=krzysztofcal')) return { total_count: 1, workflow_runs: [ownerRun({ id: 42, actor: { login: 'krzysztofcal' } })] };
+    if (route.includes(`actor=${encodeURIComponent(agentLogin)}`)) return { total_count: 1, workflow_runs: [agentRun({ id: 42, actor: { login: agentLogin } })] };
+    return { total_count: 0, workflow_runs: [] };
+  };
+  await assert.rejects(actions.resolveCandidate('', sha, diffActor.options), /candidate_search_incomplete/);
+
+  const diffSha = selectionFixture();
+  diffSha.options.read = route => {
+    if (route.includes('actor=krzysztofcal')) return { total_count: 1, workflow_runs: [ownerRun({ id: 42, head_sha: sha })] };
+    if (route.includes(`actor=${encodeURIComponent(agentLogin)}`)) return { total_count: 1, workflow_runs: [ownerRun({ id: 42, head_sha: ws })] };
+    return { total_count: 0, workflow_runs: [] };
+  };
+  await assert.rejects(actions.resolveCandidate('', sha, diffSha.options), /candidate_search_incomplete/);
+
+  const diffTrigger = selectionFixture();
+  diffTrigger.options.read = route => {
+    if (route.includes('actor=krzysztofcal')) return { total_count: 1, workflow_runs: [ownerRun({ id: 42, triggering_actor: { login: 'krzysztofcal' } })] };
+    if (route.includes(`actor=${encodeURIComponent(agentLogin)}`)) return { total_count: 1, workflow_runs: [ownerRun({ id: 42, triggering_actor: { login: agentLogin } })] };
+    return { total_count: 0, workflow_runs: [] };
+  };
+  await assert.rejects(actions.resolveCandidate('', sha, diffTrigger.options), /candidate_search_incomplete/);
+
+  const diffAttempt = selectionFixture();
+  diffAttempt.options.read = route => {
+    if (route.includes('actor=krzysztofcal')) return { total_count: 1, workflow_runs: [ownerRun({ id: 42, run_attempt: 1 })] };
+    if (route.includes(`actor=${encodeURIComponent(agentLogin)}`)) return { total_count: 1, workflow_runs: [ownerRun({ id: 42, run_attempt: 2 })] };
+    return { total_count: 0, workflow_runs: [] };
+  };
+  await assert.rejects(actions.resolveCandidate('', sha, diffAttempt.options), /candidate_search_incomplete/);
+
+  // (d) 6 unique runs across both queries (each query ≤5) → candidate_search_incomplete
+  const sixRuns = selectionFixture();
+  sixRuns.options.read = route => {
+    if (route.includes('actor=krzysztofcal')) {
+      return { total_count: 3, workflow_runs: [10, 11, 12].map(i => ownerRun({ id: i })) };
+    }
+    if (route.includes(`actor=${encodeURIComponent(agentLogin)}`)) {
+      return { total_count: 3, workflow_runs: [13, 14, 15].map(i => agentRun({ id: i })) };
+    }
+    return { total_count: 0, workflow_runs: [] };
+  };
+  await assert.rejects(actions.resolveCandidate('', sha, sixRuns.options), /candidate_search_incomplete/);
+  assert.deepEqual(sixRuns.verified, []);
 });

@@ -223,6 +223,19 @@
   function signInWithGoogle(){
     authCallbackError = null;
     var client = getClient();
+    // #1300: the Production APK uses native Credential Manager + signInWithIdToken (no browser callback).
+    if (window.MobilePoker && window.MobilePoker.nativeGoogle === true){
+      // Never fall back to the browser callback in the Production APK.
+      if (typeof window.MobilePoker.signInWithGoogle !== 'function' || !isGoogleEnabled() || !client || !client.auth) return Promise.reject(new Error('google_unavailable'));
+      return window.MobilePoker.signInWithGoogle(client).then(function(result){
+        authCallbackError = null;
+        return result;
+      }, function(error){
+        var code = error && error.message;
+        // Reuse the Account page's existing cancel/unavailable messages; everything else is a generic retryable failure.
+        throw new Error(code === 'google_canceled' ? 'auth_cancelled' : code === 'google_unavailable' ? 'google_unavailable' : 'google_failed');
+      });
+    }
     var redirectTo = getAuthRedirectTo();
     if (!isGoogleEnabled() || !redirectTo || !client || !client.auth || !client.auth.signInWithOAuth){
       return Promise.reject(new Error('google_unavailable'));
@@ -292,7 +305,14 @@
     }
     recoveryPending = false;
     recoverySession = null;
-    return client.auth.signOut();
+    var mobile = window.MobilePoker;
+    if (!mobile || typeof mobile.clearGoogleCredential !== 'function') return client.auth.signOut();
+    // Invalidate an in-flight native Google sign-in and forget the account choice (best effort; the next native
+    // sign-in waits for this clear). Then sign out after any running ID-token exchange, so its session is removed
+    // by this normal sign-out, whose result reaches the caller unchanged.
+    try { Promise.resolve(mobile.clearGoogleCredential()).catch(function(){}); } catch (_err){}
+    var settled = typeof mobile.googleSettled === 'function' ? Promise.resolve().then(function(){ return mobile.googleSettled(); }).catch(function(){}) : Promise.resolve();
+    return settled.then(function(){ return client.auth.signOut(); });
   }
 
   function computeInitials(name){

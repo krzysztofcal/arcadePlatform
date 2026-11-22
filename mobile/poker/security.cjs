@@ -1,6 +1,14 @@
 (function(root){
   'use strict';
-  var redirectTo = 'arcadepoker-stage://auth/callback';
+  var stageRedirectTo = 'arcadepoker-stage://auth/callback';
+  var productionRedirectTo = 'https://play.kcswh.pl/app/auth/callback';
+  var redirectTo = stageRedirectTo;
+
+  var expectedRefs = {
+    stage: 'krydukthwdvccggbyjfw',
+    production: 'otbqfijerkieoxwpxjnm'
+  };
+
   function validate(config){
     if (!config || !/^https:\/\/deploy-preview-[1-9][0-9]*--playkcswh\.netlify\.app$/.test(config.apiOrigin) ||
         config.supabaseUrl !== 'https://krydukthwdvccggbyjfw.supabase.co' || config.wsUrl !== 'wss://ws-preview.kcswh.pl/ws') {
@@ -25,6 +33,56 @@
     validateProduction(config);
     return 'production';
   }
+  function redirectFor(ch){
+    if (ch === 'stage') return stageRedirectTo;
+    if (ch === 'production') return productionRedirectTo;
+    throw new Error('Unknown channel: ' + ch);
+  }
+  function decodeSegment(part){
+    if (!part) throw new Error('Invalid public anon key');
+    var json;
+    try {
+      if (typeof atob === 'function') {
+        var b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4) b64 += '=';
+        json = atob(b64);
+      } else if (typeof Buffer !== 'undefined') {
+        json = Buffer.from(part, 'base64url').toString('utf8');
+      } else {
+        throw new Error('No decoder');
+      }
+      return JSON.parse(json);
+    } catch (_e) {
+      throw new Error('Invalid public anon key');
+    }
+  }
+  function decodePayload(jwt){
+    if (typeof jwt !== 'string') throw new Error('Invalid public anon key');
+    var parts = jwt.split('.');
+    if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+      throw new Error('Invalid public anon key');
+    }
+    var header = decodeSegment(parts[0]);
+    if (!header || typeof header !== 'object' || typeof header.alg !== 'string' || !header.alg) {
+      throw new Error('Invalid public anon key');
+    }
+    if (header.typ !== undefined && header.typ !== 'JWT') {
+      throw new Error('Invalid public anon key');
+    }
+    return decodeSegment(parts[1]);
+  }
+  function bind(config){
+    var ch = channel(config);
+    var payload = decodePayload(config && config.supabaseAnonKey);
+    if (!payload || typeof payload !== 'object' || payload.role !== 'anon' || payload.ref !== expectedRefs[ch]) {
+      throw new Error('Invalid public anon key');
+    }
+    return {
+      channel: ch,
+      config: config,
+      redirectTo: redirectFor(ch)
+    };
+  }
   function forPreview(config, binding, prNumber, sourceSha){
     var origin = 'https://deploy-preview-' + prNumber + '--playkcswh.netlify.app';
     var deploy = binding && binding.netlify;
@@ -38,16 +96,38 @@
     return validate(Object.assign({}, config, { apiOrigin: origin }));
   }
   function publicProfileUrl(config, handle){
-    return validate(config).apiOrigin + '/u/' + encodeURIComponent(String(handle || ''));
+    return bind(config).config.apiOrigin + '/u/' + encodeURIComponent(String(handle || ''));
   }
-  function callbackCode(value){
+  function callbackCode(value, ch){
+    if (ch === undefined) ch = 'stage';
+    if (ch !== 'stage' && ch !== 'production') throw new Error('Unknown channel: ' + ch);
     var url = new URL(value);
-    if (url.protocol !== 'arcadepoker-stage:' || url.host !== 'auth' || url.pathname !== '/callback' ||
-        url.username || url.password || url.hash || url.searchParams.has('error') ||
-        url.searchParams.getAll('code').length !== 1 || !url.searchParams.get('code')) throw new Error('Invalid auth callback');
+    if (url.username || url.password || url.hash || url.searchParams.has('error') ||
+        url.searchParams.getAll('code').length !== 1 || !url.searchParams.get('code')) {
+      throw new Error('Invalid auth callback');
+    }
+    if (ch === 'stage') {
+      if (url.protocol !== 'arcadepoker-stage:' || url.host !== 'auth' || url.pathname !== '/callback') {
+        throw new Error('Invalid auth callback');
+      }
+    } else if (ch === 'production') {
+      if (url.protocol !== 'https:' || url.host !== 'play.kcswh.pl' || url.port !== '' || url.pathname !== '/app/auth/callback') {
+        throw new Error('Invalid auth callback');
+      }
+    }
     return url.searchParams.get('code');
   }
-  var api = { validate: validate, validateProduction: validateProduction, channel: channel, forPreview: forPreview, publicProfileUrl: publicProfileUrl, callbackCode: callbackCode, redirectTo: redirectTo };
+  var api = {
+    validate: validate,
+    validateProduction: validateProduction,
+    channel: channel,
+    bind: bind,
+    redirectFor: redirectFor,
+    forPreview: forPreview,
+    publicProfileUrl: publicProfileUrl,
+    callbackCode: callbackCode,
+    redirectTo: redirectTo
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MobilePokerSecurity = api;
 })(typeof window !== 'undefined' ? window : globalThis);

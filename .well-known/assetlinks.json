@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "pl.kcswh.arcadepoker",
+      "sha256_cert_fingerprints": ["A2:63:D1:F8:C5:93:3F:C6:16:09:2E:43:BB:AE:BE:59:49:EB:52:F9:61:27:21:6A:0E:3A:86:2D:79:34:B9:2A"]
+    }
+  }
+]

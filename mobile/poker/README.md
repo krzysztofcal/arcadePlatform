@@ -145,6 +145,31 @@ Poker Offline now uses the same presentation code: `scripts/build-poker-offline-
   - The bundled `config.js` must equal the pinned Production endpoints exactly.
   - `jarsigner -verify` must report `jar is unsigned`.
   - The licensed lobby music decrypt stays fail-closed.
-- **Signing:** a future OWNER step (separate GO), done locally with the Play upload key; Google signs the delivered app through Play App Signing. Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts.
+- **Signing (#1302):** the `sign-aab` job runs after `release-aab` in the same dispatch, in the protected `android-signing` Environment (OWNER approval required for every run; only the first run attempt may sign, so a failed run is replaced by a new dispatch).
+  - Before any secret is used, it checks at runtime that the Environment requires the OWNER as reviewer, has admin bypass off and allows only `main`, and that the OWNER approved this run; otherwise it stops.
+  - It signs only the verified unsigned AAB of the same run (SHA256SUMS and receipt fields) with the Play upload key (PKCS#12, alias `upload`, Environment secrets `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_UPLOAD_STORE_PASSWORD`, optional `ANDROID_UPLOAD_KEY_PASSWORD`) via `mobile/poker/sign-release-aab.sh`.
+  - The key certificate and the single signer of the signed AAB must equal the pinned upload certificate SHA-256 in the workflow (public value, verified by the OWNER in Play Console; it is not the Play App Signing certificate used in `assetlinks.json`).
+  - Output artifact (7 days): signed AAB, `signed-release-receipt.json`, `SHA256SUMS`. CI never uploads to Google Play: the OWNER uploads manually and raises `versionCode` for every upload.
+  - Never sign with the debug key. No key or password goes to git, PRs, logs or artifacts. Provisioning the Environment and secrets is a one-time OWNER step.
 - **Status:** online play and sign-in in the Production app need T2a (channel-aware runtime/OAuth), the WWW Production release of T2b, the Supabase redirect allowlist and T2d (`assetlinks.json` with the Play app signing fingerprint). Until then only Poker Offline is expected to work.
 - **Details:** procedure, blockers and the Galaxy S24+ plan are in `specs/1140-ugc-safety/t3-production-aab.md`.
+
+## #1300: native Google sign-in (Production APK)
+
+The Production APK signs in with Google through Android Credential Manager (`PokerGoogleSignInPlugin.java`, `GetSignInWithGoogleOption`). The returned Google ID token goes to Supabase `signInWithIdToken({ provider: 'google', token, nonce })` (`MobilePoker.signInWithGoogle` in `runtime.js`, routed from `SupabaseAuth.signInWithGoogle`). There is no browser or Custom Tab callback.
+
+- **Nonce:** `runtime.js` creates a random 32-byte raw nonce. Google receives only its SHA-256 hex digest, which is bound into the ID token; Supabase receives the raw nonce.
+- **Logging:** tokens, nonces and account data are never logged.
+- **Errors:** cancel is retryable (the Account page shows its existing cancel message), and parallel pickers are refused.
+- **Sign-out:** an explicit sign-out also clears the native account choice, so a different account can be picked next time.
+- **Configuration:**
+  - `configure-android.mjs` writes the public Google **Web** OAuth client ID (`MOBILE_GOOGLE_WEB_CLIENT_ID`, the token audience already configured in the Supabase Google provider) into `res/values/poker_google_signin.xml`. A Production build fails before any file write if the ID is missing or malformed. No client secret is ever used.
+  - The Production AAB workflow reads it from the repository **variable** `MOBILE_GOOGLE_WEB_CLIENT_ID` and checks that the bundled resource contains it.
+- **Dependencies:** pinned stable `androidx.credentials` 1.6.0 (+ `credentials-play-services-auth`) and `googleid` 1.2.1. Google's play-services-auth artifact still pulls `play-services-identity-credentials` alpha transitively.
+- **Stage:** compiles the plugin but gets no client ID and keeps its existing browser OAuth. WWW Google OAuth, email/password, recovery and sessions are unchanged.
+- **Release gates (OWNER):**
+  - repository variable `MOBILE_GOOGLE_WEB_CLIENT_ID` = the existing Production Web client ID (`arcade-hub-prod-1100`);
+  - an Android OAuth client for `pl.kcswh.arcadepoker` with the **SHA-1** of the Play App Signing certificate;
+  - the Supabase Google provider accepting that Web client ID as audience;
+  - a signed AAB with versionCode ≥ 2 tested through Play internal testing on the Galaxy S24+.
+- **Breaking for optional Google photo import:** ID-token sign-in provides no `session.provider_token`. The photo reconnect flow (`js/profile-google-photo.js`, owned separately, see #1295) cannot obtain Google photo proof from this login in the Production APK, and must handle that explicitly.

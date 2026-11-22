@@ -164,7 +164,7 @@ test("infra VPS remote bash verifies backup before overwrite and validates befor
 test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers contract", () => {
   const bootstrap = fileText("infra/vps/bootstrap.sh");
   const sudoers = fileText("infra/vps/arcade-deploy.sudoers");
-  const helper = fileText("infra/vps/ws-preview-env-preflight.mjs");
+  const helper = fileText("infra/vps/ws-preview-env-preflight.v3-pinned.mjs");
 
   assert.match(bootstrap, /getent group arcade-deploy/);
   assert.match(bootstrap, /usermod --append --groups arcade-deploy copilot/);
@@ -179,7 +179,7 @@ test("infra VPS bootstrap publishes the deploy group, helper and exact sudoers c
   assert.match(bootstrap, /\/opt\/arcade-ws-preview\/(?:ws-server|shared|netlify|node_modules)/);
   assert.match(bootstrap, /-g arcade-deploy -m 2775/);
   assert.match(bootstrap, /install -o root -g arcade-deploy -m 0664 "\$REPO_ROOT\/infra\/vps\/Caddyfile" \/etc\/caddy\/Caddyfile/);
-  assert.match(bootstrap, /ws-preview-env-preflight\.mjs/);
+  assert.match(bootstrap, /ws-preview-env-preflight\.v3-pinned\.mjs/);
   assert.match(bootstrap, /ws-production-env-preflight\.mjs/);
   assert.match(bootstrap, /\[\[ ! -x \/usr\/bin\/node \]\]/);
   assert.match(bootstrap, /\/usr\/bin\/node --version/);
