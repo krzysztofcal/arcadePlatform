@@ -1,7 +1,7 @@
 # Implementation Plan: Android crash and non-fatal diagnostics (#1306)
 
-**Branch**: `1306-android-crash-diagnostics` | **Date**: 2026-11-22 r2 | **Spec**: [spec.md](spec.md) | **Base**: `main` @ `89374212`
-**Status**: plan only. Nothing is implemented, provisioned, collected, signed or uploaded until the OWNER approves this plan and D1–D6.
+**Branch**: `1306-android-crash-diagnostics` | **Date**: 2026-11-22 r3 | **Spec**: [spec.md](spec.md) | **Base**: `main` @ `89374212`
+**Status**: plan only. Nothing is implemented, provisioned, collected, signed or uploaded until the OWNER approves this plan and D1–D7.
 **Validation command (PR1):** `node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-channel.test.mjs tests/mobile-legal-packaging.test.mjs`.
 Run it plus the Draft-PR Android build. Never run the full suite on the VPS.
 
@@ -74,6 +74,10 @@ Collection is off by default, and anything buffered while it is off is deleted.
   opt-out is required, T014 applies.
 - **D5 Stage QA enablement.** A GO for a **Draft PR that is never merged**, with `DIAGNOSTICS_COLLECTION.stage = true`. Only that PR's
   APK collects data, so later Stage PR APKs stay off.
+- **D7 Reviewer pair.** The OWNER asked (2026-11-22) that Stage A/B be run by the Claude Code coordinator and a separate Claude
+  Code CLI run. The issue protocol named Claude + Codex, and review #1 of the plan is author self-review. Choose one: accept this
+  deviation, or require one Codex read-only Stage B review of the final SpecKit SHA before T003. The AGENTS.md Codex gate for PR1
+  is unaffected either way.
 - **D6 WS scope.** Accept the descope of WS reconnect reporting. `poker/poker-ws-client.js` retries indefinitely with backoff
   (`DEFAULT_RECONNECT_MAX_MS`) and has no terminal failure. Instrumenting it would change shared WWW `poker/*.js`. Uncaught JS errors
   on poker pages are still captured.
@@ -110,6 +114,9 @@ Collection is off by default, and anything buffered while it is off is deleted.
 - **`mobile/poker/PokerDiagnosticsPlugin.java`** (new, about 70 lines, `@CapacitorPlugin(name = "PokerDiagnostics")`):
   - `load()` reads the resources. If diagnostics are disabled, it calls `deleteUnsentReports()`. Otherwise it sets the custom keys
     `channel` and `source_sha`.
+  - On the first run of an enabled build (a persisted `SharedPreferences` flag `poker_diag_purged_<versionCode>`), it calls
+    `deleteUnsentReports()` once. This stops a report buffered under an earlier collection-off build from uploading after the
+    upgrade.
   - `@PluginMethod report(call)`:
     - It takes `code` and `stage`, optional `js_file` (`^[a-z0-9_.-]{1,40}\.js$`) and optional `js_line` (1–999999).
     - It checks them against a static `Map<String, Set<String>> ALLOWED` (plan §3), the **single** allowlist.
@@ -129,7 +136,8 @@ Collection is off by default, and anything buffered while it is off is deleted.
     `google_credential:credential_manager` with `exception = getClass().getSimpleName()` and `type = getType()`.
     Both must match `^[A-Za-z0-9_.]{1,128}$`; otherwise the value is `other`.
   - The failed `onResult` path records `google_credential:unexpected_credential`.
-  - `webClientId()==null` records `google_credential:config_missing`. This branch can only be reached in a Production build.
+  - `webClientId()==null` records `google_credential:config_missing`, but only when the `poker_build_channel` resource equals
+    `production`. This is a native guard, so it does not rely on the JS channel check.
   - The reject codes do not change.
 - **`mobile/poker/diagnostics.js`** (new IIFE, about 40 lines, exposes `window.MobilePokerDiagnostics = { report(code, stage) }`):
   - It looks up `window.Capacitor.Plugins.PokerDiagnostics` lazily. If the plugin is missing, the call does nothing.
@@ -211,6 +219,9 @@ Collection is off by default, and anything buffered while it is off is deleted.
     FirebaseInstallations`, and `adb shell run-as pl.kcswh.arcadepoker.stage ls -R shared_prefs files`.
   - T013a checks a **collection-off** build. Expect no upload, no Installations call and no buffered reports kept. Record whether a
     UUID/FID is written, as input to D4.
+  - **STOP rule:** if any Firebase network call or retained report appears with collection off, STOP before the PR1 merge. A
+    reviewed mitigation follows. One candidate is the global manifest flag `firebase_data_collection_default_enabled=false`
+    and/or a Sessions switch, re-checked against the official docs.
   - T013b checks a **collection-on** build. Expect offline buffering, upload on relaunch and that the Installations call succeeds.
 - **DSAR**: no account linkage and no user ID. Requests are answered by deleting the issues, or by the 90-day expiry.
 - **Runbook**: `mobile/poker/README.md` covers where to look, triage, coverage gaps, retention and a hotfix to turn collection off.
@@ -231,8 +242,8 @@ Collection is off by default, and anything buffered while it is off is deleted.
 
 ## 6. Delivery and gates
 - **Gate A (done)**: two independent Stage A architecture reviews (#1306).
-- **Gate B (this task)**: two Stage B plan reviews, then r2 fixes with dispositions in #1306, then OWNER approval of the plan and
-  D1–D6.
+- **Gate B (this task)**: two Stage B plan reviews and a round-2 verification; the r2/r3 fixes and dispositions are in #1306. Then
+  OWNER approval of the plan and D1–D7.
 - **Gate C (OWNER, phone)**: create the Spark project and two Android apps without Analytics, apply the §4 settings, and paste
   `google-services.json`.
 - **Gate D, PR1 (agent Draft, Deploy Preview kept)**: T005–T012 with collection off. The PR1 Stage APK is the compile, manifest and

@@ -1,7 +1,7 @@
 # Feature Specification: Android crash and non-fatal diagnostics (#1306)
 
 **Feature Branch**: `1306-android-crash-diagnostics`
-**Created**: 2026-11-22 · **Revised**: 2026-11-22 r2 (Stage B findings applied) · **Base**: `main` @ `89374212`
+**Created**: 2026-11-22 · **Revised**: 2026-11-22 r3 (Stage B findings and round-2 verification applied) · **Base**: `main` @ `89374212`
 **Status**: DRAFT for OWNER plan approval. There is no implementation GO yet.
 **Input**: issue #1306 body, its research/decision comments and SpecKit drafts, two Stage A and two Stage B reviews (#1306).
 
@@ -70,7 +70,7 @@ Diagnostics never delay or break startup, sign-in or gameplay, never flood repor
   is reported recursively.
 - Cross-origin `Script error.` and errors from non-packaged scripts are ignored. Inline-script errors keep only the line number.
 - The SDK keeps only the newest 8 non-fatals until the next launch. The native cap (7 per process, 1 per code:stage) stays below that.
-- While collection is off, the plugin deletes unsent reports on every start.
+- While collection is off, the plugin deletes unsent reports on every start. The first run of an enabled build also purges once, so a report buffered under an earlier collection-off build never uploads after the upgrade.
 - A Stage reinstall with a different ephemeral debug key needs an uninstall first, which also drops buffered reports.
 - Known coverage gaps:
   - crashes before Firebase init

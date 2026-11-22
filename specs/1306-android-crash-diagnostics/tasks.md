@@ -1,6 +1,6 @@
 # Tasks: Android crash and non-fatal diagnostics (#1306)
 
-**Input**: [spec.md](spec.md), [plan.md](plan.md) (r2). Nothing below is authorised before the OWNER approves the plan and D1–D6.
+**Input**: [spec.md](spec.md), [plan.md](plan.md) (r2). Nothing below is authorised before the OWNER approves the plan and D1–D7.
 **Tests**: fundamental only (constitution V). They test fail-closed config and privacy sanitising, extending
 `tests/mobile-poker-channel.test.mjs`, `tests/mobile-poker-security.test.mjs` and `tests/mobile-legal-packaging.test.mjs`.
 There are no UI, CSS, layout or glue tests. Validation command: see the plan header.
@@ -8,8 +8,8 @@ Format: `[ID] [P?] [Story] Description`.
 
 ## Phase 0: Review and decisions (no code)
 - [x] T001 Stage A: two independent architecture reviews, posted in #1306 (Claude Code coordinator and a separate Claude Code CLI run).
-- [x] T002 Stage B: two plan reviews (P0–P3) posted in #1306; r2 applies the supported fixes, and the dispositions are posted in #1306.
-- [ ] T003 OWNER: approve the plan and record D1 (variant), D2 (`ACCESS_NETWORK_STATE`), D4 (collection model, can be finalised after T013a), D5 (Stage QA Draft) and D6 (WS descope) in #1306.
+- [x] T002 Stage B: two plan reviews (P0–P3) and a round-2 verification posted in #1306. r2 and r3 apply the supported fixes, and the dispositions are posted in #1306. Two Claude runs were used, as the OWNER instructed; see D7.
+- [ ] T003 OWNER: approve the plan and record D1 (variant), D2 (`ACCESS_NETWORK_STATE`), D4 (collection model, can be finalised after T013a), D5 (Stage QA Draft), D6 (WS descope) and D7 (reviewer pair; optional Codex Stage B review) in #1306.
 
 ## Phase 1: Setup (OWNER, phone; Gate C)
 - [ ] T004 OWNER creates the dedicated Firebase project and posts the public `google-services.json` in #1306. Agents never create cloud resources.
@@ -26,12 +26,12 @@ Format: `[ID] [P?] [Story] Description`.
   - `buildResources`, with the SHA read from `www/build-receipt.json`.
   - The `PokerDiagnosticsPlugin` copy and `registerPlugin`.
 - [ ] T006 [P] [US1/US2/US3] New `mobile/poker/PokerDiagnosticsPlugin.java`. It has no crash, user-ID or free-text methods.
-  - `load()` calls `deleteUnsentReports()` while disabled, and otherwise sets the custom keys.
+  - `load()` calls `deleteUnsentReports()` while disabled, and once on the first run of an enabled build. Otherwise it sets the custom keys.
   - `report` validates against the single `ALLOWED` map (plan §3).
   - `record` applies the disabled check and the caps (1 per code:stage, 7 per process), builds the synthetic frame, and swallows all errors.
 - [ ] T007 [US2] `mobile/poker/PokerGoogleSignInPlugin.java`: record `google_credential` with `credential_manager`, `unexpected_credential` or `config_missing`.
   - Keys are the simple exception name and `getType()` only, regex 128.
-  - Never record cancel or no-credential.
+  - Never record cancel or no-credential. Record `config_missing` only when the channel resource is `production`.
   - Reject codes stay unchanged.
 - [ ] T008 [P] [US2] New `mobile/poker/diagnostics.js` IIFE, with no allowlist or cap (both are native):
   - `MobilePokerDiagnostics.report`.
@@ -59,7 +59,7 @@ Format: `[ID] [P?] [Story] Description`.
   - `tests/mobile-poker-security.test.mjs`: `diagnostics.js` loaded via the existing `vm.runInNewContext` pattern.
     - It forwards only constant code/stage plus `js_file`/`js_line`.
     - It never forwards a message, stack or URL.
-    - It ignores cross-origin and non-`.js` filenames, and does not recurse.
+    - It ignores cross-origin events, drops `js_file` (keeping `js_line`) for non-`.js` filenames, and does not recurse.
   - Java is compiled by the PR1 Draft APK build (the Deploy Preview must stay). There are no Java unit tests.
 
 ## Phase 3: Controlled acceptance
@@ -68,7 +68,11 @@ Format: `[ID] [P?] [Story] Description`.
   - whether a UUID or FID is written (this is D4 input);
   - startup, sign-in and Offline are unaffected.
 
-  Post the results in #1306.
+  Post the results in #1306. **STOP** before the PR1 merge if any Firebase network call or retained report appears (plan §4).
+- [ ] T013c [US3] Agent drafts a concise LIA and an ePrivacy note in #1306, using the T013a facts. This is not legal clearance.
+  - LIA: purpose, necessity versus alternatives, minimisation, balancing, objection handling.
+  - ePrivacy: Art. 5(3) and PKE art. 399, covering the device storage and identifier access, and the strict-necessity exemption or consent.
+  - It states the OWNER preference (notice only, no checkbox). If either assessment fails, STOP: the OWNER chooses opt-in (T014) or another architecture, and D4 is finalised here.
 - [ ] T013b [US1/US2/US4] Gate E: an unmerged Draft PR sets `DIAGNOSTICS_COLLECTION.stage = true` (D5 GO). The OWNER installs its APK and:
   1. runs `adb shell am crash pl.kcswh.arcadepoker.stage` and relaunches (if nothing arrives, add the plan §2 Stage-only `crashForTest` fallback in that Draft);
   2. presses the self-test button and relaunches;
@@ -91,5 +95,5 @@ Format: `[ID] [P?] [Story] Description`.
   5. The OWNER accepts #1306.
 
 ## Dependencies
-T003 → T004 → T005–T012 (T006 and T008 in parallel) → T013a → PR1 Codex review → OWNER merge → T013b → T014 (if required) → T015 → T016.
+T003 → T004 → T005–T012 (T006 and T008 in parallel) → T013a → T013c (D4) → PR1 Codex review → OWNER merge → T013b → T014 (if required) → T015 → T016.
 Public Production follows the remaining #1140 gates.
