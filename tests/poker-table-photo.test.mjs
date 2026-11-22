@@ -85,12 +85,13 @@ test("photo lifecycle settles the spinner without flashing fallback or attaching
   const revoked = [];
   const timeouts = new Set();
   let requests = 0, downloads = 0, blocked = false, mode = "ok", settleDecode;
-  let shown;
+  let shown, sessionToken = "synthetic";
   const seat = { seatNo: 2, userId: target, status: "ACTIVE" };
   const avatar = { dataset: { userId: target }, appendChild(image) { image.parentNode = this; shown = image; } };
   const runtime = {
     state: { tableId: viewer, currentUserId: viewer, mode: "live", seats: [seat], wsReady: true, hasAppliedAuthoritativeSnapshot: true },
-    currentAccessToken: "synthetic", pendingLeaveNavigation: false, isGuestMode: false, renderedSeatAvatars: { 2: avatar },
+    currentAccessToken: "synthetic", pendingLeaveNavigation: false, isGuestMode: false, snapshotRecoveryTimedOut: false,
+    getAccessToken: async () => sessionToken, renderedSeatAvatars: { 2: avatar },
     isClosedTableStatus: () => false, currentPlayerStatus: () => "", ugcBlocked: () => blocked,
     AbortController, Uint8Array, Blob, URL: class extends URL {
       static createObjectURL() { return "blob:" + downloads; }
@@ -123,12 +124,25 @@ test("photo lifecycle settles the spinner without flashing fallback or attaching
       return { ok: true, status: 200, json: async () => ({ photos: { [target]: value } }) };
     }
   };
-  const { reconcile, clear, interrupt, attach } = runInNewContext(renderer + "({reconcile: reconcileTablePhotos, clear: clearTablePhotos, interrupt: interruptTablePhotoRead, attach: attachTablePhoto});", runtime);
+  const { reconcile, clear, interrupt, attach, foreground } = runInNewContext(renderer + "({reconcile: reconcileTablePhotos, clear: clearTablePhotos, interrupt: interruptTablePhotoRead, attach: attachTablePhoto, foreground: reconcileTablePhotosOnForeground});", runtime);
   runtime.isGuestMode = true;
   reconcile();
   assert.equal(requests, 0);
   assert.equal(avatar.dataset.photoState, undefined);
   runtime.isGuestMode = false;
+  runtime.state.hasAppliedAuthoritativeSnapshot = false;
+  reconcile();
+  assert.equal(avatar.dataset.photoState, "pending", "a patch before the snapshot cannot reveal the fallback");
+  assert.equal(requests, 0, "a patch cannot start an eligibility request");
+  assert.equal(timeouts.size, 1);
+  reconcile();
+  assert.equal(timeouts.size, 1, "rerender does not extend the snapshot wait");
+  for (const onTimeout of timeouts) onTimeout();
+  assert.equal(avatar.dataset.photoState, "settled", "a missing snapshot cannot leave the spinner indefinitely");
+  clear();
+  reconcile();
+  assert.equal(avatar.dataset.photoState, "pending");
+  runtime.state.hasAppliedAuthoritativeSnapshot = true;
   mode = "denied";
   reconcile();
   assert.equal(avatar.dataset.photoState, "pending", "cold eligibility check hides the fallback");
@@ -173,10 +187,17 @@ test("photo lifecycle settles the spinner without flashing fallback or attaching
   assert.equal(requests, beforeRerender + 1);
   assert.equal(downloads, 1);
   assert.equal(avatar.dataset.photoState, "ready");
+  const beforeForeground = requests;
+  foreground();
+  await flush();
+  assert.equal(requests, beforeForeground, "do not revalidate using the session token held before foreground");
+  assert.equal(shown?.src, "blob:1");
+  sessionToken = "new-token";
   mode = "transient";
-  reconcile(true);
+  foreground();
   await flush();
   assert.equal(shown?.src, "blob:1");
+  assert.equal(requests, beforeForeground + 1);
   mode = "denied";
   reconcile(true);
   await flush();

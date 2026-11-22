@@ -3715,6 +3715,7 @@
   var tablePhotoContext = null;
   var seatPhotosDisabled = false;
   var tablePhotoMaxBytes = 1024 * 1024;
+  var tablePhotoTimeoutMs = 15000;
 
   function photoSeatEligible(seat){
     return seat && !seat.isBot && !/LEFT|INACTIVE|EMPTY|EJECTION_PENDING|REMOVED/.test(seat.status || '');
@@ -3738,8 +3739,19 @@
     setTablePhotoState(id, 'settled');
   }
 
+  function stopTablePhotoGateWait(context, status){
+    if (context.gateTimer === null) return;
+    window.clearTimeout(context.gateTimer);
+    context.gateTimer = null;
+    if (status === undefined) return;
+    Object.values(renderedSeatAvatars).forEach(function(avatar){
+      if (avatar.dataset.photoState === 'pending') avatar.dataset.photoState = status;
+    });
+  }
+
   function interruptTablePhotoRead(){
     if (!tablePhotoContext) return;
+    stopTablePhotoGateWait(tablePhotoContext, '');
     if (tablePhotoContext.read) tablePhotoContext.read.controller.abort();
     tablePhotoContext.read = null;
     tablePhotoContext.fingerprint = null;
@@ -3815,7 +3827,7 @@
     var context = tablePhotoContext;
     if (!context || context.viewer !== state.currentUserId || context.table !== state.tableId) {
       clearTablePhotos();
-      context = tablePhotoContext = { viewer: state.currentUserId, table: state.tableId, photos: new Map(), fingerprint: null, read: null };
+      context = tablePhotoContext = { viewer: state.currentUserId, table: state.tableId, photos: new Map(), fingerprint: null, read: null, gateTimer: null };
     }
     var seats = state.seats.filter(function(seat){
       return photoSeatEligible(seat) && !ugcBlocked(seat.userId)
@@ -3824,9 +3836,31 @@
     var ids = Array.from(new Set(seats.map(function(seat){ return seat.userId; }))).sort().slice(0, 9);
     var fingerprint = ids.join(',');
     context.photos.forEach(function(_, id){ if (!ids.includes(id)) removeTablePhoto(context, id); });
-    if (context.fingerprint !== fingerprint) interruptTablePhotoRead();
-    if (!ids.length || !currentAccessToken || document.hidden || !state.hasAppliedAuthoritativeSnapshot || !state.wsReady || state.reconnectGate
-      || context.read || (!force && context.fingerprint === fingerprint)) return;
+    if (context.fingerprint !== null && context.fingerprint !== fingerprint) interruptTablePhotoRead();
+    if (!ids.length || !currentAccessToken || document.hidden || !state.wsReady) {
+      stopTablePhotoGateWait(context, '');
+      return;
+    }
+    if (!state.hasAppliedAuthoritativeSnapshot || state.reconnectGate) {
+      if (snapshotRecoveryTimedOut) {
+        stopTablePhotoGateWait(context, 'settled');
+        return;
+      }
+      // A patch can expose seats while the subscription snapshot is still pending.
+      // Shield only their avatar presentation, and never fetch on the strength of a patch.
+      var waiting = ids.filter(function(id){
+        return !context.photos.has(id) && tablePhotoAvatar(id)?.dataset.photoState !== 'settled';
+      });
+      waiting.forEach(function(id){ setTablePhotoState(id, 'pending'); });
+      if (waiting.length && context.gateTimer === null) {
+        context.gateTimer = window.setTimeout(function(){
+          stopTablePhotoGateWait(context, 'settled');
+        }, tablePhotoTimeoutMs);
+      }
+      return;
+    }
+    stopTablePhotoGateWait(context);
+    if (context.read || (!force && context.fingerprint === fingerprint)) return;
 
     var controller = new AbortController();
     var read = { controller: controller, token: currentAccessToken, pending: new Set() };
@@ -3853,7 +3887,7 @@
       return id + ':' + context.photos.get(id).version;
     });
     var path = '/.netlify/functions/poker-table-photo?ids=' + encodeURIComponent(fingerprint) + '&known=' + encodeURIComponent(known.join(','));
-    var timeout = window.setTimeout(function(){ finishPendingBatch(); controller.abort(); }, 15000);
+    var timeout = window.setTimeout(function(){ finishPendingBatch(); controller.abort(); }, tablePhotoTimeoutMs);
     function current(){
       return tablePhotoContext === context && context.read === read && !controller.signal.aborted
         && currentAccessToken === read.token && context.viewer === state.currentUserId && context.table === state.tableId;
@@ -3927,6 +3961,19 @@
       window.clearTimeout(timeout);
       finishPendingBatch();
       if (context.read === read) context.read = null;
+    });
+  }
+
+  function reconcileTablePhotosOnForeground(){
+    var token = currentAccessToken;
+    if (!token || isGuestMode || seatPhotosDisabled) return;
+    var viewer = state.currentUserId;
+    var room = state.tableId;
+    getAccessToken().then(function(sessionToken){
+      if (document.hidden || currentAccessToken !== token || viewer !== state.currentUserId || room !== state.tableId) return;
+      // Normal auth lifecycle handles a replaced or signed-out session. Never send
+      // a foreground batch with the token we held before the session check.
+      if (sessionToken === token) reconcileTablePhotos(true);
     });
   }
 
@@ -5514,7 +5561,12 @@
       var previousAvatar = seat && previousAvatars[seat.seatNo];
       var reuseAvatar = previousAvatar && previousAvatar.dataset.userId === seat.userId && previousAvatar.dataset.avatarSource === avatarSource;
       var avatar = reuseAvatar ? previousAvatar : document.createElement('div');
-      if (!reuseAvatar) avatar.className = 'poker-seat-avatar';
+      if (!reuseAvatar) {
+        avatar.className = 'poker-seat-avatar';
+        if (previousAvatar && previousAvatar.dataset.userId === seat.userId && previousAvatar.dataset.photoState === 'settled') {
+          avatar.dataset.photoState = 'settled';
+        }
+      }
       avatar.dataset.avatarSource = avatarSource;
       avatar.setAttribute('data-poker-avatar-center', '');
       avatar.dataset.userId = seat && seat.userId || '';
@@ -8036,7 +8088,7 @@
     if (els.actionBar) els.actionBar.addEventListener('pointerdown', deemphasizeCelebration);
     document.addEventListener('visibilitychange', function(){ // xp-lifecycle-allow:poker-v2-celebration-visibility(2027-01-01)
       if (document.hidden){ interruptTablePhotoRead(); clearCardFx(); clearCelebration(); }
-      else reconcileTablePhotos(true);
+      else reconcileTablePhotosOnForeground();
     });
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches){ clearCardFx(false, true); clearCelebration(); } });
