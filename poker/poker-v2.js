@@ -3720,12 +3720,22 @@
     return seat && !seat.isBot && !/LEFT|INACTIVE|EMPTY|EJECTION_PENDING|REMOVED/.test(seat.status || '');
   }
 
+  function tablePhotoAvatar(id){
+    return Object.values(renderedSeatAvatars).find(function(avatar){ return avatar.dataset.userId === id; });
+  }
+
+  function setTablePhotoState(id, status){
+    var avatar = tablePhotoAvatar(id);
+    if (avatar) avatar.dataset.photoState = status;
+  }
+
   function removeTablePhoto(context, id){
     var photo = context.photos.get(id);
     if (!photo) return;
     photo.image.remove();
     URL.revokeObjectURL(photo.url);
     context.photos.delete(id);
+    setTablePhotoState(id, 'settled');
   }
 
   function interruptTablePhotoRead(){
@@ -3740,14 +3750,24 @@
     interruptTablePhotoRead();
     tablePhotoContext.photos.forEach(function(_, id){ removeTablePhoto(tablePhotoContext, id); });
     tablePhotoContext = null;
+    Object.values(renderedSeatAvatars).forEach(function(avatar){ delete avatar.dataset.photoState; });
   }
 
   function attachTablePhoto(avatar, seat){
     var context = tablePhotoContext;
-    var photo = context && context.viewer === state.currentUserId && context.table === state.tableId
-      && context.photos.get(seat.userId);
-    if (photo && photoSeatEligible(seat) && !ugcBlocked(seat.userId) && photo.image.parentNode !== avatar) {
-      avatar.appendChild(photo.image);
+    if (!context || context.viewer !== state.currentUserId || context.table !== state.tableId
+      || !photoSeatEligible(seat) || ugcBlocked(seat.userId)) {
+      delete avatar.dataset.photoState;
+      return;
+    }
+    var photo = context.photos.get(seat.userId);
+    if (photo) {
+      if (photo.image.parentNode !== avatar) avatar.appendChild(photo.image);
+      avatar.dataset.photoState = 'ready';
+    } else if (context.read && context.read.pending.has(seat.userId)) {
+      avatar.dataset.photoState = 'pending';
+    } else if (avatar.dataset.photoState === 'pending' || avatar.dataset.photoState === 'ready') {
+      delete avatar.dataset.photoState;
     }
   }
 
@@ -3809,14 +3829,31 @@
       || context.read || (!force && context.fingerprint === fingerprint)) return;
 
     var controller = new AbortController();
-    var read = { controller: controller, token: currentAccessToken };
+    var read = { controller: controller, token: currentAccessToken, pending: new Set() };
+    function showPending(id){
+      read.pending.add(id);
+      setTablePhotoState(id, 'pending');
+    }
+    function finishPending(id){
+      if (read.pending.delete(id)) setTablePhotoState(id, 'settled');
+    }
+    function finishPendingBatch(){
+      if (context.read === read) read.pending.forEach(finishPending);
+    }
+    controller.signal.addEventListener('abort', function(){
+      if (context.read === read) read.pending.forEach(function(id){ setTablePhotoState(id, ''); });
+      read.pending.clear();
+    }, { once: true });
     context.read = read;
     context.fingerprint = fingerprint;
+    ids.forEach(function(id){
+      if (!context.photos.has(id) && tablePhotoAvatar(id)?.dataset.photoState !== 'settled') showPending(id);
+    });
     var known = ids.filter(function(id){ return context.photos.has(id); }).map(function(id){
       return id + ':' + context.photos.get(id).version;
     });
     var path = '/.netlify/functions/poker-table-photo?ids=' + encodeURIComponent(fingerprint) + '&known=' + encodeURIComponent(known.join(','));
-    var timeout = window.setTimeout(function(){ controller.abort(); }, 15000);
+    var timeout = window.setTimeout(function(){ finishPendingBatch(); controller.abort(); }, 15000);
     function current(){
       return tablePhotoContext === context && context.read === read && !controller.signal.aborted
         && currentAccessToken === read.token && context.viewer === state.currentUserId && context.table === state.tableId;
@@ -3850,7 +3887,11 @@
         var value = result.photos[id];
         if (value && context.photos.get(id)?.version === value.version) return;
         removeTablePhoto(context, id);
-        if (!value || !current() || document.hidden) return;
+        if (!value || !current() || document.hidden) {
+          finishPending(id);
+          return;
+        }
+        showPending(id);
         var localUrl;
         function discardLocalUrl(){
           if (localUrl) URL.revokeObjectURL(localUrl);
@@ -3862,7 +3903,7 @@
           localUrl = URL.createObjectURL(blob);
           controller.signal.addEventListener('abort', discardLocalUrl, { once: true });
           var image = document.createElement('img');
-          image.className = 'poker-seat-avatar__image';
+          image.className = 'poker-seat-avatar__image poker-seat-avatar__photo';
           image.alt = '';
           image.src = localUrl;
           await image.decode();
@@ -3872,16 +3913,19 @@
           if (!avatar || avatar.dataset.userId !== id || ugcBlocked(id)) return;
           context.photos.set(id, { version: value.version, url: localUrl, image: image });
           localUrl = null;
+          read.pending.delete(id);
           attachTablePhoto(avatar, seat);
         } catch {
           // Leave the catalog avatar visible. A later reconciliation may obtain a fresh link.
         } finally {
           controller.signal.removeEventListener('abort', discardLocalUrl);
           discardLocalUrl();
+          if (context.read === read) finishPending(id);
         }
       }));
     }).catch(function(){}).finally(function(){
       window.clearTimeout(timeout);
+      finishPendingBatch();
       if (context.read === read) context.read = null;
     });
   }
@@ -3901,6 +3945,12 @@
       return;
     }
 
+    if (!seat.isBot) {
+      var spinner = document.createElement('span');
+      spinner.className = 'poker-seat-avatar__photo-spinner';
+      spinner.setAttribute('aria-hidden', 'true');
+      avatar.appendChild(spinner);
+    }
     var fallback = document.createElement('span');
     fallback.className = 'poker-seat-avatar__initials';
     fallback.textContent = initials(getDisplayName(seat));

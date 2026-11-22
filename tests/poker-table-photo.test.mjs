@@ -78,7 +78,7 @@ test("withdrawal or changed revision during signing removes the capability from 
   }
 });
 
-test("photo lifecycle retains authorized bytes and rejects a decode completing after sign-out", async () => {
+test("photo lifecycle settles the spinner without flashing fallback or attaching stale bytes", async () => {
   const source = await readFile(new URL("../poker/poker-v2.js", import.meta.url), "utf8");
   const renderer = source.slice(source.indexOf("  var tablePhotoContext"), source.indexOf("  function seatAvatarSource("));
   const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -123,23 +123,56 @@ test("photo lifecycle retains authorized bytes and rejects a decode completing a
       return { ok: true, status: 200, json: async () => ({ photos: { [target]: value } }) };
     }
   };
-  const { reconcile, clear, interrupt } = runInNewContext(renderer + "({reconcile: reconcileTablePhotos, clear: clearTablePhotos, interrupt: interruptTablePhotoRead});", runtime);
+  const { reconcile, clear, interrupt, attach } = runInNewContext(renderer + "({reconcile: reconcileTablePhotos, clear: clearTablePhotos, interrupt: interruptTablePhotoRead, attach: attachTablePhoto});", runtime);
+  runtime.isGuestMode = true;
+  reconcile();
+  assert.equal(requests, 0);
+  assert.equal(avatar.dataset.photoState, undefined);
+  runtime.isGuestMode = false;
+  mode = "denied";
+  reconcile();
+  assert.equal(avatar.dataset.photoState, "pending", "cold eligibility check hides the fallback");
+  await flush();
+  assert.equal(avatar.dataset.photoState, "settled", "explicit denial reveals the catalog avatar");
+  assert.equal(downloads, 0);
+  reconcile(true);
+  assert.equal(avatar.dataset.photoState, "settled", "known catalog avatar stays visible during revalidation");
+  await flush();
+  clear();
+  mode = "transient";
+  reconcile();
+  assert.equal(avatar.dataset.photoState, "pending");
+  await flush();
+  assert.equal(avatar.dataset.photoState, "settled", "a failed batch ends the cold spinner");
+  assert.equal(timeouts.size, 0);
+  clear();
+  mode = "late";
   reconcile();
   await flush();
+  assert.equal(avatar.dataset.photoState, "pending", "wait for the Blob decoder");
+  assert.equal(shown, undefined);
+  settleDecode();
+  await flush();
   assert.equal(shown?.src, "blob:1");
+  assert.equal(avatar.dataset.photoState, "ready");
+  attach(avatar, seat);
+  assert.equal(avatar.dataset.photoState, "ready", "a ready cached Blob renders without spinner");
+  mode = "ok";
+  const beforeRerender = requests;
   assert.equal(timeouts.size, 0);
   reconcile();
-  assert.equal(requests, 1);
+  assert.equal(requests, beforeRerender);
   interrupt();
   runtime.currentAccessToken = null;
   reconcile();
   assert.equal(shown?.src, "blob:1");
-  assert.equal(requests, 1);
+  assert.equal(requests, beforeRerender);
   runtime.currentAccessToken = "new-token";
   reconcile();
   await flush();
-  assert.equal(requests, 2);
+  assert.equal(requests, beforeRerender + 1);
   assert.equal(downloads, 1);
+  assert.equal(avatar.dataset.photoState, "ready");
   mode = "transient";
   reconcile(true);
   await flush();
@@ -148,12 +181,16 @@ test("photo lifecycle retains authorized bytes and rejects a decode completing a
   reconcile(true);
   await flush();
   assert.equal(shown, undefined);
+  assert.equal(avatar.dataset.photoState, "settled");
   assert.deepEqual(revoked, ["blob:1"]);
   mode = "late";
   reconcile(true);
   await flush();
   assert.equal(typeof settleDecode, "function");
+  assert.equal(avatar.dataset.photoState, "pending");
+  runtime.state.currentUserId = target;
   clear();
+  assert.equal(avatar.dataset.photoState, undefined);
   assert.deepEqual(revoked, ["blob:1", "blob:2"]);
   settleDecode();
   await flush();
@@ -171,6 +208,7 @@ test("photo lifecycle retains authorized bytes and rejects a decode completing a
   reconcile(true);
   await flush();
   assert.equal(shown, undefined);
+  assert.notEqual(avatar.dataset.photoState, "pending");
   const before = requests;
   reconcile(true);
   assert.equal(requests, before);
