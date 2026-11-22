@@ -20,16 +20,21 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
 
   const store = new Map();
   let randomId = 0;
-  const baseWindow = { localStorage: {
-    getItem: k => store.get(k) ?? null,
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: k => store.delete(k),
-  } };
+  const baseWindow = {
+    localStorage: {
+      getItem: k => store.get(k) ?? null,
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: k => store.delete(k),
+    },
+    atob: (str) => Buffer.from(str, 'base64').toString('utf-8'),
+  };
   const ctx = {
     window: Object.assign(baseWindow, options.window || {}),
     fetch: fetchImpl,
     crypto: { randomUUID: () => `uuid-test-${++randomId}` },
-    Date, setTimeout, clearTimeout, console,
+    Date: options.Date || Date, setTimeout, clearTimeout, console,
+    atob: (str) => Buffer.from(str, 'base64').toString('utf-8'),
+    Buffer,
   };
   ctx.window.fetch = fetchImpl;
   vm.createContext(ctx);
@@ -237,38 +242,236 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(results[1], results[0]);
   }
 
-  // A different sessionId, auth subject or generation starts a new fetch
+  // (a) While response 1 is pending, changing auth subject only starts a second POST before release
   {
     let fetchCalls = 0;
-    let token = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64url') + '.s';
+    let release1, release2;
+    const hold1 = new Promise(resolve => { release1 = resolve; });
+    const hold2 = new Promise(resolve => { release2 = resolve; });
+    let token = null;
+
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const body = JSON.parse(opts?.body || '{}');
       if (body.operation === 'status') {
         fetchCalls += 1;
-        return response(200, { ok: true, status: 'statusOnly', totalLifetime: 100 });
+        if (fetchCalls === 1) {
+          await hold1;
+        } else {
+          await hold2;
+        }
+        return response(200, { ok: true, status: 'statusOnly' });
       }
       return response(200, { ok: true });
     }, {
       window: {
         SupabaseAuthBridge: {
           getAccessToken: async () => token,
-          getCurrentUserId: async () => 'user-1',
+          getCurrentUserId: async () => (token ? 'user-1' : null),
         },
       },
     });
 
-    await XPClient.fetchStatus();
+    const call1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1, 'first status POST must be in flight');
+
+    // Change auth subject only (sign in with valid token) without bumping generation or rotating sessionId
+    token = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64url') + '.s';
+    const call2 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 1; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 2, 'second status POST must start before first response is released when auth subject changes');
+
+    release1();
+    release2();
+    await Promise.all([call1.catch(() => {}), call2]);
+  }
+
+  // (b) While response 1 is pending, changing award sessionId only starts a second POST before release
+  {
+    let fetchCalls = 0;
+    let release1, release2;
+    const hold1 = new Promise(resolve => { release1 = resolve; });
+    const hold2 = new Promise(resolve => { release2 = resolve; });
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        if (fetchCalls === 1) {
+          await hold1;
+        } else {
+          await hold2;
+        }
+        return response(200, { ok: true, status: 'statusOnly' });
+      }
+      return response(200, { ok: true });
+    });
+
+    const call1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1, 'first status POST must be in flight');
+
+    // Change award sessionId only without bumping generation or changing auth subject
+    XPClient.rotateAwardSession();
+    const call2 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 1; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 2, 'second status POST must start before first response is released when award sessionId changes');
+
+    release1();
+    release2();
+    await Promise.all([call1.catch(() => {}), call2]);
+  }
+
+  // (c) While response 1 is pending, bumping generation only starts a second POST before release
+  {
+    let fetchCalls = 0;
+    let release1, release2;
+    const hold1 = new Promise(resolve => { release1 = resolve; });
+    const hold2 = new Promise(resolve => { release2 = resolve; });
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        if (fetchCalls === 1) {
+          await hold1;
+        } else {
+          await hold2;
+        }
+        return response(200, { ok: true, status: 'statusOnly' });
+      }
+      return response(200, { ok: true });
+    });
+
+    const call1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1, 'first status POST must be in flight');
+
+    // Bump generation only
+    XPClient.clearServerSession();
+    const call2 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 1; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 2, 'second status POST must start before first response is released when generation bumps');
+
+    release1();
+    release2();
+    await assert.rejects(call1, (err) => {
+      assert.equal(err.code, 'stale_identity');
+      return true;
+    });
+    await call2;
+  }
+
+  // F1: An old request returning 401 after generation change rejects with stale_identity, not the HTTP error
+  {
+    let fetchCalls = 0;
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        await hold;
+        return response(401, { error: 'unauthorized', message: 'Token expired' });
+      }
+      return response(200, { ok: true });
+    });
+
+    const call1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
     assert.equal(fetchCalls, 1);
 
-    // Calling again after resolution starts a new fetch (no finished-answer reuse)
-    await XPClient.fetchStatus();
-    assert.equal(fetchCalls, 2, 'fetch after resolution starts a new fetch');
-
-    // Change auth subject (different user)
-    token = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-2' })).toString('base64url') + '.s';
     XPClient.clearServerSession();
-    await XPClient.fetchStatus();
-    assert.equal(fetchCalls, 3, 'different auth subject starts a new fetch');
+    release();
+
+    await assert.rejects(call1, (err) => {
+      assert.equal(err.code, 'stale_identity', 'must reject with stale_identity, not 401 HTTP error');
+      return true;
+    });
+  }
+
+  // F2: Caller awaiting token / identity across generation change does not overwrite newer entry; 3rd call joins newer request
+  {
+    let fetchCalls = 0;
+    let releaseFetch2;
+    const holdFetch2 = new Promise(resolve => { releaseFetch2 = resolve; });
+    let releaseUser1;
+    const holdUser1 = new Promise(resolve => { releaseUser1 = resolve; });
+    let userCalls = 0;
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        await holdFetch2;
+        return response(200, { ok: true, status: 'statusOnly' });
+      }
+      return response(200, { ok: true });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => null,
+          getCurrentUserId: async () => {
+            userCalls += 1;
+            if (userCalls === 1) {
+              await holdUser1;
+              return 'user-1';
+            }
+            return null;
+          },
+        },
+      },
+    });
+
+    // Call 1 begins at generation 0 and pauses while awaiting identity before in-flight entry creation
+    const call1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && userCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(userCalls, 1, 'call 1 must be awaiting identity check');
+    assert.equal(fetchCalls, 0);
+
+    // Generation advances to 1
+    XPClient.clearServerSession();
+
+    // Call 2 begins at generation 1, finishes auth checks immediately, starts fetch (held on holdFetch2)
+    const call2 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1, 'call 2 must start fetch for generation 1');
+
+    // Call 1 resumes after generation change: it must reject with stale_identity and NOT overwrite inFlightEntry
+    releaseUser1();
+    await assert.rejects(call1, (err) => {
+      assert.equal(err.code, 'stale_identity');
+      return true;
+    });
+
+    // Call 3 begins at generation 1: since Call 1 did not overwrite Call 2's inFlight entry, Call 3 joins Call 2
+    const call3 = XPClient.fetchStatus();
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1, 'call 3 must join call 2 in-flight request (POST count remains 1)');
+
+    releaseFetch2();
+    await Promise.all([call2, call3]);
   }
 
   // Older answer resolving after generation change rejects with stale_identity and does not apply cap

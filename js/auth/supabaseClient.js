@@ -413,8 +413,10 @@
       profileConfirmedUserId = String(user.id);
       renderUser(user, profile);
     }).catch(function(error){
-      profileConfirmedUserId = null;
       var ui = userUiState();
+      if (state.user && String(state.user.id) === String(user.id) && (!ui || ui.isCurrent(user.id, uiGeneration))) {
+        profileConfirmedUserId = null;
+      }
       if (ui) ui.markRefreshFailed(user.id, uiGeneration, !!hadCachedProfile);
       else setUserUiState(hadCachedProfile ? 'stale' : 'loading');
       logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });

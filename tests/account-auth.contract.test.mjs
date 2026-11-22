@@ -811,11 +811,24 @@ async function accountRenderFixture(respond) {
             const custom = await respond(force, options);
             if (custom !== undefined) return custom;
           }
-          return { displayName: 'Player', avatar: { variant: 'wizard-indigo' }, poker: { tables: [] } };
+          return { displayName: 'Player', avatarVariant: 'wizard-indigo', avatar: { variant: 'wizard-indigo' }, poker: { tables: [] } };
         },
+        updateMe: async (data) => {
+          events.savedData = data;
+          return { displayName: 'Player', avatarVariant: data.avatarVariant, avatarRevision: 2 };
+        },
+        clear: () => { events.clientCleared = true; },
+      },
+      ArcadeTerms: {
+        isReady: () => true,
+        getAvatarVariants: () => ['wizard-indigo', 'knight-cyan'],
+      },
+      ProfileGooglePhoto: {
+        load: async () => {},
+        select: async () => ({ displayName: 'Player', avatarVariant: 'google', avatarRevision: 2 }),
       },
       SupabaseAuthBridge: { getAccessToken: async () => 'private-token' },
-      KLog: { syncAdminAccess() {}, flush() {} },
+      KLog: { syncAdminAccess() {}, flush() {}, push() {} },
     },
     auth: { getCurrentUser: async () => context.currentUser },
     fetch: async () => ({ ok: true, json: async () => ({ isAdmin: true, userId: context.currentUser?.id }) }),
@@ -850,6 +863,11 @@ async function accountRenderFixture(respond) {
     render: async (user) => {
       context.renderUser(user);
       await flush();
+    },
+    saveAvatar: async () => {
+      const res = await vm.runInContext('saveAvatar()', context);
+      await flush();
+      return res;
     },
     loadProfile: async (force) => {
       const res = await vm.runInContext(`loadPublicProfile(${force ? 'true' : 'false'})`, context);
@@ -926,8 +944,17 @@ test('Account profile save still forces reload', async () => {
   assert.equal(f.events.baseReads, 1);
   assert.equal(f.events.pokerReads, 1);
 
-  // Explicit profile reload (as triggered by avatar save)
+  // Drive real avatar save handler (saveAvatar around line ~574) with a conflict retry that calls loadPublicProfile(true)
+  f.context.avatarSelection = 'knight-cyan';
+  f.context.window.ProfileClient.updateMe = async () => {
+    throw { code: 'stale_avatar_revision' };
+  };
+  await f.saveAvatar();
+  assert.equal(f.events.baseReads, 2, 'saveAvatar handler must trigger a new base read on conflict retry');
+  assert.equal(f.events.pokerReads, 1, 'avatar save should not reload poker');
+
+  // Explicit profile reload also forces new base read without touching poker
   await f.loadProfile(true);
-  assert.equal(f.events.baseReads, 2, 'explicit profile refresh must reload');
+  assert.equal(f.events.baseReads, 3, 'explicit profile refresh must reload');
   assert.equal(f.events.pokerReads, 1, 'explicit profile reload must not force poker reload');
 });
