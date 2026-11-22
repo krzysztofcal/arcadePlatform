@@ -9,6 +9,10 @@
   var inFlight = { base: null, poker: null };
   var writeSeq = 0;
   var writesInFlight = 0;
+  // After a write whose outcome is unknown (transport failure), the server may still apply it later. Until that
+  // is certainly over (longer than a function timeout), reads neither use nor fill the cache (#1309).
+  var UNCERTAIN_WRITE_MS = 30000;
+  var uncertainUntil = 0;
   var publicGeneration = 0;
 
   function klog(kind, data){
@@ -100,7 +104,7 @@
     var body = {}, unreadable = false;
     try { body = await response.json(); } catch (_err){ unreadable = true; }
     // A successful status with a lost or unreadable body is not a profile: never cache or announce it (#1309).
-    if (response.ok && (unreadable || !body || typeof body !== 'object')) throw Object.assign(new Error('invalid_response'), { code: 'invalid_response', status: response.status });
+    if (response.ok && (unreadable || !body || typeof body !== 'object' || Array.isArray(body))) throw Object.assign(new Error('invalid_response'), { code: 'invalid_response', status: response.status });
     if (response.ok) return body;
     var error = new Error(body && body.error ? body.error : 'request_failed');
     error.code = body && body.error ? body.error : 'request_failed';
@@ -136,7 +140,7 @@
     var userId = await currentUserId();
     if (!userId || generation !== publicGeneration) throw staleIdentityError();
     if (cache && cache.profile.avatar && cache.profile.avatar.type === 'uploaded' && photoExpiresAt(cache.profile.avatar.url) <= Date.now()) cache = null;
-    if (!force && cache && cache.userId === userId && (!includePoker || cache.includePoker === true)) return cache.profile;
+    if (!force && cache && cache.userId === userId && (!includePoker || cache.includePoker === true) && Date.now() >= uncertainUntil) return cache.profile;
     var kind = includePoker ? 'poker' : 'base';
     var current = inFlight[kind];
     if (current && current.userId === userId && current.seq === writeSeq && current.generation === generation) return current.promise;
@@ -145,7 +149,7 @@
     var request = authedFetch(url, { method: 'GET' }).then(parse).then(async function(profile){
       if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
       // A write that finished meanwhile already cached the newer profile.
-      if (seq === writeSeq) cache = { userId: userId, profile: profile, includePoker: includePoker };
+      if (seq === writeSeq && Date.now() >= uncertainUntil) cache = { userId: userId, profile: profile, includePoker: includePoker };
       return profile;
     });
     var entry = { userId: userId, seq: seq, generation: generation, promise: request };
@@ -164,13 +168,14 @@
     writesInFlight += 1;
     try {
       try { response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard); }
+      catch (error){ if (!(error && (error.code === 'stale_identity' || error.code === 'stale_profile' || error.code === 'not_authenticated'))) uncertainUntil = Date.now() + UNCERTAIN_WRITE_MS; throw error; }
       finally { writeSeq += 1; seq += 1; writesInFlight -= 1; }
       var profile = await parse(response);
       if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
       if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
       // Another write still running or finished meanwhile, or an invalidation (for example a Google photo
       // withdrawal): the server order is unknown, so this answer is neither cached nor announced.
-      if (writesInFlight > 0 || seq !== writeSeq) return profile;
+      if (writesInFlight > 0 || seq !== writeSeq || Date.now() < uncertainUntil) return profile;
       cache = { userId: userId, profile: profile, includePoker: false };
       cached = true;
       notify(profile);
@@ -194,7 +199,7 @@
     return profile;
   }
 
-  function clear(){ publicGeneration += 1; writeSeq += 1; cache = null; inFlight = { base: null, poker: null }; }
+  function clear(){ publicGeneration += 1; writeSeq += 1; uncertainUntil = 0; cache = null; inFlight = { base: null, poker: null }; }
 
   // A profile change made by another endpoint (for example a Google photo action): later reads start fresh.
   function invalidate(){ writeSeq += 1; cache = null; }

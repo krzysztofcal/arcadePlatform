@@ -380,11 +380,29 @@ test('ProfileClient never caches or announces a successful response whose body i
   let gets = 0, brokenBody = true; const announced = [];
   const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
   vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(event){ announced.push(event.type); } }, Promise, URL, Date, CustomEvent: class { constructor(type){ this.type = type; } },
-    fetch: async (_url, options) => { if (options.method === 'GET') gets++; return { ok: true, status: 200, json: async () => { if (brokenBody) throw new TypeError('body stream lost'); return { displayName: 'server' }; } }; } });
+    fetch: async (_url, options) => { if (options.method === 'GET') gets++; return { ok: true, status: 200, json: async () => { if (brokenBody === 'array') return []; if (brokenBody) throw new TypeError('body stream lost'); return { displayName: 'server' }; } }; } });
   await assert.rejects(window.ProfileClient.updateMe({ leaderboardVisible: false }), error => error.code === 'invalid_response');
   await assert.rejects(window.ProfileClient.getMe(false), error => error.code === 'invalid_response');
+  brokenBody = 'array'; await assert.rejects(window.ProfileClient.updateMe({ leaderboardVisible: true }), error => error.code === 'invalid_response');
+  await assert.rejects(window.ProfileClient.getMe(false), error => error.code === 'invalid_response');
   assert.deepEqual(announced, []); brokenBody = false;
-  assert.equal((await window.ProfileClient.getMe(false)).displayName, 'server'); assert.equal(gets, 2);
+  assert.equal((await window.ProfileClient.getMe(false)).displayName, 'server'); assert.equal(gets, 3);
+});
+
+test('ProfileClient uses no cache while a write with a lost response may still be applied', async () => {
+  let clock = 1_000_000, server = 'old', gets = 0;
+  const FakeDate = Object.assign(function(){}, { now: () => clock });
+  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(){} }, Promise, URL, Date: FakeDate, CustomEvent: class {},
+    fetch: async (_url, options) => { if (options.method === 'PATCH') throw new TypeError('connection reset before the answer'); gets++; return { ok: true, json: async () => ({ displayName: server }) }; } });
+  const client = window.ProfileClient;
+  assert.equal((await client.getMe(false)).displayName, 'old');
+  await assert.rejects(client.updateMe({ leaderboardVisible: false }), TypeError);
+  assert.equal((await client.getMe(false)).displayName, 'old');   // read before the server applied the lost write
+  server = 'new';                                                   // the server applies it later
+  assert.equal((await client.getMe(false)).displayName, 'new'); assert.equal(gets, 3);
+  clock += 30_000; assert.equal((await client.getMe(false)).displayName, 'new'); assert.equal(gets, 4);
+  assert.equal((await client.getMe(false)).displayName, 'new'); assert.equal(gets, 4); // cache is used again after the window
 });
 
 test('A forced Account refresh after an invalidation renders only its own newer read', async () => {
