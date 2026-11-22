@@ -118,13 +118,18 @@ test("photo lifecycle settles the spinner without flashing fallback or attaching
       }
       requests++;
       if (mode === "transient") return { status: 503 };
+      if (mode === "rotated-401") {
+        sessionToken = "refreshed-token";
+        return { status: 401 };
+      }
+      if (mode === "confirmed-401") return { status: 401 };
       if (mode === "off") return { status: 404, json: async () => ({ error: "table_photos_disabled" }) };
       const known = new URL(url, "https://kcswh.pl").searchParams.get("known");
       const value = mode === "denied" ? null : known ? { version: "1.2" } : { version: "1.2", url: signedUrl };
       return { ok: true, status: 200, json: async () => ({ photos: { [target]: value } }) };
     }
   };
-  const { reconcile, clear, interrupt, attach, foreground } = runInNewContext(renderer + "({reconcile: reconcileTablePhotos, clear: clearTablePhotos, interrupt: interruptTablePhotoRead, attach: attachTablePhoto, foreground: reconcileTablePhotosOnForeground});", runtime);
+  const { reconcile, clear, interrupt, attach } = runInNewContext(renderer + "({reconcile: reconcileTablePhotos, clear: clearTablePhotos, interrupt: interruptTablePhotoRead, attach: attachTablePhoto});", runtime);
   runtime.isGuestMode = true;
   reconcile();
   assert.equal(requests, 0);
@@ -182,22 +187,32 @@ test("photo lifecycle settles the spinner without flashing fallback or attaching
   assert.equal(shown?.src, "blob:1");
   assert.equal(requests, beforeRerender);
   runtime.currentAccessToken = "new-token";
+  sessionToken = "new-token";
   reconcile();
   await flush();
   assert.equal(requests, beforeRerender + 1);
   assert.equal(downloads, 1);
   assert.equal(avatar.dataset.photoState, "ready");
   const beforeForeground = requests;
-  foreground();
+  sessionToken = "refreshed-token";
+  interrupt();
+  reconcile();
+  reconcile(true);
   await flush();
-  assert.equal(requests, beforeForeground, "do not revalidate using the session token held before foreground");
+  assert.equal(requests, beforeForeground, "ordinary and forced renders cannot submit a stale token");
   assert.equal(shown?.src, "blob:1");
   sessionToken = "new-token";
   mode = "transient";
-  foreground();
+  reconcile(true);
   await flush();
   assert.equal(shown?.src, "blob:1");
   assert.equal(requests, beforeForeground + 1);
+  mode = "rotated-401";
+  reconcile(true);
+  await flush();
+  assert.equal(shown?.src, "blob:1", "a 401 for a replaced session preserves the authorized Blob");
+  assert.equal(requests, beforeForeground + 2, "a replaced 401 does not trigger a retry");
+  runtime.currentAccessToken = sessionToken;
   mode = "denied";
   reconcile(true);
   await flush();
@@ -225,6 +240,10 @@ test("photo lifecycle settles the spinner without flashing fallback or attaching
   reconcile();
   await flush();
   assert.equal(shown?.src, "blob:3");
+  mode = "confirmed-401";
+  reconcile(true);
+  await flush();
+  assert.equal(shown, undefined, "a 401 for the current session clears the Blob");
   mode = "off";
   reconcile(true);
   await flush();

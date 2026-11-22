@@ -3892,10 +3892,20 @@
       return tablePhotoContext === context && context.read === read && !controller.signal.aborted
         && currentAccessToken === read.token && context.viewer === state.currentUserId && context.table === state.tableId;
     }
-    fetch(window.ArcadeApi ? window.ArcadeApi.url(path) : path, {
-      headers: { Authorization: 'Bearer ' + read.token }, credentials: 'omit', cache: 'no-store', signal: controller.signal
+    getAccessToken().then(function(sessionToken){
+      // Any render or profile event can race the auth lifecycle after foreground.
+      if (!current() || document.hidden || sessionToken !== read.token) return null;
+      return fetch(window.ArcadeApi ? window.ArcadeApi.url(path) : path, {
+        headers: { Authorization: 'Bearer ' + read.token }, credentials: 'omit', cache: 'no-store', signal: controller.signal
+      });
     }).then(async function(response){
-      if (!current()) return;
+      if (!current() || !response) return;
+      if (response.status === 401) {
+        // If the rejected token was replaced in flight, the auth lifecycle owns
+        // the next revalidation. Confirmed denial still clears the photos.
+        var sessionToken = await getAccessToken();
+        if (!current() || (sessionToken && sessionToken !== read.token)) return;
+      }
       if (response.status === 401 || response.status === 403) {
         context.photos.forEach(function(_, id){ removeTablePhoto(context, id); });
         return;
@@ -3961,19 +3971,6 @@
       window.clearTimeout(timeout);
       finishPendingBatch();
       if (context.read === read) context.read = null;
-    });
-  }
-
-  function reconcileTablePhotosOnForeground(){
-    var token = currentAccessToken;
-    if (!token || isGuestMode || seatPhotosDisabled) return;
-    var viewer = state.currentUserId;
-    var room = state.tableId;
-    getAccessToken().then(function(sessionToken){
-      if (document.hidden || currentAccessToken !== token || viewer !== state.currentUserId || room !== state.tableId) return;
-      // Normal auth lifecycle handles a replaced or signed-out session. Never send
-      // a foreground batch with the token we held before the session check.
-      if (sessionToken === token) reconcileTablePhotos(true);
     });
   }
 
@@ -8088,7 +8085,7 @@
     if (els.actionBar) els.actionBar.addEventListener('pointerdown', deemphasizeCelebration);
     document.addEventListener('visibilitychange', function(){ // xp-lifecycle-allow:poker-v2-celebration-visibility(2027-01-01)
       if (document.hidden){ interruptTablePhotoRead(); clearCardFx(); clearCelebration(); }
-      else reconcileTablePhotosOnForeground();
+      else reconcileTablePhotos(true);
     });
     var motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     if (motion && motion.addEventListener) motion.addEventListener('change', function(){ if (motion.matches){ clearCardFx(false, true); clearCelebration(); } });
