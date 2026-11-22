@@ -97,8 +97,10 @@
   }
 
   async function parse(response){
-    var body = {};
-    try { body = await response.json(); } catch (_err){}
+    var body = {}, unreadable = false;
+    try { body = await response.json(); } catch (_err){ unreadable = true; }
+    // A successful status with a lost or unreadable body is not a profile: never cache or announce it (#1309).
+    if (response.ok && (unreadable || !body || typeof body !== 'object')) throw Object.assign(new Error('invalid_response'), { code: 'invalid_response', status: response.status });
     if (response.ok) return body;
     var error = new Error(body && body.error ? body.error : 'request_failed');
     error.code = body && body.error ? body.error : 'request_failed';

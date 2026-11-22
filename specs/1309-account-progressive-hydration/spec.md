@@ -15,7 +15,7 @@ They never wait for the Poker projection, which needs a chips balance and the WS
 **Test**: Poker held or failing → the profile is rendered and its status is `success`. Poker then shows its own "unavailable" state.
 
 ### User Story 2: No request storms (Priority: P1)
-Opening Account and the auth events that arrive while its reads are in flight (`INITIAL_SESSION`, `SIGNED_IN`) send one `profile-me` base read and one `includePoker` read in total. A later auth event for the same account, such as `TOKEN_REFRESHED`, still refreshes both reads, deduplicated in the same way, and keeps the Poker section visible while it refreshes. Reads made after a profile write never reuse an older in-flight read.
+Opening Account sends one `profile-me` base read and one `includePoker` read. Auth events (`INITIAL_SESSION`, `SIGNED_IN`) that arrive while a read of the same kind is still in flight join that read. An event that arrives after one kind has finished refreshes only that kind. A later auth event for the same account, such as `TOKEN_REFRESHED`, still refreshes both reads, deduplicated in the same way, and keeps the Poker section visible while it refreshes. Reads made after a profile write never reuse an older in-flight read.
 **Test**: identical forced reads share one request; a read after `updateMe` / `invalidate` starts a new one; a late old answer never replaces the written profile.
 
 ### User Story 3: Stable avatar gallery (Priority: P1)
@@ -47,7 +47,7 @@ In both cases the tile is a stable placeholder that only changes state.
   The 10 `legal/*.html` documents are immutable, hash-pinned documents and stay byte-identical, keeping their old `profile-client.js` pin. On those pages the browser skips the new script, and the topbar uses its existing fallback without `ProfileClient` (initials plus a direct `profile-me` fetch). Never update these pins in place; a future legal version decides.
 
 ## Success Criteria *(mandatory)*
-- **SC-001** In the deterministic replay of the Account-open sequence, `profile-me` requests per open drop from 10 to 2.
+- **SC-001** In the deterministic replay of the Account-open sequence, `profile-me` requests per open drop from 10 to 2. In the replay, every auth event arrives while both reads are in flight. An event between the base completion and the Poker completion adds one fresh base read.
 - **SC-002** Time to basic profile drops from the `includePoker` latency to the base latency. On the observed medians that is 2.31 s → 1.51 s; in the worst case it is 21.1 s → 6.6 s.
 - **SC-003** `profile-me` GET database round trips drop from 9 to 5 when account deletion is enabled. Each GET takes one fewer `account-lifecycle` advisory lock, so concurrent same-user requests queue less.
 - **SC-004** The gallery count is stable across auth events and photo-status reads.

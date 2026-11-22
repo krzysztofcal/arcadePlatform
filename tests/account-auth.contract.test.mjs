@@ -376,6 +376,17 @@ test('ProfileClient drops its cached profile when a sent write loses its respons
   assert.equal((await window.ProfileClient.getMe(false)).displayName, 'after-write'); assert.equal(gets, 2);
 });
 
+test('ProfileClient never caches or announces a successful response whose body is lost', async () => {
+  let gets = 0, brokenBody = true; const announced = [];
+  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(event){ announced.push(event.type); } }, Promise, URL, Date, CustomEvent: class { constructor(type){ this.type = type; } },
+    fetch: async (_url, options) => { if (options.method === 'GET') gets++; return { ok: true, status: 200, json: async () => { if (brokenBody) throw new TypeError('body stream lost'); return { displayName: 'server' }; } }; } });
+  await assert.rejects(window.ProfileClient.updateMe({ leaderboardVisible: false }), error => error.code === 'invalid_response');
+  await assert.rejects(window.ProfileClient.getMe(false), error => error.code === 'invalid_response');
+  assert.deepEqual(announced, []); brokenBody = false;
+  assert.equal((await window.ProfileClient.getMe(false)).displayName, 'server'); assert.equal(gets, 2);
+});
+
 test('A forced Account refresh after an invalidation renders only its own newer read', async () => {
   const reads = [];
   const f = await accountReadFixture(() => new Promise(resolve => reads.push(resolve)));
