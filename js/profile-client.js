@@ -162,8 +162,9 @@
     var profile = await parse(response);
     if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
     if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
-    // A later write or invalidation (for example a Google photo withdrawal) wins over this answer.
-    if (seq !== writeSeq) return profile;
+    // A later write or invalidation (for example a Google photo withdrawal) wins over this answer. The server
+    // order of overlapping writes is unknown, so their answers are not cached; the next read fetches.
+    if (seq !== writeSeq){ cache = null; return profile; }
     cache = { userId: userId, profile: profile, includePoker: false };
     notify(profile);
     return profile;

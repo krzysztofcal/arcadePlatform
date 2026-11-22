@@ -42,7 +42,7 @@ In both cases the tile is a stable placeholder that only changes state.
 - **FR-004** `js/account-page.js::renderAvatarGallery` adds the Google tile only for a known copy or for an uploaded avatar already in use. It never fakes catalog variants.
 - **FR-005** `netlify/functions/profile-me.mjs` GET verifies the JWT with `allowDeleting: true` and relies on the account-lifecycle check that `ensureUserProfile` already runs inside its own transaction. This is one transaction instead of two. `account_not_active` maps to the unchanged 401.
   - PATCH keeps the JWT lifecycle check.
-  - A bounded `profile_me_timing` klog (aggregate ms, no identifiers) is written for requests ≥ 1000 ms.
+  - A bounded `profile_me_timing` klog (aggregate ms, no identifiers) is written for **successful** GET/PATCH requests ≥ 1000 ms. Failed requests keep the existing `profile_me_failed` log.
 - **FR-006** No new endpoint, table, migration, flag, CSS or inline script. The SRI pins of the changed scripts are updated.
 
 ## Success Criteria *(mandatory)*

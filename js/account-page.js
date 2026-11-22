@@ -611,14 +611,18 @@
 
   function loadPublicProfile(force, retried){
     if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
-    if (publicProfileInFlight) return publicProfileInFlight;
+    // A forced refresh never reuses an older local read (it may predate a profile write); ProfileClient already
+    // shares one network read between identical, still-fresh requests. Only the latest request renders (#1309).
+    if (!force && publicProfileInFlight) return publicProfileInFlight;
     var requestedUserKey = getUserKey(currentUser);
     var requestedGeneration = publicProfileGeneration;
+    var request;
+    function superseded(){ return publicProfileInFlight !== request; }
     var stage = 'read';
     profileLoadState = 'loading';
     setStatus(t('profileLoading', 'Loading your profile…'), 'info', 'profile');
-    var request = window.ProfileClient.getMe(!!force).then(function(profile){
-      if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
+    request = window.ProfileClient.getMe(!!force).then(function(profile){
+      if (superseded() || requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
       stage = 'render_public_profile';
       renderPublicProfile(profile);
       stage = 'status';
@@ -626,6 +630,7 @@
       if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus(t('signedIn', 'Signed in.'), 'success', 'profile');
       return profile;
     }).catch(function(error){
+      if (superseded()) return null;
       if (error && error.code === 'stale_identity'){
         // Cancellation is not a failed profile. One fresh read, only for this identity.
         if (!retried && requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
@@ -660,11 +665,12 @@
   // The Poker section loads and fails on its own: unavailable Poker never hides the profile or the avatar.
   function loadPokerProjection(force, retried){
     if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
-    if (pokerProjectionInFlight) return pokerProjectionInFlight;
+    if (!force && pokerProjectionInFlight) return pokerProjectionInFlight;
     var requestedUserKey = getUserKey(currentUser);
     var requestedGeneration = publicProfileGeneration;
-    function isCurrent(){ return requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration; }
-    var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
+    var request;
+    function isCurrent(){ return pokerProjectionInFlight === request && requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration; }
+    request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
       if (isCurrent()) renderPokerProjection(profile);
       return profile;
     }).catch(function(error){

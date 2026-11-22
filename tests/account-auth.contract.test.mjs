@@ -321,14 +321,15 @@ test('Account profile renders before a slow Poker projection, and failed Poker s
 });
 
 test('ProfileClient coalesces identical reads, even forced ones, but never across a profile write or invalidation', async () => {
-  const requests = []; let serverName = 'v1';
+  const requests = [], announced = []; let serverName = 'v1';
   const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
-  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(){} }, Promise, URL, Date, CustomEvent: class {},
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(event){ announced.push(event.type); } }, Promise, URL, Date, CustomEvent: class { constructor(type){ this.type = type; } },
     fetch: async (url, options) => { const entry = { url, method: options.method, name: serverName }; requests.push(entry); await new Promise(resolve => { entry.release = resolve; }); return { ok: true, json: async () => ({ displayName: entry.name }) }; } });
-  const until = async count => { while (requests.length < count) await new Promise(resolve => setImmediate(resolve)); };
+  // Bounded wait: a regression that answers from cache fails with a clear assertion instead of hanging.
+  const until = async count => { for (let i = 0; i < 200 && requests.length < count; i++) await new Promise(resolve => setImmediate(resolve)); assert.equal(requests.length, count, 'expected a new network read'); };
   const client = window.ProfileClient;
   const a = client.getMe(true), b = client.getMe(false), c = client.getMe(true, { includePoker: true }), d = client.getMe(true, { includePoker: true });
-  await until(2); await new Promise(resolve => setImmediate(resolve));
+  await until(2);
   assert.deepEqual(requests.map(r => r.url), ['/.netlify/functions/profile-me', '/.netlify/functions/profile-me?includePoker=1']);
   requests[0].release(); requests[1].release(); assert.equal((await a).displayName, 'v1'); assert.equal(await b, await a); assert.equal(await c, await d);
   // A read started before a write is not reused afterwards, and its late answer never replaces the written profile.
@@ -339,12 +340,32 @@ test('ProfileClient coalesces identical reads, even forced ones, but never acros
   requests[4].release(); assert.equal((await fresh).displayName, 'v2');
   // Another endpoint's profile change (Google photo action) also starts a fresh read.
   const before = client.getMe(true); await until(6); client.invalidate(); const after = client.getMe(true); await until(7);
-  requests[5].release(); requests[6].release(); await before; await after; assert.equal(requests.length, 7);
+  requests[5].release(); requests[6].release(); await before; await after;
   // A PATCH answer that arrives after an invalidation is returned to its caller but neither cached nor announced.
-  const announced = []; window.__events = announced;
-  serverName = 'stale-write'; const late = client.updateMe({ leaderboardVisible: true }); await until(8);
-  client.invalidate(); requests[7].release(); assert.equal((await late).displayName, 'stale-write');
+  announced.length = 0; serverName = 'stale-write'; const late = client.updateMe({ leaderboardVisible: true }); await until(8);
+  client.invalidate(); requests[7].release(); assert.equal((await late).displayName, 'stale-write'); assert.deepEqual(announced, []);
   serverName = 'v3'; const reread = client.getMe(false); await until(9); requests[8].release(); assert.equal((await reread).displayName, 'v3');
+});
+
+test('ProfileClient caches no answer of overlapping writes whose server order is unknown', async () => {
+  const requests = [];
+  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(){} }, Promise, URL, Date, CustomEvent: class {},
+    fetch: async (url, options) => { const entry = { method: options.method, body: options.body }; requests.push(entry); await new Promise(resolve => { entry.release = resolve; }); return { ok: true, json: async () => ({ displayName: entry.method === 'GET' ? 'server-A' : JSON.parse(entry.body).leaderboardVisible ? 'A' : 'B' }) }; } });
+  const until = async count => { for (let i = 0; i < 200 && requests.length < count; i++) await new Promise(resolve => setImmediate(resolve)); assert.equal(requests.length, count); };
+  const writeA = window.ProfileClient.updateMe({ leaderboardVisible: true }); await until(1);
+  const writeB = window.ProfileClient.updateMe({ leaderboardVisible: false }); await until(2);
+  requests[1].release(); await writeB; requests[0].release(); await writeA;   // A, started first, lands last on the server
+  const next = window.ProfileClient.getMe(false); await until(3); requests[2].release(); assert.equal((await next).displayName, 'server-A');
+});
+
+test('A forced Account refresh after an invalidation renders only its own newer read', async () => {
+  const reads = [];
+  const f = await accountReadFixture(() => new Promise(resolve => reads.push(resolve)));
+  const older = vm.runInContext('loadPublicProfile(true)', f.context); const newer = vm.runInContext('loadPublicProfile(true)', f.context);
+  assert.equal(reads.length, 2);
+  reads[1]({ displayName: 'after-write' }); await newer; reads[0]({ displayName: 'before-write' }); await older;
+  assert.deepEqual(f.events.rendered.map(p => p.displayName), ['after-write']); assert.equal(f.context.profileLoadState, 'success');
 });
 
 test('profile read states clear an old error after a new successful read', async () => {
