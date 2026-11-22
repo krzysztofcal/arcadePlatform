@@ -8,6 +8,7 @@
   var chipsInFlight = null;
   var welcomeBonusInFlight = null;
   var publicProfileInFlight = null;
+  var pokerProjectionInFlight = null;
   var publicProfile = null;
   var avatarSelection = null;
   var avatarSaving = null;
@@ -280,6 +281,7 @@
       publicProfileGeneration += 1;
       profileLoadState = 'idle';
       publicProfileInFlight = null;
+      pokerProjectionInFlight = null;
     }
 
     // Toggle panels
@@ -304,8 +306,11 @@
     var displayName = meta.full_name || meta.name || user.email || 'Player';
     if (nodes.userEmail){ nodes.userEmail.textContent = user.email || 'Unknown email'; }
     if (nodes.userName){ nodes.userName.textContent = displayName; }
-    clearPokerProjection();
+    // #1309: the basic profile never waits for the slower Poker projection (balance + WS); each renders itself.
+    // A repeated auth event for the same account keeps the shown Poker projection while it is refreshed.
+    if (previousUserKey !== nextUserKey) clearPokerProjection();
     loadPublicProfile(true);
+    loadPokerProjection(true);
   }
 
   function setPublicProfileErrors(errors){
@@ -505,6 +510,10 @@
     var gallery=doc.getElementById('arcadeAvatarGallery');
     if(!gallery)return;
     var allowed=allowedAvatarVariants(true),presentation=googleAvatarPresentation(),choices=[];
+    // #1309: an unresolved photo status alone adds no tile, so the gallery does not flip 6/7 (16/17) and rebuild.
+    // A tile appears for a known consented copy or a Google photo already in use; it then only changes its state.
+    if(presentation&&presentation.state==='pending'&&presentation.copyKnown!==true&&!hasGoogleAvatar())presentation=null;
+    else if(!presentation&&hasGoogleAvatar())presentation={state:'pending',avatar:null};
     if(window.ArcadeAvatars&&publicProfile&&currentUser){
       choices=window.ArcadeAvatars.variants.filter(function(variant){return allowed.indexOf(variant)!==-1;});
       if(presentation)choices.push('google');
@@ -602,23 +611,26 @@
 
   function loadPublicProfile(force, retried){
     if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
-    if (publicProfileInFlight) return publicProfileInFlight;
+    // A forced refresh never reuses an older local read (it may predate a profile write); ProfileClient already
+    // shares one network read between identical, still-fresh requests. Only the latest request renders (#1309).
+    if (!force && publicProfileInFlight) return publicProfileInFlight;
     var requestedUserKey = getUserKey(currentUser);
     var requestedGeneration = publicProfileGeneration;
+    var request;
+    function superseded(){ return publicProfileInFlight !== request; }
     var stage = 'read';
     profileLoadState = 'loading';
     setStatus(t('profileLoading', 'Loading your profile…'), 'info', 'profile');
-    var request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
-      if (requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
+    request = window.ProfileClient.getMe(!!force).then(function(profile){
+      if (superseded() || requestedUserKey !== getUserKey(currentUser) || requestedGeneration !== publicProfileGeneration) return null;
       stage = 'render_public_profile';
       renderPublicProfile(profile);
-      stage = 'render_poker_projection';
-      renderPokerProjection(profile);
       stage = 'status';
       profileLoadState = 'success';
       if (!nodes.status || nodes.status.dataset.source === 'profile') setStatus(t('signedIn', 'Signed in.'), 'success', 'profile');
       return profile;
     }).catch(function(error){
+      if (superseded()) return null;
       if (error && error.code === 'stale_identity'){
         // Cancellation is not a failed profile. One fresh read, only for this identity.
         if (!retried && requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
@@ -641,13 +653,39 @@
       }, requestedUserKey, requestedGeneration);
       if (requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration){
         setBlockVisibility(nodes.publicProfileEditor, false);
-        clearPokerProjection();
         profileLoadState = 'error';
         setStatus(t('publicProfileLoadError', 'Could not load your public profile. Please refresh and try again.'), 'error', 'profile');
       }
       return null;
     }).finally(function(){ if (publicProfileInFlight === request) publicProfileInFlight = null; });
     publicProfileInFlight = request;
+    return request;
+  }
+
+  // The Poker section loads and fails on its own: unavailable Poker never hides the profile or the avatar.
+  function loadPokerProjection(force, retried){
+    if (!currentUser || !window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return Promise.resolve(null);
+    if (!force && pokerProjectionInFlight) return pokerProjectionInFlight;
+    var requestedUserKey = getUserKey(currentUser);
+    var requestedGeneration = publicProfileGeneration;
+    var request;
+    function isCurrent(){ return pokerProjectionInFlight === request && requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration; }
+    request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
+      if (isCurrent()) renderPokerProjection(profile);
+      return profile;
+    }).catch(function(error){
+      if (!isCurrent()) return null;
+      // A cancelled read is not a Poker failure: one fresh read for the same identity, as for the profile.
+      if (error && error.code === 'stale_identity' && !retried){
+        if (pokerProjectionInFlight === request) pokerProjectionInFlight = null;
+        return loadPokerProjection(true, true);
+      }
+      if (!(error && error.code === 'stale_identity')){
+        try { renderPokerProjection(null); } catch (_err){ klog('account:poker_render_failed', {}); }
+      }
+      return null;
+    }).finally(function(){ if (pokerProjectionInFlight === request) pokerProjectionInFlight = null; });
+    pokerProjectionInFlight = request;
     return request;
   }
 

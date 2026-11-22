@@ -74,7 +74,11 @@
     if(guard&&!guard.isCurrent())throw staleError();
     var headers = { Authorization: 'Bearer ' + session.access_token };
     if (payload) headers['Content-Type'] = 'application/json';
-    var response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(ENDPOINT) : ENDPOINT, { method: method, headers: headers, body: payload ? JSON.stringify(payload) : undefined, credentials: 'omit', signal: signal });
+    // A photo action can change the profile avatar: profile reads must not reuse one started before it (#1309).
+    var client = window.ProfileClient, done = method !== 'GET' && client && typeof client.beginWrite === 'function' ? client.beginWrite() : null;
+    var response;
+    try { response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(ENDPOINT) : ENDPOINT, { method: method, headers: headers, body: payload ? JSON.stringify(payload) : undefined, credentials: 'omit', signal: signal }); }
+    finally { if (done) done(); }
     var data = {};
     try { data = await response.json(); } catch (_err){}
     if (!response.ok){
@@ -107,7 +111,8 @@
   function getPresentation(userId){
     if(!userId)return null;
     if(owner!==userId)return generation===0||resolvingOwner?{state:'pending',avatar:null}:null;
-    return photoState?{state:photoState,avatar:getChoice(userId,true)}:null;
+    // copyKnown: a consented stored copy is already known, so its tile may hold a stable placeholder (#1309).
+    return photoState?{state:photoState,avatar:getChoice(userId,true),copyKnown:hasCopy(status)}:null;
   }
 
   function render(next, needsProof, unresolvedState){

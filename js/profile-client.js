@@ -3,8 +3,12 @@
 
   var ME_URL = '/.netlify/functions/profile-me';
   var PUBLIC_URL = '/.netlify/functions/profile-public?handle=';
-  var cache = null;
-  var inFlight = null;
+  // #1309: no finished answer is kept, so a lost, overlapping or later-applied write can never leave a stale
+  // profile behind. Identical reads share one in-flight request per kind (base / includePoker), also when
+  // forced, but only if no profile write or invalidation happened since that request started.
+  var inFlight = { base: null, poker: null };
+  var writeSeq = 0;
+  var writesInFlight = 0;
   var publicGeneration = 0;
 
   function klog(kind, data){
@@ -93,8 +97,10 @@
   }
 
   async function parse(response){
-    var body = {};
-    try { body = await response.json(); } catch (_err){}
+    var body = {}, unreadable = false;
+    try { body = await response.json(); } catch (_err){ unreadable = true; }
+    // A successful status with a lost or unreadable body is not a profile: never return or announce it (#1309).
+    if (response.ok && (unreadable || !body || typeof body !== 'object' || Array.isArray(body))) throw Object.assign(new Error('invalid_response'), { code: 'invalid_response', status: response.status });
     if (response.ok) return body;
     var error = new Error(body && body.error ? body.error : 'request_failed');
     error.code = body && body.error ? body.error : 'request_failed';
@@ -129,29 +135,36 @@
     var includePoker = !!(options && options.includePoker);
     var userId = await currentUserId();
     if (!userId || generation !== publicGeneration) throw staleIdentityError();
-    if (cache && cache.profile.avatar && cache.profile.avatar.type === 'uploaded' && photoExpiresAt(cache.profile.avatar.url) <= Date.now()) cache = null;
-    if (!force && cache && cache.userId === userId && (!includePoker || cache.includePoker === true)) return cache.profile;
-    if (!force && inFlight && inFlight.userId === userId && inFlight.includePoker === includePoker) return inFlight.promise;
+    var kind = includePoker ? 'poker' : 'base';
+    var current = inFlight[kind];
+    if (current && current.userId === userId && current.seq === writeSeq && current.generation === generation) return current.promise;
+    var seq = writeSeq;
     var url = includePoker ? ME_URL + '?includePoker=1' : ME_URL;
     var request = authedFetch(url, { method: 'GET' }).then(parse).then(async function(profile){
       if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
-      cache = { userId: userId, profile: profile, includePoker: includePoker };
       return profile;
     });
-    inFlight = { userId: userId, includePoker: includePoker, promise: request };
-    request.finally(function(){ if (inFlight && inFlight.promise === request) inFlight = null; }).catch(function(){});
+    var entry = { userId: userId, seq: seq, generation: generation, promise: request };
+    inFlight[kind] = entry;
+    request.finally(function(){ if (inFlight[kind] === entry) inFlight[kind] = null; }).catch(function(){});
     return request;
   }
 
   async function updateMe(payload, guard){
     var userId = guard?guard.userId:await currentUserId();
     if (!userId) throw staleIdentityError();
-    var response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard);
+    var generation = publicGeneration;
+    var seq = writeSeq += 1;
+    var response;
+    writesInFlight += 1;
+    try { response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard); }
+    finally { writeSeq += 1; seq += 1; writesInFlight -= 1; }
     var profile = await parse(response);
-    if (await currentUserId() !== userId) throw staleIdentityError();
+    if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
     if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
-    cache = { userId: userId, profile: profile, includePoker: false };
-    notify(profile);
+    // Announce only an answer no other write or invalidation can have overtaken; the server order of
+    // overlapping writes is unknown. Listeners that miss it read the profile again on their next event.
+    if (writesInFlight === 0 && seq === writeSeq) notify(profile);
     return profile;
   }
 
@@ -167,8 +180,17 @@
     return profile;
   }
 
-  function clear(){ publicGeneration += 1; cache = null; inFlight = null; }
+  function clear(){ publicGeneration += 1; writeSeq += 1; inFlight = { base: null, poker: null }; }
 
-  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, applyAvatar: applyAvatar, initials: initials };
+  // A profile change made by another endpoint (for example a Google photo action): later reads start fresh.
+  function invalidate(){ writeSeq += 1; }
+
+  // Such a change in progress also counts as a write, so no overlapping profile answer is announced.
+  function beginWrite(){
+    var open = true; writeSeq += 1; writesInFlight += 1;
+    return function done(){ if (!open) return; open = false; writeSeq += 1; writesInFlight -= 1; };
+  }
+
+  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, invalidate: invalidate, beginWrite: beginWrite, applyAvatar: applyAvatar, initials: initials };
   klog('profile:client_ready', {});
 })();

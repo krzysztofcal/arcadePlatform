@@ -220,6 +220,29 @@ test("profile-me rejects all former manual identity fields before invoking persi
  for(const payload of [{handle:"custom-player"},{displayName:"Manual"},{bio:"Text"}])assert.equal((await handler(event("PATCH",payload))).statusCode,400);
 });
 
+test("profile-me GET checks the account lifecycle once in the profile transaction; PATCH keeps the JWT check", async () => {
+  const verified = [];
+  let active = true;
+  const handler = createProfileMeHandler({
+    verifySupabaseJwt: async (_token, options) => { verified.push(options && options.allowDeleting === true); return { valid: true, userId: USER_ID }; },
+    ensureUserProfile: async () => { if (!active) throw Object.assign(new Error("account_not_active"), { code: "account_not_active" }); return profile(); },
+    updateUserProfile: async () => profile(),
+  });
+  assert.equal((await handler(event("GET"))).statusCode, 200);
+  active = false;
+  const denied = await handler(event("GET", null, { includePoker: "1" }));
+  assert.equal(denied.statusCode, 401);
+  assert.deepEqual(JSON.parse(denied.body), { error: "unauthorized" });
+  active = true;
+  assert.equal((await handler(event("PATCH", { leaderboardVisible: true }))).statusCode, 200);
+  assert.deepEqual(verified, [true, true, false]);
+  // An unavailable database during that check denies access as a server error and returns no profile data.
+  const outage = createProfileMeHandler({ verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }), ensureUserProfile: async () => { throw new Error("connection terminated"); } });
+  const failed = await outage(event("GET"));
+  assert.equal(failed.statusCode, 500);
+  assert.deepEqual(JSON.parse(failed.body), { error: "server_error" });
+});
+
 test("profile-me includePoker returns the full authoritative table projection and balance", async () => {
   const tableId = "table-full-runtime-identifier-4f2a";
   const calls = [];
