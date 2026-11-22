@@ -306,8 +306,9 @@
     var displayName = meta.full_name || meta.name || user.email || 'Player';
     if (nodes.userEmail){ nodes.userEmail.textContent = user.email || 'Unknown email'; }
     if (nodes.userName){ nodes.userName.textContent = displayName; }
-    clearPokerProjection();
     // #1309: the basic profile never waits for the slower Poker projection (balance + WS); each renders itself.
+    // A repeated auth event for the same account keeps the shown Poker projection while it is refreshed.
+    if (previousUserKey !== nextUserKey) clearPokerProjection();
     loadPublicProfile(true);
     loadPokerProjection(true);
   }

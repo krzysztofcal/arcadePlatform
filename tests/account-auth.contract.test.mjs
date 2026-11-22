@@ -340,6 +340,11 @@ test('ProfileClient coalesces identical reads, even forced ones, but never acros
   // Another endpoint's profile change (Google photo action) also starts a fresh read.
   const before = client.getMe(true); await until(6); client.invalidate(); const after = client.getMe(true); await until(7);
   requests[5].release(); requests[6].release(); await before; await after; assert.equal(requests.length, 7);
+  // A PATCH answer that arrives after an invalidation is returned to its caller but neither cached nor announced.
+  const announced = []; window.__events = announced;
+  serverName = 'stale-write'; const late = client.updateMe({ leaderboardVisible: true }); await until(8);
+  client.invalidate(); requests[7].release(); assert.equal((await late).displayName, 'stale-write');
+  serverName = 'v3'; const reread = client.getMe(false); await until(9); requests[8].release(); assert.equal((await reread).displayName, 'v3');
 });
 
 test('profile read states clear an old error after a new successful read', async () => {

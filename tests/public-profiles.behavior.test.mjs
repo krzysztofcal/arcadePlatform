@@ -236,6 +236,11 @@ test("profile-me GET checks the account lifecycle once in the profile transactio
   active = true;
   assert.equal((await handler(event("PATCH", { leaderboardVisible: true }))).statusCode, 200);
   assert.deepEqual(verified, [true, true, false]);
+  // An unavailable database during that check denies access as a server error and returns no profile data.
+  const outage = createProfileMeHandler({ verifySupabaseJwt: async () => ({ valid: true, userId: USER_ID }), ensureUserProfile: async () => { throw new Error("connection terminated"); } });
+  const failed = await outage(event("GET"));
+  assert.equal(failed.statusCode, 500);
+  assert.deepEqual(JSON.parse(failed.body), { error: "server_error" });
 });
 
 test("profile-me includePoker returns the full authoritative table projection and balance", async () => {

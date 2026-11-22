@@ -154,13 +154,16 @@
   async function updateMe(payload, guard){
     var userId = guard?guard.userId:await currentUserId();
     if (!userId) throw staleIdentityError();
-    writeSeq += 1;
+    var generation = publicGeneration;
+    var seq = writeSeq += 1;
     var response;
     try { response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard); }
-    finally { writeSeq += 1; }
+    finally { writeSeq += 1; seq += 1; }
     var profile = await parse(response);
-    if (await currentUserId() !== userId) throw staleIdentityError();
+    if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
     if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
+    // A later write or invalidation (for example a Google photo withdrawal) wins over this answer.
+    if (seq !== writeSeq) return profile;
     cache = { userId: userId, profile: profile, includePoker: false };
     notify(profile);
     return profile;

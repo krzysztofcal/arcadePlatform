@@ -15,7 +15,7 @@ They never wait for the Poker projection, which needs a chips balance and the WS
 **Test**: Poker held or failing → the profile is rendered and its status is `success`. Poker then shows its own "unavailable" state.
 
 ### User Story 2: No request storms (Priority: P1)
-Opening Account and the auth events that follow (`INITIAL_SESSION`, `SIGNED_IN`) send at most one `profile-me` base read and one `includePoker` read per profile generation. Reads made after a profile write never reuse an older in-flight read.
+Opening Account and the auth events that arrive while its reads are in flight (`INITIAL_SESSION`, `SIGNED_IN`) send one `profile-me` base read and one `includePoker` read in total. A later auth event for the same account, such as `TOKEN_REFRESHED`, still refreshes both reads, deduplicated in the same way, and keeps the Poker section visible while it refreshes. Reads made after a profile write never reuse an older in-flight read.
 **Test**: identical forced reads share one request; a read after `updateMe` / `invalidate` starts a new one; a late old answer never replaces the written profile.
 
 ### User Story 3: Stable avatar gallery (Priority: P1)
