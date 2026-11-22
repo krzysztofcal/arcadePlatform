@@ -587,6 +587,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const holdA = new Promise(resolve => { releaseA = resolve; });
     let tokenCalls = 0;
     let sentAuthHeader = null;
+    const recordedPosts = [];
 
     const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
     const tokenB = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-b' })).toString('base64url') + '.s';
@@ -594,6 +595,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const headers = opts?.headers || {};
       sentAuthHeader = headers.Authorization || null;
+      recordedPosts.push(sentAuthHeader);
       return response(200, { ok: true, status: 'statusOnly' });
     }, {
       window: {
@@ -624,7 +626,8 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
 
     // Then read 2 resolves with token A
     releaseA();
-    await call1.catch(() => {});
+    await assert.rejects(call1, err => err.code === 'stale_identity', 'late caller must reject with stale_identity');
+    assert.equal(recordedPosts.some(h => h === `Bearer ${tokenA}`), false, 'no POST with token A must be sent');
 
     // Subsequent fetchStatus must still send token B, not overwritten by late-resolving token A in same authVersion
     sentAuthHeader = null;
@@ -879,6 +882,93 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const posRes = await XPClient.refreshBadgeFromServer();
     assert.ok(posRes);
     assert.equal(applied?.payload?.totalLifetime, 1234, 'positive control: payload must be applied without generation change');
+  }
+
+  // R4/F2: rotateAwardSession bumps statusGeneration; caller drops status payload
+  {
+    let applied = null;
+    let bumpOnResolve = true;
+
+    const XPClient = await loadClientWithFetch(async () => {
+      const payload = {
+        ok: true,
+        status: 'statusOnly',
+        totalLifetime: 5678,
+        get capDelta() {
+          if (bumpOnResolve) {
+            queueMicrotask(() => {
+              XPClient.rotateAwardSession();
+            });
+          }
+          return 100;
+        },
+      };
+      return {
+        status: 200,
+        ok: true,
+        async json() { return payload; },
+        async text() { return JSON.stringify(payload); },
+      };
+    }, {
+      window: {
+        XP: {
+          refreshFromServerStatus(payload, meta) { applied = { payload, meta }; },
+        },
+      },
+    });
+
+    const res = await XPClient.refreshBadgeFromServer();
+    assert.equal(res, null, 'refreshBadgeFromServer must return null when rotateAwardSession changed generation before continuation');
+    assert.equal(applied, null, 'refreshFromServerStatus must not be called when rotateAwardSession bumped generation');
+
+    // Positive control: without rotateAwardSession, the payload is applied
+    bumpOnResolve = false;
+    applied = null;
+    const posRes = await XPClient.refreshBadgeFromServer();
+    assert.ok(posRes);
+    assert.equal(applied?.payload?.totalLifetime, 5678, 'positive control: payload applied when rotateAwardSession did not run');
+  }
+
+  // R4/F2: token subject change bumps statusGeneration; same subject does not
+  {
+    let now = 1000000;
+    const FakeDate = class extends Date {
+      constructor(...args) {
+        if (args.length) super(...args);
+        else super(now);
+      }
+      static now() { return now; }
+    };
+
+    let currentToken = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-1', ver: 1 })).toString('base64url') + '.s';
+    const XPClient = await loadClientWithFetch(async () => {
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      Date: FakeDate,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => currentToken,
+          getCurrentUserId: async () => 'user-1',
+        },
+      },
+    });
+
+    await XPClient.fetchStatus();
+    const gen1 = XPClient.getStatusGeneration();
+
+    // Advance time past auth cache (AUTH_CACHE_MS is 60_000)
+    now += 70_000;
+    // Token string changes, but subject stays 'user-1'
+    currentToken = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-1', ver: 2 })).toString('base64url') + '.s';
+    await XPClient.fetchStatus();
+    assert.equal(XPClient.getStatusGeneration(), gen1, 'same subject token change must not bump statusGeneration');
+
+    // Advance time past auth cache again
+    now += 70_000;
+    // Subject changes to 'user-2'
+    currentToken = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-2' })).toString('base64url') + '.s';
+    await XPClient.fetchStatus();
+    assert.equal(XPClient.getStatusGeneration(), gen1 + 1, 'different subject must bump statusGeneration');
   }
 
   console.log('xp-client contract tests passed');

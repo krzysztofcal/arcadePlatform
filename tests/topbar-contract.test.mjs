@@ -272,9 +272,15 @@ async function topbarProfileFixture(options) {
     setAttribute(k, v) { this.attributes[k] = String(v); },
     getAttribute(k) { return this.attributes[k]; },
   };
+  const label = { textContent: '' };
+  const menuName = { textContent: '' };
   const document = {
     readyState: 'complete',
-    getElementById: () => null,
+    getElementById: (id) => {
+      if (id === 'avatarLabel') return label;
+      if (id === 'avatarMenuName') return menuName;
+      return null;
+    },
     querySelector: () => null,
     querySelectorAll: (sel) => sel === '.topbar' ? [topbar] : [],
     addEventListener() {},
@@ -318,6 +324,7 @@ async function topbarProfileFixture(options) {
     flush,
     topbar,
     get profileReads() { return profileReads; },
+    get renderedName() { return menuName.textContent || label.textContent; },
     emit(event, next = user) {
       user = next;
       callback(event, user ? { user } : null);
@@ -461,13 +468,16 @@ test('topbar A -> sign-out -> A race without UserUiState: late success does not 
   await f.flush();
   assert.equal(f.profileReads, 2);
   assert.equal(f.topbar.getAttribute('data-user-ui-state'), 'ready');
+  assert.equal(f.renderedName, 'User A Fresh');
 
   // Late resolution of session 1 read: must not overwrite fresh profile
   releaseA1({ displayName: 'Old A' });
   await f.flush();
+  assert.equal(f.renderedName, 'User A Fresh', 'late resolution must not overwrite rendered name');
 
   // Mark must still be from second session, same-user event makes no new read
   f.emit('TOKEN_REFRESHED', { id: 'user-a' });
   await f.flush();
   assert.equal(f.profileReads, 2, 'same-user event must not make a new read');
+  assert.equal(f.renderedName, 'User A Fresh', 'rendered name must stay User A Fresh');
 });
