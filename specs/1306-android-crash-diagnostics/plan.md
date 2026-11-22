@@ -1,7 +1,7 @@
 # Implementation Plan: Android crash and non-fatal diagnostics (#1306)
 
-**Branch**: `1306-android-crash-diagnostics` | **Date**: 2026-11-22 r3 | **Spec**: [spec.md](spec.md) | **Base**: `main` @ `89374212`
-**Status**: plan only. Nothing is implemented, provisioned, collected, signed or uploaded until the OWNER approves this plan and D1–D7.
+**Branch**: `1306-android-crash-diagnostics` | **Date**: 2026-11-22 r4 execution baseline | **Spec**: [spec.md](spec.md) | **Base**: `main` @ `89374212`
+**Status**: implementation authorised for PR1 with collection off. Independent implementation review is required before readiness. D1–D3 and D5–D7 are recorded below. D4 remains conditional on T013a and T013c.
 **Validation command (PR1):** `node --test tests/mobile-poker-security.test.mjs tests/mobile-poker-channel.test.mjs tests/mobile-legal-packaging.test.mjs`.
 Run it plus the Draft-PR Android build. Never run the full suite on the VPS.
 
@@ -17,7 +17,7 @@ The integration has three parts:
 - A small repo-owned `PokerDiagnosticsPlugin.java` is the single enforcing allowlist and cap.
 - A small Android-only IIFE, `mobile/poker/diagnostics.js`, forwards constant codes.
 
-Collection is off by default, and anything buffered while it is off is deleted.
+Collection defaults to off. Before any enablement, demonstrate that an unauthorised backlog cannot upload. D4 determines which SDK operations can occur in each state.
 
 ## Technical Context
 - **Platform**:
@@ -43,44 +43,20 @@ Collection is off by default, and anything buffered while it is off is deleted.
 |---|---|
 | I Simplicity / existing mechanisms | PASS. Reuses `GOOGLE_SIGNIN_DEPENDENCIES`, the plugin copy, `registerPlugin`, `window.Capacitor.Plugins` (as `runtime.js::plugin`), the Offline `audioHash` SRI pattern and the `legal-candidate-aN` manifest mechanism. No npm dependency, server, DB or endpoint. One allowlist, one cap, both native |
 | II Runtime boundaries | PASS. No WS, poker engine, ledger, `poker/*.js` or Netlify function change |
-| III Fail-closed / env separation | PASS. A missing or mismatched Firebase config, a missing plugin or an unknown permission fails the build. Collection is off by default and pre-consent buffers are deleted. Stage and Production are separate Android apps |
+| III Fail-closed / env separation | CONDITIONAL. A missing or mismatched Firebase config, a missing plugin or an unknown permission fails the build. D4 and T013a must demonstrate early startup gating and safe handling of queued data. Stage and Production are separate Android apps |
 | IV JSP / logging / CSP | PASS. `diagnostics.js` is a classic external script with no imports. Online pages already allow `script-src 'self'`; Offline gets an SRI hash. No inline script, no new `connect-src` (the native SDK uploads), no CSS |
 | V Tests / concrete plan | PASS. Only fail-closed configuration and privacy-sanitising logic is tested, in the existing files. No UI/CSS/glue tests and no Git commands (the SHA is read from `www/build-receipt.json`) |
-| VI Workspace | Implementation runs in an `agy/*` worktree created via `scripts/ops/agent-workdir-preflight.mjs` |
+| VI Workspace | Implementation reuses the #1306 worktree on the verified Hetzner Volume |
 | Deploy / merge | No deploy, Play upload or merge. Every gate in §6 needs its own OWNER GO, and the WWW legal release uses the existing OWNER WWW path |
 
-## 1. OWNER decisions required before implementation
-- **D1 Integration variant.** Recommended: **B, the repo-owned bridge**. This deviates from the OWNER's earlier stated preference
-  for `@capacitor-firebase/crashlytics`. Review #2 slightly preferred variant **A**, the plugin pinned to 8.6.0 (32 vs 31). Review #1
-  preferred B (31 vs 27).
-  - **Reasons for B**:
-    - (b) A exposes `crash()`, `setUserId()`, free-text `log()`/`recordException(message, stacktrace)` and `setCustomKey` to
-      any WebView JS. B accepts only allowlisted constants natively and caps them natively.
-    - (c) A adds a single-maintainer npm dependency that defaults to `firebase-crashlytics:20.0.3`.
-  - **Not a reason**: native auth reporting. A could call `FirebaseCrashlytics.getInstance()` from Java too, so both variants need
-    the same Java edit in `PokerGoogleSignInPlugin`.
-  - **Delta if A is chosen**:
-    - Pin `@capacitor-firebase/crashlytics@8.6.0` exactly in `mobile/poker/package.json` and the lockfile.
-    - Write `firebaseCrashlyticsVersion = '21.1.0'` into `variables.gradle`.
-    - `diagnostics.js` calls `Capacitor.Plugins.FirebaseCrashlytics.recordException({message:'<code>:<stage>', keysAndValues})`
-      and owns the allowlist and cap in JS. It must never call `stacktrace`, `crash`, `setUserId` or `log`.
-    - The native Java edits stay.
-    - Gates C–G are identical.
-- **D2 Permission.** Approve `android.permission.ACCESS_NETWORK_STATE` in both manifest checks. The `REMOVED_LIBRARY_PERMISSIONS`
-  pattern does not apply here, because datatransport uses this permission to schedule uploads.
-- **D3 Firebase project.** The OWNER creates it on the phone (Gate C) and pastes the public `google-services.json` into #1306.
-- **D4 Collection model.** Notice-only (GDPR Art. 6(1)(f) plus the right to object) or opt-in. This needs the ePrivacy Art. 5(3) /
-  PKE art. 399 assessment, with the collection-off QA facts from T013a as input. The engineering default is off. If opt-in or
-  opt-out is required, T014 applies.
-- **D5 Stage QA enablement.** A GO for a **Draft PR that is never merged**, with `DIAGNOSTICS_COLLECTION.stage = true`. Only that PR's
-  APK collects data, so later Stage PR APKs stay off.
-- **D7 Reviewer pair.** The OWNER asked (2026-11-22) that Stage A/B be run by the Claude Code coordinator and a separate Claude
-  Code CLI run. The issue protocol named Claude + Codex, and review #1 of the plan is author self-review. Choose one: accept this
-  deviation, or require one Codex read-only Stage B review of the final SpecKit SHA before T003. The AGENTS.md Codex gate for PR1
-  is unaffected either way.
-- **D6 WS scope.** Accept the descope of WS reconnect reporting. `poker/poker-ws-client.js` retries indefinitely with backoff
-  (`DEFAULT_RECONNECT_MAX_MS`) and has no terminal failure. Instrumenting it would change shared WWW `poker/*.js`. Uncaught JS errors
-  on poker pages are still captured.
+## 1. OWNER decisions
+- **D1** Repo-owned native bridge (variant B). Keeps the allowlist and caps native and avoids exposing generic Crashlytics methods to WebView JS.
+- **D2** Approve `android.permission.ACCESS_NETWORK_STATE` in both APK/AAB checks. DataTransport uses it to schedule uploads.
+- **D3** OWNER provisions the dedicated Spark project and two Android apps on the phone at Gate C.
+- **D4** Conditional. Notice-only requires a supported LIA, a separate ePrivacy/PKE basis for covered device access/storage and an objection path. Otherwise select a reviewed opt-in design or reconsider the architecture. T013a and T013c feed the final OWNER decision.
+- **D5** Stage QA uses an OWNER-authorised, unmerged Draft and the OWNER’s test device.
+- **D6** WS reconnect reporting remains out of scope. The WS client retries indefinitely.
+- **D7** Plan review ends with the recorded Claude and Codex work and OWNER implementation GO. The complete implementation PR remains subject to the mixed-authorship review rule in AGENTS.md.
 
 ## 2. File-level design
 - **`mobile/poker/google-services.json`** (new, committed, public). It holds one project with two Android clients,
@@ -101,35 +77,33 @@ Collection is off by default, and anything buffered while it is off is deleted.
       `android_client_info.package_name === appId` with a public-format `api_key`.
     - The directly-run block also throws if `mobile/poker/google-services.json` is absent. It then copies the file to
       `android/app/google-services.json`.
-  - **Collection flag**:
-    - `DIAGNOSTICS_COLLECTION = { stage: false, production: false }`.
-    - `configureDiagnosticsManifest(xml, enabled)` adds `<meta-data android:name="firebase_crashlytics_collection_enabled" …/>`
-      inside `<application>`, and throws on a duplicate.
+  - **Startup and activation**:
+    - Keep the Crashlytics manifest default off. `DIAGNOSTICS_COLLECTION` defaults false for both channels and describes eligibility, not per-install permission.
+    - Audit the merged manifest and the pinned SDK startup path, including `FirebaseInitProvider`, eager components, Sessions, Installations and DataTransport.
+    - Where D4 requires consent for local access/storage, gate SDK initialisation itself on the persisted valid choice before any component triggers covered activity. If the pinned SDK or manifest cannot enforce this, keep the feature off and return to the OWNER.
   - **Build resources**:
-    - `googleSignInResource` is generalised to `buildResources({clientId, channel, sha, diagnostics})`.
-    - It writes `poker_build_channel`, `poker_source_sha` and the boolean `poker_diagnostics_enabled`.
+    - `buildResources(channel, sha)` adds separate diagnostic resources. `googleSignInResource` preserves its existing contract.
+    - It writes `poker_build_channel` and `poker_source_sha`. The boolean `poker_diagnostics_enabled` lives in manifest metadata and is checked on the built artifact.
     - The `sha` comes from `www/build-receipt.json`, written earlier by `package-web.mjs`, and must be 40 lowercase hex.
   - **Plugin registration**: add `PokerDiagnosticsPlugin` to the copy loop at `configure-android.mjs:250`, and
     `registerPlugin(PokerDiagnosticsPlugin.class);` in the generated `MainActivity.onCreate`.
 - **`mobile/poker/PokerDiagnosticsPlugin.java`** (new, about 70 lines, `@CapacitorPlugin(name = "PokerDiagnostics")`):
-  - `load()` reads the resources. If diagnostics are disabled, it calls `deleteUnsentReports()`. Otherwise it sets the custom keys
-    `channel` and `source_sha`.
-  - On the first run of an enabled build (a persisted `SharedPreferences` flag `poker_diag_purged_<versionCode>`), it calls
-    `deleteUnsentReports()` once. This stops a report buffered under an earlier collection-off build from uploading after the
-    upgrade.
+  - `load()` applies the bridge policy and sets custom keys on the authorised path. It runs after provider startup and cannot guard Firebase initialisation.
+  - For legacy data, keep upload blocked until pre-authorisation data is excluded, including any persisted SDK enablement and previously queued transport jobs. On Android the public `deleteUnsentReports()` queues deletion while automatic collection is disabled and returns without a completion result. It is a no-op while automatic collection is enabled. No first-run purge marker based on the call returning. Never use `sendUnsentReports()` to activate diagnostics.
+  - If an upgrade can carry pending reports, demonstrate a supported migration with off-state verification and a same-install upgrade test. If clearance cannot be demonstrated, keep activation blocked and return to the OWNER. A clean install can be assessed separately from an upgrade.
   - `@PluginMethod report(call)`:
     - It takes `code` and `stage`, optional `js_file` (`^[a-z0-9_.-]{1,40}\.js$`) and optional `js_line` (1–999999).
     - It checks them against a static `Map<String, Set<String>> ALLOWED` (plan §3), the **single** allowlist.
     - It always resolves.
   - `static record(code, stage, Map<String, String> keys)`:
-    - It returns immediately when diagnostics are disabled, when the pair is not allowed, when the `code:stage` pair has already
+    - It returns immediately when the effective native policy is off, when the pair is not allowed, when the `code:stage` pair has already
       been reported (static `Set`), or when 7 reports have been sent this process.
     - Otherwise it builds `PokerDiagnostic extends Exception` with message `code:stage` and a single synthetic
       `StackTraceElement("PokerDiagnostic", code, stage, 1)`.
     - It calls `FirebaseCrashlytics.getInstance().recordException(e, CustomKeysAndValues)` inside `try`/`catch (Throwable)`, and
       ignores any failure.
   - `selftest:handled` is accepted only when the channel is `stage`. A Stage-only fallback, `crashForTest`, is added **only if**
-    T013 shows that `am crash` is not captured. It is guarded by `poker_build_channel == stage`.
+    T013b shows that `am crash` is not captured. It is guarded by `poker_build_channel == stage`.
   - There are no crash, user-ID or free-text methods. `setEnabled` is added only if T014 applies.
 - **`mobile/poker/PokerGoogleSignInPlugin.java`**:
   - `onError`: every branch except the cancellation and no-credential branches records
@@ -141,7 +115,7 @@ Collection is off by default, and anything buffered while it is off is deleted.
   - The reject codes do not change.
 - **`mobile/poker/diagnostics.js`** (new IIFE, about 40 lines, exposes `window.MobilePokerDiagnostics = { report(code, stage) }`):
   - It looks up `window.Capacitor.Plugins.PokerDiagnostics` lazily. If the plugin is missing, the call does nothing.
-  - It has a re-entrancy guard and a local `klog(kind)`, the same as `runtime.js::klog`.
+  - It has a synchronous re-entrancy guard and handles bridge failures locally. `runtime.js` retains its existing `klog` calls.
   - `error` listener: it acts only when `filename` has origin `https://localhost`. It sends `js_file` (basename, only if it ends in
     `.js`) and `js_line`, with stage `offline` on `/poker/offline/play.html` and `window` elsewhere.
   - `unhandledrejection` listener: sends `js_unhandled_rejection` with the same stage rule.
@@ -169,13 +143,12 @@ Collection is off by default, and anything buffered while it is off is deleted.
 - **`.github/workflows/android-release-aab.yml`**:
   - The step 7 allowlist adds `android.permission.ACCESS_NETWORK_STATE` (D2) and logs the merged permission list (it already
     prints this).
-  - A new check reads `firebase_crashlytics_collection_enabled` from `artifacts/manifest.txt`. It must equal
-    `DIAGNOSTICS_COLLECTION.production`, read by `node -e` import of `configure-android.mjs`.
-  - `release-receipt.json` gains `diagnostics: { provider: 'firebase-crashlytics', collection: <bool> }`.
+  - A new check reads `firebase_crashlytics_collection_enabled` from `artifacts/manifest.txt`. Require the pinned off default and validate the reviewed activation configuration independently of the eligibility flag in `configure-android.mjs`.
+  - `release-receipt.json` gains the provider, manifest default and approved build eligibility. Runtime permission is verified on device.
   - Source provenance already rests on the `config.js` SHA check. No new secrets are needed.
-- **`.github/workflows/android-poc.yml`**: adds a new step after the APK build. It runs `aapt2 dump xmltree --file AndroidManifest.xml`
-  on the APK, finding `aapt2` the same way as `apksigner` at `android-poc.yml:138`. It applies the same permission allowlist and
-  requires the collection flag to equal `DIAGNOSTICS_COLLECTION.stage`.
+- **`.github/workflows/android-poc.yml`**: before publishing the APK, Android SDK `apkanalyzer manifest print`
+  extracts the final manifest. `mobile/poker/verify-android-diagnostics.mjs` checks app ID, permissions and both explicit off values
+  for the APK and the release AAB.
 - **Legal (T015, WWW-affecting)**:
   - New files: `legal/privacy.<date>-a5.{en,pl}.html` and `specs/1306-android-crash-diagnostics/legal-candidate-a5/manifest.json`
     (`previousVersion` a4, `basedOn` hashes).
@@ -183,7 +156,7 @@ Collection is off by default, and anything buffered while it is off is deleted.
   - Content:
     - The processor is Firebase Crashlytics (Google: DPST, global processing, EU-US DPF), and processing happens in the **Android
       app only**.
-    - It lists the data from spec Key Entities, the 90-day retention, the purpose (stability and security), the D4 legal basis and
+    - It lists the data and retention by service, the purpose (stability and security), the D4 legal basis and
       how to object or opt out.
     - The "no Analytics/AdSense in Android" statement stays.
   - A Play Data Safety draft goes into #1306:
@@ -217,14 +190,11 @@ Collection is off by default, and anything buffered while it is off is deleted.
 - **QA on the debuggable Stage APK** (Termux wireless ADB):
   - Commands: `adb shell setprop log.tag.FirebaseCrashlytics DEBUG`, `adb logcat -s FirebaseCrashlytics FirebaseSessions
     FirebaseInstallations`, and `adb shell run-as pl.kcswh.arcadepoker.stage ls -R shared_prefs files`.
-  - T013a checks a **collection-off** build. Expect no upload, no Installations call and no buffered reports kept. Record whether a
-    UUID/FID is written, as input to D4.
-  - **STOP rule:** if any Firebase network call or retained report appears with collection off, STOP before the PR1 merge. A
-    reviewed mitigation follows. One candidate is the global manifest flag `firebase_data_collection_default_enabled=false`
-    and/or a Sessions switch, re-checked against the official docs.
-  - T013b checks a **collection-on** build. Expect offline buffering, upload on relaunch and that the Installations call succeeds.
-- **DSAR**: no account linkage and no user ID. Requests are answered by deleting the issues, or by the 90-day expiry.
-- **Runbook**: `mobile/poker/README.md` covers where to look, triage, coverage gaps, retention and a hotfix to turn collection off.
+  - T013a records local changes and device/network evidence from cold start, a synthetic crash, restart and an in-place off-to-candidate upgrade. Use a consistent QA signer for the upgrade. Logcat and file listings supplement device-level network observation with an on-state positive control. Exclude app traffic unrelated to Firebase and record ambiguous traffic as unresolved.
+  - STOP before PR1 merge on unauthorised or ambiguous egress, storage, queued uploads or version/choice transitions. Send T013a evidence to T013c. Any mitigation must be reviewed against the pinned SDK and rechecked on the same matrix before the gate passes.
+  - T013b exercises the enabled Stage Draft with synthetic events and checks offline buffering and authorised upload.
+- **Retention and rights**: document retention by service, identifier limitations and the verified mechanism to handle objections/deletion requests. Do not promise per-user deletion or a hard 90-day erasure deadline without evidence.
+- **Runbook**: `mobile/poker/README.md` covers where to look, triage, coverage gaps, retention and the verified cutoff and upgrade procedure for disabling diagnostics.
 
 ## 5. Breaking impact
 - **Android**:
@@ -232,7 +202,7 @@ Collection is off by default, and anything buffered while it is off is deleted.
   - The new `ACCESS_NETWORK_STATE` permission.
   - The Google Services and Crashlytics Gradle plugins.
   - With collection on, network egress to the Crashlytics/Installations/logging hosts.
-- **Builds**: every Android build fails until `google-services.json` is committed, which is intended (Gate C before PR1).
+- **Builds**: every Android build fails until `google-services.json` is committed, which is intended. Gate C is required for the build and can follow Draft creation.
   `[skip netlify]` must **not** be used on PR1 or the Gate E PR, because the Stage APK build depends on the Deploy Preview.
 - **Stage reinstalls**: a different ephemeral debug key forces an uninstall, which drops the local session and buffered reports.
 - **WWW**: only the T015 legal revision changes WWW, and it goes through the OWNER WWW release.
@@ -242,17 +212,16 @@ Collection is off by default, and anything buffered while it is off is deleted.
 
 ## 6. Delivery and gates
 - **Gate A (done)**: two independent Stage A architecture reviews (#1306).
-- **Gate B (this task)**: two Stage B plan reviews and a round-2 verification; the r2/r3 fixes and dispositions are in #1306. Then
-  OWNER approval of the plan and D1–D7.
-- **Gate C (OWNER, phone)**: create the Spark project and two Android apps without Analytics, apply the §4 settings, and paste
-  `google-services.json`.
+- **Gate B (done)**: OWNER authorised execution using local r4 and C1–C7. The separate independent implementation PR review remains required. D4 is decided at T013c.
+- **Gate C (OWNER, phone)**: create the Spark project and two Android apps without Analytics, apply the §4 settings, and supply
+  `google-services.json` plus the project ID. This blocks the Android build, while Draft preparation can proceed.
 - **Gate D, PR1 (agent Draft, Deploy Preview kept)**: T005–T012 with collection off. The PR1 Stage APK is the compile, manifest and
-  T013a evidence. Codex review per AGENTS.md: at most 3 rounds and 0 P0/P1/P2 on the final SHA. Only the OWNER merges.
-- **Gate E (OWNER GO for D5)**: an unmerged Draft PR with `stage = true`; the OWNER installs its APK and runs T013b.
+  T013a evidence. Only the OWNER merges after T013a/T013c and the author-dependent independent review per AGENTS.md, at most three rounds with zero P0/P1/P2 on the final SHA.
+- **Gate E (OWNER GO for D5)**: an unmerged Draft with Stage eligibility for synthetic QA. Its positive control feeds T013a before PR1 merge. The OWNER runs T013b and the Draft closes unmerged.
 - **Gate F (privacy, OWNER)**:
-  - T014 if D4 requires it.
+  - Implement and independently review T014 if D4 requires a choice control. Verify permission persistence, restart, withdrawal, and no unauthorised backlog release.
   - T015 (the a5 candidate, then OWNER WWW Candidate → Publish, plus the Data Safety draft).
-  - After D4 approval, a reviewed PR sets `production: true`.
+  - After D4 approval and the applicable disclosure gates, a reviewed PR enables Production eligibility. With opt-in, a fresh install remains off pending consent. If objection or withdrawal cannot stop future unauthorised activity, STOP before Gate G.
 - **Gate G (Play internal, separate OWNER GO)**: build and sign the release AAB with the existing workflow, the OWNER uploads it, then
   T016.
 - Public Production stays blocked until the OWNER accepts #1306 and the remaining #1140 gates.

@@ -53,6 +53,7 @@ public class PokerGoogleSignInPlugin extends Plugin {
         String clientId = webClientId();
         String nonce = call.getString("nonce");
         if (clientId == null) {
+            PokerDiagnosticsPlugin.recordCredential("config_missing", null, null);
             call.reject("Google sign-in unavailable", "unavailable");
             return;
         }
@@ -90,6 +91,7 @@ public class PokerGoogleSignInPlugin extends Plugin {
                             // Fall through to a generic failure without exposing provider details.
                         }
                     }
+                    PokerDiagnosticsPlugin.recordCredential("unexpected_credential", null, null);
                     call.reject("Google sign-in failed", "failed");
                 }
 
@@ -98,7 +100,10 @@ public class PokerGoogleSignInPlugin extends Plugin {
                     end();
                     if (error instanceof GetCredentialCancellationException) call.reject("Google sign-in canceled", "canceled");
                     else if (error instanceof NoCredentialException) call.reject("No Google account available", "no_credential");
-                    else call.reject("Google sign-in failed", "failed");
+                    else {
+                        PokerDiagnosticsPlugin.recordCredential("credential_manager", error.getClass().getSimpleName(), error.getType());
+                        call.reject("Google sign-in failed", "failed");
+                    }
                 }
             });
     }

@@ -1,8 +1,8 @@
 # Feature Specification: Android crash and non-fatal diagnostics (#1306)
 
 **Feature Branch**: `1306-android-crash-diagnostics`
-**Created**: 2026-11-22 · **Revised**: 2026-11-22 r3 (Stage B findings and round-2 verification applied) · **Base**: `main` @ `89374212`
-**Status**: DRAFT for OWNER plan approval. There is no implementation GO yet.
+**Created**: 2026-11-22 · **Revised**: 2026-11-22 r4 execution baseline (Codex Stage B findings) · **Base**: `main` @ `89374212`
+**Status**: OWNER authorised collection-off implementation and Draft PR. D4 and Stage device tests remain gated.
 **Input**: issue #1306 body, its research/decision comments and SpecKit drafts, two Stage A and two Stage B reviews (#1306).
 
 Release gate: there is **no public/Production Google Play rollout** until the OWNER accepts this feature (#1140). Play internal
@@ -40,15 +40,17 @@ occurrence on the Play internal build, and is never forced.
 As a player, I am told accurately what diagnostics are collected, by whom, how long they are kept and on what legal basis. I can
 object or opt out where the law requires it.
 
-No data leaves the device in any distributed build until two conditions hold:
+In Play builds, diagnostic processing starts only after the applicable D4 conditions are met:
 - the OWNER has approved the legal basis, and
-- the EN/PL Privacy Policy and Play Data Safety match the real SDK behaviour.
+- the EN/PL Privacy Policy and Play Data Safety match the real SDK behaviour, and
+- where required, the player has opted in before the SDK starts any covered access, storage or transfer.
 
-Reports that the SDK buffered while collection was off are deleted, never uploaded later.
+D5 permits separately authorised, unmerged Stage QA with synthetic data on the OWNER’s test device.
+
+Reports from an unauthorised period must never upload. If an older build can have left a backlog, a reviewed migration must establish its safe disposition before enabling any SDK sender.
 **Independent test**:
-- The release AAB manifest shows `firebase_crashlytics_collection_enabled=false` unless the reviewed per-channel constant is
-  `true`.
-- A collection-off QA build shows no Firebase network upload.
+- The merged manifest and on-device startup match the approved D4 mode, including the pre-choice state and any persisted SDK override.
+- T013a verifies network, local storage and upgrade behaviour with the approved test matrix.
 - The a5 policy candidate and the Data Safety draft list Crashlytics, Installations, Sessions, the identifiers and the 90-day
   retention.
 
@@ -70,7 +72,7 @@ Diagnostics never delay or break startup, sign-in or gameplay, never flood repor
   is reported recursively.
 - Cross-origin `Script error.` and errors from non-packaged scripts are ignored. Inline-script errors keep only the line number.
 - The SDK keeps only the newest 8 non-fatals until the next launch. The native cap (7 per process, 1 per code:stage) stays below that.
-- While collection is off, the plugin deletes unsent reports on every start. The first run of an enabled build also purges once, so a report buffered under an earlier collection-off build never uploads after the upgrade.
+- A disabled or undecided state blocks unauthorised SDK activity, including before the WebView starts. An upgrade preserves the privacy choice and cannot release a legacy backlog. An uncertain migration or withdrawal leaves activation blocked.
 - A Stage reinstall with a different ephemeral debug key needs an uninstall first, which also drops buffered reports.
 - Known coverage gaps:
   - crashes before Firebase init
@@ -105,14 +107,11 @@ Diagnostics never delay or break startup, sign-in or gameplay, never flood repor
   `code:stage` gets its own synthetic stack frame so it forms its own issue. `setUserId` and free-text `log` are never used.
 - **FR-006** The native cap applies to native and JS reports together: 1 report per `code:stage` and 7 per process. Every call is
   fire-and-forget, swallows errors and is never awaited on startup, sign-in or gameplay paths.
-- **FR-007** Collection is **off by default**. A build-time manifest flag is set from a reviewed per-channel constant. While it is
-  off, `PokerDiagnosticsPlugin.load()` calls `deleteUnsentReports()` and `record()` returns immediately.
-
-  The flag is switched on only through a separately reviewed change after an OWNER GO:
-  - Stage QA: an unmerged Draft QA build.
-  - Production: only after the legal basis and the disclosures are approved.
-
-  If the approved legal model needs an opt-in/opt-out control, the Account page gets one switch (T014).
+- **FR-007** Diagnostics default to off. D4 remains conditional on T013a and the approved LIA/ePrivacy assessment in T013c.
+  Distinguish automatic local capture, identifier access and storage, event staging and network transfer. For opt-in,
+  a missing, invalid or withdrawn choice is off. Notice-only requires the approved legal basis, disclosures and objection
+  handling. The approved mode must govern startup and upgrade before a Firebase component can perform an operation that
+  requires that permission. Stage QA uses the separately authorised D5 Draft. Play activation requires Gate F.
 - **FR-008** Diagnostics code exists only in the Android package. These stay unchanged:
   - the ordinary WWW/Stage pages
   - `js/auth/supabaseClient.js` and `js/account-page.js`
@@ -128,7 +127,7 @@ Diagnostics never delay or break startup, sign-in or gameplay, never flood repor
   The only new permission is `android.permission.ACCESS_NETWORK_STATE`. It is declared by `firebase-crashlytics:21.1.0`,
   `firebase-installations:20.0.0` and `transport-*:5.0.0`, and is accepted only after OWNER approval (D2).
 - **FR-010** There is no R8/mapping work while the Capacitor 8.5.3 template keeps `minifyEnabled false`.
-- **FR-011** These are ready before any distributed build has collection on:
+- **FR-011** These are ready before any Play build has collection on. D5 Stage QA follows its separate test-data and authorisation gate:
   - a new immutable Privacy candidate `legal/privacy.<date>-a5.{en,pl}.html`
   - its manifest `specs/1306-android-crash-diagnostics/legal-candidate-a5/manifest.json`
   - the aliases
@@ -145,16 +144,17 @@ Diagnostics never delay or break startup, sign-in or gameplay, never flood repor
 - **Diagnostic report**: a non-fatal `PokerDiagnostic` whose message is `<code>:<stage>`. It has one synthetic frame
   `PokerDiagnostic.<code>(<stage>:1)` and the custom keys `code`, `stage`, `channel` and `source_sha`. Two keys are optional:
   `js_file` (packaged `.js` basename) and `js_line`. Native reports may add `exception` and `type`.
-- **SDK-automatic data**: the Crashlytics installation UUID, the Firebase installation ID and a session ID; device model, OS,
-  RAM/disk and a rooted flag; thread stacks; and, for native fatals, the exception class and message. Retention is 90 days
-  (Firebase privacy page).
+- **SDK-automatic data**: Crashlytics installation UUID, crash or ANR stacks and native exception class/message, app state
+  and device metadata. Installations uses a Firebase installation ID and Firebase user agent. Sessions adds session IDs,
+  app/device and network metadata and usage metrics such as foreground/session timing. Review exact fields and retention
+  by service. Firebase documents a 90-day period before removal starts for Crashlytics crash data and associated identifiers.
 
 ## Success Criteria *(mandatory)*
 - **SC-001** The collection-off build (PR1 APK) shows no Firebase upload. The Stage QA APK then produces 1 fatal and 3 distinct
   JS-origin/bridge issues, each with the correct SHA/channel and sanitised keys.
 - **SC-002** The OWNER receives at least one Crashlytics e-mail alert (new fatal or new non-fatal).
 - **SC-003** Play and sign-in in airplane mode are unaffected. Reports arrive after recovery and relaunch.
-- **SC-004** The release AAB passes the manifest checks with exactly the approved permission set and collection off by default.
+- **SC-004** The release AAB passes manifest checks for the approved permissions and activation mode. An opt-in build starts off even when the feature is available.
 - **SC-005** Before any public release GO, the OWNER accepts the dashboard, a sample report, the a5 policy and the Data Safety
   draft.
 

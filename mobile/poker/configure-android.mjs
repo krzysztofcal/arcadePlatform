@@ -128,6 +128,54 @@ export function googleSignInResource(clientId) {
   return `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="poker_google_web_client_id" translatable="false">${clientId}</string>\n</resources>\n`;
 }
 
+// Pin to the OWNER-provisioned dedicated Spark project once its configuration is supplied.
+const FIREBASE_PROJECT_ID = null;
+const FIREBASE_CRASHLYTICS_DEPENDENCIES = ['com.google.firebase:firebase-crashlytics:21.1.0'];
+const CRASHLYTICS_GRADLE_CLASSPATH = 'com.google.firebase:firebase-crashlytics-gradle:3.0.8';
+const DIAGNOSTICS_COLLECTION = { stage: false, production: false };
+
+export function assertFirebaseConfig(json, appId, projectId) {
+  if (!projectId) throw new Error('Firebase Spark project ID is not pinned in configure-android.mjs');
+  const project = json?.project_info;
+  if (project?.project_id !== projectId || !/^[0-9]+$/.test(project.project_number)) {
+    throw new Error('Firebase project does not match the pinned project');
+  }
+  const clients = Array.isArray(json.client)
+    ? json.client.filter(client => client?.client_info?.android_client_info?.package_name === appId)
+    : [];
+  const client = clients[0];
+  const sdkAppId = client?.client_info?.mobilesdk_app_id;
+  if (clients.length !== 1 || typeof sdkAppId !== 'string'
+      || !sdkAppId.startsWith(`1:${project.project_number}:android:`)
+      || !/^1:[0-9]+:android:[a-f0-9]+$/.test(sdkAppId)
+      || !Array.isArray(client.api_key) || client.api_key.length !== 1
+      || !/^AIza[A-Za-z0-9_-]{35}$/.test(client.api_key[0]?.current_key)) {
+    throw new Error(`Expected one valid Firebase Android client for ${appId}`);
+  }
+}
+
+export function configureDiagnosticsManifest(xml, channel) {
+  if (!Object.hasOwn(DIAGNOSTICS_COLLECTION, channel) || !xml.includes('</application>')
+      || /firebase_crashlytics_collection_enabled|poker_diagnostics_enabled/.test(xml)) {
+    throw new Error('Unexpected Android template diagnostics metadata');
+  }
+  return xml.replace('</application>', `<meta-data android:name="firebase_crashlytics_collection_enabled" android:value="false" />
+    <meta-data android:name="poker_diagnostics_enabled" android:value="${DIAGNOSTICS_COLLECTION[channel]}" />
+</application>`);
+}
+
+export function buildResources(channel, sha) {
+  if (!Object.hasOwn(DIAGNOSTICS_COLLECTION, channel) || !/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error('Invalid Android diagnostics channel or source SHA');
+  }
+  return `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="poker_build_channel" translatable="false">${channel}</string>
+    <string name="poker_source_sha" translatable="false">${sha}</string>
+</resources>
+`;
+}
+
 // Compare canonical paths so a symlinked invocation still configures (never a silent no-op).
 function isDirectRun() {
   if (!process.argv[1]) return false;
@@ -143,10 +191,26 @@ if (isDirectRun()) {
   const googleClientId = googleWebClientId(channel, process.env);
   const packagePath = appId.split('.').join('/');
 
+  const firebaseFile = new URL('./google-services.json', import.meta.url);
+  let firebaseConfig;
+  try {
+    firebaseConfig = JSON.parse(await readFile(firebaseFile, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') throw new Error('Missing mobile/poker/google-services.json from the dedicated Firebase Spark project');
+    if (error instanceof SyntaxError) throw new Error('Invalid mobile/poker/google-services.json');
+    throw error;
+  }
+  for (const packageName of [APPROVED_PRODUCTION_APP_ID, 'pl.kcswh.arcadepoker.stage']) {
+    assertFirebaseConfig(firebaseConfig, packageName, FIREBASE_PROJECT_ID);
+  }
+  const receipt = JSON.parse(await readFile(new URL('./www/build-receipt.json', import.meta.url), 'utf8'));
+  const resources = buildResources(channel, receipt.sha);
+
   const file = new URL('./android/app/src/main/AndroidManifest.xml', import.meta.url);
   let xml = await readFile(file, 'utf8');
   xml = configureManifest(xml, channel);
   xml = removeUnusedLibraryPermissions(xml);
+  xml = configureDiagnosticsManifest(xml, channel);
   await writeFile(file, xml);
 
   const gradleFile = new URL('./android/app/build.gradle', import.meta.url);
@@ -156,7 +220,17 @@ if (isDirectRun()) {
   gradle = gradle.replace('versionCode 1', `versionCode ${version.code}`);
   const capacitorDependency = "    implementation project(':capacitor-android')\n";
   if (!gradle.includes(capacitorDependency)) throw new Error('Unexpected Android template dependencies');
-  gradle = gradle.replace(capacitorDependency, capacitorDependency + GOOGLE_SIGNIN_DEPENDENCIES.map(dep => `    implementation "${dep}"\n`).join(''));
+  gradle = gradle.replace(capacitorDependency, capacitorDependency + [...GOOGLE_SIGNIN_DEPENDENCIES, ...FIREBASE_CRASHLYTICS_DEPENDENCIES].map(dep => `    implementation "${dep}"\n`).join(''));
+  const servicesBlock = /\ntry \{\n    def servicesJSON = file\('google-services\.json'\)[\s\S]*?\n\} catch\(Exception e\) \{[^}]*\}\s*$/;
+  if (!servicesBlock.test(gradle)) throw new Error('Unexpected Android template Google Services block');
+  gradle = gradle.replace(servicesBlock, "\napply plugin: 'com.google.gms.google-services'\napply plugin: 'com.google.firebase.crashlytics'\n");
+  const rootGradleFile = new URL('./android/build.gradle', import.meta.url);
+  const rootGradle = await readFile(rootGradleFile, 'utf8');
+  const servicesClasspath = "classpath 'com.google.gms:google-services:4.4.4'";
+  if (rootGradle.split(servicesClasspath).length !== 2) throw new Error('Unexpected Android template Google Services classpath');
+  await writeFile(rootGradleFile, rootGradle.replace(servicesClasspath,
+    `${servicesClasspath}\n        classpath '${CRASHLYTICS_GRADLE_CLASSPATH}'`));
+  await copyFile(firebaseFile, new URL('./android/app/google-services.json', import.meta.url));
   await writeFile(gradleFile, gradle);
 
   // One inset owner: full table background, safe content; native margins elsewhere.
@@ -188,6 +262,7 @@ import com.getcapacitor.WebViewListener;`);
         SplashScreen.installSplashScreen(this);
         registerPlugin(PokerAudioPlugin.class);
         registerPlugin(PokerGoogleSignInPlugin.class);
+        registerPlugin(PokerDiagnosticsPlugin.class);
         super.onCreate(savedInstanceState);
         getWindow().getDecorView().setBackgroundColor(android.graphics.Color.rgb(10, 15, 20));
         EdgeToEdge.enable(this);
@@ -247,7 +322,7 @@ import com.getcapacitor.WebViewListener;`);
     }
 }`);
   await writeFile(activityFile, activity);
-  for (const name of ['PokerAudioPlugin', 'PokerGoogleSignInPlugin']) {
+  for (const name of ['PokerAudioPlugin', 'PokerGoogleSignInPlugin', 'PokerDiagnosticsPlugin']) {
     let pluginSrc = await readFile(new URL(`./${name}.java`, import.meta.url), 'utf8');
     const firstLine = pluginSrc.split(/\r?\n/, 1)[0];
     if (firstLine !== 'package pl.kcswh.arcadepoker.stage;') {
@@ -256,6 +331,7 @@ import com.getcapacitor.WebViewListener;`);
     pluginSrc = pluginSrc.replace('package pl.kcswh.arcadepoker.stage;', `package ${appId};`);
     await writeFile(new URL(`./android/app/src/main/java/${packagePath}/${name}.java`, import.meta.url), pluginSrc);
   }
+  await writeFile(new URL('./android/app/src/main/res/values/poker_diagnostics.xml', import.meta.url), resources);
   if (googleClientId) await writeFile(new URL('./android/app/src/main/res/values/poker_google_signin.xml', import.meta.url), googleSignInResource(googleClientId));
 
   // Keep the launch window and WebView on the same dark brand surface.
