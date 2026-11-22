@@ -2257,8 +2257,12 @@ function bootXpCore(window, document) {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") {
       return Promise.resolve(null);
     }
+    const gen = typeof window.XPClient.getStatusGeneration === "function" ? window.XPClient.getStatusGeneration() : null;
     return window.XPClient.fetchStatus()
       .then((data) => {
+        if (gen !== null && typeof window.XPClient.getStatusGeneration === "function" && window.XPClient.getStatusGeneration() !== gen) {
+          return null;
+        }
         applyServerDelta(data, { source: "reconcile" });
         publishConfirmedXp(data);
         try {
@@ -2274,6 +2278,9 @@ function bootXpCore(window, document) {
         if (err && err.code === "stale_identity") {
           return null;
         }
+        if (gen !== null && typeof window.XPClient.getStatusGeneration === "function" && window.XPClient.getStatusGeneration() !== gen) {
+          return null;
+        }
         try {
           const message = err && err.message ? String(err.message).slice(0, 200) : "error";
           logDebug("badge_reconcile_error", { message });
@@ -2285,8 +2292,13 @@ function bootXpCore(window, document) {
   function refreshStatus() {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
+    const gen = typeof window.XPClient.getStatusGeneration === "function" ? window.XPClient.getStatusGeneration() : null;
     return window.XPClient.fetchStatus()
       .then((data) => {
+        if (gen !== null && typeof window.XPClient.getStatusGeneration === "function" && window.XPClient.getStatusGeneration() !== gen) {
+          setBadgeLoading(false);
+          return null;
+        }
         const migrationPending = typeof window.XPClient.isInitialStatusPending === "function"
           && window.XPClient.isInitialStatusPending();
         handleResponse(data, { source: "status", allowServerRegression: migrationPending });
@@ -2294,6 +2306,10 @@ function bootXpCore(window, document) {
       })
       .catch((err) => {
         if (err && err.code === "stale_identity") {
+          setBadgeLoading(false);
+          return null;
+        }
+        if (gen !== null && typeof window.XPClient.getStatusGeneration === "function" && window.XPClient.getStatusGeneration() !== gen) {
           setBadgeLoading(false);
           return null;
         }

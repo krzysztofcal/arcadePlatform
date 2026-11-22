@@ -165,7 +165,7 @@
           }
         }
 
-        if (state.authVersion === version) {
+        if (state.authVersion === version && state.authPromise === promise) {
           state.authToken = token || null;
           state.authCheckedAt = Date.now();
           return state.authToken;
@@ -180,7 +180,7 @@
             console.warn("[XPClient] auth_token_fetch_error");
           }
         }
-        if (state.authVersion === version) {
+        if (state.authVersion === version && state.authPromise === promise) {
           state.authToken = null;
           state.authCheckedAt = Date.now();
         }
@@ -620,6 +620,7 @@
   }
 
   async function refreshInitialStatus(legacyOverride, attempt) {
+    const gen = state.statusGeneration;
     state.initialStatusPending = true;
     const legacy = legacyOverride && typeof legacyOverride === "object"
       ? legacyOverride
@@ -645,6 +646,10 @@
 
     const identity = (await getAuthenticatedUserId()) || ensureIds().sessionId;
     const payload = await refreshBadgeFromServer({ allowServerRegression: true });
+    if (state.statusGeneration !== gen) {
+      state.initialStatusPending = false;
+      return;
+    }
     const serverTotal = Number(payload?.totalLifetime);
     if (payload?.ok !== true || payload?.status !== "statusOnly"
       || !Number.isSafeInteger(serverTotal) || serverTotal < 0) {
@@ -657,6 +662,10 @@
       } else {
         state.initialStatusPending = false;
       }
+      return;
+    }
+    if (state.statusGeneration !== gen) {
+      state.initialStatusPending = false;
       return;
     }
     clearIdentityBoundStorage();
@@ -808,8 +817,10 @@
     if (force) state.statusPromise = null;
     state.statusBootstrapped = true;
     if (!state.statusPromise) {
+      const gen = state.statusGeneration;
       let promise;
       promise = fetchStatus().then(payload => {
+        if (state.statusGeneration !== gen) return;
         if (payload && typeof payload === "object") {
           if (Number.isFinite(payload.capDelta)) setClientCap(Number(payload.capDelta));
           else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
@@ -947,8 +958,12 @@
   }
 
   async function refreshBadgeFromServer(options) {
+    const gen = state.statusGeneration;
     try {
       const payload = await fetchStatus();
+      if (state.statusGeneration !== gen) {
+        return null;
+      }
       const allowServerRegression = options?.allowServerRegression === true
         || state.initialStatusPending === true;
       if (typeof window !== "undefined" && window.XP && typeof window.XP.refreshFromServerStatus === "function") {
@@ -959,13 +974,20 @@
           });
         } catch (_) {}
       }
+      if (state.statusGeneration !== gen) {
+        return null;
+      }
       await publishConfirmedXp(payload);
       return payload;
     } catch (err) {
       if (err && err.code === "stale_identity") {
         return null;
       }
+      if (state.statusGeneration !== gen) {
+        return null;
+      }
       getAuthenticatedUserId().then((userId) => {
+        if (state.statusGeneration !== gen) return;
         const ui = getUserUiState();
         if (userId && ui && typeof ui.markSliceApplied === "function") ui.markSliceApplied(userId, "xp", state.xpCacheHydrated ? "stale" : "loading");
       }).catch(() => {});
@@ -1138,6 +1160,7 @@
     rotateAwardSession,
     ensureStatusBootstrap,
     getStatusBootstrapPromise: () => state.statusPromise,
+    getStatusGeneration: () => state.statusGeneration,
   };
 
   bindUserUiXp();
