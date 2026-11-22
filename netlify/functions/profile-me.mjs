@@ -108,8 +108,9 @@ function createProfileMeHandler(deps = {}) {
       }
       const profileMs = Date.now() - startedAt - authMs;
       if (!withPoker) {
+        const response = json(200, cors, ownerProfile(profile));
         timing(profileMs);
-        return json(200, cors, ownerProfile(profile));
+        return response;
       }
 
       const [balanceResult, pokerResult] = await Promise.allSettled([
@@ -133,12 +134,13 @@ function createProfileMeHandler(deps = {}) {
         });
       }
 
-      timing(profileMs);
-      return json(200, cors, {
+      const response = json(200, cors, {
         ...ownerProfile(profile),
         balance: normalizeBalanceSnapshot(balanceResult.value),
         poker
       });
+      timing(profileMs);
+      return response;
     } catch (error) {
       const status = Number(error?.status) || 500;
       const publicCodes = new Set(["invalid_json", "invalid_request", "invalid_leaderboard_visibility", "profile_field_read_only", "invalid_avatar_choice", "stale_avatar_revision", "terms_required", "avatar_variants_not_active"]);

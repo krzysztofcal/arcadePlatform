@@ -46,7 +46,7 @@ The WS projection is bounded by `POKER_WS_INTERNAL_TIMEOUT_MS` (default 4 s) and
 | I Simplicity / reuse | PASS. Existing functions and endpoints only; no new endpoint, table, dependency or framework |
 | II Runtime boundaries | PASS. The WS stays authoritative and the Poker projection contract is unchanged |
 | III Fail-closed | PASS. The lifecycle check still runs in the same request, inside the profile transaction, and its 401 is unchanged. A failed Poker or photo read never grants anything |
-| IV JSP / logging / CSP | PASS. Global IIFEs, `klog` only, no inline script, no CSS. The SRI pins of `profile-client.js` (47 pages) and `profile-google-photo.js` (`account.html`) are updated |
+| IV JSP / logging / CSP | PASS. Global IIFEs, `klog` only, no inline script, no CSS. The SRI pins of `profile-client.js` (37 non-legal pages) and `profile-google-photo.js` (`account.html`) are updated. The 10 immutable `legal/*.html` documents keep their old pin by design (spec FR-006) |
 | V Tests | PASS. Fundamental contract tests in existing files only (late Poker, contained Poker failure, coalescing across writes, gallery stability, GET/PATCH lifecycle check). No DOM/CSS suite. No Git commands |
 | VI Workspace | Volume worktree created via the preflight |
 
@@ -55,7 +55,7 @@ The WS projection is bounded by `POKER_WS_INTERNAL_TIMEOUT_MS` (default 4 s) and
 - `js/profile-client.js::getMe/updateMe/clear/invalidate`: per-kind in-flight reads, `writeSeq`, and a cache write only for a current read.
 - `js/account-page.js::renderUser/loadPublicProfile/loadPokerProjection/renderAvatarGallery`: independent sections, the Google tile rule, and a contained Poker failure.
 - `js/profile-google-photo.js::request/getPresentation`: invalidates after photo actions; `copyKnown`.
-- `*.html`: updated SRI pins.
+- `*.html` (non-legal only): updated SRI pins. `legal/*.html` is unchanged (FR-006).
 - Tests: `tests/account-auth.contract.test.mjs`, `tests/account-page.test.mjs`, `tests/public-profiles.behavior.test.mjs`.
 
 ## Breaking impact

@@ -160,9 +160,9 @@
     var cached = false;
     var response;
     writesInFlight += 1;
-    try { response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard); }
-    finally { writeSeq += 1; seq += 1; writesInFlight -= 1; }
     try {
+      try { response = await authedFetch(ME_URL, { method: 'PATCH', body: JSON.stringify(payload || {}) }, guard); }
+      finally { writeSeq += 1; seq += 1; writesInFlight -= 1; }
       var profile = await parse(response);
       if (await currentUserId() !== userId || generation !== publicGeneration) throw staleIdentityError();
       if(guard&&!guard.isCurrent())throw Object.assign(new Error('stale_profile'),{code:'stale_profile'});
@@ -174,7 +174,8 @@
       notify(profile);
       return profile;
     } finally {
-      // Any sent write whose answer is not cached (overlap, rejection, stale guard) leaves no older profile behind.
+      // Any write whose answer is not cached (lost response, overlap, rejection, stale guard) leaves no older
+      // profile behind: the server may have applied it.
       if (!cached) cache = null;
     }
   }

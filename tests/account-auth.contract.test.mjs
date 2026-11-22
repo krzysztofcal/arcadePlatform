@@ -366,6 +366,16 @@ test('ProfileClient caches no answer of overlapping writes whose server order is
   const again = window.ProfileClient.getMe(false); await until(6); requests[5].release(); assert.equal((await again).displayName, 'server-A');
 });
 
+test('ProfileClient drops its cached profile when a sent write loses its response', async () => {
+  let mode = 'get', gets = 0;
+  const window = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
+  vm.runInNewContext(await read('js/profile-client.js'), { window, document: { dispatchEvent(){} }, Promise, URL, Date, CustomEvent: class {},
+    fetch: async (_url, options) => { if (options.method === 'PATCH') throw new TypeError('connection reset after the server applied the write'); gets++; return { ok: true, json: async () => ({ displayName: gets === 1 ? 'before-write' : 'after-write' }) }; } });
+  assert.equal((await window.ProfileClient.getMe(false)).displayName, 'before-write');
+  await assert.rejects(window.ProfileClient.updateMe({ leaderboardVisible: false }), TypeError);
+  assert.equal((await window.ProfileClient.getMe(false)).displayName, 'after-write'); assert.equal(gets, 2);
+});
+
 test('A forced Account refresh after an invalidation renders only its own newer read', async () => {
   const reads = [];
   const f = await accountReadFixture(() => new Promise(resolve => reads.push(resolve)));

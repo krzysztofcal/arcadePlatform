@@ -43,7 +43,8 @@ In both cases the tile is a stable placeholder that only changes state.
 - **FR-005** `netlify/functions/profile-me.mjs` GET verifies the JWT with `allowDeleting: true` and relies on the account-lifecycle check that `ensureUserProfile` already runs inside its own transaction. This is one transaction instead of two. `account_not_active` maps to the unchanged 401.
   - PATCH keeps the JWT lifecycle check.
   - A bounded `profile_me_timing` klog (aggregate ms, no identifiers) is written for **successful** GET/PATCH requests ≥ 1000 ms. Failed requests keep the existing `profile_me_failed` log.
-- **FR-006** No new endpoint, table, migration, flag, CSS or inline script. The SRI pins of the changed scripts are updated.
+- **FR-006** No new endpoint, table, migration, flag, CSS or inline script. The SRI pins of the changed scripts are updated on every non-legal page: 37 for `profile-client.js` and 1 for `profile-google-photo.js`.
+  The 10 `legal/*.html` documents are immutable, hash-pinned documents and stay byte-identical, keeping their old `profile-client.js` pin. On those pages the browser skips the new script, and the topbar uses its existing fallback without `ProfileClient` (initials plus a direct `profile-me` fetch). Never update these pins in place; a future legal version decides.
 
 ## Success Criteria *(mandatory)*
 - **SC-001** In the deterministic replay of the Account-open sequence, `profile-me` requests per open drop from 10 to 2.
