@@ -46,6 +46,15 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   return ctx.window.XPClient;
 }
 
+// #1313: an awaited promise that never settles must not exit 0 as a silent pass.
+let contractCompleted = false;
+process.on('exit', (code) => {
+  if (code === 0 && !contractCompleted) {
+    console.error('xp-client contract tests did not complete');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   const semanticWindow = (scoreDelta) => ({
     gameId: 'pacman', windowStart: Date.now() - 1000, windowEnd: Date.now(),
@@ -967,9 +976,52 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     now += 70_000;
     // Subject changes to 'user-2'
     currentToken = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-2' })).toString('base64url') + '.s';
-    await XPClient.fetchStatus();
+    // The call that discovers the identity switch during its own token read belongs to the old key.
+    await assert.rejects(XPClient.fetchStatus(), (err) => { assert.equal(err.code, 'stale_identity'); return true; });
     assert.equal(XPClient.getStatusGeneration(), gen1 + 1, 'different subject must bump statusGeneration');
+    const afterSwitch = await XPClient.fetchStatus();
+    assert.equal(afterSwitch.status, 'statusOnly', 'the next call for the new identity proceeds');
   }
 
+  // Auth change while the token is being read: the call is stale and no POST carries the old token
+  {
+    const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
+    const tokenB = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-b' })).toString('base64url') + '.s';
+    let releaseA;
+    const holdA = new Promise(resolve => { releaseA = resolve; });
+    let tokenCalls = 0;
+    let authHandler = null;
+    const postedAuth = [];
+    const XPClient = await loadClientWithFetch(async (_url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') postedAuth.push((opts?.headers || {}).Authorization || null);
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      window: {
+        SupabaseAuth: { onAuthChange: (fn) => { authHandler = fn; } },
+        SupabaseAuthBridge: {
+          getAccessToken: async () => {
+            tokenCalls += 1;
+            if (tokenCalls === 1) { await holdA; return tokenA; }
+            return tokenB;
+          },
+          getCurrentUserId: async () => 'user-b',
+        },
+      },
+    });
+    assert.equal(typeof authHandler, 'function', 'XPClient must bind auth changes');
+
+    const call1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && tokenCalls === 0; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(tokenCalls, 1, 'call 1 must be reading token A');
+
+    authHandler('SIGNED_IN', { id: 'user-b' });
+    releaseA();
+    await assert.rejects(call1, (err) => { assert.equal(err.code, 'stale_identity'); return true; });
+    for (let i = 0; i < 20; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(!postedAuth.includes('Bearer ' + tokenA), 'no status POST may carry the previous identity token');
+  }
+
+  contractCompleted = true;
   console.log('xp-client contract tests passed');
 })();

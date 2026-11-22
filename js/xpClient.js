@@ -169,7 +169,8 @@
           const previousSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
           const nextToken = token || null;
           const nextSubject = nextToken ? decodeJwtSub(nextToken) : "";
-          if (previousSubject !== nextSubject) {
+          // A switch between two cached identities changes the key; the first cached token does not.
+          if (previousSubject !== "" && previousSubject !== nextSubject) {
             state.statusGeneration += 1;
           }
           state.authToken = nextToken;
@@ -867,8 +868,11 @@
   }
 
   async function fetchStatus() {
-    const authToken = await ensureAuthTokenWithRetry();
     const requestGeneration = state.statusGeneration;
+    const authToken = await ensureAuthTokenWithRetry();
+    if (state.statusGeneration !== requestGeneration) {
+      throw staleIdentityError();
+    }
     if (!authToken && await isUserLoggedIn()) {
       if (state.statusGeneration !== requestGeneration) {
         throw staleIdentityError();
