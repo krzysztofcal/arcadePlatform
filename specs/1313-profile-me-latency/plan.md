@@ -1,7 +1,7 @@
 # Implementation Plan: profile-me latency, scope 1 (#1313)
 
 **Branch**: `1313-profile-me-latency` | **Date**: 2026-11-22 | **Spec**: [spec.md](spec.md) | **Research**: [research.md](research.md)
-**Validation**: `node --test tests/account-auth.contract.test.mjs tests/account-page.test.mjs tests/topbar-contract.test.mjs tests/xp-client.test.mjs tests/xp-client-contract.test.mjs tests/xp-core-authoritative-reset.test.mjs tests/xp-client-bfcache.test.mjs`, run with the `scripts/test-all.mjs` environment. Then CI on the Draft PR and the Deploy Preview.
+**Validation**: `node --test tests/account-auth.contract.test.mjs tests/account-page.test.mjs tests/xp-client.test.mjs tests/xp-client-contract.test.mjs tests/xp-core-authoritative-reset.test.mjs tests/xp-client-bfcache.test.mjs`, run with the `scripts/test-all.mjs` environment. The new tests in `tests/topbar-contract.test.mjs` are run separately: that file has 5 failures that already exist on `main` and is not in CI. Then CI on the Draft PR and the Deploy Preview.
 
 ## Diagnosis (2026-11-22, read-only)
 | Measure | Production (`308806cc`, 24 h) | Preview #1311 (Stage DB) |
@@ -45,7 +45,7 @@
   - After the response, a key or generation change throws `{code:'stale_identity'}`.
   - Callers (`refreshBadgeFromServer`, `xp/core.js::refreshStatus`/`reconcileWithServer`, `refreshInitialStatus`) ignore that code: they apply nothing and show no error badge.
   - Finished answers are not kept.
-- **SRI**: update pins of the changed scripts on non-legal pages only.
+- **SRI**: none of the changed scripts is pinned, so no HTML changes.
 
 ## Measurement (before = `e663883e`, after = PR Deploy Preview; Stage DB for both)
 1. The OWNER opens Account on a real device five times: a cold load, then reloads 10 s apart, signed in.
