@@ -50,7 +50,7 @@
   <script src="js/core/sidebar-model.js" defer></script>
   <script src="js/sidebar.js" defer></script>
   <script src="js/account-page.js" defer></script>
-  <script src="js/profile-google-photo.js" integrity="sha256-+V7WZUGWStRxJona4UOMUNfh0gL18r4vGPfZ3lXXoLs=" crossorigin="anonymous" defer></script>
+  <script src="js/profile-google-photo.js" integrity="sha256-C4/gLVD+FXbQfeGvlwIz/RlCNANjBZjp/6LVJKMWPg0=" crossorigin="anonymous" defer></script>
   <link rel="stylesheet" href="js/vendor/klaro/klaro.css">
   <script src="js/klaro-config.js" defer></script>
   <script src="js/vendor/klaro/klaro.js" defer></script>
@@ -248,7 +248,7 @@
                   <p class="account-note" id="googlePhotoState" role="status" aria-live="polite"></p>
                   <button id="googlePhotoRetry" type="button" class="btn sm gh" hidden data-i18n="googlePhotoRetry">Retry photo read</button>
                   <div id="googlePhotoOffer">
-                    <label class="google-photo__consent"><input id="googlePhotoConsent" type="checkbox"> <span data-i18n="googlePhotoConsent">I agree that Arcade Hub copies my current Google profile photo once and shows it as my avatar to signed-in players. Our copy stays in private Storage; access links expire after 60 seconds. Anyone with a valid link can view or save the image. This is voluntary and I can withdraw at any time; copies already saved by others cannot be recalled.</span></label>
+                    <label class="google-photo__consent"><input id="googlePhotoConsent" type="checkbox"> <span id="googlePhotoConsentText" data-i18n="googlePhotoConsent">I agree that Arcade Hub copies my current Google profile photo once and shows it as my avatar to signed-in players. Our copy stays in private Storage; access links expire after 60 seconds. Anyone with a valid link can view or save the image. This is voluntary and I can withdraw at any time; copies already saved by others cannot be recalled.</span></label>
                     <button type="button" class="btn sm gh" id="googlePhotoImport" disabled data-i18n="googlePhotoImport">Use my Google photo</button>
                   </div>
                   <button type="button" class="btn sm gh" id="googlePhotoReconnect" hidden data-i18n="googlePhotoReconnect">Confirm with Google</button>

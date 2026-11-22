@@ -16,7 +16,7 @@ const normalize = text => text.replace(/\s+/g, ' ').trim();
 const htmlText = html => normalize(html.replace(/<\/(?:p|h[1-6]|li|th|td|tr)>/g, ' ').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
 const markdownText = text => normalize(text.replace(/^\|[-| ]+\|\s*$/gm, '').replace(/^#{1,6} /gm, '').replace(/^- /gm, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\|/g, ' '));
 
-test('approved legal content, historical policies and active a4 survive the real web packager', async () => {
+test('approved legal content, historical policies and active a5 survive the real web packager', async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), 'arcade-legal-package-'));
   try {
     await cp(root, fixture, { recursive: true, filter: source => !path.relative(root, source).split(path.sep).some(part => ['.git', 'node_modules', 'www'].includes(part)) });
@@ -77,6 +77,20 @@ test('approved legal content, historical policies and active a4 survive the real
       assert.match(packaged, /id="account-deletion"/);
       assert.match(packaged, /href="mailto:contact@kcswh\.pl"/);
     }
+    const a5 = JSON.parse(await readFile(path.join(root, 'specs/1140-ugc-safety/legal-candidate-a5/manifest.json'), 'utf8'));
+    assert.equal(a5.candidateVersion, '2026-11-21-a5');
+    assert.equal(a5.previousVersion, a4.candidateVersion);
+    for (const lang of ['pl', 'en']) {
+      const file = `privacy.${a5.candidateVersion}.${lang}.html`;
+      const page = `legal/${file}`;
+      const source = await readFile(path.join(root, page), 'utf8');
+      assert.equal(createHash('sha256').update(source).digest('hex'), a5.files[file]);
+      assert.equal(a5.basedOn[`legal/privacy.${a4.candidateVersion}.${lang}.html`], a4.files[`privacy.${a4.candidateVersion}.${lang}.html`]);
+      assert.ok(receipt.sourcePages.includes(page));
+      const packaged = await readFile(path.join(fixture, 'mobile/poker/www', page), 'utf8');
+      assert.equal(main(packaged), main(source));
+      assert.match(packaged, /id="account-deletion"/);
+    }
     assert.ok(!receipt.sourcePages.some(page => page.startsWith('legal/terms.') && page.includes(a4.candidateVersion)), 'a4 adds no Terms page');
     for (const lang of ['pl', 'en']) {
       for (const version of ['2026-10-26-a1', manifest.candidateVersion]) {
@@ -85,10 +99,12 @@ test('approved legal content, historical policies and active a4 survive the real
       const alias = await readFile(path.join(root, `legal/privacy.${lang}.html`), 'utf8');
       assert.match(alias, /id="account-deletion"/);
       assert.match(alias, /href="mailto:contact@kcswh\.pl"/);
-      // #1276: active Privacy aliases match a4; the a1/a2/a3 checks above remain intact.
-      const active = await readFile(path.join(root, `legal/privacy.${a4.candidateVersion}.${lang}.html`), 'utf8');
+      // Active Privacy aliases match the approved a5 text; historical checks remain intact.
+      const active = await readFile(path.join(root, `legal/privacy.${a5.candidateVersion}.${lang}.html`), 'utf8');
       const inner = html => html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)[1];
-      assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the a4 candidate text');
+      assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the approved a5 text');
+      const packagedAlias = await readFile(path.join(fixture, `mobile/poker/www/legal/privacy.${lang}.html`), 'utf8');
+      assert.equal(main(packagedAlias), main(alias), 'packaging changed the active Privacy alias');
       const legacy = await readFile(path.join(root, `legal/privacy.2026-10-26-a1.${lang}.html`), 'utf8');
       assert.equal(createHash('sha256').update(legacy).digest('hex'), PRIVACY_A1_SHA256[lang], 'Privacy a1 must stay immutable');
       // #1140: the active Terms alias carries the approved a2 text byte for byte; Terms a1 stays immutable for past acceptances.

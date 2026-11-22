@@ -134,15 +134,33 @@
     }
     show('googlePhotoPanel', true);
     show('arcadeAvatarPhotoHint', true);
-    var offer = !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
-    show('googlePhotoOffer', offer && !needsProof);
+    var offer = !!status && !hasPhoto && status.importEnabled !== false && status.googleLinked === true;
+    var upgrade = granted && stored && status.importEnabled !== false
+      && status.noticeVersion === '2026-11-21-g4' && ['2026-11-17-g2', '2026-11-21-g3'].includes(status.consent.noticeVersion)
+      && Number.isInteger(status.consentRevision);
+    show('googlePhotoOffer', upgrade || (offer && !needsProof));
+    var label = node('googlePhotoConsentText');
+    if (label && label.dataset) {
+      var useG4 = status && status.noticeVersion === '2026-11-21-g4';
+      var consentKey = useG4 ? 'googlePhotoConsentG4' : 'googlePhotoConsent';
+      if (!label.dataset.defaultText) label.dataset.defaultText = label.textContent;
+      label.dataset.i18n = consentKey;
+      label.textContent = t(consentKey, useG4
+        ? 'I agree to use my Google photo as my avatar in the web profile, leaderboard and Poker tables, visible to signed-in Arcade Hub users including spectators who have not joined. Arcade Hub stores a private copy. A short-lived download link may be shared while it works. I can withdraw consent to stop new links, but already displayed photos may remain until the next check and saved copies cannot be recalled.'
+        : label.dataset.defaultText);
+    }
+    if (importButton && importButton.dataset) {
+      importButton.dataset.action = upgrade ? 'upgrade-consent' : 'import';
+      importButton.dataset.i18n = upgrade ? 'googlePhotoUpgrade' : 'googlePhotoImport';
+      importButton.textContent = upgrade ? t('googlePhotoUpgrade', 'Confirm use of my photo') : t('googlePhotoImport', 'Use my Google photo');
+    }
     show('googlePhotoReconnect', offer && !!needsProof);
     show('googlePhotoWithdraw', granted || stored || active);
     show('googlePhotoRetry', photoState==='unavailable'||profileFailed);
     if(photoState==='pending')setState(t('googlePhotoPreviewPending','Waiting for the Google photo preview…'));
     else if(photoState==='unavailable')setState(t('googlePhotoPreviewUnavailable','The Google photo preview is unavailable. Retry the read; no photo will be imported again.'));
     else if(profileFailed)setState(t('googlePhotoProfileRefreshFailed','Photo status was read, but the profile could not be refreshed. Retry the read.'));
-    else if (status.photoInUse === true) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
+    else if (active) setState(t('googlePhotoInUse', 'Your Google photo is your avatar.'));
     else if (!granted && stored) setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
     else if (granted) setState(t('googlePhotoNotInUse', 'Your copy is stored with consent. Choose Google in the avatar gallery and save to use it again.'));
     else setState(t('googlePhotoOffer', 'Optional: use your Google profile photo instead of an Arcade avatar.'));
@@ -179,10 +197,14 @@
     try {
       var result = action === 'withdraw'
         ? await request('POST', { action: 'withdraw' }, expectedUser, false)
-        : await request('POST', { action: 'import', consent: true, noticeVersion: status && status.noticeVersion }, expectedUser, true);
+        : action === 'upgrade-consent'
+          ? await request('POST', { action: action, consent: true, noticeVersion: status.noticeVersion, expectedConsentRevision: status.consentRevision }, expectedUser, false)
+          : await request('POST', Object.assign({ action: 'import', consent: true, noticeVersion: status && status.noticeVersion },
+            status && status.noticeVersion === '2026-11-21-g4' ? { scope: 'web-leaderboard-poker-signed-in' } : {}), expectedUser, true);
       if (expectedGeneration !== generation) return;
       statusResolved=true;photoState=hasCopy(result)?'pending':null;render(result);
-      if (action !== 'withdraw' && result.photoInUse === true) setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
+      if (action === 'upgrade-consent') setState(t('googlePhotoUpgradeSaved', 'Photo consent updated.'));
+      else if (action !== 'withdraw' && result.photoInUse === true) setState(t('googlePhotoImported', 'Your Google photo is now your avatar.'));
       else if (action === 'withdraw' && result && result.copyDeleted === true) setState(t('googlePhotoWithdrawn', 'Your Google photo is no longer used and our copy was deleted.'));
       else if (action === 'withdraw') setState(t('googlePhotoCopyPending', 'Your Google photo is no longer shown, but the deletion of our copy is not confirmed yet. Try again later.'));
       if(action==='withdraw')clearPhotoPresentation();
@@ -355,7 +377,7 @@
     if (importButton) importButton.addEventListener('click', function(){
       var box = node('googlePhotoConsent');
       if (!box || !box.checked) return;
-      run('import');
+      run(importButton.dataset && importButton.dataset.action === 'upgrade-consent' ? 'upgrade-consent' : 'import');
     });
     var withdraw = node('googlePhotoWithdraw');
     if (withdraw) withdraw.addEventListener('click', async function(){
