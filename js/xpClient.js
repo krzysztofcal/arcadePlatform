@@ -166,7 +166,13 @@
         }
 
         if (state.authVersion === version && state.authPromise === promise) {
-          state.authToken = token || null;
+          const previousSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
+          const nextToken = token || null;
+          const nextSubject = nextToken ? decodeJwtSub(nextToken) : "";
+          if (previousSubject !== nextSubject) {
+            state.statusGeneration += 1;
+          }
+          state.authToken = nextToken;
           state.authCheckedAt = Date.now();
           return state.authToken;
         }
@@ -181,6 +187,10 @@
           }
         }
         if (state.authVersion === version && state.authPromise === promise) {
+          const previousSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
+          if (previousSubject !== "") {
+            state.statusGeneration += 1;
+          }
           state.authToken = null;
           state.authCheckedAt = Date.now();
         }
@@ -292,6 +302,7 @@
 
   function rotateAwardSession() {
     state.awardSessionId = randomId();
+    state.statusGeneration += 1;
   }
 
   // Server-side session management
@@ -856,12 +867,8 @@
   }
 
   async function fetchStatus() {
-    const requestGeneration = state.statusGeneration;
-
     const authToken = await ensureAuthTokenWithRetry();
-    if (state.statusGeneration !== requestGeneration) {
-      throw staleIdentityError();
-    }
+    const requestGeneration = state.statusGeneration;
     if (!authToken && await isUserLoggedIn()) {
       if (state.statusGeneration !== requestGeneration) {
         throw staleIdentityError();
@@ -895,6 +902,13 @@
       throw staleIdentityError();
     }
 
+    if (state.authToken) {
+      const cachedSubject = decodeJwtSub(state.authToken);
+      if (authSubject !== cachedSubject) {
+        throw staleIdentityError();
+      }
+    }
+
     function isStale() {
       const latestIds = ensureIds();
       const latestSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
@@ -905,6 +919,12 @@
     const inFlightEntry = { key, generation: requestGeneration, promise: null };
     const promise = (async () => {
       const body = { anonId: currentIds.userId, sessionId: currentIds.sessionId, operation: "status" };
+      if (state.authToken) {
+        const cachedSubject = decodeJwtSub(state.authToken);
+        if (authSubject !== cachedSubject) {
+          throw staleIdentityError();
+        }
+      }
       let res;
       try {
         res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {

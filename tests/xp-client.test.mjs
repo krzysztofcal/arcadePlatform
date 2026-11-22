@@ -685,6 +685,46 @@ assert.equal(typeof windowStub.XPClient.postWindowServerCalc, 'function', 'autho
   const genRes = await windowStub.XP.refreshStatus();
   assert.equal(genRes, null, 'refreshStatus must drop payload if generation changed before continuation');
   assert.equal(xpState.badge.getAttribute('aria-busy'), 'false', 'badge loading must be cleared');
+
+  // R4/F3: refresh A pending, gen changes, refresh B starts, A ends stale: loading stays on until B finishes
+  let releaseA, releaseB;
+  const holdA = new Promise(r => { releaseA = r; });
+  const holdB = new Promise(r => { releaseB = r; });
+  let callCount = 0;
+  gen = 20;
+  windowStub.XPClient.getStatusGeneration = () => gen;
+  windowStub.XPClient.fetchStatus = async () => {
+    callCount++;
+    if (callCount === 1) {
+      await holdA;
+      return { ok: true, status: 'statusOnly', totalLifetime: 1111 };
+    }
+    if (callCount === 2) {
+      await holdB;
+      return { ok: true, status: 'statusOnly', totalLifetime: 2222 };
+    }
+  };
+
+  const promiseA = windowStub.XP.refreshStatus();
+  assert.equal(xpState.badge.getAttribute('aria-busy'), 'true', 'loading on for A');
+
+  // Generation changes, refresh B starts
+  gen += 1;
+  const promiseB = windowStub.XP.refreshStatus();
+  assert.equal(xpState.badge.getAttribute('aria-busy'), 'true', 'loading on for B');
+
+  // A resolves and detects stale generation
+  releaseA();
+  const resA = await promiseA;
+  assert.equal(resA, null, 'refresh A must end stale');
+  assert.equal(xpState.badge.getAttribute('aria-busy'), 'true', 'loading must still be on after stale A while B is in flight');
+
+  // B finishes
+  releaseB();
+  const resB = await promiseB;
+  assert.ok(resB);
+  assert.equal(xpState.badge.getAttribute('aria-busy'), 'false', 'loading must be cleared when B finishes');
+
   windowStub.XPClient.fetchStatus = originalFetchStatus;
 }
 

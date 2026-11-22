@@ -2289,14 +2289,17 @@ function bootXpCore(window, document) {
       });
   }
 
+  let refreshSeq = 0;
+
   function refreshStatus() {
     if (!window.XPClient || typeof window.XPClient.fetchStatus !== "function") return Promise.resolve(null);
     setBadgeLoading(true);
+    const seq = ++refreshSeq;
     const gen = typeof window.XPClient.getStatusGeneration === "function" ? window.XPClient.getStatusGeneration() : null;
     return window.XPClient.fetchStatus()
       .then((data) => {
         if (gen !== null && typeof window.XPClient.getStatusGeneration === "function" && window.XPClient.getStatusGeneration() !== gen) {
-          setBadgeLoading(false);
+          if (seq === refreshSeq) setBadgeLoading(false);
           return null;
         }
         const migrationPending = typeof window.XPClient.isInitialStatusPending === "function"
@@ -2306,11 +2309,11 @@ function bootXpCore(window, document) {
       })
       .catch((err) => {
         if (err && err.code === "stale_identity") {
-          setBadgeLoading(false);
+          if (seq === refreshSeq) setBadgeLoading(false);
           return null;
         }
         if (gen !== null && typeof window.XPClient.getStatusGeneration === "function" && window.XPClient.getStatusGeneration() !== gen) {
-          setBadgeLoading(false);
+          if (seq === refreshSeq) setBadgeLoading(false);
           return null;
         }
         handleError(err);
