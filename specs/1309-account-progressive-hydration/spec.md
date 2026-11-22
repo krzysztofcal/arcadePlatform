@@ -16,7 +16,7 @@ They never wait for the Poker projection, which needs a chips balance and the WS
 
 ### User Story 2: No request storms (Priority: P1)
 Opening Account sends one `profile-me` base read and one `includePoker` read. Auth events (`INITIAL_SESSION`, `SIGNED_IN`) that arrive while a read of the same kind is still in flight join that read. An event that arrives after one kind has finished refreshes only that kind. A later auth event for the same account, such as `TOKEN_REFRESHED`, still refreshes both reads, deduplicated in the same way, and keeps the Poker section visible while it refreshes. Reads made after a profile write never reuse an older in-flight read.
-**Test**: identical forced reads share one request; a read after `updateMe` / `invalidate` starts a new one; a late old answer never replaces the written profile.
+**Test**: identical forced reads share one request; a read after `updateMe` or `invalidate` starts a new one; after a lost, overlapping or later-applied write the next read returns the server state.
 
 ### User Story 3: Stable avatar gallery (Priority: P1)
 The gallery shows exactly the server-allowed catalog choices (6 when `variants_enabled=false`, 16 when true). An unresolved Google-photo status adds no tile.
@@ -35,9 +35,12 @@ In both cases the tile is a stable placeholder that only changes state.
 
 ## Requirements *(mandatory)*
 - **FR-001** `js/account-page.js::renderUser` starts `loadPublicProfile(true)` (base) and `loadPokerProjection(true)` (`includePoker`) independently. Each has its own in-flight guard, generation guard and error state.
-- **FR-002** `js/profile-client.js::getMe` keeps one in-flight read per kind (base, poker). A read joins one only if it has the same user, the same identity generation, and the same `writeSeq`. This also applies to forced reads.
-  - `updateMe`, `clear` and the new `invalidate` advance `writeSeq`.
-  - A read started before a write never writes the cache.
+- **FR-002** `js/profile-client.js::getMe` keeps **no finished answer**. A lost, overlapping or later-applied write therefore can never leave a stale profile behind.
+  - Identical reads share one in-flight request per kind (base, poker), also when forced.
+  - A read joins an in-flight request only if it has the same user, the same identity generation and the same `writeSeq`.
+  - `updateMe`, `clear` and `invalidate` advance `writeSeq`.
+  - `parse` rejects a 2xx response whose body is lost, unreadable or not an object, with the code `invalid_response`.
+  - `updateMe` announces `profile:updated` only when no other write is in flight and no write or invalidation happened since it started.
 - **FR-003** `js/profile-google-photo.js::request` calls `ProfileClient.invalidate()` before and after every non-GET photo action. `getPresentation` adds `copyKnown`.
 - **FR-004** `js/account-page.js::renderAvatarGallery` adds the Google tile only for a known copy or for an uploaded avatar already in use. It never fakes catalog variants.
 - **FR-005** `netlify/functions/profile-me.mjs` GET verifies the JWT with `allowDeleting: true` and relies on the account-lifecycle check that `ensureUserProfile` already runs inside its own transaction. This is one transaction instead of two. `account_not_active` maps to the unchanged 401.

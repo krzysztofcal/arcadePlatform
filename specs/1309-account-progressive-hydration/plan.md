@@ -52,7 +52,7 @@ The WS projection is bounded by `POKER_WS_INTERNAL_TIMEOUT_MS` (default 4 s) and
 
 ## Changes
 - `netlify/functions/profile-me.mjs::createProfileMeHandler`: the GET uses `verifyJwt(token,{allowDeleting:true})`, and `account_not_active` from `ensureProfile` becomes 401. Adds `PROFILE_ME_SLOW_MS` and `profile_me_timing`.
-- `js/profile-client.js::getMe/updateMe/clear/invalidate`: per-kind in-flight reads, `writeSeq`, and a cache write only for a current read.
+- `js/profile-client.js::getMe/updateMe/clear/invalidate/parse`: per-kind shared in-flight reads with `writeSeq`. No finished-answer cache (review R7: closes every stale-cache case at once). Strict 2xx body validation. Announcement only when the write cannot have been overtaken.
 - `js/account-page.js::renderUser/loadPublicProfile/loadPokerProjection/renderAvatarGallery`: independent sections, the Google tile rule, and a contained Poker failure.
 - `js/profile-google-photo.js::request/getPresentation`: invalidates after photo actions; `copyKnown`.
 - `*.html` (non-legal only): updated SRI pins. `legal/*.html` is unchanged (FR-006).
