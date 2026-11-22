@@ -624,12 +624,37 @@ assert.equal(typeof windowStub.XPClient.postWindowServerCalc, 'function', 'autho
 
 // stale_identity in refreshStatus clears loading without error
 {
+  const xpState = getState();
+  const badgeClasses = new Set(['xp-badge']);
+  const badgeAttrs = {};
+  xpState.badge = {
+    setAttribute(k, v) { badgeAttrs[k] = String(v); },
+    getAttribute(k) { return badgeAttrs[k]; },
+    classList: {
+      add(c) { badgeClasses.add(c); },
+      remove(c) { badgeClasses.delete(c); },
+      toggle(c, v) { if (v) badgeClasses.add(c); else badgeClasses.delete(c); },
+      contains(c) { return badgeClasses.has(c); },
+    },
+    contains() { return false; },
+    querySelector() { return null; },
+    appendChild() {},
+  };
+
   const originalFetchStatus = windowStub.XPClient.fetchStatus;
   const staleErr = new Error('stale_identity');
   staleErr.code = 'stale_identity';
-  windowStub.XPClient.fetchStatus = async () => { throw staleErr; };
+  let inFlightLoadingObserved = false;
+  windowStub.XPClient.fetchStatus = async () => {
+    inFlightLoadingObserved = xpState.badge.getAttribute('aria-busy') === 'true'
+      && xpState.badge.classList.contains('xp-badge--loading');
+    throw staleErr;
+  };
   const res = await windowStub.XP.refreshStatus();
   assert.equal(res, null, 'refreshStatus must resolve to null on stale_identity');
+  assert.equal(inFlightLoadingObserved, true, 'loading state must be set while fetch is in-flight');
+  assert.equal(xpState.badge.getAttribute('aria-busy'), 'false', 'badge loading state must be cleared');
+  assert.equal(xpState.badge.classList.contains('xp-badge--loading'), false, 'loading class must be removed');
   const genericErr = new Error('network_fail');
   windowStub.XPClient.fetchStatus = async () => { throw genericErr; };
   await assert.rejects(windowStub.XP.refreshStatus(), /network_fail/);

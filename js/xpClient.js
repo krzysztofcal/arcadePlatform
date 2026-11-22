@@ -229,10 +229,10 @@
     return token;
   }
 
-  async function buildAuthHeaders(baseHeaders) {
+  async function buildAuthHeaders(baseHeaders, explicitToken) {
     const headers = Object.assign({}, baseHeaders || {});
     try {
-      const token = await ensureAuthTokenWithRetry();
+      const token = explicitToken !== undefined ? explicitToken : await ensureAuthTokenWithRetry();
       if (token) {
         headers.Authorization = `Bearer ${token}`;
       }
@@ -820,52 +820,93 @@
     else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
   }
 
+  function staleIdentityError() {
+    const err = new Error("stale_identity");
+    err.code = "stale_identity";
+    return err;
+  }
+
   async function fetchStatus() {
     const requestGeneration = state.statusGeneration;
-    const { userId: anonId, sessionId } = ensureIds();
-    const knownSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
-    const knownKey = knownSubject + "|" + anonId + "|" + sessionId;
-    if (state.statusInFlight && state.statusInFlight.key === knownKey && state.statusInFlight.generation === requestGeneration) {
-      return state.statusInFlight.promise;
-    }
 
     const authToken = await ensureAuthTokenWithRetry();
+    if (state.statusGeneration !== requestGeneration) {
+      throw staleIdentityError();
+    }
     if (!authToken && await isUserLoggedIn()) {
+      if (state.statusGeneration !== requestGeneration) {
+        throw staleIdentityError();
+      }
       throw new Error("XP status requires an authenticated token");
+    }
+    if (state.statusGeneration !== requestGeneration) {
+      throw staleIdentityError();
+    }
+
+    const headers = await buildAuthHeaders({ "content-type": "application/json" }, authToken);
+    if (state.statusGeneration !== requestGeneration) {
+      throw staleIdentityError();
     }
 
     const currentIds = ensureIds();
-    const authSubject = authToken ? decodeJwtSub(authToken) : "";
+    let headerToken = null;
+    if (headers && headers.Authorization) {
+      const match = headers.Authorization.match(/^Bearer\s+(.+)$/i);
+      if (match) headerToken = match[1];
+    }
+    const tokenForSubject = headerToken !== null ? headerToken : (authToken || "");
+    const authSubject = tokenForSubject ? decodeJwtSub(tokenForSubject) : "";
     const key = authSubject + "|" + currentIds.userId + "|" + currentIds.sessionId;
 
     if (state.statusInFlight && state.statusInFlight.key === key && state.statusInFlight.generation === requestGeneration) {
       return state.statusInFlight.promise;
     }
 
-    const inFlightEntry = { key, generation: requestGeneration, promise: null };
-    const promise = (async () => {
-      const body = { anonId: currentIds.userId, sessionId: currentIds.sessionId, operation: "status" };
-      const headers = await buildAuthHeaders({ "content-type": "application/json" });
-      const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        cache: "no-store",
-        credentials: "omit",
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`XP status failed (${res.status}) ${text}`.trim());
-      }
-      const payload = await res.json();
+    if (state.statusInFlight && state.statusInFlight.generation > requestGeneration) {
+      throw staleIdentityError();
+    }
 
+    function isStale() {
       const latestIds = ensureIds();
       const latestSubject = state.authToken ? decodeJwtSub(state.authToken) : "";
       const latestKey = latestSubject + "|" + latestIds.userId + "|" + latestIds.sessionId;
-      if (state.statusGeneration !== requestGeneration || latestKey !== key) {
-        const err = new Error("stale_identity");
-        err.code = "stale_identity";
-        throw err;
+      return state.statusGeneration !== requestGeneration || latestKey !== key;
+    }
+
+    const inFlightEntry = { key, generation: requestGeneration, promise: null };
+    const promise = (async () => {
+      const body = { anonId: currentIds.userId, sessionId: currentIds.sessionId, operation: "status" };
+      let res;
+      try {
+        res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          cache: "no-store",
+          credentials: "omit",
+        });
+      } catch (networkErr) {
+        if (isStale()) throw staleIdentityError();
+        throw networkErr;
+      }
+
+      if (!res.ok) {
+        if (isStale()) throw staleIdentityError();
+        const text = await res.text().catch(() => "");
+        if (isStale()) throw staleIdentityError();
+        throw new Error(`XP status failed (${res.status}) ${text}`.trim());
+      }
+
+      let payload;
+      try {
+        payload = await res.json();
+      } catch (parseErr) {
+        if (isStale()) throw staleIdentityError();
+        throw parseErr;
+      }
+
+      if (isStale()) {
+        throw staleIdentityError();
       }
 
       updateCapFromPayload(payload);
@@ -873,6 +914,9 @@
     })();
 
     inFlightEntry.promise = promise;
+    if (state.statusGeneration !== requestGeneration || (state.statusInFlight && state.statusInFlight.generation > requestGeneration)) {
+      throw staleIdentityError();
+    }
     state.statusInFlight = inFlightEntry;
 
     try {
@@ -1073,6 +1117,7 @@
     isAuthenticated,
     hydrateCachedXp,
     publishConfirmedXp,
+    rotateAwardSession,
   };
 
   bindUserUiXp();

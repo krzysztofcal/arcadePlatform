@@ -331,3 +331,28 @@ test('topbar reads profile again after user change', async () => {
   await f.flush();
   assert.equal(f.profileReads, 2, 'user change must trigger new profile read');
 });
+
+test('topbar late failure of user A after user B profile confirmed does not clear B mark', async () => {
+  let rejectA;
+  const holdA = new Promise((_, reject) => { rejectA = reject; });
+  let readCount = 0;
+  const f = await topbarProfileFixture(() => {
+    readCount++;
+    if (readCount === 1) {
+      return holdA;
+    }
+    return { displayName: 'User B' };
+  });
+  assert.equal(f.profileReads, 1);
+
+  f.emit('SIGNED_IN', { id: 'user-b' });
+  await f.flush();
+  assert.equal(f.profileReads, 2);
+
+  rejectA(new Error('user_a_network_failure'));
+  await f.flush();
+
+  f.emit('TOKEN_REFRESHED', { id: 'user-b' });
+  await f.flush();
+  assert.equal(f.profileReads, 2, 'late failure of user A must not clear user B confirmation mark');
+});
