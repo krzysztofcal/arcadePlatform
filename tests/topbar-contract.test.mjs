@@ -44,7 +44,6 @@ const xpHtmlFiles = [
   gameHtml,
   gameTrexHtml,
   pokerIndex,
-  pokerTable,
   playHtml || '',
   xpHtml,
 ];
@@ -133,7 +132,7 @@ test('root pages use relative topbar and format scripts', () => {
   assert.match(pokerIndex, absoluteChips);
   assert.doesNotMatch(pokerTable, absoluteTopbar);
   assert.doesNotMatch(pokerTable, absoluteFormat);
-  assert.doesNotMatch(pokerTable, absoluteChips);
+  assert.match(pokerTable, absoluteChips);
 });
 
 test('topbar scripts load once per page', () => {
@@ -174,10 +173,9 @@ test('topbar scripts load once per page', () => {
       assert.equal(matches.length, 1);
     });
   });
-  pokerScripts.forEach((pattern) => {
-    const matches = pokerTable.match(pattern) || [];
-    assert.equal(matches.length, 0);
-  });
+  assert.equal((pokerTable.match(/src="\/js\/chips\/client\.js"/g) || []).length, 1);
+  assert.equal((pokerTable.match(/src="\/js\/topbar\.js"/g) || []).length, 0);
+  assert.equal((pokerTable.match(/src="\/js\/core\/number-format\.js"/g) || []).length, 0);
 });
 
 test('nested legal pages use absolute chips/topbar dependencies', () => {
@@ -253,12 +251,79 @@ test('xp badge placeholders are compact', () => {
 test('poker pages place xp badge inside topbar', () => {
   assert.match(pokerIndex, /topbar-right[\s\S]*id="xpBadge"/);
   assert.doesNotMatch(pokerTable, /topbar-right[\s\S]*id="xpBadge"/);
-  assert.match(pokerTable, /id="xpBadge"/);
+  assert.doesNotMatch(pokerTable, /id="xpBadge"/);
 });
 
 test('poker pages boot the XP renderer after loading the XP core', () => {
-  for (const content of [pokerIndex, pokerTable]) {
-    assert.match(content, /src="\/js\/xp\.js"/);
-    assert.ok(content.indexOf('/js/xp/core.js') < content.indexOf('/js/xp.js'));
-  }
+  assert.match(pokerIndex, /src="\/js\/xp\.js"/);
+  assert.ok(pokerIndex.indexOf('/js/xp/core.js') < pokerIndex.indexOf('/js/xp.js'));
+});
+
+async function topbarProfileFixture(respond) {
+  const vm = await import('node:vm');
+  let user = { id: 'user-a' }, callback, profileReads = 0;
+  const document = { readyState: 'complete', getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, documentElement: { dataset: {} } };
+  const window = {
+    document,
+    location: { origin: 'https://arcade.test', protocol: 'https:', search: '', hash: '' },
+    SUPABASE_CONFIG: { SUPABASE_URL: 'https://stage.supabase.co', SUPABASE_ANON_KEY: 'anon' },
+    ProfileClient: {
+      clear() {},
+      getMe: async () => {
+        profileReads++;
+        if (typeof respond === 'function') return respond();
+        return { displayName: 'Player', avatar: { variant: 'wizard-indigo' } };
+      },
+    },
+    supabase: {
+      createClient: () => ({
+        auth: {
+          getSession() { return Promise.resolve({ data: { session: user ? { user } : null } }); },
+          onAuthStateChange(fn) { callback = fn; return { data: { subscription: { unsubscribe() {} } } }; },
+        },
+      }),
+    },
+  };
+  vm.runInNewContext(await readFile(path.join(repoRoot, 'js', 'auth', 'supabaseClient.js'), 'utf8'), { window, document, Promise, console });
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  await flush();
+  return {
+    flush,
+    get profileReads() { return profileReads; },
+    emit(event, next = user) {
+      user = next;
+      callback(event, user ? { user } : null);
+    },
+  };
+}
+
+test('topbar skips profile refresh on same-user auth event after a published profile', async () => {
+  const f = await topbarProfileFixture();
+  assert.equal(f.profileReads, 1);
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  f.emit('SIGNED_IN');
+  await f.flush();
+  assert.equal(f.profileReads, 1, 'same-user events must not trigger new ProfileClient.getMe');
+});
+
+test('topbar profile read failure clears the mark so next same-user event retries', async () => {
+  let shouldFail = true;
+  const f = await topbarProfileFixture(() => {
+    if (shouldFail) throw new Error('profile_network_error');
+    return { displayName: 'Player' };
+  });
+  assert.equal(f.profileReads, 1);
+  shouldFail = false;
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  assert.equal(f.profileReads, 2, 'subsequent event after failure must retry profile read');
+});
+
+test('topbar reads profile again after user change', async () => {
+  const f = await topbarProfileFixture();
+  assert.equal(f.profileReads, 1);
+  f.emit('SIGNED_IN', { id: 'user-b' });
+  await f.flush();
+  assert.equal(f.profileReads, 2, 'user change must trigger new profile read');
 });

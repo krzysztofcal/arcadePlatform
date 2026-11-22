@@ -622,4 +622,18 @@ assert.equal(overlayBursts.length, 0, 'overlay must wait for an authoritative re
 
 assert.equal(typeof windowStub.XPClient.postWindowServerCalc, 'function', 'authoritative transport must be available');
 
+// stale_identity in refreshStatus clears loading without error
+{
+  const originalFetchStatus = windowStub.XPClient.fetchStatus;
+  const staleErr = new Error('stale_identity');
+  staleErr.code = 'stale_identity';
+  windowStub.XPClient.fetchStatus = async () => { throw staleErr; };
+  const res = await windowStub.XP.refreshStatus();
+  assert.equal(res, null, 'refreshStatus must resolve to null on stale_identity');
+  const genericErr = new Error('network_fail');
+  windowStub.XPClient.fetchStatus = async () => { throw genericErr; };
+  await assert.rejects(windowStub.XP.refreshStatus(), /network_fail/);
+  windowStub.XPClient.fetchStatus = originalFetchStatus;
+}
+
 console.log('xp-client tests passed');
