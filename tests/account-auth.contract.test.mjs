@@ -424,6 +424,29 @@ async function googlePanelFixture(clock) {
   return {api:window.ProfileGooglePhoto,node,state,session,server,window};
 }
 
+test('A running Google photo action blocks the announcement of an overlapping PATCH, also when its request fails', async()=>{
+  const announced = [], patches = [];
+  const clientWindow = { SupabaseAuth: { getCurrentUser: async () => ({ id: 'user-a' }) }, SupabaseAuthBridge: { getAccessToken: async () => 'token' } };
+  vm.runInNewContext(await read('js/profile-client.js'), { window: clientWindow, document: { dispatchEvent(event){ announced.push(event.type); } }, Promise, URL, Date, CustomEvent: class { constructor(type){ this.type = type; } },
+    fetch: async () => { const entry = {}; patches.push(entry); await new Promise(resolve => { entry.release = resolve; }); return { ok: true, json: async () => ({ displayName: 'saved', avatarRevision: 1 }) }; } });
+  const real = clientWindow.ProfileClient;
+  const patch = async () => { const before = patches.length; const p = real.updateMe({ leaderboardVisible: true }); while (patches.length === before) await new Promise(r => setImmediate(r)); patches.at(-1).release(); return p; };
+  for (const outcome of ['answered', 'failed']) {
+    announced.length = 0;
+    const f = await googlePanelFixture();
+    f.window.ProfileClient = { beginWrite: real.beginWrite, updateMe: real.updateMe, invalidate: real.invalidate, clear(){}, applyAvatar(){}, getMe: async () => ({ avatarRevision: 1, avatar: { type: 'default', variant: 'wizard-indigo' } }) };
+    Object.assign(f.state, { copyStored: true, photoInUse: true, consent: { decision: 'granted' } }); await f.api.load();
+    let release;
+    if (outcome === 'failed') f.server.postResponse = new Promise((_resolve, reject) => { release = () => reject(new TypeError('synthetic connection reset')); });
+    else f.server.holdPost = new Promise(resolve => { release = resolve; });
+    const action = f.api.runForTest('withdraw');
+    while (f.server.posts === 0) await new Promise(r => setImmediate(r));
+    await patch(); assert.deepEqual(announced, [], outcome + ': PATCH during the photo action is not announced');
+    release(); await action;
+    await patch(); assert.deepEqual(announced, ['profile:updated'], outcome + ': the photo action closed its write');
+  }
+});
+
 test('Google photo offers, active photos and pending deletion have exclusive actions', async()=>{
   const f=await googlePanelFixture();f.api.renderForTest(f.state);assert.equal(f.node('googlePhotoOffer').hidden,false);assert.equal(f.node('googlePhotoWithdraw').hidden,true);assert.equal(f.node('googlePhotoReconnect').hidden,true);
   f.api.renderForTest({...f.state,photoInUse:true,consent:{decision:'granted'}});assert.equal(f.node('googlePhotoOffer').hidden,true);assert.equal(f.node('googlePhotoWithdraw').hidden,false);
