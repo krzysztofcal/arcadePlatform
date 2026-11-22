@@ -86,7 +86,7 @@ test("photo lifecycle settles the spinner without flashing fallback or attaching
   const timeouts = new Set();
   let requests = 0, downloads = 0, blocked = false, mode = "ok", settleDecode;
   let shown;
-  const seat = { seatNo: 2, userId: target, status: "ACTIVE", profile: {} };
+  const seat = { seatNo: 2, userId: target, status: "ACTIVE" };
   const avatar = { dataset: { userId: target }, appendChild(image) { image.parentNode = this; shown = image; } };
   const runtime = {
     state: { tableId: viewer, currentUserId: viewer, mode: "live", seats: [seat], wsReady: true, hasAppliedAuthoritativeSnapshot: true },

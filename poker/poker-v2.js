@@ -3818,7 +3818,7 @@
       context = tablePhotoContext = { viewer: state.currentUserId, table: state.tableId, photos: new Map(), fingerprint: null, read: null };
     }
     var seats = state.seats.filter(function(seat){
-      return photoSeatEligible(seat) && seat.profile && !ugcBlocked(seat.userId)
+      return photoSeatEligible(seat) && !ugcBlocked(seat.userId)
         && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(seat.userId);
     });
     var ids = Array.from(new Set(seats.map(function(seat){ return seat.userId; }))).sort().slice(0, 9);
