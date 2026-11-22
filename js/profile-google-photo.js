@@ -75,11 +75,10 @@
     var headers = { Authorization: 'Bearer ' + session.access_token };
     if (payload) headers['Content-Type'] = 'application/json';
     // A photo action can change the profile avatar: profile reads must not reuse one started before it (#1309).
-    var mutation = method !== 'GET', invalidate = function(){ if (mutation && window.ProfileClient && typeof window.ProfileClient.invalidate === 'function') window.ProfileClient.invalidate(); };
-    invalidate();
+    var client = window.ProfileClient, done = method !== 'GET' && client && typeof client.beginWrite === 'function' ? client.beginWrite() : null;
     var response;
     try { response = await fetch(window.ArcadeApi ? window.ArcadeApi.url(ENDPOINT) : ENDPOINT, { method: method, headers: headers, body: payload ? JSON.stringify(payload) : undefined, credentials: 'omit', signal: signal }); }
-    finally { invalidate(); }
+    finally { if (done) done(); }
     var data = {};
     try { data = await response.json(); } catch (_err){}
     if (!response.ok){

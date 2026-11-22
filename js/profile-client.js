@@ -185,6 +185,12 @@
   // A profile change made by another endpoint (for example a Google photo action): later reads start fresh.
   function invalidate(){ writeSeq += 1; }
 
-  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, invalidate: invalidate, applyAvatar: applyAvatar, initials: initials };
+  // Such a change in progress also counts as a write, so no overlapping profile answer is announced.
+  function beginWrite(){
+    var open = true; writeSeq += 1; writesInFlight += 1;
+    return function done(){ if (!open) return; open = false; writeSeq += 1; writesInFlight -= 1; };
+  }
+
+  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, invalidate: invalidate, beginWrite: beginWrite, applyAvatar: applyAvatar, initials: initials };
   klog('profile:client_ready', {});
 })();

@@ -370,8 +370,11 @@ test('ProfileClient announces only a write nothing can have overtaken, and never
   body = 'ok'; const pending = f.client.updateMe({ leaderboardVisible: true }); await f.until(4); f.client.invalidate(); f.requests[3].release(); await pending;
   const a = f.client.updateMe({ leaderboardVisible: true }); await f.until(5); const b = f.client.updateMe({ leaderboardVisible: false }); await f.until(6);
   f.requests[5].release(); await b; f.requests[4].release(); await a;
+  // A Google photo action started first and still running: a PATCH that finishes meanwhile is not announced.
+  const photoDone = f.client.beginWrite(); const during = f.client.updateMe({ leaderboardVisible: true }); await f.until(7); f.requests[6].release(); await during; photoDone(); photoDone();
   assert.deepEqual(f.announced, []);
-  body = 'lost'; const read = f.client.getMe(false); await f.until(7); f.requests[6].release(); await assert.rejects(read, error => error.code === 'invalid_response');
+  const after = f.client.updateMe({ leaderboardVisible: true }); await f.until(8); f.requests[7].release(); await after; assert.deepEqual(f.announced, ['profile:updated']); f.announced.length = 0;
+  body = 'lost'; const read = f.client.getMe(false); await f.until(9); f.requests[8].release(); await assert.rejects(read, error => error.code === 'invalid_response');
 });
 
 test('A forced Account refresh after an invalidation renders only its own newer read', async () => {
