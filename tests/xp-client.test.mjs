@@ -642,6 +642,13 @@ assert.equal(typeof windowStub.XPClient.postWindowServerCalc, 'function', 'autho
   };
 
   const originalFetchStatus = windowStub.XPClient.fetchStatus;
+  const originalKLog = windowStub.KLog;
+  const klogs = [];
+  windowStub.KLog = {
+    log(kind, data) { klogs.push({ kind, data }); return true; },
+    isAdmin() { return true; },
+  };
+
   const staleErr = new Error('stale_identity');
   staleErr.code = 'stale_identity';
   let inFlightLoadingObserved = false;
@@ -655,9 +662,17 @@ assert.equal(typeof windowStub.XPClient.postWindowServerCalc, 'function', 'autho
   assert.equal(inFlightLoadingObserved, true, 'loading state must be set while fetch is in-flight');
   assert.equal(xpState.badge.getAttribute('aria-busy'), 'false', 'badge loading state must be cleared');
   assert.equal(xpState.badge.classList.contains('xp-badge--loading'), false, 'loading class must be removed');
+  assert.equal(klogs.filter(l => l.kind === 'window_error').length, 0, 'handleError error state (window_error log) must be absent on stale_identity');
+
   const genericErr = new Error('network_fail');
   windowStub.XPClient.fetchStatus = async () => { throw genericErr; };
   await assert.rejects(windowStub.XP.refreshStatus(), /network_fail/);
+  assert.equal(xpState.badge.getAttribute('aria-busy'), 'false', 'badge loading state must be cleared on normal error');
+  assert.equal(xpState.badge.classList.contains('xp-badge--loading'), false, 'loading class must be removed on normal error');
+  assert.equal(klogs.filter(l => l.kind === 'window_error').length, 1, 'handleError error state (window_error log) must be emitted on normal error');
+  assert.equal(klogs[0].data.message, 'network_fail');
+
+  windowStub.KLog = originalKLog;
   windowStub.XPClient.fetchStatus = originalFetchStatus;
 }
 

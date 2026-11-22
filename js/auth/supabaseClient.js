@@ -396,7 +396,8 @@
 
   function refreshProfile(user, uiGeneration, hadCachedProfile){
     if (!user) return;
-    var load = window.ProfileClient && typeof window.ProfileClient.getMe === 'function'
+    var hasProfileClient = !!(window.ProfileClient && typeof window.ProfileClient.getMe === 'function');
+    var load = hasProfileClient
       ? window.ProfileClient.getMe()
       : getAccessToken().then(function(accessToken){
         if (!accessToken) throw new Error('not_authenticated');
@@ -410,16 +411,20 @@
       if (!state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
       if (ui) ui.publish(user.id, 'profile', profile, Date.now());
       else setUserUiState('ready');
-      profileConfirmedUserId = String(user.id);
+      if (hasProfileClient) {
+        profileConfirmedUserId = String(user.id);
+      }
       renderUser(user, profile);
     }).catch(function(error){
       var ui = userUiState();
-      if (state.user && String(state.user.id) === String(user.id) && (!ui || ui.isCurrent(user.id, uiGeneration))) {
-        profileConfirmedUserId = null;
+      var isCurrent = state.user && String(state.user.id) === String(user.id) && (!ui || ui.isCurrent(user.id, uiGeneration));
+      logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });
+      if (!isCurrent) {
+        return;
       }
+      profileConfirmedUserId = null;
       if (ui) ui.markRefreshFailed(user.id, uiGeneration, !!hadCachedProfile);
       else setUserUiState(hadCachedProfile ? 'stale' : 'loading');
-      logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });
     });
   }
 
@@ -441,7 +446,7 @@
       profileConfirmedUserId = null;
     }
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
-    if (previousUserId === userId && profileConfirmedUserId === userId){
+    if (previousUserId === userId && profileConfirmedUserId === userId && window.ProfileClient && typeof window.ProfileClient.getMe === 'function'){
       renderUser(user, state.profile);
       return;
     }

@@ -28,8 +28,12 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     },
     atob: (str) => Buffer.from(str, 'base64').toString('utf-8'),
   };
+  const win = Object.defineProperties(
+    baseWindow,
+    Object.getOwnPropertyDescriptors(options.window || {})
+  );
   const ctx = {
-    window: Object.assign(baseWindow, options.window || {}),
+    window: win,
     fetch: fetchImpl,
     crypto: { randomUUID: () => `uuid-test-${++randomId}` },
     Date: options.Date || Date, setTimeout, clearTimeout, console,
@@ -507,6 +511,129 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       return true;
     });
     assert.equal(globalCap, 300, 'cap must remain unchanged after stale_identity');
+
+    // Positive control: a current, non-stale answer DOES change the cap
+    const normalRes = await XPClient.fetchStatus();
+    assert.equal(normalRes.capDelta, 999);
+    assert.equal(globalCap, 999, 'cap must be updated by non-stale answer');
+  }
+
+  // R2-F1: Late-resolving token read across auth change does not overwrite newer cached token
+  {
+    let releaseTokenA;
+    const holdTokenA = new Promise(resolve => { releaseTokenA = resolve; });
+    let tokenCalls = 0;
+    let authChangeCb = null;
+    let sentAuthHeader = null;
+
+    const tokenA = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-a' })).toString('base64url') + '.s';
+    const tokenB = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-b' })).toString('base64url') + '.s';
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const headers = opts?.headers || {};
+      sentAuthHeader = headers.Authorization || null;
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => {
+            tokenCalls++;
+            if (tokenCalls === 1) {
+              await holdTokenA;
+              return tokenA;
+            }
+            return tokenB;
+          },
+          getCurrentUserId: async () => 'user-test',
+        },
+        SupabaseAuth: {
+          onAuthChange(fn) { authChangeCb = fn; },
+          getCurrentUser: async () => ({ id: 'user-test' }),
+        },
+      },
+    });
+
+    // Start token read A (held on holdTokenA)
+    const pendingStatusA = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && tokenCalls === 0; i++) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(tokenCalls, 1, 'token read A must be pending');
+
+    // Trigger auth change: increments authVersion, clears cached token and authPromise
+    authChangeCb('SIGNED_IN');
+
+    // Start token read B, which resolves immediately with tokenB
+    const statusB = await XPClient.fetchStatus();
+    assert.ok(statusB);
+    assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'status B must send token B');
+
+    // Now release token read A: it resolves with tokenA, but must NOT overwrite cached token
+    releaseTokenA();
+    await assert.rejects(pendingStatusA, (err) => {
+      assert.equal(err.code, 'stale_identity');
+      return true;
+    });
+
+    // Next fetchStatus should use cached token B, NOT token A
+    sentAuthHeader = null;
+    await XPClient.fetchStatus();
+    assert.equal(sentAuthHeader, `Bearer ${tokenB}`, 'subsequent status must continue sending token B, not overwritten by late token A');
+  }
+
+  // R2-F4: Old bootstrap ending with stale_identity does not clear newer bootstrap's promise
+  {
+    let release1;
+    const hold1 = new Promise(resolve => { release1 = resolve; });
+    let release2;
+    const hold2 = new Promise(resolve => { release2 = resolve; });
+    let fetchCalls = 0;
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls++;
+        if (fetchCalls === 1) {
+          await hold1;
+          return response(200, { ok: true, status: 'statusOnly' });
+        }
+        await hold2;
+        return response(200, { ok: true, status: 'statusOnly' });
+      }
+      return response(200, { ok: true });
+    });
+
+    // Start bootstrap 1 (generation 0)
+    XPClient.ensureStatusBootstrap(false);
+    for (let i = 0; i < 20 && fetchCalls === 0; i++) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1, 'bootstrap 1 must start fetch');
+    const promise1 = XPClient.getStatusBootstrapPromise();
+    assert.ok(promise1, 'bootstrap 1 promise must be active');
+
+    // Advance generation and start bootstrap 2
+    XPClient.clearServerSession();
+    XPClient.ensureStatusBootstrap(true);
+    for (let i = 0; i < 20 && fetchCalls === 1; i++) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 2, 'bootstrap 2 must start fetch');
+    const promise2 = XPClient.getStatusBootstrapPromise();
+    assert.ok(promise2, 'bootstrap 2 promise must be active');
+    assert.notEqual(promise2, promise1, 'bootstrap 2 promise must be different from bootstrap 1');
+
+    // Release bootstrap 1: it will reject with stale_identity and enter finally
+    release1();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Bootstrap 2's promise must STILL be active (not cleared by bootstrap 1's finally)
+    assert.equal(XPClient.getStatusBootstrapPromise(), promise2, 'bootstrap 2 promise must remain active after bootstrap 1 completes with stale_identity');
+
+    // Release bootstrap 2: now statusPromise clears
+    release2();
+    await promise2;
+    assert.equal(XPClient.getStatusBootstrapPromise(), null, 'bootstrap promise must clear when bootstrap 2 finishes');
   }
 
   // A call after resolution performs a new fetch (no finished-answer cache)

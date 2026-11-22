@@ -30,6 +30,7 @@
     authToken: null,
     authCheckedAt: 0,
     authPromise: null,
+    authVersion: 0,
     authChangeBound: false,
     initialStatusPending: false,
     migrationNotice: null,
@@ -133,7 +134,9 @@
       return state.authPromise;
     }
 
-    state.authPromise = (async () => {
+    const version = state.authVersion;
+    let promise;
+    promise = (async () => {
       try {
         let token = null;
 
@@ -160,9 +163,12 @@
           }
         }
 
-        state.authToken = token || null;
-        state.authCheckedAt = Date.now();
-        return state.authToken;
+        if (state.authVersion === version) {
+          state.authToken = token || null;
+          state.authCheckedAt = Date.now();
+          return state.authToken;
+        }
+        return token || null;
       } catch (err) {
         if (isDiagEnabled() && window && window.console && typeof console.warn === "function") {
           try {
@@ -172,13 +178,18 @@
             console.warn("[XPClient] auth_token_fetch_error");
           }
         }
-        state.authToken = null;
-        state.authCheckedAt = Date.now();
+        if (state.authVersion === version) {
+          state.authToken = null;
+          state.authCheckedAt = Date.now();
+        }
         return null;
       } finally {
-        state.authPromise = null;
+        if (state.authPromise === promise) {
+          state.authPromise = null;
+        }
       }
     })();
+    state.authPromise = promise;
 
     return state.authPromise;
   }
@@ -558,6 +569,7 @@
   }
 
   function handleAuthChange(event) {
+    state.authVersion += 1;
     state.statusGeneration += 1;
     const eventName = typeof event === "string" ? event : "unknown";
     const isGameHost = window.XP_IS_GAME_HOST === true
@@ -794,7 +806,8 @@
     if (force) state.statusPromise = null;
     state.statusBootstrapped = true;
     if (!state.statusPromise) {
-      state.statusPromise = fetchStatus().then(payload => {
+      let promise;
+      promise = fetchStatus().then(payload => {
         if (payload && typeof payload === "object") {
           if (Number.isFinite(payload.capDelta)) setClientCap(Number(payload.capDelta));
           else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
@@ -802,8 +815,11 @@
       }).catch(err => {
         if (err && err.code === "stale_identity") return;
       }).finally(() => {
-        state.statusPromise = null;
+        if (state.statusPromise === promise) {
+          state.statusPromise = null;
+        }
       });
+      state.statusPromise = promise;
     }
   }
 
@@ -1118,6 +1134,8 @@
     hydrateCachedXp,
     publishConfirmedXp,
     rotateAwardSession,
+    ensureStatusBootstrap,
+    getStatusBootstrapPromise: () => state.statusPromise,
   };
 
   bindUserUiXp();
