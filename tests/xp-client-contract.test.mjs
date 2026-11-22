@@ -208,5 +208,158 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(startSessionCalls, 1);
   }
 
+  // N concurrent fetchStatus share 1 network fetch
+  {
+    let fetchCalls = 0;
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        await hold;
+        return response(200, { ok: true, status: 'statusOnly', totalLifetime: 100 });
+      }
+      return response(200, { ok: true });
+    });
+
+    const calls = [
+      XPClient.fetchStatus(),
+      XPClient.fetchStatus(),
+      XPClient.fetchStatus(),
+      XPClient.fetchStatus(),
+    ];
+    release();
+    const results = await Promise.all(calls);
+    assert.equal(fetchCalls, 1, 'concurrent fetchStatus calls must share one network fetch');
+    assert.equal(results.length, 4);
+    assert.equal(results[0].totalLifetime, 100);
+    assert.equal(results[1], results[0]);
+  }
+
+  // A different sessionId, auth subject or generation starts a new fetch
+  {
+    let fetchCalls = 0;
+    let token = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base64url') + '.s';
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        return response(200, { ok: true, status: 'statusOnly', totalLifetime: 100 });
+      }
+      return response(200, { ok: true });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => token,
+          getCurrentUserId: async () => 'user-1',
+        },
+      },
+    });
+
+    await XPClient.fetchStatus();
+    assert.equal(fetchCalls, 1);
+
+    // Calling again after resolution starts a new fetch (no finished-answer reuse)
+    await XPClient.fetchStatus();
+    assert.equal(fetchCalls, 2, 'fetch after resolution starts a new fetch');
+
+    // Change auth subject (different user)
+    token = 'h.' + Buffer.from(JSON.stringify({ sub: 'user-2' })).toString('base64url') + '.s';
+    XPClient.clearServerSession();
+    await XPClient.fetchStatus();
+    assert.equal(fetchCalls, 3, 'different auth subject starts a new fetch');
+  }
+
+  // Older answer resolving after generation change rejects with stale_identity and does not apply cap
+  {
+    let fetchCalls = 0;
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+    let globalCap = 300;
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        await hold;
+        return response(200, { ok: true, status: 'statusOnly', capDelta: 999 });
+      }
+      return response(200, { ok: true });
+    }, {
+      window: {
+        get XP_DELTA_CAP_CLIENT() { return globalCap; },
+        set XP_DELTA_CAP_CLIENT(v) { globalCap = v; },
+      },
+    });
+
+    const pending = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1);
+    XPClient.clearServerSession();
+    release();
+    await assert.rejects(pending, (err) => {
+      assert.equal(err.code, 'stale_identity');
+      return true;
+    });
+    assert.equal(globalCap, 300, 'cap must remain unchanged after stale_identity');
+  }
+
+  // A call after resolution performs a new fetch (no finished-answer cache)
+  {
+    let fetchCalls = 0;
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        return response(200, { ok: true, status: 'statusOnly', totalLifetime: fetchCalls * 10 });
+      }
+      return response(200, { ok: true });
+    });
+
+    const res1 = await XPClient.fetchStatus();
+    assert.equal(res1.totalLifetime, 10);
+    assert.equal(fetchCalls, 1);
+
+    const res2 = await XPClient.fetchStatus();
+    assert.equal(res2.totalLifetime, 20);
+    assert.equal(fetchCalls, 2, 'second call after resolution must not reuse finished answer');
+  }
+
+  // stale_identity in refreshBadgeFromServer is treated as a silent no-op (no error, returns null)
+  {
+    let fetchCalls = 0;
+    let release;
+    const hold = new Promise(resolve => { release = resolve; });
+    let markedState = null;
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        fetchCalls += 1;
+        await hold;
+        return response(200, { ok: true, status: 'statusOnly', totalLifetime: 500 });
+      }
+      return response(200, { ok: true });
+    }, {
+      window: {
+        UserUiState: {
+          markSliceApplied(_uid, _slice, appliedState) { markedState = appliedState; },
+        },
+      },
+    });
+
+    const pending = XPClient.refreshBadgeFromServer();
+    for (let i = 0; i < 20 && fetchCalls === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(fetchCalls, 1);
+    XPClient.clearServerSession();
+    release();
+    const result = await pending;
+    assert.equal(result, null, 'refreshBadgeFromServer returns null on stale_identity');
+    assert.equal(markedState, null, 'no error or stale state marked on stale_identity');
+  }
+
   console.log('xp-client contract tests passed');
 })();

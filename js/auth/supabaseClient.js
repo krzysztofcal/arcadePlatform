@@ -8,6 +8,7 @@
   var authSubscriptionAttached = false;
   var recoverySession = null;
   var recoveryPending = false;
+  var profileConfirmedUserId = null;
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -409,8 +410,10 @@
       if (!state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
       if (ui) ui.publish(user.id, 'profile', profile, Date.now());
       else setUserUiState('ready');
+      profileConfirmedUserId = String(user.id);
       renderUser(user, profile);
     }).catch(function(error){
+      profileConfirmedUserId = null;
       var ui = userUiState();
       if (ui) ui.markRefreshFailed(user.id, uiGeneration, !!hadCachedProfile);
       else setUserUiState(hadCachedProfile ? 'stale' : 'loading');
@@ -425,13 +428,21 @@
     // Token refresh and repeated sign-in events do not change the profile owner.
     if (previousUserId !== nextUserId && window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
     if (!user || !user.id){
+      profileConfirmedUserId = null;
       if (ui && previousUserId) ui.clearUser(previousUserId);
       if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
       renderUser(null, null);
       return;
     }
     var userId = String(user.id);
+    if (previousUserId !== userId){
+      profileConfirmedUserId = null;
+    }
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
+    if (previousUserId === userId && profileConfirmedUserId === userId){
+      renderUser(user, state.profile);
+      return;
+    }
     var hydrated = ui ? ui.hydrate(userId) : { generation: 0, profile: null };
     if (!ui) setUserUiState('loading');
     // Hydrated names are useful; cached avatars need a fresh server confirmation.

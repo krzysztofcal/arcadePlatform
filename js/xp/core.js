@@ -2271,6 +2271,9 @@ function bootXpCore(window, document) {
         return data;
       })
       .catch((err) => {
+        if (err && err.code === "stale_identity") {
+          return null;
+        }
         try {
           const message = err && err.message ? String(err.message).slice(0, 200) : "error";
           logDebug("badge_reconcile_error", { message });
@@ -2289,7 +2292,14 @@ function bootXpCore(window, document) {
         handleResponse(data, { source: "status", allowServerRegression: migrationPending });
         return data;
       })
-      .catch((err) => { handleError(err); throw err; });
+      .catch((err) => {
+        if (err && err.code === "stale_identity") {
+          setBadgeLoading(false);
+          return null;
+        }
+        handleError(err);
+        throw err;
+      });
   }
 
   function maybeRefreshStatus() {
