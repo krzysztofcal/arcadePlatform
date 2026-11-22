@@ -10,7 +10,7 @@
   - `tests/account-auth.contract.test.mjs`: same-user `INITIAL_SESSION`/`SIGNED_IN`/`TOKEN_REFRESHED` after a success → no new base or Poker read. An account switch, a sign-out followed by a sign-in, or an earlier failure → a read.
   - `tests/topbar-contract.test.mjs`: same-user event after a published profile → no `refreshProfile`. A failure clears the mark.
   - `tests/xp-client.test.mjs` or `tests/xp-client-contract.test.mjs`: N concurrent `fetchStatus` → 1 fetch. A changed session, auth subject or generation → a new fetch. An old answer resolving after a change → `stale_identity`, not applied. No finished-answer reuse.
-  - Regression: the existing account, topbar, XP and legal-packaging tests pass.
+  - Regression: the existing account, XP and legal-packaging tests pass. In `tests/topbar-contract.test.mjs` the new tests pass; its 5 existing `poker/table.html` assertions already fail identically on `main` and are reported separately.
 - [x] T006 Coordinator review of the agy diff. Out-of-scope rewrites of 5 existing `poker/table.html` assertions in `tests/topbar-contract.test.mjs` were reverted; only the new tests remain. Those 5 assertions, and 1 in `tests/xp-overlay.test.mjs`, already fail identically on `main` and are not in CI or `scripts/test-all.mjs` (separate follow-up). Rerun the validation command from the plan. Check scope, SRI, `klog` only, no server change.
 - [ ] T007 Draft PR. Independent read-only Codex review per AGENTS.md "Claude Code handoff: Codex review" (at most 3 rounds, 0 P0/P1/P2 on the final diff, evidence in the PR).
 - [ ] T008 Measurement on the Deploy Preview (plan §Measurement), after the OWNER real-device acceptance. Report each SC.

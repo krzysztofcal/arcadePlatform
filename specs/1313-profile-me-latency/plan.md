@@ -1,7 +1,7 @@
 # Implementation Plan: profile-me latency, scope 1 (#1313)
 
 **Branch**: `1313-profile-me-latency` | **Date**: 2026-11-22 | **Spec**: [spec.md](spec.md) | **Research**: [research.md](research.md)
-**Validation**: `node --test tests/account-auth.contract.test.mjs tests/account-page.test.mjs tests/xp-client.test.mjs tests/xp-client-contract.test.mjs tests/xp-core-authoritative-reset.test.mjs tests/xp-client-bfcache.test.mjs`, run with the `scripts/test-all.mjs` environment. The new tests in `tests/topbar-contract.test.mjs` are run separately: that file has 5 failures that already exist on `main` and is not in CI. Then CI on the Draft PR and the Deploy Preview.
+**Validation**: `node --test tests/account-auth.contract.test.mjs tests/account-page.test.mjs tests/xp-client.test.mjs tests/xp-client-contract.test.mjs tests/xp-core-authoritative-reset.test.mjs tests/xp-client-bfcache.test.mjs tests/xp-badge.test.mjs tests/mobile-legal-packaging.test.mjs`, run with the `scripts/test-all.mjs` environment. The new tests in `tests/topbar-contract.test.mjs` are run separately: that file has 5 failures that already exist on `main` and is not in CI. Then CI on the Draft PR and the Deploy Preview.
 
 ## Diagnosis (2026-11-22, read-only)
 | Measure | Production (`308806cc`, 24 h) | Preview #1311 (Stage DB) |
