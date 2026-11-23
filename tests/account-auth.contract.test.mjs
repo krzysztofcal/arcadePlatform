@@ -916,6 +916,42 @@ test('Account renderUser reads again after an earlier failure on same user', asy
   assert.equal(f.context.profileLoadState, 'success');
 });
 
+test('Account renderUser retries only Poker after a Poker-only failure on same user', async () => {
+  let failPoker = true;
+  const f = await accountRenderFixture(async (force, options) => {
+    if (options?.includePoker && failPoker) throw new Error('poker_fail');
+    return { displayName: 'Player', poker: { tables: [] } };
+  });
+
+  await f.render({ id: 'user-1' });
+  assert.equal(f.context.profileLoadState, 'success');
+  assert.equal(f.context.pokerLoadState, 'error', 'a failed Poker read must not stay loading');
+
+  failPoker = false;
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1, 'successful profile must not reload when only Poker failed');
+  assert.equal(f.events.pokerReads, 2, 'failed Poker must be retried on the next same-user event');
+  assert.equal(f.context.pokerLoadState, 'success');
+});
+
+test('Account renderUser retries Poker after two cancelled (stale_identity) Poker reads', async () => {
+  let cancelPoker = true;
+  const f = await accountRenderFixture(async (force, options) => {
+    if (options?.includePoker && cancelPoker) throw Object.assign(new Error('stale_identity'), { code: 'stale_identity' });
+    return { displayName: 'Player', poker: { tables: [] } };
+  });
+
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.pokerReads, 2, 'a cancelled Poker read gets exactly one fresh retry');
+  assert.equal(f.context.pokerLoadState, 'idle', 'a twice-cancelled Poker read must not stay loading');
+
+  cancelPoker = false;
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1, 'successful profile must not reload');
+  assert.equal(f.events.pokerReads, 3, 'cancelled Poker must be retried on the next same-user event');
+  assert.equal(f.context.pokerLoadState, 'success');
+});
+
 test('Account switch or sign-out followed by sign-in reloads both profile and poker', async () => {
   const f = await accountRenderFixture();
   await f.render({ id: 'user-1' });

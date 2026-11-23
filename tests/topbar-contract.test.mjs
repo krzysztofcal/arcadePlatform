@@ -274,16 +274,22 @@ async function topbarProfileFixture(options) {
   };
   const label = { textContent: '' };
   const menuName = { textContent: '' };
+  const docListeners = {};
+  const stubNode = () => ({ attributes: {}, addEventListener() {}, setAttribute(k, v) { this.attributes[k] = String(v); }, classList: { add() {}, remove() {}, toggle() {} } });
+  const shell = opts.withAvatarShell ? stubNode() : null;
+  const button = opts.withAvatarShell ? stubNode() : null;
   const document = {
     readyState: 'complete',
     getElementById: (id) => {
       if (id === 'avatarLabel') return label;
       if (id === 'avatarMenuName') return menuName;
+      if (id === 'avatarShell') return shell;
+      if (id === 'avatarButton') return button;
       return null;
     },
     querySelector: () => null,
     querySelectorAll: (sel) => sel === '.topbar' ? [topbar] : [],
-    addEventListener() {},
+    addEventListener(type, fn) { (docListeners[type] = docListeners[type] || []).push(fn); },
     documentElement: { dataset: {} },
   };
   const window = {
@@ -325,6 +331,7 @@ async function topbarProfileFixture(options) {
     topbar,
     get profileReads() { return profileReads; },
     get renderedName() { return menuName.textContent || label.textContent; },
+    dispatch(type, detail) { (docListeners[type] || []).forEach((fn) => fn({ type, detail })); },
     emit(event, next = user) {
       user = next;
       callback(event, user ? { user } : null);
@@ -539,4 +546,18 @@ test('topbar without ProfileClient: late fallback failure keeps the main handlin
   releaseA1();
   await f.flush();
   assert.equal(f.topbar.getAttribute('data-user-ui-state'), 'loading');
+});
+
+test('topbar shows the saved profile after profile:updated and keeps it on the next same-user event', async () => {
+  const f = await topbarProfileFixture({ withAvatarShell: true, respond: () => ({ displayName: 'User A Before' }) });
+  assert.equal(f.renderedName, 'User A Before');
+  const readsBefore = f.profileReads;
+  // A profile write announces the saved profile (ProfileClient.updateMe / avatar save paths).
+  f.dispatch('profile:updated', { displayName: 'User A Saved' });
+  await f.flush();
+  assert.equal(f.renderedName, 'User A Saved', 'the saved profile must replace the confirmed one');
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  assert.equal(f.profileReads, readsBefore, 'a same-user event after a published save must not read again');
+  assert.equal(f.renderedName, 'User A Saved', 'the next same-user event must keep the saved profile, not an older one');
 });
