@@ -213,8 +213,8 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const calls = [];
     let resolveNetwork;
     const networkPromise = new Promise(resolve => { resolveNetwork = resolve; });
-    const rawResponseText = JSON.stringify({ ok: true, status: 'statusOnly', totalLifetime: 100 })
-      .replace('}', ',"capDelta":-0}');
+    // Literal JSON text: JSON.stringify would turn -0 into 0, and the test needs a real -0 in the wire body.
+    const rawResponseText = '{"ok":true,"status":"statusOnly","totalLifetime":100,"capDelta":-0}';
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const body = JSON.parse(opts?.body || '{}');
       if (body.operation === 'status') {
