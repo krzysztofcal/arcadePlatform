@@ -15,6 +15,7 @@
   var avatarMessage = '';
   var publicProfileGeneration = 0;
   var profileLoadState = 'idle';
+  var pokerLoadState = 'idle';
   var publicProfileSaveResetTimer = null;
   var passwordRecoveryActive = false;
   var signupConfirmationPending = false;
@@ -280,6 +281,7 @@
       renderAvatarGallery();
       publicProfileGeneration += 1;
       profileLoadState = 'idle';
+      pokerLoadState = 'idle';
       publicProfileInFlight = null;
       pokerProjectionInFlight = null;
     }
@@ -299,6 +301,10 @@
       clearPokerProjection();
       setBlockVisibility(nodes.publicProfileEditor, false);
       clearChips();
+      profileLoadState = 'idle';
+      pokerLoadState = 'idle';
+      publicProfileInFlight = null;
+      pokerProjectionInFlight = null;
       return;
     }
 
@@ -309,8 +315,13 @@
     // #1309: the basic profile never waits for the slower Poker projection (balance + WS); each renders itself.
     // A repeated auth event for the same account keeps the shown Poker projection while it is refreshed.
     if (previousUserKey !== nextUserKey) clearPokerProjection();
-    loadPublicProfile(true);
-    loadPokerProjection(true);
+    var sameUser = previousUserKey === nextUserKey;
+    if (!sameUser || (profileLoadState !== 'success' && profileLoadState !== 'loading' && !publicProfileInFlight)){
+      loadPublicProfile(true);
+    }
+    if (!sameUser || (pokerLoadState !== 'success' && pokerLoadState !== 'loading' && !pokerProjectionInFlight)){
+      loadPokerProjection(true);
+    }
   }
 
   function setPublicProfileErrors(errors){
@@ -670,8 +681,13 @@
     var requestedGeneration = publicProfileGeneration;
     var request;
     function isCurrent(){ return pokerProjectionInFlight === request && requestedUserKey === getUserKey(currentUser) && requestedGeneration === publicProfileGeneration; }
+    pokerLoadState = 'loading';
     request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
-      if (isCurrent()) renderPokerProjection(profile);
+      if (isCurrent()){
+        // An answer without a Poker projection (WS unavailable) is not a successful read: the next event retries.
+        pokerLoadState = profile && profile.poker ? 'success' : 'error';
+        renderPokerProjection(profile);
+      }
       return profile;
     }).catch(function(error){
       if (!isCurrent()) return null;
@@ -680,7 +696,10 @@
         if (pokerProjectionInFlight === request) pokerProjectionInFlight = null;
         return loadPokerProjection(true, true);
       }
-      if (!(error && error.code === 'stale_identity')){
+      if (error && error.code === 'stale_identity'){
+        pokerLoadState = 'idle';
+      } else {
+        pokerLoadState = 'error';
         try { renderPokerProjection(null); } catch (_err){ klog('account:poker_render_failed', {}); }
       }
       return null;
