@@ -623,10 +623,86 @@ function json(statusCode, obj, origin, extraHeaders) {
 }
 
 // ============================================================================
+// Timing Diagnostics Helper (#1313)
+// ============================================================================
+
+export function createXpTiming(clock = Date.now) {
+  const startMs = clock();
+  let op = null;
+  let signedIn = false;
+  let status = null;
+  const durations = {
+    jwt: 0,
+    conversion: 0,
+    totals: 0,
+    persist: 0,
+    award: 0,
+  };
+
+  return {
+    async measure(phase, fn) {
+      const t0 = clock();
+      try {
+        return await fn();
+      } finally {
+        const elapsed = clock() - t0;
+        const key = typeof phase === "string" && phase.endsWith("Ms") ? phase.slice(0, -2) : phase;
+        durations[key] = (durations[key] || 0) + elapsed;
+      }
+    },
+    set(patch = {}) {
+      if (patch && typeof patch === "object") {
+        if ("op" in patch) op = patch.op;
+        if ("signedIn" in patch) signedIn = patch.signedIn;
+        if ("status" in patch) status = patch.status;
+      }
+    },
+    shouldLog() {
+      const totalMs = Math.round(clock() - startMs);
+      return (op === "status" || op === "award") && totalMs >= 1000;
+    },
+    fields() {
+      const totalMs = Math.max(0, Math.round(clock() - startMs));
+      const jwtMs = Math.round(durations.jwt || 0);
+      const conversionMs = Math.round(durations.conversion || 0);
+      const totalsMs = Math.round(durations.totals || 0);
+      const persistMs = Math.round(durations.persist || 0);
+      const awardMs = Math.round(durations.award || 0);
+      const sum = jwtMs + conversionMs + totalsMs + persistMs + awardMs;
+      const otherMs = Math.max(0, totalMs - sum);
+      return {
+        op,
+        signedIn,
+        status,
+        jwtMs,
+        conversionMs,
+        totalsMs,
+        persistMs,
+        awardMs,
+        otherMs,
+        totalMs,
+      };
+    },
+  };
+}
+
+// ============================================================================
 // Main Handler
 // ============================================================================
 
 export async function handler(event) {
+  const timing = createXpTiming();
+  let response;
+  try { response = await handleCalculateXp(event, timing); return response; }
+  finally {
+    try {
+      if (response && typeof response.statusCode === "number") timing.set({ status: response.statusCode });
+      if (timing.shouldLog()) klog("calc_xp_timing", timing.fields());
+    } catch (_) {}
+  }
+}
+
+async function handleCalculateXp(event, timing) {
   const origin = event.headers?.origin;
   const now = Date.now();
 
@@ -682,7 +758,8 @@ export async function handler(event) {
     return json(400, { error: "invalid_operation" }, origin);
   }
   const jwtToken = extractBearerToken(event.headers);
-  const authContext = await verifySupabaseJwt(jwtToken);
+  const authContext = await timing.measure("jwt", () => verifySupabaseJwt(jwtToken));
+  timing.set({ op: operation });
   if (jwtToken && !authContext.valid) {
     return json(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
   }
@@ -690,6 +767,7 @@ export async function handler(event) {
     return json(400, { error: "invalid_identity" }, origin);
   }
   const { supabaseUserId, identityId, anonId: resolvedAnonId } = resolveXpIdentity({ anonId, authContext });
+  timing.set({ op: operation, signedIn: !!supabaseUserId });
 
   if (!identityId) {
     return json(400, { error: "missing_fields", message: "identity required" }, origin);
@@ -721,18 +799,18 @@ export async function handler(event) {
   };
 
   if (operation === "status") {
-    const conversion = await convertAnonymousXp();
+    const conversion = await timing.measure("conversion", () => convertAnonymousXp());
     const dayKey = getDailyKey(now);
     try {
       const result = await readCanonicalXpStatus({
-        readTotals: () => getTotals({ userId, sessionId, now, anonymous: !supabaseUserId }),
+        readTotals: () => timing.measure("totals", () => getTotals({ userId, sessionId, now, anonymous: !supabaseUserId })),
         dailyCap: DAILY_CAP,
         deltaCap: DELTA_CAP,
         sessionId,
         dayKey,
         nextReset: getNextResetEpoch(now),
         supabaseUserId,
-        persistProfile: ({ userId: profileUserId, totalXp }) => persistUserProfile({ userId: profileUserId, totalXp, now }),
+        persistProfile: (args) => timing.measure("persist", () => persistUserProfile({ userId: args.userId, totalXp: args.totalXp, now })),
       });
       if (conversion?.converted > 0) result.payload.conversion = { converted: conversion.converted };
       return json(200, result.payload, origin);
@@ -812,7 +890,7 @@ export async function handler(event) {
   }
 
   if (validatedServerSessionId) touchSession(validatedServerSessionId, { userId, anonymous: !supabaseUserId }).catch(() => {});
-  const conversion = await convertAnonymousXp();
+  const conversion = await timing.measure("conversion", () => convertAnonymousXp());
 
   const {
     gameId,
@@ -915,7 +993,7 @@ export async function handler(event) {
   const leaderboardWeekKey = XP_LEADERBOARD_KEYS.week(leaderboardPeriods.weekKey);
 
   // Award XP atomically with caps
-  const awardResult = await executeAtomicXpAward({
+  const awardResult = await timing.measure("award", () => executeAtomicXpAward({
     store, userId, anonymous: !supabaseUserId,
     keys: [
       sessionKeyK,
@@ -941,7 +1019,7 @@ export async function handler(event) {
       leaderboardPeriods.weekExpiresAtSec,
     ],
     onEvalError: (err) => klog("calc_redis_eval_failed", { error: err?.message }),
-  });
+  }));
   const granted = awardResult.granted;
   const redisDailyTotal = awardResult.dailyTotal;
   const sessionTotal = awardResult.sessionTotal;
@@ -952,13 +1030,13 @@ export async function handler(event) {
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
 
   if (supabaseUserId) {
-    await persistUserProfile({ userId: supabaseUserId, totalXp: totalLifetime, now });
+    await timing.measure("persist", () => persistUserProfile({ userId: supabaseUserId, totalXp: totalLifetime, now }));
   }
 
   // Update session state
   sessionState.combo = updatedCombo;
   sessionState.lastWindowEnd = windowEnd;
-  await saveSessionState(userId, sessionId, sessionState, !supabaseUserId);
+  await timing.measure("persist", () => saveSessionState(userId, sessionId, sessionState, !supabaseUserId));
 
   // Build response
   const payload = {
