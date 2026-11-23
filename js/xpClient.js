@@ -801,7 +801,9 @@
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const key = (headers.Authorization || "") + "\n" + JSON.stringify(body);
-    if (state.statusShared && state.statusShared.key === key) return state.statusShared.promise;
+    if (state.statusShared && state.statusShared.key === key) {
+      return state.statusShared.promise.then((p) => (p && typeof p === "object" ? JSON.parse(JSON.stringify(p)) : p));
+    }
     const entry = { key, promise: null };
     entry.promise = (async () => {
       const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {

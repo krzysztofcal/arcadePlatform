@@ -29,7 +29,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     window: Object.assign(baseWindow, options.window || {}),
     fetch: fetchImpl,
     crypto: { randomUUID: () => `uuid-test-${++randomId}` },
-    Date: options.Date || Date, setTimeout, clearTimeout, console,
+    Date: options.Date || Date, setTimeout, clearTimeout, console, JSON,
   };
   ctx.window.fetch = fetchImpl;
   vm.createContext(ctx);
@@ -239,8 +239,14 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
 
     assert.equal(calls.length, 1, '3 concurrent fetchStatus calls must share 1 POST');
     assert.deepEqual(r1, { ok: true, status: 'statusOnly', totalLifetime: 100 });
-    assert.strictEqual(r1, r2);
-    assert.strictEqual(r2, r3);
+    assert.deepStrictEqual(r1, r2);
+    assert.deepStrictEqual(r2, r3);
+    assert.notStrictEqual(r1, r2, 'joined caller must receive its own copy');
+    assert.notStrictEqual(r1, r3, 'joined caller must receive its own copy');
+    assert.notStrictEqual(r2, r3, 'joined caller must receive its own copy');
+    r2.mutated = true;
+    assert.equal(r1.mutated, undefined, 'mutating joined result must not affect leader result');
+    assert.equal(r3.mutated, undefined, 'mutating joined result must not affect other callers');
   }
 
   // 2. User or token change: call 1 is in flight with token A. The bridge then returns token B (a different sub) and call 2 starts → 2 POSTs. Call 2's POST carries B, and call 1's carries A.
@@ -302,9 +308,81 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(calls.length, 2, 'expected exactly 2 POSTs (1 for token A, 1 for token B)');
     assert.equal(calls[0].headers.Authorization, 'Bearer token-A');
     assert.equal(calls[1].headers.Authorization, 'Bearer token-B');
-    assert.strictEqual(r1, r1b);
+    assert.deepStrictEqual(r1, r1b);
     assert.equal(r1.tokenUsed, 'Bearer token-A');
     assert.equal(r2.tokenUsed, 'Bearer token-B');
+  }
+
+  // F2(a): A POST with token A is in flight. A new call starts whose first token read returns A, but buildAuthHeaders returns B → second POST carrying Bearer B.
+  {
+    const calls = [];
+    let dateNowCalls = 0;
+    const fakeDate = function(...args) { return new Date(...args); };
+    fakeDate.now = () => {
+      dateNowCalls++;
+      // Call 4 is Call 2 read 1 (cache hit with token-A at currentTime 1_000_000).
+      // From Call 5 onwards (Call 2 read 2 buildAuthHeaders), time has advanced past TTL (1_065_000).
+      if (dateNowCalls >= 5) {
+        return 1_065_000;
+      }
+      return 1_000_000;
+    };
+    Object.setPrototypeOf(fakeDate, Date);
+
+    let resolve1;
+    const wait1 = new Promise(resolve => { resolve1 = resolve; });
+    let resolve2;
+    const wait2 = new Promise(resolve => { resolve2 = resolve; });
+
+    let bridgeCalls = 0;
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        const item = { url, headers: opts?.headers || {}, body };
+        calls.push(item);
+        if (calls.length === 1) {
+          await wait1;
+          return response(200, { ok: true, source: 'post1' });
+        }
+        await wait2;
+        return response(200, { ok: true, source: 'post2' });
+      }
+      return response(200, { ok: true });
+    }, {
+      Date: fakeDate,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => {
+            bridgeCalls += 1;
+            if (bridgeCalls === 1) return 'token-A';
+            return 'token-B';
+          },
+          getCurrentUserId: async () => 'user-1',
+        },
+      },
+    });
+
+    const p1 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].headers.Authorization, 'Bearer token-A');
+
+    const p2 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && calls.length < 2; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    resolve1();
+    resolve2();
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    assert.equal(calls.length, 2, 'expected a second POST carrying Bearer B');
+    assert.equal(calls[0].headers.Authorization, 'Bearer token-A');
+    assert.equal(calls[1].headers.Authorization, 'Bearer token-B');
+    assert.equal(r1.source, 'post1');
+    assert.equal(r2.source, 'post2');
   }
 
   // 3. Session change: call 1 is in flight. Change the award session id through the existing auth path: give the fixture a window.SupabaseAuth = { onAuthChange(fn){ handler = fn } } mock, call handler('TOKEN_REFRESHED', user) (handleAuthChange regenerates the award session id), then start call 2. Expect 2 POSTs with different sessionId in the bodies.
@@ -363,7 +441,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
 
     assert.equal(startedCalls.length, 2, 'expected exactly 2 POSTs for the started calls');
     assert.notEqual(startedCalls[0].body.sessionId, startedCalls[1].body.sessionId, 'expected different sessionId in bodies');
-    assert.strictEqual(r1, r1b);
+    assert.deepStrictEqual(r1, r1b);
     assert.equal(r1.sessionId, startedCalls[0].body.sessionId);
     assert.equal(r2.sessionId, startedCalls[1].body.sessionId);
   }
@@ -373,6 +451,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     // 4a. Same token re-read after expiry shares in-flight request
     {
       const calls = [];
+      let bridgeReads = 0;
       let currentTime = 1_000_000;
       const fakeDate = function(...args) { return new Date(...args); };
       fakeDate.now = () => currentTime;
@@ -393,7 +472,10 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
         Date: fakeDate,
         window: {
           SupabaseAuthBridge: {
-            getAccessToken: async () => 'same-token',
+            getAccessToken: async () => {
+              bridgeReads += 1;
+              return 'same-token';
+            },
             getCurrentUserId: async () => 'user-same',
           },
         },
@@ -414,7 +496,8 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       const [r1, r2] = await Promise.all([p1, p2]);
 
       assert.equal(calls.length, 1, 'concurrent call with same token after expiry must share');
-      assert.strictEqual(r1, r2);
+      assert.equal(bridgeReads, 2, 'bridge getter must be called again after TTL');
+      assert.deepStrictEqual(r1, r2);
     }
 
     // 4b. Different token re-read after expiry sends a new POST
@@ -546,7 +629,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const [r1, r2] = await Promise.all([p1, p2]);
 
     assert.equal(calls.length, 1, 'concurrent callers must share 1 POST');
-    assert.strictEqual(r1, r2);
+    assert.deepStrictEqual(r1, r2);
     assert.equal(r1.totalLifetime, 10);
 
     // Call made after settlement
