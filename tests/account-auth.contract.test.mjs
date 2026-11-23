@@ -771,3 +771,220 @@ test('A failed explicit read-only retry keeps unavailable and permits a later re
  assert.equal(f.api.getPresentation('user-a').state,'unavailable');assert.equal(f.node('googlePhotoRetry').hidden,false);assert.equal(f.node('googlePhotoPanel').hidden,false);assert.equal(f.node('googlePhotoPanel').getAttribute('aria-busy'),'false');assert.equal(f.api.getChoice('user-a'),null);assert.equal(f.server.posts,0);
  f.server.getError=null;await f.api.load(true);assert.equal(f.api.getPresentation('user-a'),null);assert.equal(f.server.posts,0);
 });
+
+async function accountRenderFixture(respond) {
+  const source = await read('js/account-page.js');
+  const start = source.indexOf('  function renderUser(user){');
+  const end = source.indexOf('\n  function handlePublicProfileSave', start);
+  const events = { rendered: [], pokerRendered: [], errors: 0, states: [], baseReads: 0, pokerReads: 0 };
+  const statusNode = { dataset: { source: 'profile' } };
+  const context = vm.createContext({
+    currentUser: null,
+    publicProfileGeneration: 0,
+    publicProfileInFlight: null,
+    pokerProjectionInFlight: null,
+    profileLoadState: 'idle',
+    pokerLoadState: 'idle',
+    avatarSelection: null,
+    avatarSaving: null,
+    avatarMessage: '',
+    publicProfile: null,
+    deletionReceivedOwnerId: '',
+    deletionAttempt: null,
+    signupConfirmationPending: false,
+    doc: { getElementById: () => null, createElement: () => ({ appendChild() {}, setAttribute() {} }), createDocumentFragment: () => ({ appendChild() {} }) },
+    document: { getElementById: () => null },
+    nodes: {
+      forms: {}, account: {}, deletionInfo: {}, chipPanel: {},
+      signupConfirmation: {}, publicProfileEditor: {}, status: statusNode,
+      userEmail: {}, userName: {},
+    },
+    window: {
+      ProfileClient: {
+        getMe: async (force, options) => {
+          if (options && options.includePoker) {
+            events.pokerReads++;
+          } else {
+            events.baseReads++;
+          }
+          if (typeof respond === 'function') {
+            const custom = await respond(force, options);
+            if (custom !== undefined) return custom;
+          }
+          return { displayName: 'Player', avatarVariant: 'wizard-indigo', avatar: { variant: 'wizard-indigo' }, poker: { tables: [] } };
+        },
+        updateMe: async (data) => {
+          events.savedData = data;
+          return { displayName: 'Player', avatarVariant: data.avatarVariant, avatarRevision: 2 };
+        },
+        clear: () => { events.clientCleared = true; },
+      },
+      ArcadeTerms: {
+        isReady: () => true,
+        getAvatarVariants: () => ['wizard-indigo', 'knight-cyan'],
+      },
+      ProfileGooglePhoto: {
+        load: async () => {},
+        select: async () => ({ displayName: 'Player', avatarVariant: 'google', avatarRevision: 2 }),
+      },
+      SupabaseAuthBridge: { getAccessToken: async () => 'private-token' },
+      KLog: { syncAdminAccess() {}, flush() {}, push() {} },
+    },
+    auth: { getCurrentUser: async () => context.currentUser },
+    fetch: async () => ({ ok: true, json: async () => ({ isAdmin: true, userId: context.currentUser?.id }) }),
+    AbortController, setTimeout, clearTimeout,
+    getUserKey: user => user ? String(user.id || user.user_id || user.sub || 'current') : '',
+    renderPublicProfile: profile => events.rendered.push(profile),
+    renderPokerProjection: profile => events.pokerRendered.push(profile),
+    clearPokerProjection() {},
+    renderAvatarGallery() {},
+    setBlockVisibility() {},
+    setWelcomeBonusVisibility() {},
+    focusDeletionLink() {},
+    clearChips() {},
+    resetDeletionAttempt() {},
+    setStatus(message, tone, source) {
+      if (tone === 'error') events.errors++;
+      events.states.push(context.profileLoadState);
+      statusNode.dataset.source = source || 'auth';
+    },
+    t: (_, fallback) => fallback,
+    tf: (_, __, fallback) => fallback,
+    klog: () => {},
+    Promise,
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  };
+  return {
+    context,
+    events,
+    render: async (user) => {
+      context.renderUser(user);
+      await flush();
+    },
+    saveAvatar: async () => {
+      const res = await vm.runInContext('saveAvatar()', context);
+      await flush();
+      return res;
+    },
+    loadProfile: async (force) => {
+      const res = await vm.runInContext(`loadPublicProfile(${force ? 'true' : 'false'})`, context);
+      await flush();
+      return res;
+    },
+  };
+}
+
+test('Account renderUser skips base and poker getMe on same-user auth events after success', async () => {
+  const f = await accountRenderFixture();
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1);
+  assert.equal(f.events.pokerReads, 1);
+  assert.equal(f.context.profileLoadState, 'success');
+  assert.equal(f.context.pokerLoadState, 'success');
+
+  // Same-user event (INITIAL_SESSION / SIGNED_IN / TOKEN_REFRESHED)
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1, 'same-user event must not trigger new base getMe');
+  assert.equal(f.events.pokerReads, 1, 'same-user event must not trigger new poker getMe');
+
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1);
+  assert.equal(f.events.pokerReads, 1);
+});
+
+test('Account renderUser reads again after an earlier failure on same user', async () => {
+  let failBase = true;
+  const f = await accountRenderFixture(async (force, options) => {
+    if (!options?.includePoker && failBase) throw new Error('profile_fail');
+    return { displayName: 'Player', poker: { tables: [] } };
+  });
+
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1);
+  assert.equal(f.events.pokerReads, 1);
+  assert.equal(f.context.profileLoadState, 'error');
+  assert.equal(f.context.pokerLoadState, 'success');
+
+  // Next same-user event: profile reads again because it failed earlier, poker does not reload
+  failBase = false;
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 2, 'failed profile must be retried on next same-user event');
+  assert.equal(f.events.pokerReads, 1, 'successful poker must not reload when only profile failed');
+  assert.equal(f.context.profileLoadState, 'success');
+});
+
+test('Account switch or sign-out followed by sign-in reloads both profile and poker', async () => {
+  const f = await accountRenderFixture();
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1);
+  assert.equal(f.events.pokerReads, 1);
+
+  // Account switch to user-2
+  await f.render({ id: 'user-2' });
+  assert.equal(f.events.baseReads, 2, 'account switch must trigger base getMe');
+  assert.equal(f.events.pokerReads, 2, 'account switch must trigger poker getMe');
+
+  // Sign out (user null)
+  await f.render(null);
+  assert.equal(f.events.baseReads, 2);
+  assert.equal(f.events.pokerReads, 2);
+
+  // Sign in again with user-1
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 3, 'sign-in after sign-out must reload base profile');
+  assert.equal(f.events.pokerReads, 3, 'sign-in after sign-out must reload poker projection');
+});
+
+test('Account avatar save conflict forces profile reload', async () => {
+  const f = await accountRenderFixture();
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1);
+  assert.equal(f.events.pokerReads, 1);
+
+  // Drive real avatar save handler (saveAvatar around line ~574) with a conflict retry that calls loadPublicProfile(true)
+  f.context.avatarSelection = 'knight-cyan';
+  f.context.window.ProfileClient.updateMe = async () => {
+    throw { code: 'stale_avatar_revision' };
+  };
+  await f.saveAvatar();
+  assert.equal(f.events.baseReads, 2, 'saveAvatar handler must trigger a new base read on conflict retry');
+  assert.equal(f.events.pokerReads, 1, 'avatar save should not reload poker');
+
+  // Explicit profile reload also forces new base read without touching poker
+  await f.loadProfile(true);
+  assert.equal(f.events.baseReads, 3, 'explicit profile refresh must reload');
+  assert.equal(f.events.pokerReads, 1, 'explicit profile reload must not force poker reload');
+});
+
+test('Successful avatar save through real handler renders profile and clears ProfileClient without extra reload', async () => {
+  const f = await accountRenderFixture();
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1);
+  assert.equal(f.events.pokerReads, 1);
+
+  // Drive real avatar save handler with a successful response
+  f.context.avatarSelection = 'knight-cyan';
+  f.context.window.ProfileClient.updateMe = async (data) => {
+    return {
+      displayName: 'Player',
+      avatarVariant: data.avatarVariant,
+      avatarRevision: 2,
+      avatar: { variant: data.avatarVariant },
+    };
+  };
+
+  await f.saveAvatar();
+  assert.equal(f.events.baseReads, 1, 'successful avatar save must not trigger redundant base read');
+  assert.equal(f.events.pokerReads, 1, 'successful avatar save must not reload poker');
+  assert.equal(f.events.clientCleared, true, 'ProfileClient.clear() must be called on successful avatar save');
+  assert.equal(f.context.avatarMessage, 'arcadeAvatarSaved', 'avatar message must be arcadeAvatarSaved');
+  assert.equal(f.context.publicProfile.avatarVariant, 'knight-cyan', 'publicProfile must be updated with new variant');
+
+  // Subsequent same-user event after successful save does not re-read
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1, 'same-user render after successful avatar save must not re-read');
+  assert.equal(f.events.pokerReads, 1, 'same-user render after successful avatar save must not reload poker');
+});

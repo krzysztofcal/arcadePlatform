@@ -8,6 +8,8 @@
   var authSubscriptionAttached = false;
   var recoverySession = null;
   var recoveryPending = false;
+  var profileConfirmedUserId = null;
+  var profileSessionGeneration = 0;
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -395,7 +397,9 @@
 
   function refreshProfile(user, uiGeneration, hadCachedProfile){
     if (!user) return;
-    var load = window.ProfileClient && typeof window.ProfileClient.getMe === 'function'
+    var sessionGen = profileSessionGeneration;
+    var hasProfileClient = !!(window.ProfileClient && typeof window.ProfileClient.getMe === 'function');
+    var load = hasProfileClient
       ? window.ProfileClient.getMe()
       : getAccessToken().then(function(accessToken){
         if (!accessToken) throw new Error('not_authenticated');
@@ -405,13 +409,28 @@
         });
       });
     load.then(function(profile){
+      // A late answer from an earlier session never confirms the current one (ProfileClient path only).
+      if (hasProfileClient && profileSessionGeneration !== sessionGen) return;
       var ui = userUiState();
       if (!state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
       if (ui) ui.publish(user.id, 'profile', profile, Date.now());
       else setUserUiState('ready');
+      if (hasProfileClient) {
+        profileConfirmedUserId = String(user.id);
+      }
       renderUser(user, profile);
     }).catch(function(error){
       var ui = userUiState();
+      // #1313: only the ProfileClient path skips late failures of an earlier session or user; the legal-page
+      // fallback (no ProfileClient) keeps its previous handling unchanged.
+      if (hasProfileClient){
+        var isCurrent = profileSessionGeneration === sessionGen && state.user && String(state.user.id) === String(user.id) && (!ui || ui.isCurrent(user.id, uiGeneration));
+        if (!isCurrent){
+          logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });
+          return;
+        }
+        profileConfirmedUserId = null;
+      }
       if (ui) ui.markRefreshFailed(user.id, uiGeneration, !!hadCachedProfile);
       else setUserUiState(hadCachedProfile ? 'stale' : 'loading');
       logDiag('profile:topbar_load_failed', { code: error && error.code ? error.code : 'request_failed' });
@@ -425,13 +444,23 @@
     // Token refresh and repeated sign-in events do not change the profile owner.
     if (previousUserId !== nextUserId && window.ProfileClient && typeof window.ProfileClient.clear === 'function') window.ProfileClient.clear();
     if (!user || !user.id){
+      profileSessionGeneration += 1;
+      profileConfirmedUserId = null;
       if (ui && previousUserId) ui.clearUser(previousUserId);
       if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
       renderUser(null, null);
       return;
     }
     var userId = String(user.id);
+    if (previousUserId !== userId){
+      profileSessionGeneration += 1;
+      profileConfirmedUserId = null;
+    }
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
+    if (previousUserId === userId && profileConfirmedUserId === userId && window.ProfileClient && typeof window.ProfileClient.getMe === 'function'){
+      renderUser(user, state.profile);
+      return;
+    }
     var hydrated = ui ? ui.hydrate(userId) : { generation: 0, profile: null };
     if (!ui) setUserUiState('loading');
     // Hydrated names are useful; cached avatars need a fresh server confirmation.
