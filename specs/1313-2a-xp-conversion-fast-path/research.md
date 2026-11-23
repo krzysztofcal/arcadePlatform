@@ -38,7 +38,7 @@ Before `guardedRedisEval`, make **one** `store.mget([userMigration(userId), migr
 - No marker, and the anon total is absent or exactly a non-positive integer → return `{converted:0, userTotal:<parsed>, anonTotal:0, alreadyConverted:false}`. Again the script's result.
 - Anything else falls through to the **unchanged** guarded path:
   - anon total > 0;
-  - a non-integer or unparsable value (the Lua `tonumber` would yield nil and error);
+  - any value that is not `null` or a canonical integer string `/^-?\d+$/` (Lua `tonumber` and JS `Number` differ on exotic forms such as `0b10`, so they always go to Lua);
   - `mget` missing or throwing;
   - an unexpected array shape.
 
@@ -54,7 +54,9 @@ Before `guardedRedisEval`, make **one** `store.mget([userMigration(userId), migr
 | Markers wiped (`CLEAN_OWNER` for a deleted user, flush) | — | A deleted user is rejected by I4. After a flush, no marker → normal path | ✅ |
 | User change between requests | Ids come from the same request (JWT sub, body anonId) | Same ids; no cross-request state | ✅ |
 | Retries | Idempotent | No writes on the fast path | ✅ |
-| Non-UUID or legacy anon id; deletion disabled and non-v3 | Unguarded eval | The reads are still valid; a skip avoids one eval | ✅ |
+| Deletion disabled and non-v3 (legacy) | One unguarded eval | **Gated off**: the fast path is not used, because it would save nothing and add an `MGET` on fallback (Codex R1/F7) | ✅ |
+| Illegal anonId (an Auth user, deleting, retired or `BLOCKED`) with zero total | The guarded path rejects the request | Skipped: no write, and the anonId has no other effect. **D1, behaviour difference for an OWNER decision** | ✅ for writes; the request-level rejection changes |
+| Wrong Redis type on a marker or total key (corruption) | Lua `WRONGTYPE` error | `MGET` gives `null` → skip, no write. **D2** | ✅ for writes |
 | Owner index (I6) | The no-op eval still `ZADD`s references | Nothing is written, so no reference is needed | ✅ |
 
 **Not changed:** the guarded path, `withRedisIdentityPermit`, `lockAccountLifecycle`, the scripts, the JWT lifecycle check, `persistUserProfile` (2b HOLD), awards, deletion, keys and TTLs.

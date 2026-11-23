@@ -10,7 +10,7 @@ Every signed-in XP status read and every award calls `migrateAnonXpToUser`. Almo
 - **FR-001** In `netlify/functions/_shared/xp-identity.mjs::migrateAnonXpToUser`, before `guardedRedisEval`, make one unlocked `store.mget` of the user marker, the pair marker, the anon total and the user total.
   - Return without any transaction or eval **only** when the conversion script would provably write nothing: a marker is present, or the anon total is absent or a non-positive integer.
   - The result must have the same shape and values as the script's result.
-- **FR-002** Every other case uses the **unchanged** guarded path, including:
+- **FR-002** The fast path runs only in permit modes (`ACCOUNT_DELETION_ENABLED==='1'` or XP v3), only on an exact 4-entry array, and only on canonical integer strings or `null`. Every other case uses the **unchanged** guarded path, including:
   - an anon total > 0;
   - any unparsable value;
   - a missing `mget`;
@@ -27,6 +27,10 @@ Every signed-in XP status read and every award calls `migrateAnonXpToUser`. Almo
 - A deleting or missing account is still rejected by the JWT lifecycle check (I4).
 - `BLOCKED`, a missing epoch or a Redis failure still make the request fail closed through the unchanged guarded writes.
 - A conversion that is actually due (anon XP > 0, no marker) runs exactly as today, at most one status or award later than today if a concurrent anonymous award raced the read.
+
+## Behaviour differences without writes (OWNER decision; plan §Change)
+- **D1:** an illegal anonId (an Auth user, deleting, retired or `BLOCKED`) no longer fails a request when no conversion is due.
+- **D2:** a corrupted non-string marker or total key is skipped instead of raising `WRONGTYPE`.
 
 ## Success Criteria
 - **SC-001** Fundamental tests prove the following:
