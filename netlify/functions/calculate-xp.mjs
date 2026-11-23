@@ -626,8 +626,29 @@ function json(statusCode, obj, origin, extraHeaders) {
 // Timing Diagnostics Helper (#1313)
 // ============================================================================
 
-export function createXpTiming(clock = Date.now) {
-  const startMs = clock();
+export function createXpTiming(clock = () => performance.now()) {
+  let disabled = false;
+
+  function readClock() {
+    if (disabled) return null;
+    try {
+      const val = clock();
+      if (typeof val !== "number" || Number.isNaN(val)) {
+        disabled = true;
+        return null;
+      }
+      return val;
+    } catch (_) {
+      disabled = true;
+      return null;
+    }
+  }
+
+  const startMs = readClock();
+  if (startMs == null) {
+    disabled = true;
+  }
+
   let op = null;
   let signedIn = false;
   let status = null;
@@ -639,15 +660,53 @@ export function createXpTiming(clock = Date.now) {
     award: 0,
   };
 
+  function fields() {
+    if (disabled || startMs == null) return null;
+    const now = readClock();
+    if (disabled || now == null) return null;
+
+    let totalMs = Math.max(0, Math.round(now - startMs));
+    const jwtMs = Math.round(durations.jwt || 0);
+    const conversionMs = Math.round(durations.conversion || 0);
+    const totalsMs = Math.round(durations.totals || 0);
+    const persistMs = Math.round(durations.persist || 0);
+    const awardMs = Math.round(durations.award || 0);
+    const sum = jwtMs + conversionMs + totalsMs + persistMs + awardMs;
+
+    // Clamp totalMs to sum of rounded phases if rounding caused sum to exceed totalMs, ensuring phases + otherMs === totalMs exactly.
+    totalMs = Math.max(totalMs, sum);
+    const otherMs = Math.max(0, totalMs - sum);
+
+    return {
+      op,
+      signedIn,
+      status,
+      jwtMs,
+      conversionMs,
+      totalsMs,
+      persistMs,
+      awardMs,
+      otherMs,
+      totalMs,
+    };
+  }
+
   return {
     async measure(phase, fn) {
-      const t0 = clock();
+      if (disabled) return await fn();
+      const t0 = readClock();
+      if (disabled || t0 == null) {
+        return await fn();
+      }
       try {
         return await fn();
       } finally {
-        const elapsed = clock() - t0;
-        const key = typeof phase === "string" && phase.endsWith("Ms") ? phase.slice(0, -2) : phase;
-        durations[key] = (durations[key] || 0) + elapsed;
+        const t1 = readClock();
+        if (!disabled && t1 != null) {
+          const elapsed = t1 - t0;
+          const key = typeof phase === "string" && phase.endsWith("Ms") ? phase.slice(0, -2) : phase;
+          durations[key] = (durations[key] || 0) + elapsed;
+        }
       }
     },
     set(patch = {}) {
@@ -657,32 +716,16 @@ export function createXpTiming(clock = Date.now) {
         if ("status" in patch) status = patch.status;
       }
     },
-    shouldLog() {
-      const totalMs = Math.round(clock() - startMs);
-      return (op === "status" || op === "award") && totalMs >= 1000;
+    shouldLog(f) {
+      if (disabled) return false;
+      const data = f !== undefined ? f : fields();
+      return Boolean(
+        data &&
+        (data.op === "status" || data.op === "award") &&
+        data.totalMs >= 1000
+      );
     },
-    fields() {
-      const totalMs = Math.max(0, Math.round(clock() - startMs));
-      const jwtMs = Math.round(durations.jwt || 0);
-      const conversionMs = Math.round(durations.conversion || 0);
-      const totalsMs = Math.round(durations.totals || 0);
-      const persistMs = Math.round(durations.persist || 0);
-      const awardMs = Math.round(durations.award || 0);
-      const sum = jwtMs + conversionMs + totalsMs + persistMs + awardMs;
-      const otherMs = Math.max(0, totalMs - sum);
-      return {
-        op,
-        signedIn,
-        status,
-        jwtMs,
-        conversionMs,
-        totalsMs,
-        persistMs,
-        awardMs,
-        otherMs,
-        totalMs,
-      };
-    },
+    fields,
   };
 }
 
@@ -697,7 +740,8 @@ export async function handler(event) {
   finally {
     try {
       if (response && typeof response.statusCode === "number") timing.set({ status: response.statusCode });
-      if (timing.shouldLog()) klog("calc_xp_timing", timing.fields());
+      const f = timing.fields();
+      if (timing.shouldLog(f)) klog("calc_xp_timing", f);
     } catch (_) {}
   }
 }
@@ -757,9 +801,9 @@ async function handleCalculateXp(event, timing) {
   if (operation !== "award" && operation !== "status") {
     return json(400, { error: "invalid_operation" }, origin);
   }
+  timing.set({ op: operation });
   const jwtToken = extractBearerToken(event.headers);
   const authContext = await timing.measure("jwt", () => verifySupabaseJwt(jwtToken));
-  timing.set({ op: operation });
   if (jwtToken && !authContext.valid) {
     return json(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
   }
