@@ -1,7 +1,9 @@
 # Tasks: #1313 2a, skip no-op anonymous XP conversion
 - [x] T001 Read-only analysis on main `5364a459` (research.md R1–R6).
 - [x] T002 Independent Codex plan review, 3 rounds: R1 7 findings, R2 6, R3 4. All accepted or documented; dispositions are in the review log. The R3 revisions are not re-reviewed (limit reached).
-- [ ] T003 OWNER GO for implementation.
+- [x] T003 OWNER review (2026-11-23): D1 and D2 rejected; V0 withdrawn; implementation HOLD.
+- [x] T003a Re-analysis read-only (research-2.md): owner-index proof, options V1–V3, time split. Not covered by the completed plan review.
+- [ ] T003b OWNER decision on the recommendation in research-2 §F.
 - [ ] T004 [agy] Implement plan §Change in `netlify/functions/_shared/xp-identity.mjs` only.
 - [ ] T005 [agy] Fundamental tests (a)–(h8), including e2, in `tests/xp-redis-v3.behavior.test.mjs`; the existing XP and deletion suites pass unchanged.
 - [ ] T006 Coordinator review; Draft PR from main; Codex review (max 3 rounds).

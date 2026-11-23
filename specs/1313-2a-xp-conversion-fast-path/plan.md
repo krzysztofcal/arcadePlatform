@@ -1,5 +1,8 @@
 # Plan: #1313 2a, skip no-op anonymous XP conversion
 
+> **Status after the OWNER plan review (2026-11-23): D1 and D2 are rejected, so variant V0 (the MGET fast path) is WITHDRAWN.** The re-analysis and options are in [research-2.md](research-2.md). Everything after Codex plan review R3, including the R3 revisions, is **NOT COVERED BY THE COMPLETED REVIEW**. Implementation is HOLD.
+
+
 ## Change (one function), revised after Codex plan review R1
 In `netlify/functions/_shared/xp-identity.mjs::migrateAnonXpToUser`, after the **complete** existing early return (`!anonId || !userId || anonId === userId`) and before `guardedRedisEval`:
 0. **Gate (R1/F7, R2-F1):**
