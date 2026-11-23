@@ -1,0 +1,6 @@
+# Tasks: `calc_xp_timing` (#1313)
+- [ ] T001 [agy] `createXpTiming` plus the wrapper and phase measurement in `netlify/functions/calculate-xp.mjs` (plan §Change).
+- [ ] T002 [agy] Fundamental tests (plan §Tests).
+- [ ] T003 Coordinator review; Draft PR; Codex review (max 3 rounds); CI and CodeQL green.
+- [ ] T004 Stage Playwright measurement with the dedicated test account: ≥ 10 signed-in status reads, ≥ 10 signed-in awards, plus anonymous reads. Aggregates only.
+- [ ] T005 Report: the median and p90 per phase, the dominant phase, and a recommendation (2a/V1, region, or stop).
