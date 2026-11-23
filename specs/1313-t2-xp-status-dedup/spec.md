@@ -4,7 +4,7 @@
 **Origin**: OWNER decision. The #1317 approach (generations, stale rejection, token-cache ownership) is **not** reused.
 
 ## Problem
-On Account open, up to 8 `calculate-xp` status POSTs start in the same millisecond (research.md M1). Each signed-in status read holds the `account-lifecycle:<user>` lock across Upstash calls. The reads therefore queue for 5–20 s, and `profile-me` waits behind them.
+On Account open, up to 8 `calculate-xp` POSTs start in the same millisecond (research.md M1). For anonymous opens, Playwright confirmed they are `status` requests. For signed-in opens this is **inferred**: there is no game on the page and the response sizes are uniform; the request bodies were not observed. Each signed-in status read holds the `account-lifecycle:<user>` lock across Upstash calls. The reads therefore queue for 5–20 s, and `profile-me` waits behind them.
 
 ## Requirements
 - **FR-001** `js/xpClient.js::fetchStatus` keeps the main flow unchanged up to and including `buildAuthHeaders`. It then joins an in-flight status request **only if** the request it is about to send is byte-identical to that request: the same `Authorization` header value (or none) and the same JSON body (`anonId`, `sessionId`, `operation`).
@@ -17,5 +17,5 @@ On Account open, up to 8 `calculate-xp` status POSTs start in the same milliseco
 `fetchStatus` reads the token twice: once in `ensureAuthTokenWithRetry` and again in `buildAuthHeaders`. The POST carries the second read. A key decided earlier, from the cached token or a pending `authPromise`, cannot guarantee that the shared POST used the joiner's token after an asynchronous Auth refresh. A key equal to the final header and body guarantees by construction that the shared POST is exactly the request the joiner would have sent.
 
 ## Success Criteria
-- **SC-001** On Stage, `calculate-xp` status POSTs per Account open drop to 1 per distinct request, both anonymous and signed in. Requests caused by later auth events are reported separately; each event still changes the award session id and may add at most one request.
+- **SC-001** On Stage, `calculate-xp` status POSTs per Account open drop to 1 per distinct request. Anonymous: verified on confirmed `operation:"status"` bodies (Playwright). Signed in: verified by the POST count in Netlify logs (operation inferred). Requests caused by later auth events are reported separately; each event still changes the award session id and may add at most one request.
 - **SC-002** Fundamental tests pass: concurrent calls, a user or session change, token expiry or change, errors, and a retry after settlement.
