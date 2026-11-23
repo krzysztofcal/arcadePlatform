@@ -802,7 +802,7 @@
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
     const key = (headers.Authorization || "") + "\n" + JSON.stringify(body);
     if (state.statusShared && state.statusShared.key === key) {
-      return state.statusShared.promise.then((p) => (p && typeof p === "object" ? JSON.parse(JSON.stringify(p)) : p));
+      return state.statusShared.promise.then((t) => JSON.parse(t));
     }
     const entry = { key, promise: null };
     entry.promise = (async () => {
@@ -817,13 +817,14 @@
         const text = await res.text().catch(() => "");
         throw new Error(`XP status failed (${res.status}) ${text}`.trim());
       }
-      const payload = await res.json();
+      const text = await res.text();
+      const payload = JSON.parse(text);
       updateCapFromPayload(payload);
-      return payload;
+      return text;
     })();
     state.statusShared = entry;
     try {
-      return await entry.promise;
+      return JSON.parse(await entry.promise);
     } finally {
       if (state.statusShared === entry) state.statusShared = null;
     }

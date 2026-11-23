@@ -213,12 +213,19 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const calls = [];
     let resolveNetwork;
     const networkPromise = new Promise(resolve => { resolveNetwork = resolve; });
+    const rawResponseText = JSON.stringify({ ok: true, status: 'statusOnly', totalLifetime: 100 })
+      .replace('}', ',"capDelta":-0}');
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const body = JSON.parse(opts?.body || '{}');
       if (body.operation === 'status') {
         calls.push({ url, headers: opts?.headers || {}, body });
         await networkPromise;
-        return response(200, { ok: true, status: 'statusOnly', totalLifetime: 100 });
+        return {
+          status: 200,
+          ok: true,
+          async text() { return rawResponseText; },
+          async json() { return JSON.parse(rawResponseText); },
+        };
       }
       return response(200, { ok: true });
     }, {
@@ -238,9 +245,12 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
 
     assert.equal(calls.length, 1, '3 concurrent fetchStatus calls must share 1 POST');
-    assert.deepEqual(r1, { ok: true, status: 'statusOnly', totalLifetime: 100 });
+    assert.deepEqual(r1, { ok: true, status: 'statusOnly', totalLifetime: 100, capDelta: -0 });
     assert.deepStrictEqual(r1, r2);
     assert.deepStrictEqual(r2, r3);
+    assert.ok(Object.is(r1.capDelta, -0), 'leader must receive Object.is(capDelta, -0) === true');
+    assert.ok(Object.is(r2.capDelta, -0), 'joined caller must receive Object.is(capDelta, -0) === true');
+    assert.ok(Object.is(r3.capDelta, -0), 'joined caller must receive Object.is(capDelta, -0) === true');
     assert.notStrictEqual(r1, r2, 'joined caller must receive its own copy');
     assert.notStrictEqual(r1, r3, 'joined caller must receive its own copy');
     assert.notStrictEqual(r2, r3, 'joined caller must receive its own copy');
@@ -313,28 +323,22 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(r2.tokenUsed, 'Bearer token-B');
   }
 
-  // F2(a): A POST with token A is in flight. A new call starts whose first token read returns A, but buildAuthHeaders returns B → second POST carrying Bearer B.
+  // F2(a): A POST with token A is in flight. A new call starts whose first token read returns A from cache,
+  // then cache expires and buildAuthHeaders calls getter for B → second POST carrying Bearer B.
   {
     const calls = [];
-    let dateNowCalls = 0;
+    let currentTime = 1_000_000;
     const fakeDate = function(...args) { return new Date(...args); };
-    fakeDate.now = () => {
-      dateNowCalls++;
-      // Call 4 is Call 2 read 1 (cache hit with token-A at currentTime 1_000_000).
-      // From Call 5 onwards (Call 2 read 2 buildAuthHeaders), time has advanced past TTL (1_065_000).
-      if (dateNowCalls >= 5) {
-        return 1_065_000;
-      }
-      return 1_000_000;
-    };
+    fakeDate.now = () => currentTime;
     Object.setPrototypeOf(fakeDate, Date);
 
     let resolve1;
+    let post1Settled = false;
     const wait1 = new Promise(resolve => { resolve1 = resolve; });
     let resolve2;
     const wait2 = new Promise(resolve => { resolve2 = resolve; });
 
-    let bridgeCalls = 0;
+    let bridgeReads = 0;
     const XPClient = await loadClientWithFetch(async (url, opts) => {
       const body = JSON.parse(opts?.body || '{}');
       if (body.operation === 'status') {
@@ -342,6 +346,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
         calls.push(item);
         if (calls.length === 1) {
           await wait1;
+          post1Settled = true;
           return response(200, { ok: true, source: 'post1' });
         }
         await wait2;
@@ -353,8 +358,8 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       window: {
         SupabaseAuthBridge: {
           getAccessToken: async () => {
-            bridgeCalls += 1;
-            if (bridgeCalls === 1) return 'token-A';
+            bridgeReads += 1;
+            if (bridgeReads === 1) return 'token-A';
             return 'token-B';
           },
           getCurrentUserId: async () => 'user-1',
@@ -362,25 +367,38 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       },
     });
 
+    // Call 1 starts and its POST is held in flight
     const p1 = XPClient.fetchStatus();
     for (let i = 0; i < 20 && calls.length === 0; i += 1) {
       await new Promise(resolve => setTimeout(resolve, 0));
     }
     assert.equal(calls.length, 1);
     assert.equal(calls[0].headers.Authorization, 'Bearer token-A');
+    assert.equal(bridgeReads, 1, 'call 1 must have called bridge getter once');
 
+    // Call 2 starts: its first token read is served from the fresh cache (A)
     const p2 = XPClient.fetchStatus();
+    assert.equal(bridgeReads, 1, 'call 2 first token read must be served from fresh cache (no extra getter call)');
+
+    // Expire the cache: single explicit advance step right after call 2 passed its first check
+    currentTime += 65_000;
+
+    // Wait until POST 2 has started while POST 1 is still held in flight
     for (let i = 0; i < 20 && calls.length < 2; i += 1) {
       await new Promise(resolve => setTimeout(resolve, 0));
     }
 
+    assert.equal(calls.length, 2, 'expected a second POST carrying Bearer B');
+    assert.equal(post1Settled, false, 'POST 1 must still be held when POST 2 starts');
+    assert.equal(bridgeReads, 2, 'buildAuthHeaders must call bridge getter exactly once more');
+    assert.equal(calls[0].headers.Authorization, 'Bearer token-A');
+    assert.equal(calls[1].headers.Authorization, 'Bearer token-B');
+
+    // Now release both in-flight requests
     resolve1();
     resolve2();
     const [r1, r2] = await Promise.all([p1, p2]);
 
-    assert.equal(calls.length, 2, 'expected a second POST carrying Bearer B');
-    assert.equal(calls[0].headers.Authorization, 'Bearer token-A');
-    assert.equal(calls[1].headers.Authorization, 'Bearer token-B');
     assert.equal(r1.source, 'post1');
     assert.equal(r2.source, 'post2');
   }
@@ -603,6 +621,52 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     const r3 = await XPClient.fetchStatus();
     assert.equal(calls.length, 2, 'call made after error settlement must send a new POST');
     assert.equal(r3.status, 'statusOnly');
+  }
+
+  // 5b. Malformed JSON response rejects both leader and joiner with SyntaxError
+  {
+    const calls = [];
+    let resolve1;
+    const wait1 = new Promise(resolve => { resolve1 = resolve; });
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        calls.push({ url, headers: opts?.headers || {}, body });
+        await wait1;
+        return {
+          status: 200,
+          ok: true,
+          async text() { return 'not valid json {'; },
+          async json() { return JSON.parse('not valid json {'); },
+        };
+      }
+      return response(200, { ok: true });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => 'error-token-json',
+          getCurrentUserId: async () => 'user-error-json',
+        },
+      },
+    });
+
+    const p1 = XPClient.fetchStatus();
+    const p2 = XPClient.fetchStatus();
+    for (let i = 0; i < 20 && calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    resolve1();
+
+    let err1 = null;
+    let err2 = null;
+    try { await p1; } catch (e) { err1 = e; }
+    try { await p2; } catch (e) { err2 = e; }
+
+    assert.ok(err1 instanceof SyntaxError, 'leader must reject with SyntaxError on malformed JSON');
+    assert.ok(err2 instanceof SyntaxError, 'joiner must reject with SyntaxError on malformed JSON');
+    assert.equal(calls.length, 1, 'joined callers share single POST even on JSON parse error');
   }
 
   // 6. Retry after settlement: a call made after the shared request resolved → a new POST (no finished-answer reuse).
