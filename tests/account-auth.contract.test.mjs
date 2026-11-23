@@ -934,6 +934,23 @@ test('Account renderUser retries only Poker after a Poker-only failure on same u
   assert.equal(f.context.pokerLoadState, 'success');
 });
 
+test('Account renderUser retries Poker after an answer without a Poker projection', async () => {
+  let pokerAvailable = false;
+  const f = await accountRenderFixture(async (force, options) => {
+    if (options?.includePoker) return { displayName: 'Player', poker: pokerAvailable ? { tables: [] } : null };
+    return { displayName: 'Player' };
+  });
+
+  await f.render({ id: 'user-1' });
+  assert.equal(f.context.pokerLoadState, 'error', 'HTTP 200 with poker:null must not count as a successful Poker read');
+
+  pokerAvailable = true;
+  await f.render({ id: 'user-1' });
+  assert.equal(f.events.baseReads, 1, 'the successful profile must not reload');
+  assert.equal(f.events.pokerReads, 2, 'an unavailable Poker projection must be retried on the next same-user event');
+  assert.equal(f.context.pokerLoadState, 'success');
+});
+
 test('Account renderUser retries Poker after two cancelled (stale_identity) Poker reads', async () => {
   let cancelPoker = true;
   const f = await accountRenderFixture(async (force, options) => {

@@ -684,7 +684,8 @@
     pokerLoadState = 'loading';
     request = window.ProfileClient.getMe(!!force, { includePoker: true }).then(function(profile){
       if (isCurrent()){
-        pokerLoadState = 'success';
+        // An answer without a Poker projection (WS unavailable) is not a successful read: the next event retries.
+        pokerLoadState = profile && profile.poker ? 'success' : 'error';
         renderPokerProjection(profile);
       }
       return profile;
