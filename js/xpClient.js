@@ -22,6 +22,7 @@
     fallbackIds: null,
     statusBootstrapped: false,
     statusPromise: null,
+    statusShared: null,
     backoffUntil: 0,
     serverSessionPromise: null,
     serverSessionRenewalPromise: null,
@@ -799,20 +800,31 @@
       throw new Error("XP status requires an authenticated token");
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
-    const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      cache: "no-store",
-      credentials: "omit",
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`XP status failed (${res.status}) ${text}`.trim());
+    const key = (headers.Authorization || "") + "\n" + JSON.stringify(body);
+    if (state.statusShared && state.statusShared.key === key) return state.statusShared.promise;
+    const entry = { key, promise: null };
+    entry.promise = (async () => {
+      const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        cache: "no-store",
+        credentials: "omit",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`XP status failed (${res.status}) ${text}`.trim());
+      }
+      const payload = await res.json();
+      updateCapFromPayload(payload);
+      return payload;
+    })();
+    state.statusShared = entry;
+    try {
+      return await entry.promise;
+    } finally {
+      if (state.statusShared === entry) state.statusShared = null;
     }
-    const payload = await res.json();
-    updateCapFromPayload(payload);
-    return payload;
   }
 
   async function refreshBadgeFromServer(options) {
