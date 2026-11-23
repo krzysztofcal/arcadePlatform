@@ -23,12 +23,12 @@
 - `handler`: one existing-style status request still returns the same status and body. No new mocks of the business logic.
 
 ## Measurement automation (agent-run, Stage only)
-- **Credentials:** a dedicated Stage test account in `/home/copilot/.arcade-stage-test/stage-test-user.env` (mode 600, outside all repositories, loaded only into the Playwright process environment). Never printed, logged or committed.
+- **Credentials:** a dedicated Stage test account provided by the OWNER, stored in `/home/copilot/.arcade-stage-test/stage-test-user.env` (mode 600, outside all repositories and agent config directories). The script reads it literally, with no shell sourcing, and it is never printed, logged or committed. AGENTS.md defines no preview-account procedure; the OWNER chose this account and handover.
+- **Stage guard (R1/F5):** before signing in, the script aborts unless the Preview's served public Supabase config host equals the expected Stage host. After sign-in, the Stage DB `auth.users.last_sign_in_at` of that account is checked (an aggregate only) to prove that the sign-in hit Stage.
 - **Script:** outside the repository (a run artifact on the Volume). Playwright against `deploy-preview-<PR>--playkcswh.netlify.app` (a Stage Supabase/Redis build).
   - Signs in through the existing Account sign-in form.
-  - **≥ 10 status reads:** Account / index opens.
-  - **≥ 10 awards:** real gameplay windows in an existing XP game, using normal input. No cap or session bypass.
-  - Anonymous runs in a fresh context.
+  - **Signed-in context:** ≥ 10 status reads (Account / index opens) and ≥ 10 awards (real 2048 gameplay windows with normal input; no cap or session bypass).
+  - **Anonymous context (R1/F6):** status reads only, in a fresh context.
 - **Data:** Netlify request logs plus the function log lines `calc_xp_timing` for those windows. Aggregates only: median and p90 per phase, op and identity. Requests below 1000 ms have no phase log; they are reported by total duration only.
 
 ## Constitution Check (v1.6.0)
