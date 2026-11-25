@@ -1064,7 +1064,7 @@
 
     let attempt = 0;
     let sessionRenewed = false;
-    const allowBeacon = opts.allowBeacon === true || opts.keepalive === true;
+    const allowBeacon = opts.allowBeacon === true;
     if (opts.keepalive === true && sent.anon) {
       markAnonPending();
     }
@@ -1158,9 +1158,7 @@
           } catch (_) {}
           markAnonPending();
           const beaconBody = Object.assign({}, body, { userId });
-          const beaconPayload = typeof Blob === "function"
-            ? new Blob([JSON.stringify(beaconBody)], { type: "application/json" })
-            : JSON.stringify(beaconBody);
+          const beaconPayload = new Blob([JSON.stringify(beaconBody)], { type: "application/json" });
           const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
           if (beaconOk) {
             return { _transport: "beacon" };

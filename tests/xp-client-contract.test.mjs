@@ -1013,7 +1013,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
       navigator: fakeNavigator,
     }));
 
-    const res = await client.postWindowServerCalc(semanticWindow(5), { keepalive: true });
+    const res = await client.postWindowServerCalc(semanticWindow(5), { keepalive: true, allowBeacon: true });
     assert.equal(res?._transport, 'beacon');
     assert.equal(beaconCalls.length, 1);
 
