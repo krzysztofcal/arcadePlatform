@@ -26,6 +26,16 @@ export const deletionPokerSeatPendingSql = `not coalesce((p.status='INACTIVE' an
 
 const PHASES = ['preparing', 'poker', 'burn', 'cleanup', 'auth', 'completed'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isAccountUuid(value) {
+  return typeof value === 'string' && UUID.test(value);
+}
+
+// SQL predicate (no lock) that the account exists and has no deletion request; `param` is the placeholder holding the
+// account UUID. Shared by the unlocked read fast paths so they cannot drift from each other.
+export function accountActiveSql(param = '$1') {
+  return `exists(select 1 from auth.users u where u.id = ${param}) and not exists(select 1 from public.account_deletion_requests d where d.old_user_id = ${param})`;
+}
+
 function requireUuid(value) {
   if (typeof value !== 'string' || !UUID.test(value)) throw Object.assign(new Error('invalid_identity'), { code: 'invalid_identity' });
   return value.toLowerCase();
@@ -38,14 +48,26 @@ export async function lockAccountLifecycle(tx, userIds) {
   for (const id of ids) await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1, 0));', ['account-lifecycle:' + id]);
 }
 
-export async function assertAccountActive(tx, userId) {
-  userId = requireUuid(userId);
-  await lockAccountLifecycle(tx, [userId]);
+async function requireActiveRow(tx, userId) {
   const [row] = await tx.unsafe(`select exists(select 1 from auth.users where id=$1) as present,
     exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting;`, [userId]);
   if (row?.present !== true || row?.deleting !== false) {
     throw Object.assign(new Error('account_not_active'), { code: 'account_not_active' });
   }
+}
+
+export async function assertAccountActive(tx, userId) {
+  userId = requireUuid(userId);
+  await lockAccountLifecycle(tx, [userId]);
+  await requireActiveRow(tx, userId);
+}
+
+// Lockless snapshot for request authentication only, in a transaction that does nothing else. It sees every committed
+// deletion request; a lock here would protect nothing after this transaction commits, but it would queue parallel
+// requests of one account and make the owned-write trigger's try-lock fail (40001). Never use it before a write:
+// writers must call assertAccountActive, which takes the exclusive lifecycle lock in the writing transaction.
+export async function assertAccountActiveUnlocked(tx, userId) {
+  await requireActiveRow(tx, requireUuid(userId));
 }
 
 export async function requestDeletion(tx, userId) {
