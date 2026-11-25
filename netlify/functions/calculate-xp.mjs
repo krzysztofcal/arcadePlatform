@@ -626,106 +626,31 @@ function json(statusCode, obj, origin, extraHeaders) {
 // Timing Diagnostics Helper (#1313)
 // ============================================================================
 
+const XP_TIMING_THRESHOLD_MS = 1000;
+
 export function createXpTiming(clock = () => performance.now()) {
-  let disabled = false;
-
-  function readClock() {
-    if (disabled) return null;
-    try {
-      const val = clock();
-      if (typeof val !== "number" || Number.isNaN(val)) {
-        disabled = true;
-        return null;
-      }
-      return val;
-    } catch (_) {
-      disabled = true;
-      return null;
-    }
-  }
-
-  const startMs = readClock();
-  if (startMs == null) {
-    disabled = true;
-  }
-
-  let op = null;
-  let signedIn = false;
-  let status = null;
-  const durations = {
-    jwt: 0,
-    conversion: 0,
-    totals: 0,
-    persist: 0,
-    award: 0,
-  };
-
-  function fields() {
-    if (disabled || startMs == null) return null;
-    const now = readClock();
-    if (disabled || now == null) return null;
-
-    let totalMs = Math.max(0, Math.round(now - startMs));
-    const jwtMs = Math.round(durations.jwt || 0);
-    const conversionMs = Math.round(durations.conversion || 0);
-    const totalsMs = Math.round(durations.totals || 0);
-    const persistMs = Math.round(durations.persist || 0);
-    const awardMs = Math.round(durations.award || 0);
-    const sum = jwtMs + conversionMs + totalsMs + persistMs + awardMs;
-
-    // Clamp totalMs to sum of rounded phases if rounding caused sum to exceed totalMs, ensuring phases + otherMs === totalMs exactly.
-    totalMs = Math.max(totalMs, sum);
-    const otherMs = Math.max(0, totalMs - sum);
-
-    return {
-      op,
-      signedIn,
-      status,
-      jwtMs,
-      conversionMs,
-      totalsMs,
-      persistMs,
-      awardMs,
-      otherMs,
-      totalMs,
-    };
-  }
-
+  const start = clock();
+  const phases = { jwt: 0, conversion: 0, totals: 0, persist: 0, award: 0 };
+  const meta = { op: null, signedIn: false, status: null };
   return {
     async measure(phase, fn) {
-      if (disabled) return await fn();
-      const t0 = readClock();
-      if (disabled || t0 == null) {
-        return await fn();
-      }
-      try {
-        return await fn();
-      } finally {
-        const t1 = readClock();
-        if (!disabled && t1 != null) {
-          const elapsed = t1 - t0;
-          const key = typeof phase === "string" && phase.endsWith("Ms") ? phase.slice(0, -2) : phase;
-          durations[key] = (durations[key] || 0) + elapsed;
-        }
-      }
+      const t0 = clock();
+      try { return await fn(); } finally { phases[phase] += clock() - t0; }
     },
-    set(patch = {}) {
-      if (patch && typeof patch === "object") {
-        if ("op" in patch) op = patch.op;
-        if ("signedIn" in patch) signedIn = patch.signedIn;
-        if ("status" in patch) status = patch.status;
-      }
+    set(patch) { Object.assign(meta, patch); },
+    // One clock read decides the threshold (on the raw, unrounded time) and builds the fields; null = no log.
+    payload() {
+      const rawMs = clock() - start;
+      if (!(rawMs >= XP_TIMING_THRESHOLD_MS) || (meta.op !== "status" && meta.op !== "award")) return null;
+      const jwtMs = Math.round(phases.jwt);
+      const conversionMs = Math.round(phases.conversion);
+      const totalsMs = Math.round(phases.totals);
+      const persistMs = Math.round(phases.persist);
+      const awardMs = Math.round(phases.award);
+      const sum = jwtMs + conversionMs + totalsMs + persistMs + awardMs;
+      const totalMs = Math.max(Math.round(rawMs), sum); // rounding can push the phase sum above round(raw)
+      return { op: meta.op, signedIn: meta.signedIn, status: meta.status, jwtMs, conversionMs, totalsMs, persistMs, awardMs, otherMs: totalMs - sum, totalMs };
     },
-    shouldLog(f) {
-      if (disabled) return false;
-      const data = f !== undefined ? f : fields();
-      return Boolean(
-        data &&
-        (data.op === "status" || data.op === "award") &&
-        data.totalMs >= 1000
-      );
-    },
-    fields,
   };
 }
 
@@ -739,9 +664,9 @@ export async function handler(event) {
   try { response = await handleCalculateXp(event, timing); return response; }
   finally {
     try {
-      if (response && typeof response.statusCode === "number") timing.set({ status: response.statusCode });
-      const f = timing.fields();
-      if (timing.shouldLog(f)) klog("calc_xp_timing", f);
+      timing.set({ status: typeof response?.statusCode === "number" ? response.statusCode : null });
+      const fields = timing.payload();
+      if (fields) klog("calc_xp_timing", fields);
     } catch (_) {}
   }
 }
