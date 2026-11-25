@@ -18,18 +18,28 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   const __dirname = path.dirname(__filename);
   const src = await fs.readFile(path.join(__dirname, '..', 'js', 'xpClient.js'), 'utf8');
 
-  const store = new Map();
+  const store = options.store || new Map();
   let randomId = 0;
-  const baseWindow = { localStorage: {
+  const baseLocalStorage = {
     getItem: k => store.get(k) ?? null,
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: k => store.delete(k),
-  } };
+  };
+  const baseWindow = {
+    localStorage: baseLocalStorage,
+    atob: typeof atob !== 'undefined' ? atob : undefined,
+  };
+  const mergedWindow = Object.assign(baseWindow, options.window || {});
+  if (options.window && options.window.localStorage) {
+    mergedWindow.localStorage = options.window.localStorage;
+  }
   const ctx = {
-    window: Object.assign(baseWindow, options.window || {}),
+    window: mergedWindow,
     fetch: fetchImpl,
-    crypto: { randomUUID: () => `uuid-test-${++randomId}` },
+    crypto: options.crypto || { randomUUID: () => `uuid-test-${++randomId}` },
     Date: options.Date || Date, setTimeout, clearTimeout, console, JSON,
+    atob: typeof atob !== 'undefined' ? atob : undefined,
+    Buffer: typeof Buffer !== 'undefined' ? Buffer : undefined,
   };
   ctx.window.fetch = fetchImpl;
   vm.createContext(ctx);
@@ -702,5 +712,275 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(r3.totalLifetime, 20);
   }
 
+  // SC-001 helpers
+  const makeJwt = (sub) => {
+    const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+  };
+
+  function createFakeDate(t = 1_000_000) {
+    let now = t;
+    const d = function(...args) { return new Date(...args); };
+    d.now = () => now; d.advance = (ms) => { now += ms; };
+    Object.setPrototypeOf(d, Date);
+    return d;
+  }
+
+  function assertBodyHasAnonId(call, expected = true, msg) {
+    const b = call?.body || call || {};
+    assert.equal(Boolean(b.anonId || b.userId), expected, msg || (expected ? 'expected anon id' : 'expected no anon id'));
+  }
+
+  function createSharedStorage(initialEntries = []) {
+    const store = new Map(initialEntries);
+    let throwGet = false, throwSetKey = null;
+    return {
+      store,
+      get throwGet() { return throwGet; }, set throwGet(v) { throwGet = v; },
+      get throwSetKey() { return throwSetKey; }, set throwSetKey(v) { throwSetKey = v; },
+      getItem: (k) => { if (throwGet) throw new Error('storage read error'); return store.get(k) ?? null; },
+      setItem: (k, v) => { if (throwSetKey && (throwSetKey === true || throwSetKey === k)) throw new Error('storage write error'); store.set(k, String(v)); },
+      removeItem: (k) => store.delete(k),
+    };
+  }
+
+  function createRecorder(handler) {
+    const calls = [];
+    const fn = async (url, opts) => {
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      const entry = { url, headers: opts?.headers || {}, body, opts };
+      calls.push(entry);
+      if (handler) return handler(entry, calls.length);
+      const isStatus = body.operation === 'status';
+      return response(200, isStatus
+        ? { ok: true, status: 'statusOnly', totalLifetime: 100, anonConversionChecked: true }
+        : { ok: true, awarded: 10, totalToday: 10, sessionTotal: 10, cap: 400, capDelta: 240, anonConversionChecked: true });
+    };
+    return { calls, fn };
+  }
+
+  function authOpts(sub, extra = {}) {
+    const storage = extra.storage || (extra.store ? { store: extra.store } : null);
+    return {
+      ...(extra.store ? { store: extra.store } : {}),
+      ...(extra.Date ? { Date: extra.Date } : {}),
+      window: {
+        ...(storage ? { localStorage: storage } : {}),
+        ...(extra.window || {}),
+        SupabaseAuthBridge: sub ? {
+          getAccessToken: async () => (typeof sub === 'function' ? sub() : (sub ? makeJwt(sub) : null)),
+          getCurrentUserId: async () => (typeof sub === 'function' ? (sub() ? 'user-A' : null) : sub),
+        } : undefined,
+      },
+    };
+  }
+
+  // SC-001: 1. The first signed-in status sends anonId; after a 200 with anonConversionChecked, next status and award omit it
+  {
+    const rec = createRecorder();
+    const XPClient = await loadClientWithFetch(rec.fn, authOpts('user-A'));
+    await XPClient.fetchStatus();
+    assertBodyHasAnonId(rec.calls[0], true, 'first signed-in status sends anonId');
+    await XPClient.fetchStatus();
+    assertBodyHasAnonId(rec.calls[1], false, 'second status omits anonId');
+    await XPClient.postWindowServerCalc(semanticWindow(10));
+    assertBodyHasAnonId(rec.calls[2], false, 'subsequent award omits userId');
+  }
+
+  // SC-001: 2. A 200 without the field, another 2xx, a non-2xx, a body parse error or a throw does not set the marker
+  {
+    const cases = [
+      ['200 without flag', () => response(200, { ok: true, status: 'statusOnly' }), false],
+      ['201 created', () => response(201, { ok: true, anonConversionChecked: true }), false],
+      ['500 error', (c, n) => n === 1 ? response(500, { error: 'err' }) : response(200, { ok: true }), /500/],
+      ['parse error', (c, n) => n === 1 ? { status: 200, ok: true, async text() { return '{ bad json'; } } : response(200, { ok: true }), SyntaxError],
+      ['throw', (c, n) => { if (n === 1) throw new Error('network failure'); return response(200, { ok: true }); }, /network failure/],
+    ];
+    for (const [name, fn, reject] of cases) {
+      const rec = createRecorder(fn);
+      const client = await loadClientWithFetch(rec.fn, authOpts('user-A'));
+      if (reject) await assert.rejects(() => client.fetchStatus(), reject);
+      else await client.fetchStatus();
+      await client.fetchStatus();
+      assertBodyHasAnonId(rec.calls[rec.calls.length - 1], true, `call 2 sends anonId after ${name}`);
+    }
+  }
+
+  // SC-001: 3. An anonymous request clears the marker
+  {
+    let currentToken = makeJwt('user-A');
+    const storage = createSharedStorage(), fakeDate = createFakeDate(), rec = createRecorder();
+    const XPClient = await loadClientWithFetch(rec.fn, authOpts(() => currentToken, { store: storage.store, storage, Date: fakeDate }));
+    await XPClient.fetchStatus();
+    assertBodyHasAnonId(rec.calls[0], true);
+    assert.ok(storage.store.has('kcswh:xpAnonConvertedFor'));
+    await XPClient.fetchStatus();
+    assertBodyHasAnonId(rec.calls[1], false);
+    currentToken = null;
+    fakeDate.advance(65_000);
+    await XPClient.postWindowServerCalc(semanticWindow(5));
+    assert.equal(storage.store.has('kcswh:xpAnonConvertedFor'), false, 'anonymous request must clear marker');
+    currentToken = makeJwt('user-A');
+    fakeDate.advance(65_000);
+    await XPClient.fetchStatus();
+    assertBodyHasAnonId(rec.calls[rec.calls.length - 1], true, 'signed-in status sends anonId again');
+  }
+
+  // SC-001: 4. A delayed signed-in response that completes after an anonymous request does not set it
+  {
+    let resolveSignedIn;
+    const signedInHold = new Promise(r => { resolveSignedIn = r; });
+    const storage = createSharedStorage();
+    const tab1Rec = createRecorder(async (c) => {
+      if (c.body.operation === 'status') { await signedInHold; return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true }); }
+      return response(200, { ok: true });
+    });
+    const tab2Rec = createRecorder();
+    const tab1 = await loadClientWithFetch(tab1Rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    const tab2 = await loadClientWithFetch(tab2Rec.fn, { store: storage.store, window: { localStorage: storage } });
+    const p1 = tab1.fetchStatus();
+    await new Promise(r => setTimeout(r, 10));
+    await tab2.postWindowServerCalc(semanticWindow(5));
+    resolveSignedIn();
+    await p1;
+    assert.equal(storage.store.has('kcswh:xpAnonConvertedFor'), false, 'delayed response must not set marker');
+    const tab1Next = await loadClientWithFetch(tab1Rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    await tab1Next.fetchStatus();
+    assertBodyHasAnonId(tab1Rec.calls[tab1Rec.calls.length - 1], true);
+  }
+
+  // SC-001: 5a. Anonymous award starts before signed-in status and settles after it (single tab)
+  {
+    let resolveAnon;
+    const anonHold = new Promise(r => { resolveAnon = r; });
+    let currentToken = null;
+    const storage = createSharedStorage(), fakeDate = createFakeDate();
+    const rec = createRecorder(async (c) => {
+      if (c.body.operation !== 'status' && !c.headers?.Authorization) { await anonHold; return response(200, { ok: true, awarded: 10 }); }
+      return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+    });
+    const XPClient = await loadClientWithFetch(rec.fn, authOpts(() => currentToken, { store: storage.store, storage, Date: fakeDate }));
+    const pAnon = XPClient.postWindowServerCalc(semanticWindow(10));
+    await new Promise(r => setTimeout(r, 10));
+    currentToken = makeJwt('user-A');
+    fakeDate.advance(65_000);
+    await XPClient.fetchStatus();
+    assert.ok(storage.store.has('kcswh:xpAnonConvertedFor'));
+    resolveAnon();
+    await pAnon;
+    const XPClientNext = await loadClientWithFetch(rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    await XPClientNext.fetchStatus();
+    assertBodyHasAnonId(rec.calls[rec.calls.length - 1], true);
+  }
+
+  // SC-001: 5b. Anonymous award in Tab 2 starts before Tab 1 signed-in status and settles after it (two tabs)
+  {
+    let resolveAnon;
+    const anonHold = new Promise(r => { resolveAnon = r; });
+    const storage = createSharedStorage();
+    const tab2Rec = createRecorder(async (c) => {
+      if (c.body.operation !== 'status') { await anonHold; return response(200, { ok: true, awarded: 10 }); }
+      return response(200, { ok: true, status: 'statusOnly' });
+    });
+    const tab1Rec = createRecorder();
+    const tab2 = await loadClientWithFetch(tab2Rec.fn, { store: storage.store, window: { localStorage: storage } });
+    const tab1 = await loadClientWithFetch(tab1Rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    const pAnon = tab2.postWindowServerCalc(semanticWindow(10));
+    await new Promise(r => setTimeout(r, 10));
+    await tab1.fetchStatus();
+    assertBodyHasAnonId(tab1Rec.calls[0], true);
+    assert.ok(storage.store.has('kcswh:xpAnonConvertedFor'));
+    resolveAnon();
+    await pAnon;
+    await tab1.fetchStatus();
+    assertBodyHasAnonId(tab1Rec.calls[1], true);
+  }
+
+  // SC-001: 6. Two simulated tabs where an anonymous award settles before a delayed signed-in response is handled
+  {
+    let resolveTab1;
+    const tab1Hold = new Promise(r => { resolveTab1 = r; });
+    const storage = createSharedStorage();
+    const tab1Rec = createRecorder(async () => { await tab1Hold; return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true }); });
+    const tab2Rec = createRecorder();
+    const tab1 = await loadClientWithFetch(tab1Rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    const tab2 = await loadClientWithFetch(tab2Rec.fn, { store: storage.store, window: { localStorage: storage } });
+    const p1 = tab1.fetchStatus();
+    await new Promise(r => setTimeout(r, 10));
+    await tab2.postWindowServerCalc(semanticWindow(10));
+    resolveTab1();
+    await p1;
+    assert.equal(storage.store.has('kcswh:xpAnonConvertedFor'), false);
+    const tab1Next = await loadClientWithFetch(tab1Rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    await tab1Next.fetchStatus();
+    assertBodyHasAnonId(tab1Rec.calls[tab1Rec.calls.length - 1], true);
+  }
+
+  // SC-001: 7. Both activity writes fail during anonymous activity, and next signed-in request still sends anonId
+  {
+    const storage = createSharedStorage();
+    let currentToken = null;
+    const rec = createRecorder();
+    const client = await loadClientWithFetch(rec.fn, authOpts(() => currentToken, { store: storage.store, storage }));
+    storage.throwSetKey = 'kcswh:xpAnonActivity';
+    await client.postWindowServerCalc(semanticWindow(5));
+    storage.throwSetKey = null;
+    currentToken = makeJwt('user-A');
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[rec.calls.length - 1], true);
+  }
+
+  // SC-001: 8. A token for another sub sends the id
+  {
+    let currentToken = makeJwt('user-A');
+    const fakeDate = createFakeDate(), rec = createRecorder();
+    const client = await loadClientWithFetch(rec.fn, authOpts(() => currentToken, { Date: fakeDate }));
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[0], true);
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[1], false);
+    currentToken = makeJwt('user-B');
+    fakeDate.advance(65_000);
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[2], true);
+  }
+
+  // SC-001: 9. A localStorage failure sends it
+  {
+    const storage = createSharedStorage(), rec = createRecorder();
+    const client = await loadClientWithFetch(rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[0], true);
+    storage.throwGet = true;
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[1], true);
+  }
+
+  // SC-001: 10. Concurrent status calls share one request only with an identical Authorization and body
+  {
+    let resolveBatch;
+    const batchPromise = new Promise(r => { resolveBatch = r; });
+    const rec = createRecorder(async (c) => {
+      if (c.body.operation === 'status') {
+        await batchPromise;
+        return response(200, { ok: true, status: 'statusOnly', totalLifetime: 200, anonConversionChecked: true });
+      }
+      return response(200, { ok: true });
+    });
+    const storage = createSharedStorage([
+      ['kcswh:xpAnonConvertedFor', JSON.stringify({ sub: 'user-A', act: 'act-fixed' })],
+      ['kcswh:xpAnonActivity', 'act-fixed'],
+    ]);
+    const client = await loadClientWithFetch(rec.fn, authOpts('user-A', { store: storage.store, storage }));
+    const [p1, p2, p3] = [client.fetchStatus(), client.fetchStatus(), client.fetchStatus()];
+    resolveBatch();
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+    assert.equal(rec.calls.length, 1);
+    assertBodyHasAnonId(rec.calls[0], false);
+    assert.deepStrictEqual(r1, r2);
+    assert.deepStrictEqual(r2, r3);
+  }
+
   console.log('xp-client contract tests passed');
+  console.log('xp-client SC-001 contract tests passed');
 })();
