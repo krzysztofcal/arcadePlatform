@@ -12,25 +12,27 @@
 - **Every uncertain case falls back to main's request**, which sends the id.
 
 ## Change
-**`netlify/functions/calculate-xp.mjs`** (about 2 lines; **requires explicit OWNER approval**, see spec Status): add `anonConversionChecked: true` to the status payload (next to the existing `result.payload.conversion`) and to the award payload when `conversion` is not `null`.
+**`netlify/functions/calculate-xp.mjs`** (about 2 lines; **requires explicit OWNER approval**, see spec Status): add `anonConversionChecked: true` to the status payload (next to the existing `result.payload.conversion`) and to the award payload, in both cases **only when `conversion` is not `null`** (`if (conversion)`).
 
 **`js/xpClient.js`** (about 25–30 lines):
-- `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`, `ACTIVITY_KEY = "kcswh:xpAnonActivity"`; `bumpActivity()` writes a new `randomId()` value and `readActivity()` reads it, both in try/catch. `readActivity()` returns `null` on failure. `bumpActivity()` failure: try `removeItem(CONVERTED_KEY)` and set `state.anonStorageFailed = true`.
+- `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`, `ACTIVITY_KEY = "kcswh:xpAnonActivity"`; `bumpActivity()` writes a new `randomId()` value and `readActivity()` reads it, both in try/catch. `readActivity()` returns `null` **only when localStorage throws**. If the key is absent, it writes a new `randomId()` and returns that value. A fresh browser can then set a marker. `bumpActivity()` failure: try `removeItem(CONVERTED_KEY)` and set `state.anonStorageFailed = true`.
 - `tokenSub(headers)`: base64url-decode the payload of `headers.Authorization` (`Bearer x.y.z`) and return `sub`, or `null` on any error. This is only a label; the server still verifies the token.
 - `anonIdFor(headers, anonId)`, used after `buildAuthHeaders(...)` and before the body is built:
-  - no `Authorization`: `bumpActivity()`, return `{ id: anonId, sub: null, anon: true }`. The caller must `bumpActivity()` again in `finally` when the request settles.
+  - no `Authorization`: `bumpActivity()`, then remove the marker (`removeItem(CONVERTED_KEY)` in try/catch), then return `{ id: anonId, sub: null, anon: true }`.
   - otherwise: `sub = tokenSub(headers)`, `act = readActivity()`. If `!state.anonStorageFailed` and `sub` and `act !== null` and the marker is `{ sub, act }`, return `{ id: undefined, sub, act }`; else return `{ id: anonId, sub, act }`.
   - any throw: return `{ id: anonId, sub: null }`.
 - `noteConversion(sent, payload)`: write the marker `{ sub: sent.sub, act: sent.act }` only when `sent.id && sent.sub && sent.act !== null && readActivity() === sent.act && payload && payload.anonConversionChecked === true`, in try/catch.
 - `fetchStatus()`:
-  - the headers already come first;
+  - on main the body is built **before** `buildAuthHeaders`. Move `ensureAuthTokenWithRetry()`/`buildAuthHeaders(...)` above the body, then call `anonIdFor(headers, userId)` and build the body from it;
   - the body uses `sent.id` (the field is omitted when `undefined`);
   - the T2 key keeps the final `Authorization` and body;
-  - `noteConversion` runs inside the shared promise after `res.status === 200` and `JSON.parse`, so it runs once per network request.
+  - `noteConversion` runs inside the shared promise after `res.status === 200` and `JSON.parse`, so it runs once per network request;
+  - wrap the network request in `try … finally`, so that when `sent.anon` the `finally` calls `bumpActivity()` once on settle.
 - `postWindowServerCalc()`:
   - the headers are built before the body (move the existing `buildAuthHeaders` call up if it is built later);
   - `userId: sent.id`;
-  - `noteConversion` after a 200 and a successful parse.
+  - `noteConversion` after a 200 and a successful parse;
+  - wrap the whole request, **including the existing retry loop and every early return or throw**, in one `try … finally`. When `sent.anon`, that `finally` calls `bumpActivity()` once, after the last attempt settles.
 - No change to `ensureIds()`, the auth bridge, the token refresh or any other file. The implementation re-checks with `grep` that no other client code posts to `calculate-xp`.
 
 ## Tests (fundamental, existing files)
