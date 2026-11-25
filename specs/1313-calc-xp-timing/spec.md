@@ -28,6 +28,6 @@
   - a throwing request still emits at most one log and rethrows unchanged;
   - existing handler tests unchanged.
 - **SC-002** Stage (Deploy Preview of this PR, a dedicated Stage test account, Playwright):
-  - signed in: ≥ 10 status reads and ≥ 10 real awards through the existing game flow;
+  - signed in: ≥ 10 status reads and ≥ 10 real awards through the existing game flow, counted only as responses with `granted > 0` and proven by the reported aggregate count of such responses;
   - anonymous: status reads;
   - per group (op, identity, window): the total request count and the phase-sample count. Phase medians/p90 and the dominant phase describe **only the logged (≥ 1000 ms) requests**; a group without samples is reported as "no phase samples" with total durations only.
