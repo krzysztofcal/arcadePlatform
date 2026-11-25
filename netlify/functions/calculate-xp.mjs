@@ -623,10 +623,55 @@ function json(statusCode, obj, origin, extraHeaders) {
 }
 
 // ============================================================================
+// Timing Diagnostics Helper (#1313)
+// ============================================================================
+
+const XP_TIMING_THRESHOLD_MS = 1000;
+
+export function createXpTiming(clock = () => performance.now()) {
+  const start = clock();
+  const phases = { jwt: 0, conversion: 0, totals: 0, persist: 0, award: 0 };
+  const meta = { op: null, signedIn: false, status: null };
+  return {
+    async measure(phase, fn) {
+      const t0 = clock();
+      try { return await fn(); } finally { phases[phase] += clock() - t0; }
+    },
+    set(patch) { Object.assign(meta, patch); },
+    // One clock read decides the threshold (on the raw, unrounded time) and builds the fields; null = no log.
+    payload() {
+      const rawMs = clock() - start;
+      if (!(rawMs >= XP_TIMING_THRESHOLD_MS) || (meta.op !== "status" && meta.op !== "award")) return null;
+      const jwtMs = Math.round(phases.jwt);
+      const conversionMs = Math.round(phases.conversion);
+      const totalsMs = Math.round(phases.totals);
+      const persistMs = Math.round(phases.persist);
+      const awardMs = Math.round(phases.award);
+      const sum = jwtMs + conversionMs + totalsMs + persistMs + awardMs;
+      const totalMs = Math.max(Math.round(rawMs), sum); // rounding can push the phase sum above round(raw)
+      return { op: meta.op, signedIn: meta.signedIn, status: meta.status, jwtMs, conversionMs, totalsMs, persistMs, awardMs, otherMs: totalMs - sum, totalMs };
+    },
+  };
+}
+
+// ============================================================================
 // Main Handler
 // ============================================================================
 
 export async function handler(event) {
+  const timing = createXpTiming();
+  let response;
+  try { response = await handleCalculateXp(event, timing); return response; }
+  finally {
+    try {
+      timing.set({ status: typeof response?.statusCode === "number" ? response.statusCode : null });
+      const fields = timing.payload();
+      if (fields) klog("calc_xp_timing", fields);
+    } catch (_) {}
+  }
+}
+
+async function handleCalculateXp(event, timing) {
   const origin = event.headers?.origin;
   const now = Date.now();
 
@@ -681,8 +726,9 @@ export async function handler(event) {
   if (operation !== "award" && operation !== "status") {
     return json(400, { error: "invalid_operation" }, origin);
   }
+  timing.set({ op: operation });
   const jwtToken = extractBearerToken(event.headers);
-  const authContext = await verifySupabaseJwt(jwtToken);
+  const authContext = await timing.measure("jwt", () => verifySupabaseJwt(jwtToken));
   if (jwtToken && !authContext.valid) {
     return json(401, { error: "unauthorized", message: authContext.reason || "invalid_token" }, origin);
   }
@@ -690,6 +736,7 @@ export async function handler(event) {
     return json(400, { error: "invalid_identity" }, origin);
   }
   const { supabaseUserId, identityId, anonId: resolvedAnonId } = resolveXpIdentity({ anonId, authContext });
+  timing.set({ op: operation, signedIn: !!supabaseUserId });
 
   if (!identityId) {
     return json(400, { error: "missing_fields", message: "identity required" }, origin);
@@ -721,18 +768,18 @@ export async function handler(event) {
   };
 
   if (operation === "status") {
-    const conversion = await convertAnonymousXp();
+    const conversion = await timing.measure("conversion", () => convertAnonymousXp());
     const dayKey = getDailyKey(now);
     try {
       const result = await readCanonicalXpStatus({
-        readTotals: () => getTotals({ userId, sessionId, now, anonymous: !supabaseUserId }),
+        readTotals: () => timing.measure("totals", () => getTotals({ userId, sessionId, now, anonymous: !supabaseUserId })),
         dailyCap: DAILY_CAP,
         deltaCap: DELTA_CAP,
         sessionId,
         dayKey,
         nextReset: getNextResetEpoch(now),
         supabaseUserId,
-        persistProfile: ({ userId: profileUserId, totalXp }) => persistUserProfile({ userId: profileUserId, totalXp, now }),
+        persistProfile: (args) => timing.measure("persist", () => persistUserProfile({ userId: args.userId, totalXp: args.totalXp, now })),
       });
       if (conversion?.converted > 0) result.payload.conversion = { converted: conversion.converted };
       if (conversion) result.payload.anonConversionChecked = true;
@@ -813,7 +860,7 @@ export async function handler(event) {
   }
 
   if (validatedServerSessionId) touchSession(validatedServerSessionId, { userId, anonymous: !supabaseUserId }).catch(() => {});
-  const conversion = await convertAnonymousXp();
+  const conversion = await timing.measure("conversion", () => convertAnonymousXp());
 
   const {
     gameId,
@@ -916,7 +963,7 @@ export async function handler(event) {
   const leaderboardWeekKey = XP_LEADERBOARD_KEYS.week(leaderboardPeriods.weekKey);
 
   // Award XP atomically with caps
-  const awardResult = await executeAtomicXpAward({
+  const awardResult = await timing.measure("award", () => executeAtomicXpAward({
     store, userId, anonymous: !supabaseUserId,
     keys: [
       sessionKeyK,
@@ -942,7 +989,7 @@ export async function handler(event) {
       leaderboardPeriods.weekExpiresAtSec,
     ],
     onEvalError: (err) => klog("calc_redis_eval_failed", { error: err?.message }),
-  });
+  }));
   const granted = awardResult.granted;
   const redisDailyTotal = awardResult.dailyTotal;
   const sessionTotal = awardResult.sessionTotal;
@@ -953,13 +1000,13 @@ export async function handler(event) {
   const remaining = Math.max(0, DAILY_CAP - redisDailyTotal);
 
   if (supabaseUserId) {
-    await persistUserProfile({ userId: supabaseUserId, totalXp: totalLifetime, now });
+    await timing.measure("persist", () => persistUserProfile({ userId: supabaseUserId, totalXp: totalLifetime, now }));
   }
 
   // Update session state
   sessionState.combo = updatedCombo;
   sessionState.lastWindowEnd = windowEnd;
-  await saveSessionState(userId, sessionId, sessionState, !supabaseUserId);
+  await timing.measure("persist", () => saveSessionState(userId, sessionId, sessionState, !supabaseUserId));
 
   // Build response
   const payload = {
