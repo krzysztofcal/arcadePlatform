@@ -82,6 +82,17 @@ test("derived profile persistence normalizes totals and fails without changing c
   assert.equal(await persistXpProfileSnapshot({ userId: "user-1", totalXp: 12, save: async () => { throw new Error("profile unavailable"); } }), false);
 });
 
+test("saveUserProfile skips the guarded write when the stored total is unchanged", async () => {
+  const { saveUserProfile } = await import("../netlify/functions/_shared/store-upstash.mjs");
+  const userId = "55555555-5555-4555-8555-555555555555";
+  const first = await saveUserProfile({ userId, totalXp: 50, now: 1_000_000 });
+  const same = await saveUserProfile({ userId, totalXp: 50, now: 9_000_000 });
+  assert.equal(same.totalXp, 50);
+  assert.equal(same.updatedAt, first.updatedAt, "an unchanged total must not be rewritten");
+  const changed = await saveUserProfile({ userId, totalXp: 60, now: 9_000_000 });
+  assert.equal(changed.totalXp, 60);
+  assert.notEqual(changed.updatedAt, first.updatedAt);
+});
 test("atomic award executor normalizes results and preserves legacy lock retry", async () => {
   let calls = 0;
   let delayed = false;
