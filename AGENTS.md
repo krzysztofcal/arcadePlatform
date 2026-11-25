@@ -29,6 +29,10 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - **Release Record**: `.github/workflows/release-record.yml` (rejestr wersji; `publish=true` requires direct OWNER dispatch or the verified OWNER WWW publication chain; never deploys).
 - **Android / Google Play**: Separate publishing track with independent review and signing.
 
+### OWNER device for manual steps
+- The OWNER performs OWNER-only manual steps (Netlify discard/publish scripts, `gh`, Supabase CLI) from an **Android phone in Termux**, not a desktop. `netlify`, `supabase`, `gh` and `git` are already logged in there; Node may need `pkg install nodejs`. Mobile GitHub UI covers workflow dispatch and Environment approval.
+- Write OWNER instructions as copy-paste Termux commands: fetch single scripts from `main` with `gh api -H "Accept: application/vnd.github.raw" "repos/krzysztofcal/arcadePlatform/contents/<path>?ref=main"` instead of a full clone; read credentials from the logged-in CLI config without echoing them; end by unsetting variables and removing temporary files.
+
 ---
 
 ## 🔀 GitHub PR Merge Policy (Always Binding)
