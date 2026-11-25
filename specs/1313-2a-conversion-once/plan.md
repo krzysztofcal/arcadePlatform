@@ -37,7 +37,7 @@
 
 ## Tests (fundamental, existing files)
 - `tests/xp-client-contract.test.mjs`: the cases in spec SC-001 (client), with the file's existing fetch, auth and localStorage stubs and fake JWTs with different `sub` values. Assert the request bodies and the marker.
-- Server field: positive and negative assertions per spec SC-001 (server), in `tests/xp-v3-cutover.behavior.test.mjs` with its existing fixture-JWT subprocess pattern (memory store, `ACCOUNT_DELETION_ENABLED=0`). No fallback to anonymous-only assertions.
+- Server field: the in-process harness cannot reach the signed-in conversion path (it needs a DB). As agreed by the OWNER (spec SC-001), it is verified on the PR Deploy Preview: a fresh browser, status reads only. There is no in-process server assertion.
 
 ## Delivery
 - Antigravity implements in its own `agy/*` worktree.
@@ -60,5 +60,6 @@
 - **Same-account sign-out/sign-in without anonymous play keeps the marker.** This is intended: without an anonymous request no new anonymous XP exists, so there is nothing to convert.
 - **Another browser profile or a cleared `localStorage`** falls back to main's behaviour.
 - **Cross-tab storage failure:** see spec FR-005 (OWNER acceptance).
+- **Unload sends (code review):** a beacon carries no `Authorization`, so it is treated as anonymous: it always sends the anonymous id and invalidates the marker. An anonymous `keepalive` or beacon send also writes `kcswh:xpAnonPendingUntil = now + 15 s`, and no marker is written before that time. Its `finally` may never run when the page unloads.
 - **Residual race:** a tab closed mid-way through an anonymous award never runs its settle write. If the server applies that award after a concurrent signed-in check, and a marker is written with the post-start activity token, that XP waits until the next anonymous request clears the marker. It is not deleted, because anonymous totals do not expire. This is accepted for a minor feature.
 - **Breaking changes:** none. The added response field is ignored by older clients.
