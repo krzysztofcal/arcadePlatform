@@ -826,43 +826,13 @@
 
   function base64UrlDecode(str) {
     try {
-      if (typeof atob === "function") {
-        let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
-        while (b64.length % 4) b64 += "=";
-        try {
-          return decodeURIComponent(escape(atob(b64)));
-        } catch (_) {
-          return atob(b64);
-        }
-      }
-      if (typeof window !== "undefined" && typeof window.atob === "function") {
-        let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
-        while (b64.length % 4) b64 += "=";
-        try {
-          return decodeURIComponent(escape(window.atob(b64)));
-        } catch (_) {
-          return window.atob(b64);
-        }
-      }
-      if (typeof Buffer !== "undefined") {
-        return Buffer.from(str, "base64url").toString("utf8");
-      }
-    } catch (_) {}
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
-    while (b64.length % 4) b64 += "=";
-    let out = "";
-    for (let i = 0; i < b64.length; i += 4) {
-      const c1 = chars.indexOf(b64.charAt(i));
-      const c2 = chars.indexOf(b64.charAt(i + 1));
-      const c3 = chars.indexOf(b64.charAt(i + 2));
-      const c4 = chars.indexOf(b64.charAt(i + 3));
-      if (c1 < 0 || c2 < 0) break;
-      out += String.fromCharCode((c1 << 2) | (c2 >> 4));
-      if (c3 >= 0) out += String.fromCharCode(((c2 & 15) << 4) | (c3 >> 2));
-      if (c4 >= 0) out += String.fromCharCode(((c3 & 3) << 6) | c4);
+      let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+      const fn = typeof atob === "function" ? atob : (typeof window !== "undefined" && window.atob);
+      return fn ? fn(b64) : null;
+    } catch (_) {
+      return null;
     }
-    return out;
   }
 
   function tokenSub(headers) {
@@ -1011,13 +981,10 @@
    * Server calculates XP based on activity instead of trusting client delta
    */
   async function postWindowServerCalc(payload, options) {
-    const opts = options || {};
-    const source = (payload && typeof payload === "object") ? payload : {};
     ensureStatusBootstrap(false);
     await maybeBackoff();
 
-    const { userId, sessionId } = ensureIds();
-    const allowBeacon = opts.allowBeacon === true;
+    const { userId } = ensureIds();
     const authToken = await ensureAuthTokenWithRetry();
     if (!authToken && await isUserLoggedIn()) {
       throw new Error("Authenticated XP award requires an access token");
@@ -1026,145 +993,154 @@
     const sent = anonIdFor(headers, userId);
 
     try {
-      // Build payload for server-side calculation
-      // Note: We send raw activity data, NOT calculated delta
-      const body = {
-        ...(sent.id !== undefined ? { userId: sent.id } : {}),
-        sessionId,
-        gameId: source.gameId || "default",
-        windowStart: source.windowStart || 0,
-        windowEnd: source.windowEnd || Date.now(),
-        inputEvents: Math.max(0, Math.floor(Number(source.inputEvents) || 0)),
-        visibilitySeconds: Math.max(0, Number(source.visibilitySeconds) || 0),
-        scoreDelta: Math.max(0, Math.floor(Number(source.scoreDelta) || 0)),
-        gameplayActions: Math.max(0, Math.floor(Number(source.gameplayActions) || 0)),
-      };
-
-      // Add game events if present
-      if (Array.isArray(source.gameEvents) && source.gameEvents.length > 0) {
-        body.gameEvents = source.gameEvents.slice(0, 50);
-      }
-
-      // Add boost if present
-      if (source.boostMultiplier && source.boostMultiplier > 1) {
-        body.boostMultiplier = source.boostMultiplier;
-      }
-
-      // Add session token if available (from source or stored)
-      const sessionToken = source.sessionToken || loadServerSession();
-      if (sessionToken) {
-        body.sessionToken = sessionToken;
-      }
-
-      let attempt = 0;
-      let sessionRenewed = false;
-
-      while (attempt < 3) {
-        const payloadJson = JSON.stringify(body);
-        let networkError = false;
-        let lastError = null;
-        let res = null;
-        try {
-          res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
-            method: "POST",
-            headers,
-            body: payloadJson,
-            cache: "no-store",
-            credentials: "include",
-            keepalive: opts.keepalive === true,
-          });
-        } catch (err) {
-          networkError = true;
-          lastError = err;
-        }
-
-        if (res) {
-          if (!res.ok) {
-            let parsed = null;
-            try {
-              const text = await res.text();
-              parsed = text ? JSON.parse(text) : null;
-            } catch (_) {
-              throw new Error(`Server calc failed (${res.status})`);
-            }
-
-            if (res.status === 429) {
-              // Rate limited - back off
-              state.backoffUntil = Date.now() + 60000;
-              throw new Error("Rate limited");
-            }
-
-            if (res.status === 401 && parsed?.error === "invalid_session" && parsed?.requiresNewSession === true) {
-              if (sessionRenewed) {
-                throw new Error("XP session renewal rejected");
-              }
-              sessionRenewed = true;
-              const renewedToken = await renewServerSession();
-              if (!renewedToken) throw new Error("XP session renewal failed");
-              body.sessionToken = renewedToken;
-              continue;
-            }
-
-            throw new Error(parsed?.message || parsed?.error || `Server calc failed (${res.status})`);
-          }
-
-          const responseBody = await res.json();
-          if (responseBody && typeof responseBody === "object" && opts.keepalive === true) {
-            responseBody._transport = "keepalive";
-          }
-
-          if (res.status === 200) {
-            noteConversion(sent, responseBody);
-          }
-
-          if (isDiagEnabled() && window && window.console && typeof window.console.debug === "function" && responseBody) {
-            window.console.debug("[XP] server_calc_apply", {
-              awarded: responseBody.awarded || 0,
-              totalLifetime: responseBody.totalLifetime,
-              remaining: responseBody.remaining,
-            });
-          }
-
-          // Update client cap from server response
-          if (responseBody && typeof responseBody === "object") {
-            if (Number.isFinite(responseBody.capDelta)) setClientCap(Number(responseBody.capDelta));
-            if (responseBody.sessionCapped === true) rotateAwardSession();
-          }
-
-          // Dispatch event for listeners
-          if (typeof window !== "undefined" && typeof CustomEvent === "function") {
-            window.dispatchEvent(new CustomEvent("xp:server-calculated", {
-              detail: responseBody,
-            }));
-          }
-
-          return responseBody;
-        }
-
-        if (networkError && allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
-          try {
-            const beaconPayload = new Blob([payloadJson], { type: "application/json" });
-            const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
-            if (beaconOk) {
-              return { _transport: "beacon" };
-            }
-          } catch (_) {}
-        }
-
-        attempt += 1;
-        if (attempt >= 3) {
-          throw lastError || new Error("Server calc failed");
-        }
-        // Brief backoff before retry
-        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
-      }
-
-      throw new Error("Server calc failed: exhausted retries");
+      return await postWindowServerCalcOnce(payload, options, sent, headers);
     } finally {
       if (sent.anon) {
         bumpActivity();
       }
     }
+  }
+
+  async function postWindowServerCalcOnce(payload, options, sent, headers) {
+    const opts = options || {};
+    const source = (payload && typeof payload === "object") ? payload : {};
+
+    const { sessionId } = ensureIds();
+
+    // Build payload for server-side calculation
+    // Note: We send raw activity data, NOT calculated delta
+    const body = {
+      ...(sent.id !== undefined ? { userId: sent.id } : {}),
+      sessionId,
+      gameId: source.gameId || "default",
+      windowStart: source.windowStart || 0,
+      windowEnd: source.windowEnd || Date.now(),
+      inputEvents: Math.max(0, Math.floor(Number(source.inputEvents) || 0)),
+      visibilitySeconds: Math.max(0, Number(source.visibilitySeconds) || 0),
+      scoreDelta: Math.max(0, Math.floor(Number(source.scoreDelta) || 0)),
+      gameplayActions: Math.max(0, Math.floor(Number(source.gameplayActions) || 0)),
+    };
+
+    // Add game events if present
+    if (Array.isArray(source.gameEvents) && source.gameEvents.length > 0) {
+      body.gameEvents = source.gameEvents.slice(0, 50);
+    }
+
+    // Add boost if present
+    if (source.boostMultiplier && source.boostMultiplier > 1) {
+      body.boostMultiplier = source.boostMultiplier;
+    }
+
+    // Add session token if available (from source or stored)
+    const sessionToken = source.sessionToken || loadServerSession();
+    if (sessionToken) {
+      body.sessionToken = sessionToken;
+    }
+
+    let attempt = 0;
+    let sessionRenewed = false;
+    const allowBeacon = opts.allowBeacon === true;
+    while (attempt < 3) {
+      const payloadJson = JSON.stringify(body);
+      let networkError = false;
+      let lastError = null;
+      let res = null;
+      try {
+        res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
+          method: "POST",
+          headers,
+          body: payloadJson,
+          cache: "no-store",
+          credentials: "include",
+          keepalive: opts.keepalive === true,
+        });
+      } catch (err) {
+        networkError = true;
+        lastError = err;
+      }
+
+      if (res) {
+        if (!res.ok) {
+          let parsed = null;
+          try {
+            const text = await res.text();
+            parsed = text ? JSON.parse(text) : null;
+          } catch (_) {
+            throw new Error(`Server calc failed (${res.status})`);
+          }
+
+          if (res.status === 429) {
+            // Rate limited - back off
+            state.backoffUntil = Date.now() + 60000;
+            throw new Error("Rate limited");
+          }
+
+          if (res.status === 401 && parsed?.error === "invalid_session" && parsed?.requiresNewSession === true) {
+            if (sessionRenewed) {
+              throw new Error("XP session renewal rejected");
+            }
+            sessionRenewed = true;
+            const renewedToken = await renewServerSession();
+            if (!renewedToken) throw new Error("XP session renewal failed");
+            body.sessionToken = renewedToken;
+            continue;
+          }
+
+          throw new Error(parsed?.message || parsed?.error || `Server calc failed (${res.status})`);
+        }
+
+        const responseBody = await res.json();
+        if (responseBody && typeof responseBody === "object" && opts.keepalive === true) {
+          responseBody._transport = "keepalive";
+        }
+
+        if (res.status === 200) {
+          noteConversion(sent, responseBody);
+        }
+
+        if (isDiagEnabled() && window && window.console && typeof window.console.debug === "function" && responseBody) {
+          window.console.debug("[XP] server_calc_apply", {
+            awarded: responseBody.awarded || 0,
+            totalLifetime: responseBody.totalLifetime,
+            remaining: responseBody.remaining,
+          });
+        }
+
+        // Update client cap from server response
+        if (responseBody && typeof responseBody === "object") {
+          if (Number.isFinite(responseBody.capDelta)) setClientCap(Number(responseBody.capDelta));
+          if (responseBody.sessionCapped === true) rotateAwardSession();
+        }
+
+        // Dispatch event for listeners
+        if (typeof window !== "undefined" && typeof CustomEvent === "function") {
+          window.dispatchEvent(new CustomEvent("xp:server-calculated", {
+            detail: responseBody,
+          }));
+        }
+
+        return responseBody;
+      }
+
+      if (networkError && allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
+        try {
+          const beaconPayload = new Blob([payloadJson], { type: "application/json" });
+          const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
+          if (beaconOk) {
+            return { _transport: "beacon" };
+          }
+        } catch (_) {}
+      }
+
+      attempt += 1;
+      if (attempt >= 3) {
+        throw lastError || new Error("Server calc failed");
+      }
+      // Brief backoff before retry
+      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+    }
+
+    throw new Error("Server calc failed: exhausted retries");
   }
 
   window.XPClient = {
