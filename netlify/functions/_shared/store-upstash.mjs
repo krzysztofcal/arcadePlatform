@@ -807,6 +807,8 @@ export async function saveUserProfile({ userId, totalXp, now = Date.now() }) {
   assertXpStoreAvailable();
   if (!userId) return null;
   const existing = await getUserProfile(userId);
+  // An unchanged total needs no guarded (lifecycle-locked) write; status reads otherwise rewrote it every time.
+  if (existing && existing.totalXp === clampTotalXp(totalXp)) return existing;
   const timestamp = new Date(now).toISOString();
   const profile = {
     userId,

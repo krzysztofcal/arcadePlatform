@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql } from "../shared/account-deletion.mjs";
+import { accountActiveSql, isAccountUuid, lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql } from "../shared/account-deletion.mjs";
 
 const loadLedger = ({ beginSql, executeSql, klog = () => {} }) => {
   const source = fs.readFileSync(path.join(process.cwd(), "netlify/functions/_shared/chips-ledger.mjs"), "utf8");
@@ -16,9 +16,11 @@ const loadLedger = ({ beginSql, executeSql, klog = () => {} }) => {
     "lockAccountLifecycle",
     "assertAccountActive",
     "deletionPokerSeatPendingSql",
+    "accountActiveSql",
+    "isAccountUuid",
     `"use strict";\n${rewrittenExports}\nreturn { postTransaction, getUserBalance };`
   );
-  return factory(crypto, beginSql, executeSql, klog, lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql);
+  return factory(crypto, beginSql, executeSql, klog, lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql, accountActiveSql, isAccountUuid);
 };
 
 const loadPostTransaction = (deps) => loadLedger(deps).postTransaction;
@@ -538,8 +540,11 @@ const runGetUserBalanceTests = async () => {
     const missingLifecycleUserId = "44444444-4444-4444-8444-444444444444";
     beginSqlCalls = 0;
     forUpdateQueries.length = 0;
+    executeSqlQueries.length = 0;
 
     const lifecycleBalance = await ledger.getUserBalance(missingLifecycleUserId);
+    assert.match(executeSqlQueries[0].query, /account_deletion_requests d where d\.old_user_id = \$1/, "the unlocked fast path must exclude deleting accounts");
+    assert.match(executeSqlQueries[0].query, /exists\(select 1 from auth\.users u where u\.id = \$1\)/);
     assert.deepEqual(lifecycleBalance, {
       accountId: `acct-${missingLifecycleUserId}`,
       balance: 0,

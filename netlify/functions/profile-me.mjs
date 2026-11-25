@@ -83,8 +83,10 @@ function createProfileMeHandler(deps = {}) {
     if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: cors, body: "" };
     if (event.httpMethod !== "GET" && event.httpMethod !== "PATCH") return json(405, cors, { error: "method_not_allowed" });
 
-    // #1309: a GET checks the account lifecycle once, inside ensureUserProfile's own transaction, instead of a
-    // second transaction in the JWT check. The check and its 401 answer are unchanged; PATCH keeps both.
+    // #1309/#1313: a GET checks the account lifecycle once, inside ensureUserProfile, instead of in the JWT check.
+    // For an existing profile that is an unlocked read requiring an existing, non-deleting account (it does not wait
+    // for an uncommitted deletion start); a deleting or missing profile takes the locked path. The 401 is unchanged;
+    // PATCH keeps the JWT check.
     const read = event.httpMethod === "GET";
     const startedAt = Date.now();
     const auth = await verifyJwt(extractBearerToken(event.headers), { allowDeleting: read });

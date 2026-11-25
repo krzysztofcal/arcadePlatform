@@ -1,4 +1,4 @@
-import { accountDeletionEnabled, assertAccountActive, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
+import { accountActiveSql, accountDeletionEnabled, assertAccountActive, isAccountUuid, lockAccountLifecycle } from "../../../shared/account-deletion.mjs";
 import { requireCurrentTerms } from "../../../shared/profile-terms.mjs";
 import { beginSql, executeSql } from "./supabase-admin.mjs";
 import { syncUserLeaderboardVisibility } from "./xp-leaderboard-visibility.mjs";
@@ -72,24 +72,10 @@ function ownerProfile(profile) {
   };
 }
 
-async function readProfile(userId, runSql = executeSql) {
+async function readProfile(userId, runSql = executeSql, { activeOnly = false } = {}) {
   const rows = await runSql(
     `select user_id::text, handle, display_name, avatar_key, avatar_variant, avatar_revision, google_photo_suppressed, leaderboard_visible
-     from public.user_profiles where user_id = $1 limit 1;`,
-    [userId],
-  );
-  return normalizeProfileRow(rows?.[0]);
-}
-
-// Unlocked fast path for an existing profile. With Account Deletion on, it only returns the row while the account
-// exists and has no deletion request; otherwise the caller falls through to the locked path, which rejects.
-async function readActiveProfile(userId, runSql) {
-  const rows = await runSql(
-    `select p.user_id::text, p.handle, p.display_name, p.avatar_key, p.avatar_variant, p.avatar_revision, p.google_photo_suppressed, p.leaderboard_visible
-     from public.user_profiles p
-     where p.user_id = $1 and exists(select 1 from auth.users u where u.id = $1)
-       and not exists(select 1 from public.account_deletion_requests d where d.old_user_id = $1)
-     limit 1;`,
+     from public.user_profiles where user_id = $1${activeOnly ? ` and ${accountActiveSql('$1')}` : ""} limit 1;`,
     [userId],
   );
   return normalizeProfileRow(rows?.[0]);
@@ -97,12 +83,15 @@ async function readActiveProfile(userId, runSql) {
 
 async function ensureUserProfile(userId, deps = {}) {
   if (typeof userId !== "string" || !userId.trim()) throw profileError("unauthorized", 401);
-  if (!deps.profileTx) {
-    const runSql = deps.executeSql || executeSql;
-    const existing = accountDeletionEnabled(deps.env || process.env) ? await readActiveProfile(userId, runSql) : await readProfile(userId, runSql);
+  const lifecycle = accountDeletionEnabled(deps.env || process.env);
+  // Unlocked fast path for an existing profile (ensure_user_profile returns existing rows unchanged). With Account
+  // Deletion on it requires an existing, non-deleting account, so profile-me GET (allowDeleting JWT) still reaches the
+  // locked path below for a deleting account and gets account_not_active.
+  if (!deps.profileTx && (!lifecycle || isAccountUuid(userId))) {
+    const existing = await readProfile(userId, deps.executeSql || executeSql, { activeOnly: lifecycle });
     if (existing) return existing;
   }
-  if (accountDeletionEnabled(deps.env || process.env) && !deps.profileTx) {
+  if (lifecycle && !deps.profileTx) {
     return (deps.beginSql || beginSql)(async (tx) => {
       await assertAccountActive(tx, userId);
       return ensureUserProfile(userId, { ...deps, profileTx: tx, executeSql: (q,p) => tx.unsafe(q,p) });

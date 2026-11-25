@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql } from "../../../shared/account-deletion.mjs";
+import { accountActiveSql, isAccountUuid, lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql } from "../../../shared/account-deletion.mjs";
 
 const deletionEnabled = () => process.env.ACCOUNT_DELETION_ENABLED === "1";
 const INTERNAL_DELETION = Symbol("trusted deletion ledger effect");
@@ -383,23 +383,23 @@ where system_key = any($1::text[]);
 }
 
 async function getUserBalance(userId) {
-  // Unlocked fast path for an existing active account; with Account Deletion on, only while the account exists and has
-  // no deletion request. Missing, retired, inactive or deleting accounts use the unchanged locked path.
-  const activeGuard = deletionEnabled()
-    ? ` and exists(select 1 from auth.users u where u.id = $1) and not exists(select 1 from public.account_deletion_requests d where d.old_user_id = $1)`
-    : "";
-  const rows = await executeSql(
-    `select * from public.chips_accounts where user_id = $1 and account_type = 'USER'${activeGuard} limit 1;`,
-    [userId],
-  );
-  const row = rows?.[0];
-  if (row && row.status === "active") {
-    return {
-      accountId: row.id,
-      balance: asLooseInt(row.balance, 0),
-      nextEntrySeq: asLooseInt(row.next_entry_seq, 1),
-      status: row.status,
-    };
+  // Unlocked fast path for an existing active account; with Account Deletion on, only for an existing, non-deleting
+  // account. Missing, retired, inactive or deleting accounts use the unchanged locked getOrCreateUserAccount.
+  const lifecycle = deletionEnabled();
+  if (!lifecycle || isAccountUuid(userId)) {
+    const rows = await executeSql(
+      `select * from public.chips_accounts where user_id = $1 and account_type = 'USER'${lifecycle ? ` and ${accountActiveSql('$1')}` : ""} limit 1;`,
+      [userId],
+    );
+    const row = rows?.[0];
+    if (row && row.status === "active") {
+      return {
+        accountId: row.id,
+        balance: asLooseInt(row.balance, 0),
+        nextEntrySeq: asLooseInt(row.next_entry_seq, 1),
+        status: row.status,
+      };
+    }
   }
   const account = await getOrCreateUserAccount(userId);
   return {

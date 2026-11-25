@@ -26,6 +26,16 @@ export const deletionPokerSeatPendingSql = `not coalesce((p.status='INACTIVE' an
 
 const PHASES = ['preparing', 'poker', 'burn', 'cleanup', 'auth', 'completed'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isAccountUuid(value) {
+  return typeof value === 'string' && UUID.test(value);
+}
+
+// SQL predicate (no lock) that the account exists and has no deletion request; `param` is the placeholder holding the
+// account UUID. Shared by the unlocked read fast paths so they cannot drift from each other.
+export function accountActiveSql(param = '$1') {
+  return `exists(select 1 from auth.users u where u.id = ${param}) and not exists(select 1 from public.account_deletion_requests d where d.old_user_id = ${param})`;
+}
+
 function requireUuid(value) {
   if (typeof value !== 'string' || !UUID.test(value)) throw Object.assign(new Error('invalid_identity'), { code: 'invalid_identity' });
   return value.toLowerCase();

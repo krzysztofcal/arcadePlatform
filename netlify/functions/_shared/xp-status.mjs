@@ -1,5 +1,5 @@
 import { klog } from "./supabase-admin.mjs";
-import { saveUserProfile, getUserProfile } from "./store-upstash.mjs";
+import { saveUserProfile } from "./store-upstash.mjs";
 import { sanitizeXpCounter, isXpV3, resolveXpNamespace } from "./xp-ledger.mjs";
 
 function buildXpStatusSnapshot({ totals, dailyCap, deltaCap, sessionId, dayKey, nextReset, status = "statusOnly" }) {
@@ -35,22 +35,10 @@ async function readCanonicalXpStatus({ readTotals, dailyCap, deltaCap, sessionId
   };
 }
 
-async function persistXpProfileSnapshot({
-  userId,
-  totalXp,
-  now = Date.now(),
-  read = getUserProfile,
-  save = saveUserProfile,
-  logKind = "xp_save_user_profile_failed",
-}) {
+async function persistXpProfileSnapshot({ userId, totalXp, now = Date.now(), save = saveUserProfile, logKind = "xp_save_user_profile_failed" }) {
   if (!userId) return false;
   try {
-    const sanitizedTotal = sanitizeXpCounter(totalXp);
-    const existing = await read(userId);
-    if (existing?.totalXp === sanitizedTotal) {
-      return true;
-    }
-    await save({ userId, totalXp: sanitizedTotal, now });
+    await save({ userId, totalXp: sanitizeXpCounter(totalXp), now });
     return true;
   } catch (error) {
     klog(logKind, { error: error?.message });
