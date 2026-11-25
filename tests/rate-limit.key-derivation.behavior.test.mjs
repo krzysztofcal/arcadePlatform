@@ -208,11 +208,11 @@ const { warsawDayKey, nextWarsawResetMs } = await import('../netlify/functions/_
     }
   }
 
-  // 5. slow: let n = 0; performance.now = () => (n++ === 0 ? 0 : 5000) -> exactly one line, assert.deepEqual with expected object
+  // 5. slow: a step clock (+200 ms per read) -> exactly one line; jwt, conversion and totals each get one step (anonymous status has no persist)
   {
     const origPerf = performance.now;
     let n = 0;
-    performance.now = () => (n++ === 0 ? 0 : 5000);
+    performance.now = () => (n++) * 200;
 
     try {
       const { lines } = await captureTimingLogs(() => handler({
@@ -226,13 +226,13 @@ const { warsawDayKey, nextWarsawResetMs } = await import('../netlify/functions/_
         op: "status",
         signedIn: false,
         status: 200,
-        jwtMs: 0,
-        conversionMs: 0,
-        totalsMs: 0,
+        jwtMs: 200,
+        conversionMs: 200,
+        totalsMs: 200,
         persistMs: 0,
         awardMs: 0,
-        otherMs: 5000,
-        totalMs: 5000,
+        otherMs: 800,
+        totalMs: 1400,
       });
     } finally {
       performance.now = origPerf;
