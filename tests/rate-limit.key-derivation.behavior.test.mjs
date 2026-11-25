@@ -170,11 +170,7 @@ const { warsawDayKey, nextWarsawResetMs } = await import('../netlify/functions/_
 
       assert.equal(lines.length, 0);
       assert.deepEqual(
-        {
-          statusCode: result.statusCode,
-          headers: result.headers,
-          body: JSON.parse(result.body),
-        },
+        result,
         {
           statusCode: 200,
           headers: {
@@ -185,7 +181,7 @@ const { warsawDayKey, nextWarsawResetMs } = await import('../netlify/functions/_
             "access-control-allow-methods": "POST,OPTIONS",
             Vary: "Origin",
           },
-          body: {
+          body: JSON.stringify({
             ok: true,
             awarded: 0,
             granted: 0,
@@ -199,7 +195,7 @@ const { warsawDayKey, nextWarsawResetMs } = await import('../netlify/functions/_
             remaining: 3000,
             dayKey: expectedDayKey,
             nextReset: expectedNextReset,
-          },
+          }),
         }
       );
     } finally {
