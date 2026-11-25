@@ -5,8 +5,8 @@
 **Out of scope (HOLD):** 2a, 2b, T3, #1319, the Netlify region.
 
 ## Requirements
-- **FR-001** `netlify/functions/calculate-xp.mjs::handler` emits at most **one** `klog("calc_xp_timing", {...})` per request, only when `totalMs >= 1000`, with:
-  - `op` (`"status"` | `"award"`), `signedIn` (boolean) and `status` (the HTTP status code);
+- **FR-001** `netlify/functions/calculate-xp.mjs::handler` emits at most **one** `klog("calc_xp_timing", {...})` per request, only when the raw (unrounded) elapsed time is ≥ 1000 ms and `op` is known, with:
+  - `op` (`"status"` | `"award"`), `signedIn` (boolean) and `status` (the returned HTTP status code, or `null` when the handler throws before returning);
   - the phases in whole ms: `jwtMs`, `conversionMs`, `totalsMs`, `persistMs`, `awardMs`, `otherMs`, `totalMs`.
 - **FR-002** Phase boundaries:
   - `jwtMs` is `verifySupabaseJwt`.
@@ -14,7 +14,7 @@
   - `totalsMs` is the totals read: `readTotals` inside `readCanonicalXpStatus` for status.
   - `persistMs` is the guarded snapshot and session writes: `persistProfile` inside `readCanonicalXpStatus`, the award's `persistUserProfile` and `saveSessionState`.
   - `awardMs` is `executeAtomicXpAward`.
-  - `otherMs = totalMs − (sum of the measured phases)`, never negative.
+  - `otherMs = totalMs − (sum of the rounded phases)`, never negative; when rounding pushes the phase sum above the rounded total, `totalMs` is that sum.
   - Inside `readCanonicalXpStatus`, the read and the write are measured separately by wrapping the `readTotals` and `persistProfile` callbacks that are passed in.
 - **FR-003** No identifiers or user data in the log: no user id, anon id, session id, token, IP, email or XP values.
 - **FR-004** Unchanged: every HTTP response (status, body, headers), XP awarding, caps, the rate limit, session validation, conversion, Account Deletion fencing, error handling and existing logs. A failure inside the timing code must never affect the request.
@@ -30,4 +30,4 @@
 - **SC-002** Stage (Deploy Preview of this PR, a dedicated Stage test account, Playwright):
   - signed in: ≥ 10 status reads and ≥ 10 real awards through the existing game flow;
   - anonymous: status reads;
-  - per op and identity: the median and p90 of each phase from the Netlify function logs (aggregates only), and the dominant phase.
+  - per group (op, identity, window): the total request count and the phase-sample count. Phase medians/p90 and the dominant phase describe **only the logged (≥ 1000 ms) requests**; a group without samples is reported as "no phase samples" with total durations only.
