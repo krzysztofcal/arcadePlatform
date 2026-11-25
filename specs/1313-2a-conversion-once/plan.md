@@ -15,11 +15,11 @@
 **`netlify/functions/calculate-xp.mjs`** (about 2 lines; **requires explicit OWNER approval**, see spec Status): add `anonConversionChecked: true` to the status payload (next to the existing `result.payload.conversion`) and to the award payload when `conversion` is not `null`.
 
 **`js/xpClient.js`** (about 25–30 lines):
-- `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`, `ACTIVITY_KEY = "kcswh:xpAnonActivity"`; `bumpActivity()` and `readActivity()` read and write the shared integer in try/catch (`null` on failure).
+- `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`, `ACTIVITY_KEY = "kcswh:xpAnonActivity"`; `bumpActivity()` writes a new `randomId()` value and `readActivity()` reads it, both in try/catch. `readActivity()` returns `null` on failure. `bumpActivity()` failure: try `removeItem(CONVERTED_KEY)` and set `state.anonStorageFailed = true`.
 - `tokenSub(headers)`: base64url-decode the payload of `headers.Authorization` (`Bearer x.y.z`) and return `sub`, or `null` on any error. This is only a label; the server still verifies the token.
 - `anonIdFor(headers, anonId)`, used after `buildAuthHeaders(...)` and before the body is built:
   - no `Authorization`: `bumpActivity()`, return `{ id: anonId, sub: null, anon: true }`. The caller must `bumpActivity()` again in `finally` when the request settles.
-  - otherwise: `sub = tokenSub(headers)`, `act = readActivity()`. If `sub` and `act !== null` and the marker is `{ sub, act }`, return `{ id: undefined, sub, act }`; else return `{ id: anonId, sub, act }`.
+  - otherwise: `sub = tokenSub(headers)`, `act = readActivity()`. If `!state.anonStorageFailed` and `sub` and `act !== null` and the marker is `{ sub, act }`, return `{ id: undefined, sub, act }`; else return `{ id: anonId, sub, act }`.
   - any throw: return `{ id: anonId, sub: null }`.
 - `noteConversion(sent, payload)`: write the marker `{ sub: sent.sub, act: sent.act }` only when `sent.id && sent.sub && sent.act !== null && readActivity() === sent.act && payload && payload.anonConversionChecked === true`, in try/catch.
 - `fetchStatus()`:
@@ -57,5 +57,6 @@
 - **The token `sub` decode is unverified client-side.** It is used only to label the marker. A wrong label can only make the client send the id again, or skip it for an account whose own token the server already confirmed.
 - **Same-account sign-out/sign-in without anonymous play keeps the marker.** This is intended: without an anonymous request no new anonymous XP exists, so there is nothing to convert.
 - **Another browser profile or a cleared `localStorage`** falls back to main's behaviour.
-- **Residual race:** a tab closed mid-way through an anonymous award never runs its settle increment. If the server applies that award after a concurrent signed-in check, and a marker is written with the post-start counter, that XP waits until the next anonymous request clears the marker. It is not deleted, because anonymous totals do not expire. This is accepted for a minor feature.
+- **Cross-tab storage failure:** see spec FR-005 (OWNER acceptance).
+- **Residual race:** a tab closed mid-way through an anonymous award never runs its settle write. If the server applies that award after a concurrent signed-in check, and a marker is written with the post-start activity token, that XP waits until the next anonymous request clears the marker. It is not deleted, because anonymous totals do not expire. This is accepted for a minor feature.
 - **Breaking changes:** none. The added response field is ignored by older clients.
