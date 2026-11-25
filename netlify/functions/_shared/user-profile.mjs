@@ -81,10 +81,25 @@ async function readProfile(userId, runSql = executeSql) {
   return normalizeProfileRow(rows?.[0]);
 }
 
+// Unlocked fast path for an existing profile. With Account Deletion on, it only returns the row while the account
+// exists and has no deletion request; otherwise the caller falls through to the locked path, which rejects.
+async function readActiveProfile(userId, runSql) {
+  const rows = await runSql(
+    `select p.user_id::text, p.handle, p.display_name, p.avatar_key, p.avatar_variant, p.avatar_revision, p.google_photo_suppressed, p.leaderboard_visible
+     from public.user_profiles p
+     where p.user_id = $1 and exists(select 1 from auth.users u where u.id = $1)
+       and not exists(select 1 from public.account_deletion_requests d where d.old_user_id = $1)
+     limit 1;`,
+    [userId],
+  );
+  return normalizeProfileRow(rows?.[0]);
+}
+
 async function ensureUserProfile(userId, deps = {}) {
   if (typeof userId !== "string" || !userId.trim()) throw profileError("unauthorized", 401);
   if (!deps.profileTx) {
-    const existing = await readProfile(userId, deps.executeSql || executeSql);
+    const runSql = deps.executeSql || executeSql;
+    const existing = accountDeletionEnabled(deps.env || process.env) ? await readActiveProfile(userId, runSql) : await readProfile(userId, runSql);
     if (existing) return existing;
   }
   if (accountDeletionEnabled(deps.env || process.env) && !deps.profileTx) {
