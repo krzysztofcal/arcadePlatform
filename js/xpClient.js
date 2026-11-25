@@ -14,6 +14,7 @@
   const XP_MIGRATION_NOTICE_ID = "xpServerMigrationNotice";
   const CONVERTED_KEY = "kcswh:xpAnonConvertedFor";
   const ACTIVITY_KEY = "kcswh:xpAnonActivity";
+  const PENDING_KEY = "kcswh:xpAnonPendingUntil";
 
   // Session states: "none" | "pending" | "ready"
   const SESSION_NONE = "none";
@@ -795,6 +796,24 @@
     else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
   }
 
+  function markAnonPending() {
+    try {
+      window.localStorage.setItem(PENDING_KEY, String(Date.now() + 15000));
+    } catch (_) {}
+  }
+
+  function isAnonPending() {
+    try {
+      const raw = window.localStorage.getItem(PENDING_KEY);
+      if (!raw) return false;
+      const until = Number(raw);
+      if (!Number.isFinite(until)) return false;
+      return Date.now() < until;
+    } catch (_) {
+      return true;
+    }
+  }
+
   function bumpActivity() {
     try {
       const ls = window.localStorage;
@@ -828,8 +847,7 @@
     try {
       let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
       while (b64.length % 4) b64 += "=";
-      const fn = typeof atob === "function" ? atob : (typeof window !== "undefined" && window.atob);
-      return fn ? fn(b64) : null;
+      return typeof atob === "function" ? atob(b64) : null;
     } catch (_) {
       return null;
     }
@@ -851,14 +869,15 @@
   }
 
   function anonIdFor(headers, anonId) {
+    const auth = Boolean(headers && (headers.Authorization || headers.authorization));
+    const anon = !auth;
     try {
-      const auth = headers && (headers.Authorization || headers.authorization);
-      if (!auth) {
+      if (anon) {
         bumpActivity();
         try {
           window.localStorage.removeItem(CONVERTED_KEY);
         } catch (_) {}
-        return { id: anonId, sub: null, anon: true };
+        return { id: anonId, sub: null, act: null, anon: true };
       }
       const sub = tokenSub(headers);
       const act = readActivity();
@@ -875,11 +894,16 @@
         } catch (_) {}
       }
       if (markerMatch) {
-        return { id: undefined, sub, act };
+        return { id: undefined, sub, act, anon: false };
       }
-      return { id: anonId, sub, act };
+      return { id: anonId, sub, act, anon: false };
     } catch (_) {
-      return { id: anonId, sub: null };
+      if (anon) {
+        try {
+          bumpActivity();
+        } catch (_) {}
+      }
+      return { id: anonId, sub: null, act: null, anon };
     }
   }
 
@@ -890,6 +914,7 @@
         sent.id &&
         sent.sub &&
         sent.act !== null &&
+        !isAnonPending() &&
         readActivity() === sent.act &&
         payload &&
         payload.anonConversionChecked === true
@@ -1005,7 +1030,7 @@
     const opts = options || {};
     const source = (payload && typeof payload === "object") ? payload : {};
 
-    const { sessionId } = ensureIds();
+    const { userId, sessionId } = ensureIds();
 
     // Build payload for server-side calculation
     // Note: We send raw activity data, NOT calculated delta
@@ -1039,7 +1064,10 @@
 
     let attempt = 0;
     let sessionRenewed = false;
-    const allowBeacon = opts.allowBeacon === true;
+    const allowBeacon = opts.allowBeacon === true || opts.keepalive === true;
+    if (opts.keepalive === true && sent.anon) {
+      markAnonPending();
+    }
     while (attempt < 3) {
       const payloadJson = JSON.stringify(body);
       let networkError = false;
@@ -1124,7 +1152,15 @@
 
       if (networkError && allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
         try {
-          const beaconPayload = new Blob([payloadJson], { type: "application/json" });
+          bumpActivity();
+          try {
+            window.localStorage.removeItem(CONVERTED_KEY);
+          } catch (_) {}
+          markAnonPending();
+          const beaconBody = Object.assign({}, body, { userId });
+          const beaconPayload = typeof Blob === "function"
+            ? new Blob([JSON.stringify(beaconBody)], { type: "application/json" })
+            : JSON.stringify(beaconBody);
           const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
           if (beaconOk) {
             return { _transport: "beacon" };

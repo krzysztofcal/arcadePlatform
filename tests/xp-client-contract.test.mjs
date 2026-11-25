@@ -28,6 +28,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   const baseWindow = {
     localStorage: baseLocalStorage,
     atob: typeof atob !== 'undefined' ? atob : undefined,
+    navigator: options.navigator || (typeof navigator !== 'undefined' ? navigator : undefined),
   };
   const mergedWindow = Object.assign(baseWindow, options.window || {});
   if (options.window && options.window.localStorage) {
@@ -40,6 +41,8 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     Date: options.Date || Date, setTimeout, clearTimeout, console, JSON,
     atob: typeof atob !== 'undefined' ? atob : undefined,
     Buffer: typeof Buffer !== 'undefined' ? Buffer : undefined,
+    Blob: options.Blob || (typeof Blob !== 'undefined' ? Blob : undefined),
+    navigator: options.navigator || mergedWindow.navigator || (typeof navigator !== 'undefined' ? navigator : undefined),
   };
   ctx.window.fetch = fetchImpl;
   vm.createContext(ctx);
@@ -764,8 +767,10 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     return {
       ...(extra.store ? { store: extra.store } : {}),
       ...(extra.Date ? { Date: extra.Date } : {}),
+      ...(extra.navigator ? { navigator: extra.navigator } : {}),
       window: {
         ...(storage ? { localStorage: storage } : {}),
+        ...(extra.navigator ? { navigator: extra.navigator } : {}),
         ...(extra.window || {}),
         SupabaseAuthBridge: sub ? {
           getAccessToken: async () => (typeof sub === 'function' ? sub() : (sub ? makeJwt(sub) : null)),
@@ -979,6 +984,80 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assertBodyHasAnonId(rec.calls[0], false);
     assert.deepStrictEqual(r1, r2);
     assert.deepStrictEqual(r2, r3);
+  }
+
+  // SC-001: 11. Beacon fallback: signed-in user with valid marker whose keepalive fetch throws falls back to beacon
+  {
+    const storage = createSharedStorage([
+      ['kcswh:xpAnonConvertedFor', JSON.stringify({ sub: 'user-A', act: 'act-fixed' })],
+      ['kcswh:xpAnonActivity', 'act-fixed'],
+      ['kcswh:userId', 'anon-browser-id-123'],
+    ]);
+    const beaconCalls = [];
+    const fakeNavigator = {
+      sendBeacon: (url, payload) => {
+        beaconCalls.push({ url, payload });
+        return true;
+      },
+    };
+    const rec = createRecorder(async (c) => {
+      if (c.body.operation === 'status') {
+        return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+      }
+      throw new Error('keepalive network failure');
+    });
+
+    const client = await loadClientWithFetch(rec.fn, authOpts('user-A', {
+      store: storage.store,
+      storage,
+      navigator: fakeNavigator,
+    }));
+
+    const res = await client.postWindowServerCalc(semanticWindow(5), { keepalive: true });
+    assert.equal(res?._transport, 'beacon');
+    assert.equal(beaconCalls.length, 1);
+
+    const rawPayload = beaconCalls[0].payload;
+    const beaconBody = typeof rawPayload?.text === 'function'
+      ? JSON.parse(await rawPayload.text())
+      : JSON.parse(String(rawPayload));
+    assert.equal(beaconBody.userId, 'anon-browser-id-123', 'beacon payload must include userId');
+    assert.equal(storage.store.has('kcswh:xpAnonConvertedFor'), false, 'marker must be removed after beacon send');
+
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[rec.calls.length - 1], true, 'subsequent signed-in request must send anonId');
+  }
+
+  // SC-001: 12. Pending window for unload sends: keepalive award blocks marker within 15s; after 15s confirmation sets it
+  {
+    let currentToken = null;
+    const storage = createSharedStorage();
+    const fakeDate = createFakeDate(1_000_000);
+    const rec = createRecorder();
+    const client = await loadClientWithFetch(rec.fn, authOpts(() => currentToken, {
+      store: storage.store,
+      storage,
+      Date: fakeDate,
+    }));
+
+    // 1. Anonymous keepalive award sets pending until now + 15000
+    await client.postWindowServerCalc(semanticWindow(5), { keepalive: true });
+    assert.equal(storage.store.get('kcswh:xpAnonPendingUntil'), '1015000');
+
+    // 2. User signs in; confirmation within 15s (t = 1005000) writes NO marker
+    currentToken = makeJwt('user-A');
+    fakeDate.advance(5_000);
+    await client.fetchStatus();
+    assert.equal(storage.store.has('kcswh:xpAnonConvertedFor'), false, 'no marker within 15s of keepalive award');
+
+    // 3. Confirmation after 15s (advance to t = 1016000) DOES write marker
+    fakeDate.advance(11_000);
+    await client.fetchStatus();
+    assert.equal(storage.store.has('kcswh:xpAnonConvertedFor'), true, 'marker written after 15s elapsed');
+
+    // 4. Subsequent request omits anonId
+    await client.fetchStatus();
+    assertBodyHasAnonId(rec.calls[rec.calls.length - 1], false, 'subsequent request omits anonId');
   }
 
   console.log('xp-client contract tests passed');
