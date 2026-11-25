@@ -12,6 +12,9 @@
   const LEGACY_XP_RUNTIME_KEY = "kcswh:xp:regen";
   const XP_MIGRATION_NOTICE_PREFIX = "kcswh:xp:server-migration-notice:v1:";
   const XP_MIGRATION_NOTICE_ID = "xpServerMigrationNotice";
+  const CONVERTED_KEY = "kcswh:xpAnonConvertedFor";
+  const ACTIVITY_KEY = "kcswh:xpAnonActivity";
+  const PENDING_KEY = "kcswh:xpAnonPendingUntil";
 
   // Session states: "none" | "pending" | "ready"
   const SESSION_NONE = "none";
@@ -39,6 +42,7 @@
     migrationNoticeLangBound: false,
     awardSessionId: null,
     xpCacheHydrated: false,
+    anonStorageFailed: false,
   };
 
   function isDiagEnabled() {
@@ -792,14 +796,150 @@
     else if (Number.isFinite(payload.cap)) setClientCap(Number(payload.cap));
   }
 
+  function markAnonPending() {
+    try {
+      window.localStorage.setItem(PENDING_KEY, String(Date.now() + 15000));
+    } catch (_) {}
+  }
+
+  function isAnonPending() {
+    try {
+      const raw = window.localStorage.getItem(PENDING_KEY);
+      if (!raw) return false;
+      const until = Number(raw);
+      if (!Number.isFinite(until)) return false;
+      return Date.now() < until;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function bumpActivity() {
+    try {
+      const ls = window.localStorage;
+      const next = randomId();
+      ls.setItem(ACTIVITY_KEY, next);
+      return next;
+    } catch (_) {
+      state.anonStorageFailed = true;
+      try {
+        window.localStorage.removeItem(CONVERTED_KEY);
+      } catch (_) {}
+      return null;
+    }
+  }
+
+  function readActivity() {
+    try {
+      const ls = window.localStorage;
+      let val = ls.getItem(ACTIVITY_KEY);
+      if (!val) {
+        val = randomId();
+        ls.setItem(ACTIVITY_KEY, val);
+      }
+      return val;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function base64UrlDecode(str) {
+    try {
+      let b64 = str.replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+      return typeof atob === "function" ? atob(b64) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function tokenSub(headers) {
+    try {
+      const auth = (headers && (headers.Authorization || headers.authorization)) || "";
+      if (typeof auth !== "string" || !auth.startsWith("Bearer ")) return null;
+      const token = auth.slice(7).trim();
+      const parts = token.split(".");
+      if (parts.length < 2) return null;
+      const jsonStr = base64UrlDecode(parts[1]);
+      const parsed = JSON.parse(jsonStr);
+      return (parsed && parsed.sub != null && String(parsed.sub).trim()) ? String(parsed.sub).trim() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // An anonymous award (the only request that can add anonymous XP) invalidates every marker in every tab
+  // and blocks new markers for 15 s, because its settle step may never run if the page unloads.
+  function noteAnonAward() {
+    bumpActivity();
+    try {
+      window.localStorage.removeItem(CONVERTED_KEY);
+    } catch (_) {}
+    markAnonPending();
+  }
+
+  function anonIdFor(headers, anonId, isAward) {
+    const auth = Boolean(headers && (headers.Authorization || headers.authorization));
+    const anon = !auth && isAward === true;
+    if (!auth) {
+      // Anonymous status reads cannot add anonymous XP, so they keep the marker.
+      if (anon) noteAnonAward();
+      return { id: anonId, sub: null, act: null, anon };
+    }
+    try {
+      const sub = tokenSub(headers);
+      const act = readActivity();
+      let markerMatch = false;
+      if (!state.anonStorageFailed && sub && act !== null) {
+        try {
+          const raw = window.localStorage.getItem(CONVERTED_KEY);
+          if (raw) {
+            const marker = JSON.parse(raw);
+            if (marker && marker.sub === sub && marker.act === act) {
+              markerMatch = true;
+            }
+          }
+        } catch (_) {}
+      }
+      if (markerMatch) {
+        return { id: undefined, sub, act, anon: false };
+      }
+      return { id: anonId, sub, act, anon: false };
+    } catch (_) {
+      return { id: anonId, sub: null, act: null, anon: false };
+    }
+  }
+
+  function noteConversion(sent, payload) {
+    try {
+      if (
+        sent &&
+        sent.id &&
+        sent.sub &&
+        sent.act !== null &&
+        !isAnonPending() &&
+        readActivity() === sent.act &&
+        payload &&
+        payload.anonConversionChecked === true
+      ) {
+        window.localStorage.setItem(CONVERTED_KEY, JSON.stringify({ sub: sent.sub, act: sent.act }));
+      }
+    } catch (_) {}
+  }
+
   async function fetchStatus() {
     const { userId, sessionId } = ensureIds();
-    const body = { anonId: userId, sessionId, operation: "status" };
     const authToken = await ensureAuthTokenWithRetry();
     if (!authToken && await isUserLoggedIn()) {
       throw new Error("XP status requires an authenticated token");
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
+    const sent = anonIdFor(headers, userId);
+    const body = {
+      ...(sent.id !== undefined ? { anonId: sent.id } : {}),
+      sessionId,
+      operation: "status",
+    };
     const key = (headers.Authorization || "") + "\n" + JSON.stringify(body);
     if (state.statusShared && state.statusShared.key === key) {
       return state.statusShared.promise.then((t) => JSON.parse(t));
@@ -819,6 +959,7 @@
       }
       const text = await res.text();
       const payload = JSON.parse(text);
+      if (res.status === 200) noteConversion(sent, payload);
       updateCapFromPayload(payload);
       return text;
     })();
@@ -860,17 +1001,36 @@
    * Server calculates XP based on activity instead of trusting client delta
    */
   async function postWindowServerCalc(payload, options) {
-    const opts = options || {};
-    const source = (payload && typeof payload === "object") ? payload : {};
     ensureStatusBootstrap(false);
     await maybeBackoff();
+
+    const { userId } = ensureIds();
+    const authToken = await ensureAuthTokenWithRetry();
+    if (!authToken && await isUserLoggedIn()) {
+      throw new Error("Authenticated XP award requires an access token");
+    }
+    const headers = await buildAuthHeaders({ "content-type": "application/json" });
+    const sent = anonIdFor(headers, userId, true);
+
+    try {
+      return await postWindowServerCalcOnce(payload, options, sent, headers);
+    } finally {
+      if (sent.anon) {
+        bumpActivity();
+      }
+    }
+  }
+
+  async function postWindowServerCalcOnce(payload, options, sent, headers) {
+    const opts = options || {};
+    const source = (payload && typeof payload === "object") ? payload : {};
 
     const { userId, sessionId } = ensureIds();
 
     // Build payload for server-side calculation
     // Note: We send raw activity data, NOT calculated delta
     const body = {
-      userId,
+      ...(sent.id !== undefined ? { userId: sent.id } : {}),
       sessionId,
       gameId: source.gameId || "default",
       windowStart: source.windowStart || 0,
@@ -900,11 +1060,6 @@
     let attempt = 0;
     let sessionRenewed = false;
     const allowBeacon = opts.allowBeacon === true;
-    const authToken = await ensureAuthTokenWithRetry();
-    if (!authToken && await isUserLoggedIn()) {
-      throw new Error("Authenticated XP award requires an access token");
-    }
-    const headers = await buildAuthHeaders({ "content-type": "application/json" });
     while (attempt < 3) {
       const payloadJson = JSON.stringify(body);
       let networkError = false;
@@ -959,6 +1114,10 @@
           responseBody._transport = "keepalive";
         }
 
+        if (res.status === 200) {
+          noteConversion(sent, responseBody);
+        }
+
         if (isDiagEnabled() && window && window.console && typeof window.console.debug === "function" && responseBody) {
           window.console.debug("[XP] server_calc_apply", {
             awarded: responseBody.awarded || 0,
@@ -985,7 +1144,9 @@
 
       if (networkError && allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
         try {
-          const beaconPayload = new Blob([payloadJson], { type: "application/json" });
+          noteAnonAward();
+          const beaconBody = Object.assign({}, body, { userId });
+          const beaconPayload = new Blob([JSON.stringify(beaconBody)], { type: "application/json" });
           const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);
           if (beaconOk) {
             return { _transport: "beacon" };

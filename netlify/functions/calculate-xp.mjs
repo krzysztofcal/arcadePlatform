@@ -782,6 +782,7 @@ async function handleCalculateXp(event, timing) {
         persistProfile: (args) => timing.measure("persist", () => persistUserProfile({ userId: args.userId, totalXp: args.totalXp, now })),
       });
       if (conversion?.converted > 0) result.payload.conversion = { converted: conversion.converted };
+      if (conversion) result.payload.anonConversionChecked = true;
       return json(200, result.payload, origin);
     } catch (err) {
       klog("calc_status_read_failed", { error: err?.message });
@@ -1023,6 +1024,7 @@ async function handleCalculateXp(event, timing) {
     dayKey: dayKeyNow,
     nextReset,
     conversion: conversion?.converted > 0 ? { converted: conversion.converted } : undefined,
+    ...(conversion ? { anonConversionChecked: true } : {}),
     combo: {
       multiplier: updatedCombo.multiplier,
       mode: updatedCombo.mode,
