@@ -12,14 +12,18 @@
 - Apply GO proposal: one operator transaction with the three operational bodies (outer `BEGIN`/`COMMIT` stripped, never nested), the three settings pairs, and one final `COMMIT`. Error before `COMMIT` → full rollback, stop, no retry.
 
 ## Phase 2: Legal and procedure (separate PR, OWNER legal acceptance)
-- Privacy `a6` PL/EN plus the alias: reports, blocks, moderation, retention, legal basis. Terms bump only if the OWNER decides it.
+- Privacy `a6` PL/EN plus the alias: reports, blocks, moderation, retention, legal basis.
+- Terms `a3` PL/EN plus the alias (OWNER decision: Privacy **and** Terms): conduct rules, reporting, blocking, moderation actions.
+- The legal versions in code (`shared/profile-terms.mjs` and the client Terms dialog) are updated to a3, following the existing a1→a2 change.
+- A Production-pinned `enable-terms-production` operation for a3 (identity, history, confirmation, legal document hash, reader pins), modelled on the #1114 one. It is a separate GO and runs only after the WWW release that serves a3.
 - OWNER sets the moderator list (`ADMIN_USER_IDS`) and the review cadence.
 
 ## Phase 3: Activation (OWNER GO each)
 1. Apply Phase 1 SQL on Production, then the independent postflight (SC-002).
 2. Netlify Production flags: `UGC_SAFETY_ENABLED=1`, `GOOGLE_PHOTO_IMPORT_ENABLED=1`, `POKER_TABLE_PHOTO_ENABLED=1`. The OWNER changes Netlify configuration; the agent never does.
-3. WWW Candidate (agent, after the OWNER GO) and Publish (OWNER), carrying Privacy `a6` and the flags.
-4. Smoke (SC-003).
+3. WWW Candidate (agent, after the OWNER GO) and Publish (OWNER), carrying Privacy `a6`, Terms `a3` and the flags.
+4. Switch the Production Terms policy to a3 (separate exact-file GO); signed-in users re-accept.
+5. Smoke (SC-003), including the Terms re-acceptance on an OWNER test account.
 
 ## Phase 4: 16-avatar catalog (separate PR and GOs)
 - Production-pinned variants of `normalize-profiles.sql` and `enable-catalog.sql` where only the Stage variant exists; the order with the BIO contract per #1114.

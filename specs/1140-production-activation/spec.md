@@ -26,7 +26,11 @@
   - a late error rolls everything back;
   - valid N→N+3;
   - protected financial, poker and profile tables unchanged.
-- **FR-004** Legal: Privacy (PL/EN, new immutable version `a6` plus the alias) describes user reports, blocks, the moderation queue, moderator actions, retention and legal basis. If the OWNER decides Terms need a conduct or moderation clause, a Terms bump means a new Terms version and its re-acceptance flow (`private.profile_terms_policy`). That is an explicit OWNER legal decision.
+- **FR-004** Legal (OWNER decision 2026-11-25: **Privacy and Terms**):
+  - Privacy (PL/EN, new immutable version `a6` plus the alias) describes user reports, blocks, the moderation queue, moderator actions, retention and legal basis.
+  - Terms (PL/EN, new immutable version `2026-11-xx-a3` plus the alias) add the conduct rules, reporting, blocking and moderation (hiding a profile or photo, removal, account restriction).
+  - Activating Terms a3 on Production switches `private.profile_terms_policy` to the new version through a Production-pinned operation modelled on `specs/1114-arcade-profiles-avatars/operations/enable-terms-production.sql` (separate exact-file OWNER GO). This triggers the existing re-acceptance flow for every signed-in user.
+  - The legal texts need OWNER legal acceptance before any publication.
 - **FR-005** The 16-avatar catalog on Production uses the existing #1114 operations:
   - normalization (`operations/normalize-profiles.sql`);
   - the BIO contract (`supabase/production-migrations/20261027173627_...`);

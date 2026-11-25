@@ -4,6 +4,6 @@
 - [ ] T003 [agy] Manifest entries plus harness cases in the existing files.
 - [ ] T004 Coordinator review; guard and full local harness on disposable PostgreSQL; independent review; Draft PR; CI green.
 - [ ] T005 OWNER GO: the Phase 1 apply on Production; independent postflight.
-- [ ] T006 Privacy `a6` (plus Terms if the OWNER decides); OWNER legal acceptance; moderator procedure.
+- [ ] T006 Privacy `a6` and Terms `a3` (OWNER decision); code legal version a3; Production Terms-a3 operation (prepared); OWNER legal acceptance; moderator procedure.
 - [ ] T007 OWNER: Netlify Production flags; agent Candidate after GO; OWNER Publish; smoke.
 - [ ] T008 16-avatar catalog: Production-pinned normalization/enable-catalog plus the BIO contract order; separate GOs.
