@@ -831,6 +831,22 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assertBodyHasAnonId(rec.calls[rec.calls.length - 1], true, 'signed-in status sends anonId again');
   }
 
+  // SC-001: 3b. An anonymous status read (cannot add anonymous XP) keeps the marker
+  {
+    let currentToken = makeJwt('user-A');
+    const storage = createSharedStorage(), fakeDate = createFakeDate(), rec = createRecorder();
+    const XPClient = await loadClientWithFetch(rec.fn, authOpts(() => currentToken, { store: storage.store, storage, Date: fakeDate }));
+    await XPClient.fetchStatus();
+    assert.ok(storage.store.has('kcswh:xpAnonConvertedFor'));
+    currentToken = null;
+    fakeDate.advance(65_000);
+    await XPClient.fetchStatus();
+    currentToken = makeJwt('user-A');
+    fakeDate.advance(65_000);
+    await XPClient.fetchStatus();
+    assertBodyHasAnonId(rec.calls[rec.calls.length - 1], false, 'marker survives an anonymous status read');
+  }
+
   // SC-001: 4. A delayed signed-in response that completes after an anonymous request does not set it
   {
     let resolveSignedIn;
@@ -894,7 +910,7 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     await new Promise(r => setTimeout(r, 10));
     await tab1.fetchStatus();
     assertBodyHasAnonId(tab1Rec.calls[0], true);
-    assert.ok(storage.store.has('kcswh:xpAnonConvertedFor'));
+    assert.equal(storage.store.has('kcswh:xpAnonConvertedFor'), false, 'pending anonymous award blocks the marker');
     resolveAnon();
     await pAnon;
     await tab1.fetchStatus();

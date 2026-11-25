@@ -14,7 +14,7 @@
 ## Change
 **`netlify/functions/calculate-xp.mjs`** (about 2 lines; **requires explicit OWNER approval**, see spec Status): add `anonConversionChecked: true` to the status payload (next to the existing `result.payload.conversion`) and to the award payload, in both cases **only when `conversion` is not `null`** (`if (conversion)`).
 
-**`js/xpClient.js`** (about 25–30 lines):
+**`js/xpClient.js`** (planned 25–30 lines; delivered about 150 lines without whitespace, including the error handling and the unload path):
 - `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`, `ACTIVITY_KEY = "kcswh:xpAnonActivity"`; `bumpActivity()` writes a new `randomId()` value and `readActivity()` reads it, both in try/catch. `readActivity()` returns `null` **only when localStorage throws**. If the key is absent, it writes a new `randomId()` and returns that value. A fresh browser can then set a marker. `bumpActivity()` failure: try `removeItem(CONVERTED_KEY)` and set `state.anonStorageFailed = true`.
 - `tokenSub(headers)`: base64url-decode the payload of `headers.Authorization` (`Bearer x.y.z`) and return `sub`, or `null` on any error. This is only a label; the server still verifies the token.
 - `anonIdFor(headers, anonId)`, used after `buildAuthHeaders(...)` and before the body is built:
@@ -53,13 +53,13 @@
 | II Authoritative runtime | PASS: the server decides and confirms; the client omits an optional field only after server confirmation |
 | III Fail-closed / environment separation | PASS: no server check is weakened; client uncertainty falls back to main's request |
 | IV Platform / logging / style | PASS: IIFE global script, no `console.log` |
-| V Fundamental tests | PASS: client contract tests plus one server assertion, in existing files |
+| V Fundamental tests | PASS: client contract tests in an existing file; the server field is verified on the Preview (OWNER-agreed), with no in-process server assertion |
 
 ## Risks
 - **The token `sub` decode is unverified client-side.** It is used only to label the marker. A wrong label can only make the client send the id again, or skip it for an account whose own token the server already confirmed.
 - **Same-account sign-out/sign-in without anonymous play keeps the marker.** This is intended: without an anonymous request no new anonymous XP exists, so there is nothing to convert.
 - **Another browser profile or a cleared `localStorage`** falls back to main's behaviour.
 - **Cross-tab storage failure:** see spec FR-005 (OWNER acceptance).
-- **Unload sends (code review):** a beacon carries no `Authorization`, so it is treated as anonymous: it always sends the anonymous id and invalidates the marker. An anonymous `keepalive` or beacon send also writes `kcswh:xpAnonPendingUntil = now + 15 s`, and no marker is written before that time. Its `finally` may never run when the page unloads.
+- **Unload sends and closed tabs (code review):** a beacon carries no `Authorization`, so it is treated as an anonymous award: it always sends the anonymous id. Every anonymous award (fetch, keepalive or beacon) runs `noteAnonAward()`: a new activity token, the marker removed, and `kcswh:xpAnonPendingUntil = now + 15 s`. No marker is written before that time, so a lost `finally` (page unload or closed tab) cannot strand XP. Anonymous status reads do not touch the marker.
 - **Residual race:** a tab closed mid-way through an anonymous award never runs its settle write. If the server applies that award after a concurrent signed-in check, and a marker is written with the post-start activity token, that XP waits until the next anonymous request clears the marker. It is not deleted, because anonymous totals do not expire. This is accepted for a minor feature.
 - **Breaking changes:** none. The added response field is ignored by older clients.

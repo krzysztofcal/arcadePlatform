@@ -868,17 +868,25 @@
     }
   }
 
-  function anonIdFor(headers, anonId) {
-    const auth = Boolean(headers && (headers.Authorization || headers.authorization));
-    const anon = !auth;
+  // An anonymous award (the only request that can add anonymous XP) invalidates every marker in every tab
+  // and blocks new markers for 15 s, because its settle step may never run if the page unloads.
+  function noteAnonAward() {
+    bumpActivity();
     try {
-      if (anon) {
-        bumpActivity();
-        try {
-          window.localStorage.removeItem(CONVERTED_KEY);
-        } catch (_) {}
-        return { id: anonId, sub: null, act: null, anon: true };
-      }
+      window.localStorage.removeItem(CONVERTED_KEY);
+    } catch (_) {}
+    markAnonPending();
+  }
+
+  function anonIdFor(headers, anonId, isAward) {
+    const auth = Boolean(headers && (headers.Authorization || headers.authorization));
+    const anon = !auth && isAward === true;
+    if (!auth) {
+      // Anonymous status reads cannot add anonymous XP, so they keep the marker.
+      if (anon) noteAnonAward();
+      return { id: anonId, sub: null, act: null, anon };
+    }
+    try {
       const sub = tokenSub(headers);
       const act = readActivity();
       let markerMatch = false;
@@ -898,12 +906,7 @@
       }
       return { id: anonId, sub, act, anon: false };
     } catch (_) {
-      if (anon) {
-        try {
-          bumpActivity();
-        } catch (_) {}
-      }
-      return { id: anonId, sub: null, act: null, anon };
+      return { id: anonId, sub: null, act: null, anon: false };
     }
   }
 
@@ -943,30 +946,22 @@
     }
     const entry = { key, promise: null };
     entry.promise = (async () => {
-      try {
-        const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          cache: "no-store",
-          credentials: "omit",
-        });
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(`XP status failed (${res.status}) ${text}`.trim());
-        }
-        const text = await res.text();
-        const payload = JSON.parse(text);
-        if (res.status === 200) {
-          noteConversion(sent, payload);
-        }
-        updateCapFromPayload(payload);
-        return text;
-      } finally {
-        if (sent.anon) {
-          bumpActivity();
-        }
+      const res = await fetch(window.ArcadeApi ? window.ArcadeApi.url(CALC_URL) : CALC_URL, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        cache: "no-store",
+        credentials: "omit",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`XP status failed (${res.status}) ${text}`.trim());
       }
+      const text = await res.text();
+      const payload = JSON.parse(text);
+      if (res.status === 200) noteConversion(sent, payload);
+      updateCapFromPayload(payload);
+      return text;
     })();
     state.statusShared = entry;
     try {
@@ -1015,7 +1010,7 @@
       throw new Error("Authenticated XP award requires an access token");
     }
     const headers = await buildAuthHeaders({ "content-type": "application/json" });
-    const sent = anonIdFor(headers, userId);
+    const sent = anonIdFor(headers, userId, true);
 
     try {
       return await postWindowServerCalcOnce(payload, options, sent, headers);
@@ -1065,9 +1060,6 @@
     let attempt = 0;
     let sessionRenewed = false;
     const allowBeacon = opts.allowBeacon === true;
-    if (opts.keepalive === true && sent.anon) {
-      markAnonPending();
-    }
     while (attempt < 3) {
       const payloadJson = JSON.stringify(body);
       let networkError = false;
@@ -1152,11 +1144,7 @@
 
       if (networkError && allowBeacon && typeof navigator !== "undefined" && navigator && typeof navigator.sendBeacon === "function") {
         try {
-          bumpActivity();
-          try {
-            window.localStorage.removeItem(CONVERTED_KEY);
-          } catch (_) {}
-          markAnonPending();
+          noteAnonAward();
           const beaconBody = Object.assign({}, body, { userId });
           const beaconPayload = new Blob([JSON.stringify(beaconBody)], { type: "application/json" });
           const beaconOk = navigator.sendBeacon(CALC_URL, beaconPayload);

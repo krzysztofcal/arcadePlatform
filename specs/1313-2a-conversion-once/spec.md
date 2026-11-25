@@ -23,7 +23,7 @@
   - the body parsed successfully and contains `anonConversionChecked === true`;
   - the shared anonymous-activity token is unchanged between this request's start and the write.
 - **FR-004** Shared anonymous-activity token: `localStorage` key `kcswh:xpAnonActivity`, shared by all tabs.
-  - Every request sent without an `Authorization` header writes a **new unique random value** (not a read-modify-write increment) **before** sending and **again when it settles** (success, error or throw, in `finally`). Any write changes the value, so concurrent writers in different tabs cannot restore an old value.
+  - Every **award** request sent without an `Authorization` header (the only request that can add anonymous XP; anonymous status reads keep the marker) writes a **new unique random value** (not a read-modify-write increment) **before** sending and **again when it settles** (success, error or throw, in `finally`). Any write changes the value, so concurrent writers in different tabs cannot restore an old value.
   - An anonymous award that starts before, or finishes after, a signed-in conversion check therefore invalidates any marker written in between, in every tab.
   - Only anonymous requests can accrue anonymous XP.
 - **FR-005** Fail-open to main's behaviour:
