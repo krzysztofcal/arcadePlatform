@@ -1,4 +1,4 @@
-import { accountDeletionEnabled, assertAccountActive } from '../../../shared/account-deletion.mjs';
+import { accountDeletionEnabled, assertAccountActiveForRead } from '../../../shared/account-deletion.mjs';
 import crypto from "crypto";
 import postgres from "postgres";
 import { buildApiCorsPolicy, buildCorsHeaders } from "./api-cors.mjs";
@@ -237,7 +237,7 @@ const verifySupabaseJwt = async (token, { allowDeleting = false } = {}) => {
   const finish = async (result, mode = "local") => {
     logAuthTiming(start, mode);
     if (result.valid && accountDeletionEnabled() && !allowDeleting) {
-      try { await beginSql((tx) => assertAccountActive(tx, result.userId)); }
+      try { await beginSql((tx) => assertAccountActiveForRead(tx, result.userId)); }
       catch { return buildJwtAuthResult({ provided:true,valid:false,reason:'account_not_active' }); }
     }
     return result;

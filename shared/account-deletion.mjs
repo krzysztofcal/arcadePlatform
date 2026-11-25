@@ -38,14 +38,27 @@ export async function lockAccountLifecycle(tx, userIds) {
   for (const id of ids) await tx.unsafe('select pg_advisory_xact_lock(hashtextextended($1, 0));', ['account-lifecycle:' + id]);
 }
 
-export async function assertAccountActive(tx, userId) {
-  userId = requireUuid(userId);
-  await lockAccountLifecycle(tx, [userId]);
+async function requireActiveRow(tx, userId) {
   const [row] = await tx.unsafe(`select exists(select 1 from auth.users where id=$1) as present,
     exists(select 1 from public.account_deletion_requests where old_user_id=$1) as deleting;`, [userId]);
   if (row?.present !== true || row?.deleting !== false) {
     throw Object.assign(new Error('account_not_active'), { code: 'account_not_active' });
   }
+}
+
+export async function assertAccountActive(tx, userId) {
+  userId = requireUuid(userId);
+  await lockAccountLifecycle(tx, [userId]);
+  await requireActiveRow(tx, userId);
+}
+
+// Read-only check for a transaction that does nothing else (request authentication). A shared lock still waits for,
+// and blocks, every exclusive lifecycle holder (deletion start, guarded writes), but concurrent checks of one account
+// no longer queue behind each other. Writers must keep using assertAccountActive.
+export async function assertAccountActiveForRead(tx, userId) {
+  userId = requireUuid(userId);
+  await tx.unsafe('select pg_advisory_xact_lock_shared(hashtextextended($1, 0));', ['account-lifecycle:' + userId]);
+  await requireActiveRow(tx, userId);
 }
 
 export async function requestDeletion(tx, userId) {
