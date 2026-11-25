@@ -18,18 +18,28 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
   const __dirname = path.dirname(__filename);
   const src = await fs.readFile(path.join(__dirname, '..', 'js', 'xpClient.js'), 'utf8');
 
-  const store = new Map();
+  const store = options.store || new Map();
   let randomId = 0;
-  const baseWindow = { localStorage: {
+  const baseLocalStorage = {
     getItem: k => store.get(k) ?? null,
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: k => store.delete(k),
-  } };
+  };
+  const baseWindow = {
+    localStorage: baseLocalStorage,
+    atob: typeof atob !== 'undefined' ? atob : undefined,
+  };
+  const mergedWindow = Object.assign(baseWindow, options.window || {});
+  if (options.window && options.window.localStorage) {
+    mergedWindow.localStorage = options.window.localStorage;
+  }
   const ctx = {
-    window: Object.assign(baseWindow, options.window || {}),
+    window: mergedWindow,
     fetch: fetchImpl,
-    crypto: { randomUUID: () => `uuid-test-${++randomId}` },
+    crypto: options.crypto || { randomUUID: () => `uuid-test-${++randomId}` },
     Date: options.Date || Date, setTimeout, clearTimeout, console, JSON,
+    atob: typeof atob !== 'undefined' ? atob : undefined,
+    Buffer: typeof Buffer !== 'undefined' ? Buffer : undefined,
   };
   ctx.window.fetch = fetchImpl;
   vm.createContext(ctx);
@@ -702,5 +712,624 @@ async function loadClientWithFetch(fetchImpl, options = {}) {
     assert.equal(r3.totalLifetime, 20);
   }
 
+  function makeJwt(sub) {
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({ sub, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+    return `${header}.${payload}.fake_signature`;
+  }
+
+  function createFakeDate(initialTime = 1_000_000) {
+    let currentTime = initialTime;
+    const fakeDate = function(...args) { return new Date(...args); };
+    fakeDate.now = () => currentTime;
+    fakeDate.advance = (ms) => { currentTime += ms; };
+    Object.setPrototypeOf(fakeDate, Date);
+    return fakeDate;
+  }
+
+  // SC-001: 1. The first signed-in status sends anonId; after a 200 with anonConversionChecked, next status and award omit it
+  {
+    const statusCalls = [];
+    const awardCalls = [];
+    const jwtA = makeJwt('user-A');
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        statusCalls.push({ url, headers: opts?.headers || {}, body });
+        return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+      }
+      awardCalls.push({ url, headers: opts?.headers || {}, body });
+      return response(200, { ok: true, awarded: 10, totalToday: 10, sessionTotal: 10, cap: 400, capDelta: 240, anonConversionChecked: true });
+    }, {
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+
+    // 1st status: sends anonId
+    await XPClient.fetchStatus();
+    assert.equal(statusCalls.length, 1);
+    assert.ok(statusCalls[0].body.anonId, 'first signed-in status must send anonId');
+
+    // 2nd status: omits anonId
+    await XPClient.fetchStatus();
+    assert.equal(statusCalls.length, 2);
+    assert.equal(statusCalls[1].body.anonId, undefined, 'second status must omit anonId');
+
+    // Next award: omits userId
+    await XPClient.postWindowServerCalc(semanticWindow(10));
+    assert.equal(awardCalls.length, 1);
+    assert.equal(awardCalls[0].body.userId, undefined, 'subsequent award must omit userId');
+  }
+
+  // SC-001: 2. A 200 without the field, another 2xx, a non-2xx, a body parse error or a throw does not set the marker
+  {
+    const jwtA = makeJwt('user-A');
+
+    // 2a: 200 without anonConversionChecked
+    {
+      const calls = [];
+      const XPClient = await loadClientWithFetch(async (url, opts) => {
+        const body = JSON.parse(opts?.body || '{}');
+        calls.push({ url, body });
+        return response(200, { ok: true, status: 'statusOnly' });
+      }, {
+        window: {
+          SupabaseAuthBridge: {
+            getAccessToken: async () => jwtA,
+            getCurrentUserId: async () => 'user-A',
+          },
+        },
+      });
+      await XPClient.fetchStatus();
+      await XPClient.fetchStatus();
+      assert.equal(calls.length, 2);
+      assert.ok(calls[0].body.anonId, 'call 1 sends anonId');
+      assert.ok(calls[1].body.anonId, 'call 2 still sends anonId when 200 lacked anonConversionChecked');
+    }
+
+    // 2b: another 2xx (201 Created)
+    {
+      const calls = [];
+      const XPClient = await loadClientWithFetch(async (url, opts) => {
+        const body = JSON.parse(opts?.body || '{}');
+        calls.push({ url, body });
+        return response(201, { ok: true, anonConversionChecked: true });
+      }, {
+        window: {
+          SupabaseAuthBridge: {
+            getAccessToken: async () => jwtA,
+            getCurrentUserId: async () => 'user-A',
+          },
+        },
+      });
+      await XPClient.fetchStatus();
+      await XPClient.fetchStatus();
+      assert.equal(calls.length, 2);
+      assert.ok(calls[0].body.anonId, 'call 1 sends anonId');
+      assert.ok(calls[1].body.anonId, 'call 2 still sends anonId after 201 response');
+    }
+
+    // 2c: non-2xx (500)
+    {
+      const calls = [];
+      const XPClient = await loadClientWithFetch(async (url, opts) => {
+        const body = JSON.parse(opts?.body || '{}');
+        calls.push({ url, body });
+        if (calls.length === 1) return response(500, { error: 'server_error' });
+        return response(200, { ok: true, status: 'statusOnly' });
+      }, {
+        window: {
+          SupabaseAuthBridge: {
+            getAccessToken: async () => jwtA,
+            getCurrentUserId: async () => 'user-A',
+          },
+        },
+      });
+      await assert.rejects(() => XPClient.fetchStatus(), /500/);
+      await XPClient.fetchStatus();
+      assert.equal(calls.length, 2);
+      assert.ok(calls[1].body.anonId, 'call 2 still sends anonId after 500 error');
+    }
+
+    // 2d: body parse error (malformed JSON)
+    {
+      const calls = [];
+      const XPClient = await loadClientWithFetch(async (url, opts) => {
+        const body = JSON.parse(opts?.body || '{}');
+        calls.push({ url, body });
+        if (calls.length === 1) {
+          return {
+            status: 200,
+            ok: true,
+            async text() { return '{ malformed json'; },
+            async json() { return JSON.parse('{ malformed json'); },
+          };
+        }
+        return response(200, { ok: true, status: 'statusOnly' });
+      }, {
+        window: {
+          SupabaseAuthBridge: {
+            getAccessToken: async () => jwtA,
+            getCurrentUserId: async () => 'user-A',
+          },
+        },
+      });
+      await assert.rejects(() => XPClient.fetchStatus(), SyntaxError);
+      await XPClient.fetchStatus();
+      assert.equal(calls.length, 2);
+      assert.ok(calls[1].body.anonId, 'call 2 still sends anonId after body parse error');
+    }
+
+    // 2e: throw (network failure)
+    {
+      const calls = [];
+      const XPClient = await loadClientWithFetch(async (url, opts) => {
+        const body = JSON.parse(opts?.body || '{}');
+        calls.push({ url, body });
+        if (calls.length === 1) throw new Error('network failure');
+        return response(200, { ok: true, status: 'statusOnly' });
+      }, {
+        window: {
+          SupabaseAuthBridge: {
+            getAccessToken: async () => jwtA,
+            getCurrentUserId: async () => 'user-A',
+          },
+        },
+      });
+      await assert.rejects(() => XPClient.fetchStatus(), /network failure/);
+      await XPClient.fetchStatus();
+      assert.equal(calls.length, 2);
+      assert.ok(calls[1].body.anonId, 'call 2 still sends anonId after network throw');
+    }
+  }
+
+  // SC-001: 3. An anonymous request clears the marker
+  {
+    const statusCalls = [];
+    const awardCalls = [];
+    let currentToken = makeJwt('user-A');
+    const store = new Map();
+    const fakeDate = createFakeDate();
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        statusCalls.push({ url, headers: opts?.headers || {}, body });
+        return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+      }
+      awardCalls.push({ url, headers: opts?.headers || {}, body });
+      return response(200, { ok: true, awarded: 10 });
+    }, {
+      store,
+      Date: fakeDate,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => currentToken,
+          getCurrentUserId: async () => (currentToken ? 'user-A' : null),
+        },
+      },
+    });
+
+    // 1. Signed-in status sets marker
+    await XPClient.fetchStatus();
+    assert.ok(statusCalls[0].body.anonId);
+    assert.ok(store.has('kcswh:xpAnonConvertedFor'), 'marker must be stored');
+
+    // 2. Next signed-in status omits anonId
+    await XPClient.fetchStatus();
+    assert.equal(statusCalls[1].body.anonId, undefined);
+
+    // 3. Anonymous request
+    currentToken = null;
+    fakeDate.advance(65_000);
+    await XPClient.postWindowServerCalc(semanticWindow(5));
+    assert.equal(store.has('kcswh:xpAnonConvertedFor'), false, 'anonymous request must clear conversion marker');
+
+    // 4. User signs in again: next signed-in status sends anonId again
+    currentToken = makeJwt('user-A');
+    fakeDate.advance(65_000);
+    await XPClient.fetchStatus();
+    assert.ok(statusCalls[2].body.anonId, 'signed-in status after anonymous play must send anonId again');
+  }
+
+  // SC-001: 4. A delayed signed-in response that completes after an anonymous request does not set it
+  {
+    let resolveSignedIn;
+    const signedInHold = new Promise(resolve => { resolveSignedIn = resolve; });
+    const store = new Map();
+    const jwtA = makeJwt('user-A');
+
+    // Tab 1: signed in
+    const tab1Client = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        await signedInHold;
+        return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+      }
+      return response(200, { ok: true, awarded: 5, totalToday: 5 });
+    }, {
+      store,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+
+    // Tab 2: anonymous
+    const tab2Client = await loadClientWithFetch(async (url, opts) => {
+      return response(200, { ok: true, awarded: 5, status: 'statusOnly' });
+    }, { store });
+
+    // Signed-in status starts and captures act token, but is held in flight
+    const signedInPromise = tab1Client.fetchStatus();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // Anonymous request runs and settles while signed-in response is pending
+    await tab2Client.postWindowServerCalc(semanticWindow(5));
+
+    // Release signed-in response
+    resolveSignedIn();
+    await signedInPromise;
+
+    // Marker must NOT be set because activity token was bumped during request
+    assert.equal(store.has('kcswh:xpAnonConvertedFor'), false, 'delayed signed-in response must not set marker if anon request happened');
+
+    // Next signed-in request still sends anonId
+    let secondBody = null;
+    const tab1Client2 = await loadClientWithFetch(async (url, opts) => {
+      secondBody = JSON.parse(opts?.body || '{}');
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      store,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+    await tab1Client2.fetchStatus();
+    assert.ok(secondBody.anonId, 'subsequent signed-in request must still send anonId');
+  }
+
+  // SC-001: 5a. Anonymous award starts before signed-in status and settles after it invalidates marker (single tab)
+  {
+    let resolveAnonAward;
+    const anonHold = new Promise(resolve => { resolveAnonAward = resolve; });
+    let currentToken = null;
+    const store = new Map();
+    const fakeDate = createFakeDate();
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation !== 'status' && !opts?.headers?.Authorization) {
+        await anonHold;
+        return response(200, { ok: true, awarded: 10 });
+      }
+      return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+    }, {
+      store,
+      Date: fakeDate,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => currentToken,
+          getCurrentUserId: async () => (currentToken ? 'user-A' : null),
+        },
+      },
+    });
+
+    // 1. Anonymous award starts and is held
+    const anonPromise = XPClient.postWindowServerCalc(semanticWindow(10));
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // 2. User signs in, status runs and completes
+    currentToken = makeJwt('user-A');
+    fakeDate.advance(65_000);
+    await XPClient.fetchStatus();
+
+    // Marker was written at this moment
+    assert.ok(store.has('kcswh:xpAnonConvertedFor'), 'status wrote marker');
+
+    // 3. Anonymous award settles
+    resolveAnonAward();
+    await anonPromise;
+
+    // Settle bumped activity token; next signed-in request must find marker invalid and send anonId
+    let nextBody = null;
+    const XPClientNext = await loadClientWithFetch(async (url, opts) => {
+      nextBody = JSON.parse(opts?.body || '{}');
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      store,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => currentToken,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+    await XPClientNext.fetchStatus();
+    assert.ok(nextBody.anonId, 'must send anonId because anonymous settle invalidated marker');
+  }
+
+  // SC-001: 5b. Anonymous award in Tab 2 starts before Tab 1 signed-in status and settles after it (two tabs)
+  {
+    let resolveAnonAward;
+    const anonHold = new Promise(resolve => { resolveAnonAward = resolve; });
+    const sharedStore = new Map();
+
+    // Tab 2: anonymous client
+    const tab2Client = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation !== 'status') {
+        await anonHold;
+        return response(200, { ok: true, awarded: 10 });
+      }
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, { store: sharedStore });
+
+    // Tab 1: signed-in client
+    const jwtA = makeJwt('user-A');
+    const tab1Calls = [];
+    const tab1Client = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      tab1Calls.push(body);
+      return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+    }, {
+      store: sharedStore,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+
+    // 1. Tab 2 starts anonymous award (bumps activity at start)
+    const tab2AwardPromise = tab2Client.postWindowServerCalc(semanticWindow(10));
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // 2. Tab 1 runs signed-in status and completes
+    await tab1Client.fetchStatus();
+    assert.ok(tab1Calls[0].anonId, 'Tab 1 first status sends anonId');
+    assert.ok(sharedStore.has('kcswh:xpAnonConvertedFor'), 'Tab 1 wrote marker');
+
+    // 3. Tab 2 anonymous award settles (bumps activity at settle)
+    resolveAnonAward();
+    await tab2AwardPromise;
+
+    // 4. Tab 1 makes another request: marker is invalid because activity token changed in Tab 2
+    await tab1Client.fetchStatus();
+    assert.ok(tab1Calls[1].anonId, 'Tab 1 must send anonId again because Tab 2 award settle invalidated marker');
+  }
+
+  // SC-001: 6. Two simulated tabs where an anonymous award settles before a delayed signed-in response is handled
+  {
+    let resolveTab1Status;
+    const tab1Hold = new Promise(resolve => { resolveTab1Status = resolve; });
+    const sharedStore = new Map();
+    const jwtA = makeJwt('user-A');
+
+    // Tab 1: signed in
+    const tab1Client = await loadClientWithFetch(async (url, opts) => {
+      await tab1Hold;
+      return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+    }, {
+      store: sharedStore,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+
+    // Tab 2: anonymous
+    const tab2Client = await loadClientWithFetch(async (url, opts) => {
+      return response(200, { ok: true, awarded: 10 });
+    }, { store: sharedStore });
+
+    // 1. Tab 1 starts signed-in status (captures initial activity token) and is held
+    const tab1Promise = tab1Client.fetchStatus();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // 2. Tab 2 starts and settles anonymous award
+    await tab2Client.postWindowServerCalc(semanticWindow(10));
+
+    // 3. Tab 1 response resolves
+    resolveTab1Status();
+    await tab1Promise;
+
+    // Marker must NOT have been written
+    assert.equal(sharedStore.has('kcswh:xpAnonConvertedFor'), false, 'no marker written because Tab 2 settled during Tab 1 flight');
+
+    // Tab 1 next call sends anonId
+    let nextBody = null;
+    const tab1Client2 = await loadClientWithFetch(async (url, opts) => {
+      nextBody = JSON.parse(opts?.body || '{}');
+      return response(200, { ok: true, status: 'statusOnly' });
+    }, {
+      store: sharedStore,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+    await tab1Client2.fetchStatus();
+    assert.ok(nextBody.anonId, 'Tab 1 sends anonId on subsequent call');
+  }
+
+  // SC-001: 7. Both activity writes fail during anonymous activity, and next signed-in request still sends anonId
+  {
+    const store = new Map();
+    let failActivityWrites = false;
+    const jwtA = makeJwt('user-A');
+    let currentToken = null;
+    const calls = [];
+
+    const customLocalStorage = {
+      getItem: k => store.get(k) ?? null,
+      setItem: (k, v) => {
+        if (failActivityWrites && k === 'kcswh:xpAnonActivity') {
+          throw new Error('localStorage write failure');
+        }
+        store.set(k, String(v));
+      },
+      removeItem: k => store.delete(k),
+    };
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      calls.push(body);
+      return response(200, { ok: true, status: 'statusOnly', awarded: 5, anonConversionChecked: true });
+    }, {
+      window: {
+        localStorage: customLocalStorage,
+        SupabaseAuthBridge: {
+          getAccessToken: async () => currentToken,
+          getCurrentUserId: async () => (currentToken ? 'user-A' : null),
+        },
+      },
+    });
+
+    // Make activity writes fail during anonymous activity
+    failActivityWrites = true;
+    await XPClient.postWindowServerCalc(semanticWindow(5));
+
+    // Now restore storage capability and sign in
+    failActivityWrites = false;
+    currentToken = jwtA;
+
+    // Next signed-in request in that tab must still send anonId due to tab-local anonStorageFailed
+    await XPClient.fetchStatus();
+    assert.ok(calls[calls.length - 1].anonId, 'must send anonId after anonymous storage failure');
+  }
+
+  // SC-001: 8. A token for another sub sends the id
+  {
+    const calls = [];
+    const store = new Map();
+    let currentToken = makeJwt('user-A');
+    const fakeDate = createFakeDate();
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      calls.push(body);
+      return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+    }, {
+      store,
+      Date: fakeDate,
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => currentToken,
+          getCurrentUserId: async () => (currentToken === makeJwt('user-A') ? 'user-A' : 'user-B'),
+        },
+      },
+    });
+
+    // 1. User A status -> sets marker for user-A
+    await XPClient.fetchStatus();
+    assert.ok(calls[0].anonId);
+
+    // User A next status -> omits anonId
+    await XPClient.fetchStatus();
+    assert.equal(calls[1].anonId, undefined);
+
+    // 2. Switch to User B token
+    currentToken = makeJwt('user-B');
+    fakeDate.advance(65_000);
+    await XPClient.fetchStatus();
+    assert.ok(calls[2].anonId, 'user B status must send anonId despite marker for user A');
+  }
+
+  // SC-001: 9. A localStorage failure sends it
+  {
+    const store = new Map();
+    const jwtA = makeJwt('user-A');
+    let throwOnGet = false;
+    const calls = [];
+
+    const customLocalStorage = {
+      getItem: k => {
+        if (throwOnGet) throw new Error('SecurityError: storage disabled');
+        return store.get(k) ?? null;
+      },
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: k => store.delete(k),
+    };
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      calls.push(body);
+      return response(200, { ok: true, status: 'statusOnly', anonConversionChecked: true });
+    }, {
+      window: {
+        localStorage: customLocalStorage,
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+
+    // First request sets marker
+    await XPClient.fetchStatus();
+    assert.ok(calls[0].anonId);
+
+    // Now localStorage fails on read
+    throwOnGet = true;
+    await XPClient.fetchStatus();
+    assert.ok(calls[1].anonId, 'must send anonId when localStorage throws');
+  }
+
+  // SC-001: 10. Concurrent status calls share one request only with an identical Authorization and body
+  {
+    const calls = [];
+    const jwtA = makeJwt('user-A');
+    let resolveBatch;
+    const batchPromise = new Promise(resolve => { resolveBatch = resolve; });
+
+    const XPClient = await loadClientWithFetch(async (url, opts) => {
+      const body = JSON.parse(opts?.body || '{}');
+      if (body.operation === 'status') {
+        calls.push({ url, headers: opts?.headers || {}, body });
+        await batchPromise;
+        return response(200, { ok: true, status: 'statusOnly', totalLifetime: 200, anonConversionChecked: true });
+      }
+      return response(200, { ok: true });
+    }, {
+      store: new Map([
+        ['kcswh:xpAnonConvertedFor', JSON.stringify({ sub: 'user-A', act: 'act-fixed' })],
+        ['kcswh:xpAnonActivity', 'act-fixed'],
+      ]),
+      window: {
+        SupabaseAuthBridge: {
+          getAccessToken: async () => jwtA,
+          getCurrentUserId: async () => 'user-A',
+        },
+      },
+    });
+
+    const p1 = XPClient.fetchStatus();
+    const p2 = XPClient.fetchStatus();
+    const p3 = XPClient.fetchStatus();
+
+    resolveBatch();
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+
+    assert.equal(calls.length, 1, '3 concurrent status calls sharing identical auth and body must share 1 request');
+    assert.equal(calls[0].body.anonId, undefined, 'body must omit anonId');
+    assert.deepStrictEqual(r1, r2);
+    assert.deepStrictEqual(r2, r3);
+  }
+
   console.log('xp-client contract tests passed');
+  console.log('xp-client SC-001 contract tests passed');
 })();
