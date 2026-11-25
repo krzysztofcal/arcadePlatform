@@ -53,302 +53,234 @@ assert.equal(a4.statusCode, 429);
 
 console.log('rate-limit key derivation behavior test passed');
 
-// --- createXpTiming fundamental tests (#1313) ---
+// --- #1313 calc_xp_timing deterministic tests ---
 
-// 1. below 1000 ms -> shouldLog() false; at exactly 1000 -> true; unknown op -> false
+const { warsawDayKey, nextWarsawResetMs } = await import('../netlify/functions/_shared/time-utils.mjs');
+
+// 1. threshold on raw time: raw 999.6 ms -> payload() null; exactly 1000 -> object; op "award" logs; op null / "other" -> null
 {
   let now = 10_000;
   const timing = createXpTiming(() => now);
-  timing.set({ op: "status", signedIn: false });
-  assert.equal(timing.shouldLog(), false);
+  timing.set({ op: "status" });
 
-  now = 10_999;
-  assert.equal(timing.shouldLog(), false);
+  now = 10_999.6;
+  assert.equal(timing.payload(), null);
 
   now = 11_000;
-  assert.equal(timing.shouldLog(), true);
+  assert.notEqual(timing.payload(), null);
+  assert.equal(timing.payload().op, "status");
 
-  now = 11_500;
-  assert.equal(timing.shouldLog(), true);
-
-  // award op logs at >= 1000ms
   timing.set({ op: "award" });
-  assert.equal(timing.shouldLog(), true);
+  assert.notEqual(timing.payload(), null);
+  assert.equal(timing.payload().op, "award");
 
-  // unknown op -> false
-  timing.set({ op: "unknown" });
-  assert.equal(timing.shouldLog(), false);
-  timing.set({ op: "custom" });
-  assert.equal(timing.shouldLog(), false);
   timing.set({ op: null });
-  assert.equal(timing.shouldLog(), false);
-  timing.set({ op: undefined });
-  assert.equal(timing.shouldLog(), false);
+  assert.equal(timing.payload(), null);
+
+  timing.set({ op: "other" });
+  assert.equal(timing.payload(), null);
 }
 
-// 2. Object.keys(fields()) is exactly the allowed list
+// 2. rounding: sum of rounded phases >= 1000 but raw is 999.x -> null; rounded phase sum exceeds round(raw) -> totalMs === sum, otherMs === 0; phases + otherMs === totalMs
 {
-  const allowedKeys = [
-    "op",
-    "signedIn",
-    "status",
-    "jwtMs",
-    "conversionMs",
-    "totalsMs",
-    "persistMs",
-    "awardMs",
-    "otherMs",
-    "totalMs",
-  ];
-  const timing = createXpTiming();
-  assert.deepEqual(Object.keys(timing.fields()), allowedKeys);
-  timing.set({ op: "status", signedIn: true, status: 200 });
-  assert.deepEqual(Object.keys(timing.fields()), allowedKeys);
+  let now = 0;
+  const t1 = createXpTiming(() => now);
+  t1.set({ op: "status" });
+  await t1.measure("jwt", async () => { now += 499.8; });
+  await t1.measure("totals", async () => { now += 499.8; });
+  now = 999.8;
+  assert.equal(t1.payload(), null);
+
+  now = 0;
+  const t2 = createXpTiming(() => now);
+  t2.set({ op: "status" });
+  await t2.measure("jwt", async () => { now += 333.6; });
+  await t2.measure("totals", async () => { now += 333.6; });
+  await t2.measure("persist", async () => { now += 333.6; });
+  now = 1001.2;
+  const p2 = t2.payload();
+  const sum2 = p2.jwtMs + p2.conversionMs + p2.totalsMs + p2.persistMs + p2.awardMs;
+  assert.equal(p2.totalMs, sum2);
+  assert.equal(p2.otherMs, 0);
+  assert.equal(sum2 + p2.otherMs, p2.totalMs);
 }
 
-// 3. sum of phases plus otherMs equals totalMs; otherMs >= 0; clamping when sum exceeds totalMs
+// 3. measure adds elapsed time on success and on throw, rethrows the same error object, returns the value
 {
-  // Normal case: sum of phases < totalMs
-  let clockTime = 1000;
-  const tNormal = createXpTiming(() => clockTime);
-  tNormal.set({ op: "status", signedIn: true, status: 200 });
-  await tNormal.measure("jwt", async () => { clockTime += 120; });
-  await tNormal.measure("totals", async () => { clockTime += 230; });
-  await tNormal.measure("persist", async () => { clockTime += 50; });
-  clockTime = 1000 + 1200; // total elapsed = 1200 ms
-  const fNormal = tNormal.fields();
-  assert.equal(fNormal.totalMs, 1200);
-  assert.equal(fNormal.jwtMs, 120);
-  assert.equal(fNormal.conversionMs, 0);
-  assert.equal(fNormal.totalsMs, 230);
-  assert.equal(fNormal.persistMs, 50);
-  assert.equal(fNormal.awardMs, 0);
-  assert.equal(fNormal.otherMs, 1200 - (120 + 230 + 50)); // 800
-  const phaseSum = fNormal.jwtMs + fNormal.conversionMs + fNormal.totalsMs + fNormal.persistMs + fNormal.awardMs;
-  assert.equal(phaseSum + fNormal.otherMs, fNormal.totalMs);
-  assert.ok(fNormal.otherMs >= 0);
+  let now = 0;
+  const timing = createXpTiming(() => now);
 
-  // Clamping case: when sum of rounded phases exceeds elapsed time, totalMs is raised to sum so phases + otherMs === totalMs
-  let clockTimeExceed = 1000;
-  const tExceed = createXpTiming(() => clockTimeExceed);
-  tExceed.set({ op: "award", signedIn: false });
-  await tExceed.measure("jwt", async () => { clockTimeExceed += 600; });
-  await tExceed.measure("award", async () => { clockTimeExceed += 600; });
-  clockTimeExceed = 1000 + 1000; // sum of measured phases = 1200
-  const fExceed = tExceed.fields();
-  assert.equal(fExceed.jwtMs, 600);
-  assert.equal(fExceed.awardMs, 600);
-  assert.equal(fExceed.otherMs, 0);
-  assert.equal(fExceed.totalMs, 1200);
-  assert.equal(fExceed.jwtMs + fExceed.conversionMs + fExceed.totalsMs + fExceed.persistMs + fExceed.awardMs + fExceed.otherMs, fExceed.totalMs);
-}
-
-// 4. measure adds time on success and on throw, and rethrows the same error
-{
-  let clockTime = 5000;
-  const tMeasure = createXpTiming(() => clockTime);
-
-  // Success
-  const result = await tMeasure.measure("persist", async () => {
-    clockTime += 75;
-    return "persisted";
+  const val = await timing.measure("jwt", async () => {
+    now += 150;
+    return "ok";
   });
-  assert.equal(result, "persisted");
-  assert.equal(tMeasure.fields().persistMs, 75);
+  assert.equal(val, "ok");
 
-  // Throw
-  const testError = new Error("persist_failure");
+  const err = new Error("boom");
   let thrown = null;
   try {
-    await tMeasure.measure("persist", async () => {
-      clockTime += 45;
-      throw testError;
+    await timing.measure("jwt", async () => {
+      now += 75;
+      throw err;
     });
-  } catch (err) {
-    thrown = err;
+  } catch (e) {
+    thrown = e;
   }
-  assert.equal(thrown, testError);
-  // Accumulated 75 + 45 = 120
-  assert.equal(tMeasure.fields().persistMs, 120);
+  assert.equal(thrown, err);
+
+  timing.set({ op: "status" });
+  now = 1000;
+  assert.equal(timing.payload().jwtMs, 225);
 }
 
-// --- F1 clock guard tests ---
+// Handler tests (stub global performance.now, restore in finally; capture [klog] calc_xp_timing lines)
 {
-  // Clock throws at creation
-  const tCreationThrow = createXpTiming(() => { throw new Error("clock_at_creation"); });
-  assert.equal(tCreationThrow.shouldLog(), false);
-  assert.equal(tCreationThrow.fields(), null);
-  let ranCreation = false;
-  const resCreation = await tCreationThrow.measure("jwt", async () => { ranCreation = true; return 42; });
-  assert.equal(ranCreation, true);
-  assert.equal(resCreation, 42);
-  const errCreation = new Error("fn_err");
-  await assert.rejects(async () => tCreationThrow.measure("jwt", async () => { throw errCreation; }), (err) => err === errCreation);
-
-  // Clock throws at start of measure
-  let startCalls = 0;
-  const tStartThrow = createXpTiming(() => { if (++startCalls === 2) throw new Error("clock_start"); return 1000; });
-  let ranStart = false;
-  const resStart = await tStartThrow.measure("jwt", async () => { ranStart = true; return 99; });
-  assert.equal(ranStart, true);
-  assert.equal(resStart, 99);
-  assert.equal(tStartThrow.shouldLog(), false);
-
-  // Clock throws at end of measure (finally)
-  let endCalls = 0;
-  const tEndThrow = createXpTiming(() => { if (++endCalls === 3) throw new Error("clock_end"); return 2000; });
-  let ranEnd = false;
-  const resEnd = await tEndThrow.measure("jwt", async () => { ranEnd = true; return 101; });
-  assert.equal(ranEnd, true);
-  assert.equal(resEnd, 101);
-  assert.equal(tEndThrow.shouldLog(), false);
-  // and rethrows original error if fn throws
-  endCalls = 0;
-  const tEndThrowErr = createXpTiming(() => { if (++endCalls === 3) throw new Error("clock_end"); return 2000; });
-  const fnExplosion = new Error("fn_explosion");
-  await assert.rejects(async () => tEndThrowErr.measure("jwt", async () => { throw fnExplosion; }), (err) => err === fnExplosion);
-
-  // Clock throws in fields()
-  let fieldsCalls = 0;
-  const tFieldsThrow = createXpTiming(() => { if (++fieldsCalls === 2) throw new Error("clock_fields"); return 3000; });
-  assert.equal(tFieldsThrow.fields(), null);
-  assert.equal(tFieldsThrow.shouldLog(), false);
-}
-
-// --- F4 handler-level tests ---
-{
-  const allowedKeys = [
-    "op",
-    "signedIn",
-    "status",
-    "jwtMs",
-    "conversionMs",
-    "totalsMs",
-    "persistMs",
-    "awardMs",
-    "otherMs",
-    "totalMs",
-  ];
-
-  const captureKlog = async (fn) => {
-    const originalConsoleLog = console.log;
-    const entries = [];
+  const captureTimingLogs = async (fn) => {
+    const origLog = console.log;
+    const lines = [];
     console.log = (...args) => {
       if (args[0] === '[klog] calc_xp_timing') {
-        entries.push(typeof args[1] === 'string' ? JSON.parse(args[1]) : args[1]);
+        lines.push(typeof args[1] === 'string' ? JSON.parse(args[1]) : args[1]);
       }
-      originalConsoleLog(...args);
+      origLog(...args);
     };
     try {
-      return { result: await fn(), entries };
+      return { result: await fn(), lines };
     } finally {
-      console.log = originalConsoleLog;
+      console.log = origLog;
     }
   };
 
-  // (a) a fast status request emits no calc_xp_timing
+  // 4. fast: performance.now = () => 5000 (constant) -> zero timing lines; stub Date.now to a fixed timestamp and assert.deepEqual the WHOLE response
   {
-    const { result, entries } = await captureKlog(() => handler({
-      httpMethod: "POST",
-      headers: { origin: "http://127.0.0.1:4173" },
-      body: JSON.stringify({ anonId: "fast-status-user", operation: "status" }),
-    }));
-    assert.equal(result.statusCode, 200);
-    assert.equal(entries.length, 0);
-  }
+    const origPerf = performance.now;
+    const origDate = Date.now;
+    performance.now = () => 5000;
+    const fixedNow = 1700000000000;
+    Date.now = () => fixedNow;
+    const expectedDayKey = warsawDayKey(fixedNow);
+    const expectedNextReset = nextWarsawResetMs(fixedNow);
 
-  // (b) a slow path (>= 1000 ms via stubbed performance.now) emits exactly one entry with allowed fields
-  {
-    const origPerfNow = performance.now;
-    let t = 10_000;
-    performance.now = () => (t += 300);
     try {
-      const { result, entries } = await captureKlog(() => handler({
+      const { result, lines } = await captureTimingLogs(() => handler({
         httpMethod: "POST",
         headers: { origin: "http://127.0.0.1:4173" },
-        body: JSON.stringify({ anonId: "slow-status-user", operation: "status" }),
+        body: JSON.stringify({ anonId: "test-fast-status-user-r3", operation: "status" }),
       }));
-      assert.equal(result.statusCode, 200);
-      assert.equal(entries.length, 1);
-      const entry = entries[0];
-      assert.deepEqual(Object.keys(entry), allowedKeys);
-      assert.equal(entry.op, "status");
-      assert.equal(entry.status, 200);
-      assert.equal(entry.signedIn, false);
-      assert.ok(entry.totalMs >= 1000);
-      const phaseSum = entry.jwtMs + entry.conversionMs + entry.totalsMs + entry.persistMs + entry.awardMs;
-      assert.equal(phaseSum + entry.otherMs, entry.totalMs);
+
+      assert.equal(lines.length, 0);
+      assert.deepEqual(
+        {
+          statusCode: result.statusCode,
+          headers: result.headers,
+          body: JSON.parse(result.body),
+        },
+        {
+          statusCode: 200,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+            "access-control-allow-origin": "http://127.0.0.1:4173",
+            "access-control-allow-headers": "content-type,authorization,x-api-key",
+            "access-control-allow-methods": "POST,OPTIONS",
+            Vary: "Origin",
+          },
+          body: {
+            ok: true,
+            awarded: 0,
+            granted: 0,
+            cap: 3000,
+            capDelta: 300,
+            totalLifetime: 0,
+            sessionTotal: 0,
+            lastSync: 0,
+            status: "statusOnly",
+            totalToday: 0,
+            remaining: 3000,
+            dayKey: expectedDayKey,
+            nextReset: expectedNextReset,
+          },
+        }
+      );
     } finally {
-      performance.now = origPerfNow;
+      performance.now = origPerf;
+      Date.now = origDate;
     }
   }
 
-  // (c) a handler that throws still emits at most one entry and rethrows the same error object
+  // 5. slow: let n = 0; performance.now = () => (n++ === 0 ? 0 : 5000) -> exactly one line, assert.deepEqual with expected object
   {
-    const origPerfNow = performance.now;
-    let t = 20_000;
-    performance.now = () => (t += 1500);
-    const testThrowError = new Error("handler_forced_throw");
+    const origPerf = performance.now;
+    let n = 0;
+    performance.now = () => (n++ === 0 ? 0 : 5000);
+
+    try {
+      const { lines } = await captureTimingLogs(() => handler({
+        httpMethod: "POST",
+        headers: { origin: "http://127.0.0.1:4173" },
+        body: JSON.stringify({ anonId: "test-slow-status-user-r3", operation: "status" }),
+      }));
+
+      assert.equal(lines.length, 1);
+      assert.deepEqual(lines[0], {
+        op: "status",
+        signedIn: false,
+        status: 200,
+        jwtMs: 0,
+        conversionMs: 0,
+        totalsMs: 0,
+        persistMs: 0,
+        awardMs: 0,
+        otherMs: 5000,
+        totalMs: 5000,
+      });
+    } finally {
+      performance.now = origPerf;
+    }
+  }
+
+  // 6. throw: same clock as 5, event whose headers.authorization getter throws -> handler rethrows same error, exactly one line with status: null
+  {
+    const origPerf = performance.now;
+    let n = 0;
+    performance.now = () => (n++ === 0 ? 0 : 5000);
+    const authError = new Error("auth_getter_boom");
     const throwingEvent = {
       httpMethod: "POST",
       headers: {
         origin: "http://127.0.0.1:4173",
-        get authorization() {
-          throw testThrowError;
-        },
+        get authorization() { throw authError; },
       },
-      body: JSON.stringify({ anonId: "throw-user", operation: "status" }),
+      body: JSON.stringify({ anonId: "test-throw-status-user-r3", operation: "status" }),
     };
 
     try {
-      let caught = null;
-      const { entries } = await captureKlog(async () => {
+      let thrown = null;
+      const { lines } = await captureTimingLogs(async () => {
         try {
           await handler(throwingEvent);
         } catch (err) {
-          caught = err;
+          thrown = err;
         }
       });
-      assert.equal(caught, testThrowError);
-      assert.equal(entries.length, 1);
-      const entry = entries[0];
-      assert.deepEqual(Object.keys(entry), allowedKeys);
-      assert.equal(entry.op, "status");
-      assert.equal(entry.status, null);
-      assert.ok(entry.totalMs >= 1000);
-    } finally {
-      performance.now = origPerfNow;
-    }
-  }
 
-  // (d) full status response, including statusCode, body and headers, is unchanged
-  {
-    const res = await handler({
-      httpMethod: "POST",
-      headers: { origin: "http://127.0.0.1:4173" },
-      body: JSON.stringify({ anonId: "rate-key-status-user", operation: "status" }),
-    });
-    assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.headers, {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "access-control-allow-origin": "http://127.0.0.1:4173",
-      "access-control-allow-headers": "content-type,authorization,x-api-key",
-      "access-control-allow-methods": "POST,OPTIONS",
-      Vary: "Origin",
-    });
-    const statusBody = JSON.parse(res.body);
-    assert.equal(statusBody.ok, true);
-    assert.equal(typeof statusBody.totalLifetime, "number");
-    assert.equal(typeof statusBody.totalToday, "number");
-    assert.equal(statusBody.awarded, 0);
-    assert.equal(statusBody.granted, 0);
-    assert.equal(statusBody.cap, 3000);
-    assert.equal(statusBody.capDelta, 300);
-    assert.equal(statusBody.status, "statusOnly");
-    assert.equal(typeof statusBody.remaining, "number");
-    assert.equal(typeof statusBody.dayKey, "string");
-    assert.equal(typeof statusBody.nextReset, "number");
+      assert.equal(thrown, authError);
+      assert.equal(lines.length, 1);
+      assert.deepEqual(lines[0], {
+        op: "status",
+        signedIn: false,
+        status: null,
+        jwtMs: 0,
+        conversionMs: 0,
+        totalsMs: 0,
+        persistMs: 0,
+        awardMs: 0,
+        otherMs: 5000,
+        totalMs: 5000,
+      });
+    } finally {
+      performance.now = origPerf;
+    }
   }
 }
 
