@@ -12,16 +12,16 @@
 - **Every uncertain case falls back to main's request**, which sends the id.
 
 ## Change
-**`netlify/functions/calculate-xp.mjs`** (about 2 lines): add `anonConversionChecked: true` to the status payload (next to the existing `result.payload.conversion`) and to the award payload when `conversion` is not `null`.
+**`netlify/functions/calculate-xp.mjs`** (about 2 lines; **requires explicit OWNER approval**, see spec Status): add `anonConversionChecked: true` to the status payload (next to the existing `result.payload.conversion`) and to the award payload when `conversion` is not `null`.
 
 **`js/xpClient.js`** (about 25–30 lines):
-- `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`; `state.anonGeneration = 0`.
+- `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`, `ACTIVITY_KEY = "kcswh:xpAnonActivity"`; `bumpActivity()` and `readActivity()` read and write the shared integer in try/catch (`null` on failure).
 - `tokenSub(headers)`: base64url-decode the payload of `headers.Authorization` (`Bearer x.y.z`) and return `sub`, or `null` on any error. This is only a label; the server still verifies the token.
 - `anonIdFor(headers, anonId)`, used after `buildAuthHeaders(...)` and before the body is built:
-  - no `Authorization`: increment `state.anonGeneration`, remove the marker in try/catch, return `{ id: anonId, sub: null }`;
-  - otherwise: `sub = tokenSub(headers)`; if `sub` and the marker equals `sub`, return `{ id: undefined, sub }`; else return `{ id: anonId, sub }`;
+  - no `Authorization`: `bumpActivity()`, return `{ id: anonId, sub: null, anon: true }`. The caller must `bumpActivity()` again in `finally` when the request settles.
+  - otherwise: `sub = tokenSub(headers)`, `act = readActivity()`. If `sub` and `act !== null` and the marker is `{ sub, act }`, return `{ id: undefined, sub, act }`; else return `{ id: anonId, sub, act }`.
   - any throw: return `{ id: anonId, sub: null }`.
-- `noteConversion(sent, generation, payload)`: write the marker = `sent.sub` only when `sent.id && sent.sub && generation === state.anonGeneration && payload && payload.anonConversionChecked === true`, in try/catch.
+- `noteConversion(sent, payload)`: write the marker `{ sub: sent.sub, act: sent.act }` only when `sent.id && sent.sub && sent.act !== null && readActivity() === sent.act && payload && payload.anonConversionChecked === true`, in try/catch.
 - `fetchStatus()`:
   - the headers already come first;
   - the body uses `sent.id` (the field is omitted when `undefined`);
@@ -35,13 +35,13 @@
 
 ## Tests (fundamental, existing files)
 - `tests/xp-client-contract.test.mjs`: the cases in spec SC-001 (client), with the file's existing fetch, auth and localStorage stubs and fake JWTs with different `sub` values. Assert the request bodies and the marker.
-- The server field goes in an existing `calculate-xp` test that already runs status with and without conversion (`tests/rate-limit.key-derivation.behavior.test.mjs` or `tests/xp-v3-cutover.behavior.test.mjs`). If no existing harness reaches the signed-in conversion path in-process, assert presence/absence via the existing anonymous-status case, and state that limit.
+- Server field: positive and negative assertions per spec SC-001 (server), in `tests/xp-v3-cutover.behavior.test.mjs` with its existing fixture-JWT subprocess pattern (memory store, `ACCOUNT_DELETION_ENABLED=0`). No fallback to anonymous-only assertions.
 
 ## Delivery
 - Antigravity implements in its own `agy/*` worktree.
 - The coordinator reviews the diff, reruns `tests/xp-client-contract.test.mjs`, `tests/xp-client.test.mjs`, `tests/xp-client-bfcache.test.mjs` and the touched server test, then integrates.
 - A Draft PR, a Codex code review (max 3 rounds), and green CI and CodeQL.
-- Preview check SC-002 by the OWNER, or by the agent with the dedicated Stage test account under the VPS runbook.
+- Preview check SC-002 by the OWNER. The agent runs the XP-mutating steps only on the pinned Stage project, after a separate OWNER GO.
 - No WS change and no migration. Merge and Production are the OWNER's decision.
 
 ## Constitution Check (v1.6.0)
@@ -57,4 +57,5 @@
 - **The token `sub` decode is unverified client-side.** It is used only to label the marker. A wrong label can only make the client send the id again, or skip it for an account whose own token the server already confirmed.
 - **Same-account sign-out/sign-in without anonymous play keeps the marker.** This is intended: without an anonymous request no new anonymous XP exists, so there is nothing to convert.
 - **Another browser profile or a cleared `localStorage`** falls back to main's behaviour.
+- **Residual race:** a tab closed mid-way through an anonymous award never runs its settle increment. If the server applies that award after a concurrent signed-in check, and a marker is written with the post-start counter, that XP waits until the next anonymous request clears the marker. It is not deleted, because anonymous totals do not expire. This is accepted for a minor feature.
 - **Breaking changes:** none. The added response field is ignored by older clients.

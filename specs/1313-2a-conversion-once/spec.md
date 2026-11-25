@@ -1,6 +1,6 @@
 # Feature Specification: anonymous XP conversion once per sign-in (#1313 2a)
 
-**Branch**: `1313-2a-conversion-once` · **Base**: `main` @ `5364a459` · **Status**: plan only; implementation needs an OWNER GO.
+**Branch**: `1313-2a-conversion-once` · **Base**: `main` @ `5364a459` · **Status**: plan only. Implementation needs an OWNER GO, which must explicitly cover the one additive server response field (FR-001); the OWNER's earlier scope said "no server change".
 **Background:**
 - Every signed-in `calculate-xp` request (status and award) runs `migrateAnonXpToUser` under the guarded path: `account-lifecycle` locks, an SQL identity check and Upstash permits.
 - That happens even when nothing is left to convert.
@@ -14,14 +14,18 @@
   - That covers converted, already converted, and nothing to convert.
   - The field is absent when conversion did not run (no `anonId`, anonymous request) or failed (`null`).
   - No other server change.
-- **FR-002 (client)** `js/xpClient.js` sends the browser's anonymous id (`anonId` for status, `userId` for award) on a signed-in request unless the marker matches the account of **that request's token**.
-  - Marker: `localStorage` key `kcswh:xpAnonConvertedFor` = the `sub` claim decoded from the exact bearer token placed in that request's `Authorization` header.
+- **FR-002 (client)** `js/xpClient.js` sends the browser's anonymous id (`anonId` for status, `userId` for award) on a signed-in request unless the marker is valid for **that request's token**.
+  - Marker: `localStorage` key `kcswh:xpAnonConvertedFor` = JSON `{ sub, act }`. `sub` is decoded from the exact bearer token in that request's `Authorization` header. `act` is the shared anonymous-activity counter captured when that request started.
+  - The marker is valid only when `sub` matches the token and `act` equals the current counter.
 - **FR-003** The marker is set only when all of these hold:
   - the request carried both the anonymous id and that token;
   - the response is `status === 200`;
   - the body parsed successfully and contains `anonConversionChecked === true`;
-  - no anonymous request started after this request started (anonymous generation counter unchanged).
-- **FR-004** Every request sent without an `Authorization` header removes the marker and increments the anonymous generation, before it is sent. Only anonymous requests can accrue anonymous XP.
+  - the shared anonymous-activity counter is unchanged between this request's start and the write.
+- **FR-004** Shared anonymous-activity counter: `localStorage` key `kcswh:xpAnonActivity`, an integer shared by all tabs.
+  - Every request sent without an `Authorization` header increments it **before** sending and **again when it settles** (success, error or throw, in `finally`).
+  - An anonymous award that starts before, or finishes after, a signed-in conversion check therefore invalidates any marker written in between, in every tab.
+  - Only anonymous requests can accrue anonymous XP.
 - **FR-005** Fail-open to main's behaviour: if `localStorage` throws, or the token `sub` cannot be decoded, the anonymous id is sent and the marker is not written.
 - **FR-006** Omitting the anonymous id skips only the migration-specific work: the `isValidXpAnonId` format check and the guarded migration (its SQL identity, epoch and permit checks, and its error propagation). Everything else is unchanged and still runs: JWT verification, the identity from the token, rate limiting, session validation, caps, the guarded award and profile writes with their Account Deletion fences, T2 status sharing, and anonymous play.
 
@@ -32,10 +36,11 @@
     - a 200 without the field, another 2xx, a non-2xx, a body parse error or a throw does not set the marker;
     - an anonymous request clears the marker;
     - a delayed signed-in response that completes after an anonymous request does not set it;
+    - an anonymous award that starts before a signed-in status and settles after it invalidates the marker that status wrote (single tab, and a second simulated tab sharing `localStorage`);
     - a token for another `sub` sends the id;
     - a `localStorage` failure sends it;
     - concurrent status calls share one request only with an identical `Authorization` and body.
-  - server (an existing `calculate-xp` test file): `anonConversionChecked` is present only when conversion ran without error.
-- **SC-002** Preview check:
+  - server: in an existing test file, using the existing fixture-JWT subprocess pattern of `tests/xp-v3-cutover.behavior.test.mjs`. The field is present on a signed-in status **and** a signed-in award that carry `anonId`, and absent without `anonId` and when conversion fails. If that harness cannot reach these paths, SC-001 is not met until the OWNER agrees on another verification.
+- **SC-002** Preview check, by the OWNER. If the agent runs it, it does so only on the pinned Stage project, under the VPS runbook, and after a separate OWNER GO that covers these XP mutations:
   - signed-in status and award succeed;
   - anonymous XP earned before sign-in is still added on the first signed-in request.
