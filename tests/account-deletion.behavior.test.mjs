@@ -2,7 +2,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { requestDeletion, assertAccountActive, assertAccountActiveForRead, getDeletionStatus, advanceDeletion, assertDeletionLease, deleteAuthUser, issueDeletionStatusAccess, readDeletionStatusAccess, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
+import { requestDeletion, assertAccountActive, assertAccountActiveUnlocked, getDeletionStatus, advanceDeletion, assertDeletionLease, deleteAuthUser, issueDeletionStatusAccess, readDeletionStatusAccess, queueAccountPrivateFrame } from '../shared/account-deletion.mjs';
 
 const OWNER = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -241,17 +241,17 @@ test('completed status suppresses active intervention without clearing historica
  assert.equal(saved.incident,true);
 });
 
-test('read-only active check matches assertAccountActive and takes the shared lifecycle lock', async (t) => {
+test('unlocked auth check matches assertAccountActive results and takes no lifecycle lock', async (t) => {
   const { db, beginSql } = await fixture(t);
-  await beginSql((tx) => assertAccountActiveForRead(tx, OTHER));
+  await beginSql((tx) => assertAccountActiveUnlocked(tx, OTHER));
   await beginSql((tx) => requestDeletion(tx, OWNER));
-  await assert.rejects(beginSql((tx) => assertAccountActiveForRead(tx, OWNER)), { code: 'account_not_active' });
+  await assert.rejects(beginSql((tx) => assertAccountActiveUnlocked(tx, OWNER)), { code: 'account_not_active' });
   await db.query('delete from auth.users where id=$1', [OTHER]);
-  await assert.rejects(beginSql((tx) => assertAccountActiveForRead(tx, OTHER)), { code: 'account_not_active' });
+  await assert.rejects(beginSql((tx) => assertAccountActiveUnlocked(tx, OTHER)), { code: 'account_not_active' });
   const seen = [];
   const spy = { unsafe: async (sql, params = []) => { seen.push([sql, params]); return [{ present: true, deleting: false }]; } };
-  await assertAccountActiveForRead(spy, OWNER);
-  assert.match(seen[0][0], /pg_advisory_xact_lock_shared\(hashtextextended\(\$1, 0\)\)/);
-  assert.deepEqual(seen[0][1], ['account-lifecycle:' + OWNER]);
-  assert.equal(seen.some(([sql]) => /pg_advisory_xact_lock\(/.test(sql)), false);
+  await assertAccountActiveUnlocked(spy, OWNER);
+  assert.equal(seen.length, 1);
+  assert.equal(seen.some(([sql]) => /advisory/.test(sql)), false);
+  assert.deepEqual(seen[0][1], [OWNER]);
 });

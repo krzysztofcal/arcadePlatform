@@ -52,13 +52,12 @@ export async function assertAccountActive(tx, userId) {
   await requireActiveRow(tx, userId);
 }
 
-// Read-only check for a transaction that does nothing else (request authentication). A shared lock still waits for,
-// and blocks, every exclusive lifecycle holder (deletion start, guarded writes), but concurrent checks of one account
-// no longer queue behind each other. Writers must keep using assertAccountActive.
-export async function assertAccountActiveForRead(tx, userId) {
-  userId = requireUuid(userId);
-  await tx.unsafe('select pg_advisory_xact_lock_shared(hashtextextended($1, 0));', ['account-lifecycle:' + userId]);
-  await requireActiveRow(tx, userId);
+// Lockless snapshot for request authentication only, in a transaction that does nothing else. It sees every committed
+// deletion request; a lock here would protect nothing after this transaction commits, but it would queue parallel
+// requests of one account and make the owned-write trigger's try-lock fail (40001). Never use it before a write:
+// writers must call assertAccountActive, which takes the exclusive lifecycle lock in the writing transaction.
+export async function assertAccountActiveUnlocked(tx, userId) {
+  await requireActiveRow(tx, requireUuid(userId));
 }
 
 export async function requestDeletion(tx, userId) {
