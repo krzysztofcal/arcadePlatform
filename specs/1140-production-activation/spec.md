@@ -1,9 +1,9 @@
 # Feature Specification: Production activation of Google photos, UGC Report/Block, Poker table photos and the 16-avatar catalog (#1140, #1282, #1114)
 
-**Branch**: `1140-production-activation` · **Base**: `main` @ `04e281a7` (WWW Production since 2026-11-25) · **Status**: plan only. Every Production SQL execution, flag change and release needs its own OWNER GO.
+**Branch**: `1140-production-activation` · **Base**: `main` @ `cddc65be` (WWW and WS Production since 2026-11-25) · **Status**: plan only. Every Production SQL execution, flag change and release needs its own OWNER GO.
 
 ## Current Production state (read-only, 2026-11-25)
-- WWW `04e281a7` (`release-20261125-45644195409`), WS `98fb6fac`. The code for all four features is deployed dark.
+- WWW and WS `cddc65be` (`release-20261125-45714571321`). The code for all four features is deployed dark.
 - Netlify Production flags: `UGC_SAFETY_ENABLED`, `GOOGLE_PHOTO_IMPORT_ENABLED` and `POKER_TABLE_PHOTO_ENABLED` are empty. `ACCOUNT_DELETION_ENABLED=1`, `ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1`, `PUBLIC_PROFILES_ENABLED=1`.
 - DB migration history ends at `20261105160500`, the last applied version.
   - Missing Stage-only migrations without a Production equivalent: `20261107120000_ugc_reports_blocks`, `20261107130000_ugc_moderation`, `20261107140000_google_photo_consent`. The private tables do not exist.
@@ -17,7 +17,7 @@
   - an operator check (`postgres`), pinned project `otbqfijerkieoxwpxjnm` and system `7575202818581710058`;
   - a per-file confirmation setting and an approved source SHA-256 receipt;
   - the shared Production coordination lock, the exact expected history, and a nonblocking lock on `schema_migrations`;
-  - schema only: empty tables, RLS on, no flag and no data change; a transaction-counter guard against unrelated DML;
+  - schema only: RLS on, no flag and no user data change; a transaction-counter guard against unrelated DML. The only permitted DML is the Stage-identical seed row `private.ugc_moderation_counters('pending_removed_with_deleted_account', 0)` in `ugc_moderation`; all other new tables are empty;
   - a history row with `statements=['source_sha256=<hash>']`.
 - **FR-002** `supabase/production-migrations/manifest.json`: append the three entries under `replacement_migrations`; reclassify the Stage entries; prior entries and hashes stay unchanged; the repository guard (`scripts/check-db-migrations.mjs`) passes.
 - **FR-003** Validation in the existing harness (`tests/chips/chips.migration.test.mjs` with a disposable local PostgreSQL rebuilt from the Production history and synthetic data):
@@ -37,15 +37,16 @@
   - `operations/enable-catalog.sql`.
 
   Each needs a Production-pinned variant (identity, confirmation, history) where only the Stage variant exists, and each is its own OWNER GO. No activation is bundled with the UGC schema.
-- **FR-006** Activation order (all OWNER GO):
+- **FR-006** Activation order (each step its own OWNER GO; the features stay dark until step 5):
   1. apply the Production schema;
-  2. Privacy/Terms update and the moderator procedure (`ADMIN_USER_IDS`, review cadence);
-  3. set the Netlify Production flags;
-  4. a new WWW Candidate and Publish (env vars take effect only on a build);
-  5. the catalog operations, which are runtime DB switches and need no release.
+  2. **release A**: WWW with Privacy a6, Terms a3 and the code legal version a3, flags still off;
+  3. switch the Production Terms policy to a3 (re-acceptance starts);
+  4. moderator procedure (verify the existing `ADMIN_USER_IDS` and the review cadence), then the OWNER sets the Netlify feature flags;
+  5. **release B**: a rebuild of the then-current main, so the flags take effect;
+  6. the catalog operations, which are runtime DB switches and need no release.
 - **FR-007** No change to WS, ledger, poker or account-deletion behaviour. No flag is activated by any migration.
 
 ## Success Criteria
 - **SC-001** The three equivalents and the manifest pass the guard and the full local harness (FR-003). Independent review: Codex, or the reviewer the OWNER chooses.
-- **SC-002** After the OWNER-approved apply, an independent postflight shows: history N+3, three hash receipts, empty RLS-on tables, unchanged protected tables, unchanged profile fingerprints.
+- **SC-002** After the OWNER-approved apply, an independent postflight shows: history N+3, three hash receipts, RLS on, empty new tables except exactly the one seed counter row, unchanged protected tables, unchanged profile fingerprints.
 - **SC-003** After flags and release: a signed-in OWNER smoke on Production for import, publication, table photo, report and block (OWNER test accounts), plus a check that the moderation tab works for the configured admins.

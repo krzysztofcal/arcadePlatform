@@ -1,9 +1,11 @@
 # Tasks: Production activation (#1140, #1282, #1114)
-- [ ] T001 Read-only re-check of the Production history, schema and policy (pins).
-- [ ] T002 [agy] Three Production-equivalent SQL files (plan Phase 1).
+- [ ] T001 Read-only re-check of the Production history, schema and policy (pins N).
+- [ ] T002 [agy] Three Production-equivalent SQL files with sequential pins, exact GUC names, the seed-row DML allowance and the trigger preflight (plan Phase 1).
 - [ ] T003 [agy] Manifest entries plus harness cases in the existing files.
 - [ ] T004 Coordinator review; guard and full local harness on disposable PostgreSQL; independent review; Draft PR; CI green.
-- [ ] T005 OWNER GO: the Phase 1 apply on Production; independent postflight.
-- [ ] T006 Privacy `a6` and Terms `a3` (OWNER decision); code legal version a3; Production Terms-a3 operation (prepared); OWNER legal acceptance; moderator procedure.
-- [ ] T007 OWNER: Netlify Production flags; agent Candidate after GO; OWNER Publish; smoke.
-- [ ] T008 16-avatar catalog: Production-pinned normalization/enable-catalog plus the BIO contract order; separate GOs.
+- [ ] T005 OWNER GO: the Phase 1 apply on Production (3 exact files, one session); independent postflight.
+- [ ] T006 Privacy a6 and Terms a3 plus code a3; Production enable/disable Terms-a3 operations (prepared); OWNER legal acceptance; moderator procedure.
+- [ ] T007 Release A (Candidate after GO, OWNER Publish), flags off.
+- [ ] T008 OWNER GO: switch the Production Terms policy to a3; re-acceptance smoke.
+- [ ] T009 OWNER sets the Netlify flags; release B (Candidate after GO, OWNER Publish); smoke SC-003.
+- [ ] T010 16-avatar catalog: Production-pinned normalization/enable-catalog plus the BIO contract order; separate GOs.
