@@ -82,13 +82,17 @@ async function readProfile(userId, runSql = executeSql) {
 }
 
 async function ensureUserProfile(userId, deps = {}) {
+  if (typeof userId !== "string" || !userId.trim()) throw profileError("unauthorized", 401);
+  if (!deps.profileTx) {
+    const existing = await readProfile(userId, deps.executeSql || executeSql);
+    if (existing) return existing;
+  }
   if (accountDeletionEnabled(deps.env || process.env) && !deps.profileTx) {
     return (deps.beginSql || beginSql)(async (tx) => {
       await assertAccountActive(tx, userId);
       return ensureUserProfile(userId, { ...deps, profileTx: tx, executeSql: (q,p) => tx.unsafe(q,p) });
     });
   }
-  if (typeof userId !== "string" || !userId.trim()) throw profileError("unauthorized", 401);
   const runSql = deps.executeSql || executeSql;
   const rows = await runSql(
     `select user_id::text, handle, display_name, avatar_key, avatar_variant,

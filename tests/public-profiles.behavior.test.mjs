@@ -72,11 +72,82 @@ function transactionForProfile(row, updateError = null) {
 test("profile helper delegates idempotent creation to the database function", async () => {
   let called = null;
   const result = await ensureUserProfile(USER_ID, {
-    executeSql: async (query, params) => { called = { query, params }; return [dbProfile()]; },
+    executeSql: async (query, params) => {
+      called = { query, params };
+      if (query.includes("from public.user_profiles")) return [];
+      return [dbProfile()];
+    },
   });
   assert.match(called.query, /from public\.ensure_user_profile\(\$1::uuid\)/);
   assert.deepEqual(called.params, [USER_ID]);
   assert.equal(result.leaderboardVisible, true);
+});
+
+test("ensureUserProfile returns existing profile without beginSql or ensure_user_profile", async () => {
+  let beginSqlCalled = false;
+  let ensureFuncCalled = false;
+  const existingRow = dbProfile({ displayName: "Existing User" });
+
+  const result = await ensureUserProfile(USER_ID, {
+    beginSql: async () => {
+      beginSqlCalled = true;
+      throw new Error("beginSql should not be called for existing profile");
+    },
+    executeSql: async (query, params) => {
+      if (query.includes("ensure_user_profile")) {
+        ensureFuncCalled = true;
+        throw new Error("ensure_user_profile should not be called for existing profile");
+      }
+      if (query.includes("from public.user_profiles")) {
+        return [existingRow];
+      }
+      return [];
+    },
+  });
+
+  assert.equal(beginSqlCalled, false);
+  assert.equal(ensureFuncCalled, false);
+  assert.equal(result.displayName, "Existing User");
+  assert.equal(result.userId, USER_ID);
+});
+
+test("ensureUserProfile uses locked path with beginSql when profile is missing", async () => {
+  let beginSqlCalled = false;
+  let ensureFuncCalled = false;
+  const createdRow = dbProfile({ displayName: "Created User" });
+
+  const result = await ensureUserProfile(USER_ID, {
+    env: { ACCOUNT_DELETION_ENABLED: "1" },
+    beginSql: async (cb) => {
+      beginSqlCalled = true;
+      const tx = {
+        unsafe: async (query, params) => {
+          if (query.includes("ensure_user_profile")) {
+            ensureFuncCalled = true;
+            return [createdRow];
+          }
+          if (query.includes("select pg_advisory_xact_lock")) {
+            return [];
+          }
+          if (query.includes("auth.users")) {
+            return [{ present: true, deleting: false }];
+          }
+          return [];
+        },
+      };
+      return cb(tx);
+    },
+    executeSql: async (query, params) => {
+      if (query.includes("from public.user_profiles")) {
+        return [];
+      }
+      return [];
+    },
+  });
+
+  assert.equal(beginSqlCalled, true);
+  assert.equal(ensureFuncCalled, true);
+  assert.equal(result.displayName, "Created User");
 });
 
 test("public projection never returns internal identity or avatar storage key", () => {

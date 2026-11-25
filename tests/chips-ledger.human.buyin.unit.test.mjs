@@ -2,14 +2,26 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql } from "../shared/account-deletion.mjs";
 
-const loadPostTransaction = ({ beginSql, executeSql, klog }) => {
+const loadLedger = ({ beginSql, executeSql, klog = () => {} }) => {
   const source = fs.readFileSync(path.join(process.cwd(), "netlify/functions/_shared/chips-ledger.mjs"), "utf8");
   const strippedImports = source.replace(/^\s*import[^;]+;\s*$/gm, "");
   const rewrittenExports = strippedImports.replace(/export\s*\{[\s\S]*?\};?\s*$/m, "");
-  const factory = new Function("crypto", "beginSql", "executeSql", "klog", `"use strict";\n${rewrittenExports}\nreturn { postTransaction };`);
-  return factory(crypto, beginSql, executeSql, klog).postTransaction;
+  const factory = new Function(
+    "crypto",
+    "beginSql",
+    "executeSql",
+    "klog",
+    "lockAccountLifecycle",
+    "assertAccountActive",
+    "deletionPokerSeatPendingSql",
+    `"use strict";\n${rewrittenExports}\nreturn { postTransaction, getUserBalance };`
+  );
+  return factory(crypto, beginSql, executeSql, klog, lockAccountLifecycle, assertAccountActive, deletionPokerSeatPendingSql);
 };
+
+const loadPostTransaction = (deps) => loadLedger(deps).postTransaction;
 
 const run = async () => {
   const userId = "11111111-1111-4111-8111-111111111111";
@@ -401,8 +413,162 @@ const runSavepointIsolationTests = async () => {
   }
 };
 
+const runGetUserBalanceTests = async () => {
+  const existingUserId = "22222222-2222-4222-8222-222222222222";
+  const missingUserId = "33333333-3333-4333-8333-333333333333";
+
+  let beginSqlCalls = 0;
+  const forUpdateQueries = [];
+  const executeSqlQueries = [];
+
+  const accounts = new Map([
+    ["acct-existing", {
+      id: "acct-existing",
+      account_type: "USER",
+      user_id: existingUserId,
+      status: "active",
+      balance: 750,
+      next_entry_seq: 5,
+    }],
+  ]);
+
+  const executeSql = async (query, params = []) => {
+    const text = String(query).toLowerCase();
+    executeSqlQueries.push({ query: String(query), params });
+    if (text.includes("for update")) {
+      forUpdateQueries.push({ query: String(query), params });
+      if (text.includes("with existing as")) {
+        const userId = params[0];
+        let account = [...accounts.values()].find((a) => a.user_id === userId && a.account_type === "USER");
+        if (!account) {
+          account = {
+            id: `acct-${userId}`,
+            account_type: "USER",
+            user_id: userId,
+            status: "active",
+            balance: 0,
+            next_entry_seq: 1,
+          };
+          accounts.set(account.id, account);
+        }
+        return [{ account }];
+      }
+    }
+    if (text.includes("from public.chips_accounts") && text.includes("where user_id")) {
+      const account = [...accounts.values()].find((a) => a.user_id === params[0] && a.account_type === "USER");
+      return account ? [account] : [];
+    }
+    return [];
+  };
+
+  const beginSql = async (fn) => {
+    beginSqlCalls += 1;
+    const sqlTx = async () => {
+      throw new Error("unexpected template call");
+    };
+    sqlTx.unsafe = async (query, params = []) => {
+      const text = String(query).toLowerCase();
+      if (text.includes("for update")) {
+        forUpdateQueries.push({ query: String(query), params });
+      }
+      if (text.includes("auth.users")) {
+        return [{ present: true, deleting: false }];
+      }
+      if (text.includes("select pg_advisory_xact_lock") || text.includes("retired_user_id")) {
+        return [];
+      }
+      if (text.includes("with existing as") || (text.includes("account_type = 'user'") && text.includes("for update"))) {
+        const userId = params[0];
+        let account = [...accounts.values()].find((a) => a.user_id === userId && a.account_type === "USER");
+        if (!account) {
+          account = {
+            id: `acct-${userId}`,
+            account_type: "USER",
+            user_id: userId,
+            status: "active",
+            balance: 0,
+            next_entry_seq: 1,
+          };
+          accounts.set(account.id, account);
+        }
+        return [{ account }];
+      }
+      return [];
+    };
+    return fn(sqlTx);
+  };
+
+  const ledger = loadLedger({ beginSql, executeSql, klog: () => {} });
+
+  // 1. Existing active account: unlocked read, no lock/FOR UPDATE query issued, beginSql not called
+  beginSqlCalls = 0;
+  forUpdateQueries.length = 0;
+  executeSqlQueries.length = 0;
+
+  const existingBalance = await ledger.getUserBalance(existingUserId);
+  assert.deepEqual(existingBalance, {
+    accountId: "acct-existing",
+    balance: 750,
+    nextEntrySeq: 5,
+    status: "active",
+  });
+  assert.equal(beginSqlCalls, 0, "beginSql must not be called when account exists and is active");
+  assert.equal(forUpdateQueries.length, 0, "no FOR UPDATE queries issued when account exists and is active");
+  assert.equal(executeSqlQueries.length, 1, "exactly one executeSql query issued");
+  assert.match(executeSqlQueries[0].query, /from public\.chips_accounts where user_id = \$1 and account_type = 'USER' limit 1/i);
+
+  // 2. Missing account: falls back to locked path (issues FOR UPDATE)
+  beginSqlCalls = 0;
+  forUpdateQueries.length = 0;
+  executeSqlQueries.length = 0;
+
+  const missingBalance = await ledger.getUserBalance(missingUserId);
+  assert.deepEqual(missingBalance, {
+    accountId: `acct-${missingUserId}`,
+    balance: 0,
+    nextEntrySeq: 1,
+    status: "active",
+  });
+  assert.ok(forUpdateQueries.length >= 1, "FOR UPDATE query must be issued for missing account creation");
+
+  // 3. Missing account with lifecycle deletion enabled: calls beginSql and issues FOR UPDATE
+  const prevDeletion = process.env.ACCOUNT_DELETION_ENABLED;
+  process.env.ACCOUNT_DELETION_ENABLED = "1";
+  try {
+    const missingLifecycleUserId = "44444444-4444-4444-8444-444444444444";
+    beginSqlCalls = 0;
+    forUpdateQueries.length = 0;
+
+    const lifecycleBalance = await ledger.getUserBalance(missingLifecycleUserId);
+    assert.deepEqual(lifecycleBalance, {
+      accountId: `acct-${missingLifecycleUserId}`,
+      balance: 0,
+      nextEntrySeq: 1,
+      status: "active",
+    });
+    assert.ok(beginSqlCalls >= 1, "beginSql must be called when account is missing under lifecycle protection");
+    assert.ok(forUpdateQueries.length >= 1, "FOR UPDATE query must be issued under lifecycle protection");
+  } finally {
+    if (prevDeletion === undefined) delete process.env.ACCOUNT_DELETION_ENABLED;
+    else process.env.ACCOUNT_DELETION_ENABLED = prevDeletion;
+  }
+
+  // 4. Inactive account falls back to locked path and throws account_not_active
+  const inactiveUserId = "55555555-5555-4555-8555-555555555555";
+  accounts.set(`acct-${inactiveUserId}`, {
+    id: `acct-${inactiveUserId}`,
+    account_type: "USER",
+    user_id: inactiveUserId,
+    status: "frozen",
+    balance: 100,
+    next_entry_seq: 2,
+  });
+  await assert.rejects(ledger.getUserBalance(inactiveUserId), /account_not_active/);
+};
+
 run()
   .then(() => runSavepointIsolationTests())
+  .then(() => runGetUserBalanceTests())
   .catch((error) => {
     console.error(error);
     process.exit(1);

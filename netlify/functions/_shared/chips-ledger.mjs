@@ -383,6 +383,19 @@ where system_key = any($1::text[]);
 }
 
 async function getUserBalance(userId) {
+  const rows = await executeSql(
+    `select * from public.chips_accounts where user_id = $1 and account_type = 'USER' limit 1;`,
+    [userId],
+  );
+  const row = rows?.[0];
+  if (row && row.status === "active") {
+    return {
+      accountId: row.id,
+      balance: asLooseInt(row.balance, 0),
+      nextEntrySeq: asLooseInt(row.next_entry_seq, 1),
+      status: row.status,
+    };
+  }
   const account = await getOrCreateUserAccount(userId);
   return {
     accountId: account.id,

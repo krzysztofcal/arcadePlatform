@@ -82,6 +82,70 @@ test("derived profile persistence normalizes totals and fails without changing c
   assert.equal(await persistXpProfileSnapshot({ userId: "user-1", totalXp: 12, save: async () => { throw new Error("profile unavailable"); } }), false);
 });
 
+test("persistXpProfileSnapshot skips save when stored total matches and calls save when total differs or profile missing", async () => {
+  let saveCalls = 0;
+  let savedValue = null;
+  const save = async (val) => {
+    saveCalls += 1;
+    savedValue = val;
+  };
+
+  // 1. Equal stored total -> save not called
+  const skipped = await persistXpProfileSnapshot({
+    userId: "user-1",
+    totalXp: 100,
+    read: async () => ({ userId: "user-1", totalXp: 100 }),
+    save,
+  });
+  assert.equal(skipped, true);
+  assert.equal(saveCalls, 0);
+
+  // Equal with floating point that sanitizes to equal -> save not called
+  const skippedFloat = await persistXpProfileSnapshot({
+    userId: "user-1",
+    totalXp: 100.9,
+    read: async () => ({ userId: "user-1", totalXp: 100 }),
+    save,
+  });
+  assert.equal(skippedFloat, true);
+  assert.equal(saveCalls, 0);
+
+  // 2. Different total -> save called once
+  const savedDiff = await persistXpProfileSnapshot({
+    userId: "user-1",
+    totalXp: 150,
+    now: 12345,
+    read: async () => ({ userId: "user-1", totalXp: 100 }),
+    save,
+  });
+  assert.equal(savedDiff, true);
+  assert.equal(saveCalls, 1);
+  assert.deepEqual(savedValue, { userId: "user-1", totalXp: 150, now: 12345 });
+
+  // 3. Missing profile -> save called
+  saveCalls = 0;
+  savedValue = null;
+  const savedMissing = await persistXpProfileSnapshot({
+    userId: "user-1",
+    totalXp: 150,
+    now: 54321,
+    read: async () => null,
+    save,
+  });
+  assert.equal(savedMissing, true);
+  assert.equal(saveCalls, 1);
+  assert.deepEqual(savedValue, { userId: "user-1", totalXp: 150, now: 54321 });
+
+  // 4. Read error goes through same catch path
+  const readErrorResult = await persistXpProfileSnapshot({
+    userId: "user-1",
+    totalXp: 150,
+    read: async () => { throw new Error("read timeout"); },
+    save,
+  });
+  assert.equal(readErrorResult, false);
+});
+
 test("atomic award executor normalizes results and preserves legacy lock retry", async () => {
   let calls = 0;
   let delayed = false;
