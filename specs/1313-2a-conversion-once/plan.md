@@ -14,7 +14,7 @@
 ## Change
 **`netlify/functions/calculate-xp.mjs`** (about 2 lines; **requires explicit OWNER approval**, see spec Status): add `anonConversionChecked: true` to the status payload (next to the existing `result.payload.conversion`) and to the award payload, in both cases **only when `conversion` is not `null`** (`if (conversion)`).
 
-**`js/xpClient.js`** (planned 25–30 lines; delivered about 150 lines without whitespace, including the error handling and the unload path):
+**`js/xpClient.js`** (planned 25–30 lines; delivered about 180 lines without whitespace, including the error handling and the unload path):
 - `CONVERTED_KEY = "kcswh:xpAnonConvertedFor"`, `ACTIVITY_KEY = "kcswh:xpAnonActivity"`; `bumpActivity()` writes a new `randomId()` value and `readActivity()` reads it, both in try/catch. `readActivity()` returns `null` **only when localStorage throws**. If the key is absent, it writes a new `randomId()` and returns that value. A fresh browser can then set a marker. `bumpActivity()` failure: try `removeItem(CONVERTED_KEY)` and set `state.anonStorageFailed = true`.
 - `tokenSub(headers)`: base64url-decode the payload of `headers.Authorization` (`Bearer x.y.z`) and return `sub`, or `null` on any error. This is only a label; the server still verifies the token.
 - `anonIdFor(headers, anonId)`, used after `buildAuthHeaders(...)` and before the body is built:
