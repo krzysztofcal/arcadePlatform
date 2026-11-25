@@ -1,5 +1,5 @@
 # Tasks: conversion once per sign-in (#1313 2a)
-- [ ] T000 OWNER GO, explicitly covering the additive server response field.
+- [x] T000 OWNER GO 2026-11-25 ("implement per plan"): covers the additive server response field and accepts the cross-tab storage-failure limit (spec FR-005).
 - [ ] T001 [agy] `calculate-xp.mjs`: additive `anonConversionChecked` (plan §Change, server).
 - [ ] T002 [agy] `js/xpClient.js`: `tokenSub`, `anonIdFor`, `noteConversion`, the shared activity token (`bumpActivity` writes a new random value on anonymous start and settle); wire into `fetchStatus` and `postWindowServerCalc` (plan §Change, client).
 - [ ] T003 [agy] Fundamental tests (spec SC-001) in the existing files.
