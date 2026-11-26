@@ -222,6 +222,7 @@ change always needs its own GO; health alone does not prove playable status.
   - simplicity
   - no regressions
   - consistency with patterns
+- Every AI review (Claude Code, Codex, Antigravity) follows [REVIEW.md](REVIEW.md): the five finding questions, impact-based severity, accepted OWNER trade-offs, and proportional fixes. Review tooling passes `REVIEW.md` to the reviewer with the material under review.
 
 ---
 
