@@ -1,0 +1,52 @@
+# Feature Specification: Production activation of Google photos, UGC Report/Block, Poker table photos and the 16-avatar catalog (#1140, #1282, #1114)
+
+**Branch**: `1140-production-activation` · **Base**: `main` @ `cddc65be` (WWW and WS Production since 2026-11-25) · **Status**: plan only. Every Production SQL execution, flag change and release needs its own OWNER GO.
+
+## Current Production state (read-only, 2026-11-25)
+- WWW and WS `cddc65be` (`release-20261125-45714571321`). The code for all four features is deployed dark.
+- Netlify Production flags: `UGC_SAFETY_ENABLED`, `GOOGLE_PHOTO_IMPORT_ENABLED` and `POKER_TABLE_PHOTO_ENABLED` are empty. `ACCOUNT_DELETION_ENABLED=1`, `ACCOUNT_DELETION_AVATAR_TRACKING_ENABLED=1`, `PUBLIC_PROFILES_ENABLED=1`.
+- DB migration history ends at `20261105160500`, the last applied version.
+  - Missing Stage-only migrations without a Production equivalent: `20261107120000_ugc_reports_blocks`, `20261107130000_ugc_moderation`, `20261107140000_google_photo_consent`. The private tables do not exist.
+  - The prepared but unapplied BIO contract is `20261027173627`.
+- Profile policy: `2026-10-28-a2`, `active=true` (Terms ON), `variants_enabled=false` (6 avatars), `identity_normalized_at` NULL. Production still has the `bio` column.
+- Privacy `2026-11-21-a5` describes Google photo import and the g4 table-photo consent. It does **not** describe user reports, blocks or moderation.
+
+## Requirements
+- **FR-001** Production-equivalent migrations in `supabase/production-migrations/` for the three Stage migrations, following the established pattern (`20261028180000_public_profile_block.sql`, `specs/1114-.../production-equivalents-review.md`):
+  - `BEGIN`/`COMMIT`; lock 2 s, statement 15 s, idle 15 s;
+  - an operator check (`postgres`), pinned project `otbqfijerkieoxwpxjnm` and system `7575202818581710058`;
+  - a per-file confirmation setting and an approved source SHA-256 receipt;
+  - the shared Production coordination lock, the exact expected history, and a nonblocking lock on `schema_migrations`;
+  - schema only: RLS on, no flag and no user data change; a transaction-counter guard against unrelated DML. The only permitted DML is the Stage-identical seed row `private.ugc_moderation_counters('pending_removed_with_deleted_account', 0)` in `ugc_moderation`; all other new tables are empty;
+  - a history row with `statements=['source_sha256=<hash>']`.
+- **FR-002** `supabase/production-migrations/manifest.json`: append the three entries under `replacement_migrations`; reclassify the Stage entries; prior entries and hashes stay unchanged; the repository guard (`scripts/check-db-migrations.mjs`) passes.
+- **FR-003** Validation in the existing harness (`tests/chips/chips.migration.test.mjs` with a disposable local PostgreSQL rebuilt from the Production history and synthetic data):
+  - identity, confirmation and hash refusals;
+  - history-drift refusal;
+  - a late error rolls back that file only; earlier committed files stay (dark, additive);
+  - valid N→N+3;
+  - protected financial, poker and profile tables unchanged.
+- **FR-004** Legal (OWNER decision 2026-11-25: **Privacy and Terms**):
+  - Privacy (PL/EN, new immutable version `a6` plus the alias) describes user reports, blocks, the moderation queue, moderator actions, retention and legal basis.
+  - Terms (PL/EN, new immutable version `2026-11-xx-a3` plus the alias) add the conduct rules, reporting, blocking and moderation (hiding a profile or photo, removal, account restriction).
+  - Activating Terms a3 on Production switches `private.profile_terms_policy` to the new version through a Production-pinned operation modelled on `specs/1114-arcade-profiles-avatars/operations/enable-terms-production.sql` (separate exact-file OWNER GO). This triggers the existing re-acceptance flow for every signed-in user.
+  - The legal texts need OWNER legal acceptance before any publication.
+- **FR-005** The 16-avatar catalog on Production uses the existing #1114 operations:
+  - normalization (`operations/normalize-profiles.sql`);
+  - the BIO contract (`supabase/production-migrations/20261027173627_...`);
+  - `operations/enable-catalog.sql`.
+
+  Each needs a Production-pinned variant (identity, confirmation, history) where only the Stage variant exists, and each is its own OWNER GO. No activation is bundled with the UGC schema.
+- **FR-006** Activation order (each step its own OWNER GO; the features stay dark until step 5):
+  1. apply the Production schema;
+  2. **release A**: WWW with Privacy a6, Terms a3 and the code legal version a3, flags still off;
+  3. switch the Production Terms policy to a3 (re-acceptance starts);
+  4. moderator procedure (verify the existing `ADMIN_USER_IDS` and the review cadence), then the OWNER sets the Netlify feature flags;
+  5. **release B**: a rebuild of the then-current main, so the flags take effect;
+  6. the catalog operations, which are runtime DB switches and need no release.
+- **FR-007** No change to WS, ledger, poker or account-deletion behaviour. No flag is activated by any migration.
+
+## Success Criteria
+- **SC-001** The three equivalents and the manifest pass the guard and the full local harness (FR-003). Independent review: Codex, or the reviewer the OWNER chooses.
+- **SC-002** After the OWNER-approved apply, an independent postflight shows: history N+3, three hash receipts, RLS on, empty new tables except exactly the one seed counter row, unchanged protected tables, unchanged profile fingerprints.
+- **SC-003** After flags and release: a signed-in OWNER smoke on Production for import, publication, table photo, report and block (OWNER test accounts), plus a check that the moderation tab works for the configured admins.
