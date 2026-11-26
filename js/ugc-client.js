@@ -182,7 +182,7 @@
   // One shared modal: either the reason choice for a report or a plain confirmation for a block.
   function openDialog(options){
     return new Promise(function(resolve){
-      var dialog = element('dialog', 'ugc-dialog');
+      var dialog = element('dialog', 'ugc-dialog' + (options.danger ? ' ugc-dialog--danger' : ''));
       var form = element('form', 'ugc-dialog__form');
       form.method = 'dialog';
       form.appendChild(element('h2', 'ugc-dialog__title', options.title));
@@ -226,7 +226,7 @@
       state.dialogs.push(finish);
       document.body.appendChild(dialog);
       if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
-      confirm.focus();
+      if (options.danger) cancel.focus(); else confirm.focus();
     });
   }
 
@@ -267,7 +267,7 @@
           await unblock(blocked.userId, { userId: owner, session: session });
           status.textContent = t('ugcUnblocked', 'Player unblocked.');
         } else {
-          var ok = await openDialog({ title: t('ugcBlock', 'Block'), text: t('ugcBlockConfirm', 'Block {name}? You will no longer see their avatar or their new reactions and gifts. Gifts shown earlier may still be visible. The game itself is not affected.', target.displayName), confirm: t('ugcBlock', 'Block') });
+          var ok = await openDialog({ title: t('ugcBlockTitle', 'Block player?'), text: t('ugcBlockConfirm', 'Block {name}? You will no longer see their avatar or their new reactions and gifts. Gifts shown earlier may still be visible. The game itself is not affected.', target.displayName), confirm: t('ugcBlockConfirmButton', 'Block player'), danger: true });
           if (ok && await sameOwner(owner, session)){
             await block(target, { userId: owner, session: session });
             status.textContent = t('ugcBlocked', 'Player blocked. You will no longer see their avatar or their new reactions and gifts.');

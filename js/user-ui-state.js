@@ -25,6 +25,40 @@
 
   function validUserId(value){ return typeof value === 'string' && value.length > 0 && value.length <= 128; }
 
+  function decodeBase64(value){
+    try {
+      if (typeof atob === 'function') return atob(value);
+      if (typeof window !== 'undefined' && typeof window.atob === 'function') return window.atob(value);
+    } catch (_err){}
+    return null;
+  }
+
+  function encodeBase64(value){
+    try {
+      if (typeof btoa === 'function') return btoa(value);
+      if (typeof window !== 'undefined' && typeof window.btoa === 'function') return window.btoa(value);
+    } catch (_err){}
+    return null;
+  }
+
+  function validPhoto(userId, path, dataUrl){
+    if (!validUserId(userId)) return false;
+    if (typeof path !== 'string' || !/^pending\/[0-9a-f-]{36}$/.test(path)) return false;
+    if (typeof dataUrl !== 'string') return false;
+    var prefix = 'data:image/webp;base64,';
+    if (dataUrl.indexOf(prefix) !== 0) return false;
+    var b64 = dataUrl.slice(prefix.length);
+    if (!b64 || b64.length > 65536 || b64.length % 4 !== 0) return false;
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return false;
+    if (b64.indexOf('?') !== -1 || b64.indexOf('token=') !== -1 || b64.indexOf('http') !== -1) return false;
+    var raw = decodeBase64(b64);
+    if (!raw || raw.length < 12 || raw.length > 49152) return false;
+    if (raw.slice(0, 4) !== 'RIFF' || raw.slice(8, 12) !== 'WEBP') return false;
+    var reencoded = encodeBase64(raw);
+    if (reencoded !== b64) return false;
+    return true;
+  }
+
   function normalizeAvatar(value){
     var avatar = value && typeof value === 'object' ? value : {};
     var type = avatar.type === 'uploaded' ? 'uploaded' : 'default';
@@ -182,17 +216,92 @@
     return record ? record.value : null;
   }
 
+  function readPhoto(userId){
+    if (!validUserId(userId)) return { available: false };
+    var store = storage();
+    if (!store) return { available: false };
+    var cacheKey = key('photo', userId);
+    var raw;
+    try {
+      raw = store.getItem(cacheKey);
+    } catch (_err){
+      return { available: false };
+    }
+    if (!raw) return { available: true, record: null };
+    var record;
+    try {
+      record = JSON.parse(raw);
+    } catch (_err){
+      try { store.removeItem(cacheKey); } catch (_e){}
+      return { available: true, record: null };
+    }
+    var now = Date.now();
+    var savedAt = Number(record && record.savedAt);
+    if (!record || record.version !== VERSION || record.userId !== userId || !validPhoto(userId, record.path, record.dataUrl) || !Number.isSafeInteger(savedAt) || savedAt < 1 || now - savedAt > 7 * 24 * 60 * 60 * 1000 || savedAt > now){
+      try { store.removeItem(cacheKey); } catch (_e){}
+      return { available: true, record: null };
+    }
+    return { available: true, record: { version: VERSION, userId: userId, savedAt: savedAt, path: record.path, dataUrl: record.dataUrl } };
+  }
+
+  function writePhoto(userId, record){
+    if (!validUserId(userId) || !record) return false;
+    if (!validPhoto(userId, record.path, record.dataUrl)) return false;
+    var store = storage();
+    if (!store) return false;
+    var cacheKey = key('photo', userId);
+    var toStore = { version: VERSION, userId: userId, savedAt: Date.now(), path: record.path, dataUrl: record.dataUrl };
+    try {
+      store.setItem(cacheKey, JSON.stringify(toStore));
+      return true;
+    } catch (_err){
+      return false;
+    }
+  }
+
+  function clearPhoto(userId){
+    if (!validUserId(userId)) return;
+    var store = storage();
+    if (!store) return;
+    try { store.removeItem(key('photo', userId)); } catch (_err){}
+  }
+
   function clearUser(userId){
     if (!validUserId(userId)) return;
     var store = storage();
     if (store){
-      ['profile', 'xp', 'chips', 'offline-avatar'].forEach(function(slice){ try { store.removeItem(key(slice, userId)); } catch (_err){} });
+      ['profile', 'xp', 'chips', 'photo', 'offline-avatar'].forEach(function(slice){ try { store.removeItem(key(slice, userId)); } catch (_err){} });
       if (activeUserId === userId){ try { store.removeItem(OFFLINE_AVATAR_KEY); } catch (_err){} }
     }
     if (activeUserId === userId){ activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setAllSliceStates('pending'); }
   }
 
-  function setAnonymous(){ try { var store = storage(); if (store) store.removeItem(OFFLINE_AVATAR_KEY); } catch (_err){} activeUserId = null; appliedAt = { profile: 0, xp: 0, chips: 0 }; generation += 1; setAllSliceStates('anonymous'); }
+  function setAnonymous(){
+    try {
+      var store = storage();
+      if (store){
+        store.removeItem(OFFLINE_AVATAR_KEY);
+        var photoPrefix = PREFIX + 'photo:v' + VERSION + ':';
+        var toRemove = [];
+        if (typeof store.length === 'number' && typeof store.key === 'function'){
+          for (var i = 0; i < store.length; i++){
+            var k = store.key(i);
+            if (k && k.indexOf(photoPrefix) === 0) toRemove.push(k);
+          }
+        } else {
+          var keys = Object.keys(store);
+          for (var j = 0; j < keys.length; j++){
+            if (keys[j] && keys[j].indexOf(photoPrefix) === 0) toRemove.push(keys[j]);
+          }
+        }
+        for (var m = 0; m < toRemove.length; m++) store.removeItem(toRemove[m]);
+      }
+    } catch (_err){}
+    activeUserId = null;
+    appliedAt = { profile: 0, xp: 0, chips: 0 };
+    generation += 1;
+    setAllSliceStates('anonymous');
+  }
 
   function markSliceApplied(userId, slice, value){
     if (activeUserId !== userId) return false;
@@ -247,6 +356,6 @@
     if (parsed && parsed.userId === userId) acceptExternal(parsed);
   });
 
-  window.UserUiState = { hydrate: hydrate, publish: publish, readActiveSlice: readActiveSlice, getActiveContext: getActiveContext, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markSliceApplied: markSliceApplied, markActiveSliceApplied: markActiveSliceApplied, markRefreshFailed: markRefreshFailed, onChange: onChange };
+  window.UserUiState = { hydrate: hydrate, publish: publish, readActiveSlice: readActiveSlice, getActiveContext: getActiveContext, clearUser: clearUser, setAnonymous: setAnonymous, isCurrent: isCurrent, markSliceApplied: markSliceApplied, markActiveSliceApplied: markActiveSliceApplied, markRefreshFailed: markRefreshFailed, onChange: onChange, readPhoto: readPhoto, writePhoto: writePhoto, clearPhoto: clearPhoto };
   klog('user_ui_state_ready', { version: VERSION });
 })();

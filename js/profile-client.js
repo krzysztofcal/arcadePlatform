@@ -10,6 +10,8 @@
   var writeSeq = 0;
   var writesInFlight = 0;
   var publicGeneration = 0;
+  var photoLoads = {};
+  var storageUsable = true;
 
   function klog(kind, data){
     try { if (window.KLog && typeof window.KLog.log === 'function') window.KLog.log(kind, data || {}); } catch (_err){}
@@ -33,6 +35,59 @@
     } catch (_err){ return 0; }
   }
 
+  function photoPath(url){
+    if (typeof url !== 'string' || !PHOTO_URL_RE.test(url)) return null;
+    var storage = window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.SUPABASE_URL;
+    if (typeof storage !== 'string') return null;
+    var prefix = storage.replace(/\/$/, '') + '/storage/v1/object/sign/profile-avatar-uploads/';
+    if (url.indexOf(prefix) !== 0) return null;
+    var rest = url.slice(prefix.length).split('?')[0];
+    return /^pending\/[0-9a-f-]{36}$/.test(rest) ? rest : null;
+  }
+
+  function downloadPhoto(url){
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function(){ controller.abort(); }, 15000) : null;
+    var options = { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', redirect: 'error' };
+    if (controller) options.signal = controller.signal;
+    return fetch(url, options).then(function(res){
+      if (timer) clearTimeout(timer);
+      if (!res.ok) throw new Error('http_' + res.status);
+      var contentType = res.headers && typeof res.headers.get === 'function' ? (res.headers.get('content-type') || '') : '';
+      if (contentType && contentType.indexOf('image/webp') === -1) throw new Error('invalid_content_type');
+      return res.blob();
+    }).then(function(blob){
+      if (!blob || blob.size > 49152) throw new Error('image_too_large');
+      if (blob.type && blob.type.indexOf('image/webp') === -1) throw new Error('invalid_blob_type');
+      if (typeof FileReader !== 'undefined'){
+        return new Promise(function(resolve, reject){
+          var reader = new FileReader();
+          reader.onload = function(){ resolve(reader.result); };
+          reader.onerror = function(){ reject(new Error('filereader_failed')); };
+          reader.readAsDataURL(blob);
+        });
+      }
+      if (typeof blob.arrayBuffer === 'function'){
+        return blob.arrayBuffer().then(function(buf){
+          var b64;
+          if (typeof Buffer !== 'undefined') b64 = Buffer.from(buf).toString('base64');
+          else {
+            var bytes = new Uint8Array(buf);
+            var bin = '';
+            for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            b64 = btoa(bin);
+          }
+          return 'data:image/webp;base64,' + b64;
+        });
+      }
+      throw new Error('cannot_convert_blob');
+    }).catch(function(err){
+      if (timer) clearTimeout(timer);
+      klog('profile:own_photo_failed', { code: err && err.message ? err.message : 'download_failed' });
+      throw err;
+    });
+  }
+
   function applyPhoto(node, profile){
     var avatar = profile && profile.avatar;
     if (!avatar || avatar.type !== 'uploaded' || typeof avatar.url !== 'string' || !PHOTO_URL_RE.test(avatar.url)) return false;
@@ -52,24 +107,120 @@
     image.onload = function(){
       if (node.dataset.avatarUrl !== url) return;
       if (Date.now() >= deadline){ fallback(); return; }
+      clearTimeout(node.profileAvatarExpiry);
+      delete node.profileAvatarExpiry;
       delete node.dataset.avatarLoading;if(node.setAttribute)node.setAttribute('aria-busy','false');
       node.textContent = ''; node.style.backgroundImage = 'url("' + url + '")';
+      var path = photoPath(url);
+      if (path) node.dataset.avatarShownPath = path;
     };
-    function fallback(){ if (node.dataset.avatarUrl === url) applyAvatar(node, null); }
+    function fallback(){
+      if (node.dataset.avatarUrl === url){
+        clearTimeout(node.profileAvatarExpiry);
+        delete node.profileAvatarExpiry;
+        delete node.dataset.avatarShownPath;
+        applyAvatar(node, null);
+      }
+    }
     image.onerror = fallback;
     node.profileAvatarExpiry = setTimeout(fallback, remaining);
     image.src = url;
     return true;
   }
 
-  function applyAvatar(node, profile){
+  function applyAvatar(node, profile, options){
     if (!node) return;
+    var currentPath = profile && profile.avatar && (profile.avatar.path || (typeof profile.avatar.url === 'string' ? photoPath(profile.avatar.url) : null));
+    if (currentPath && node.dataset.avatarShownPath === currentPath) return;
+
     // Cancel old image callbacks and hide the previous photo before any fallback loads.
     clearTimeout(node.profileAvatarExpiry);
     delete node.profileAvatarExpiry;
-    delete node.dataset.avatarUrl;delete node.dataset.avatarLoading;if(node.setAttribute)node.setAttribute('aria-busy','false');
+    delete node.dataset.avatarUrl;
+    delete node.dataset.avatarLoading;
+    delete node.dataset.avatarWant;
+    delete node.dataset.avatarShownPath;
+    if (node.setAttribute) node.setAttribute('aria-busy', 'false');
     node.style.backgroundImage = '';
     node.classList.remove('profile-avatar--uploaded');
+
+    var ownUserId = options && options.ownUserId ? String(options.ownUserId) : null;
+    if (ownUserId && storageUsable){
+      var ui = window.UserUiState;
+      var photoRes = ui && typeof ui.readPhoto === 'function' ? ui.readPhoto(ownUserId) : { available: false };
+      if (!photoRes.available){
+        storageUsable = false;
+      } else {
+        var avatar = profile && profile.avatar;
+        if (avatar && avatar.type === 'default'){
+          if (typeof ui.clearPhoto === 'function') ui.clearPhoto(ownUserId);
+        } else if (avatar && avatar.type === 'uploaded'){
+          if (!avatar.url){
+            if (photoRes.record){
+              node.classList.add('profile-avatar--uploaded');
+              node.style.backgroundSize = 'cover';
+              node.style.backgroundPosition = 'center';
+              node.textContent = '';
+              node.style.backgroundImage = 'url("' + photoRes.record.dataUrl + '")';
+              node.dataset.avatarShownPath = photoRes.record.path;
+              return;
+            }
+            node.textContent = 'AH';
+            return;
+          }
+          var path = photoPath(avatar.url);
+          if (path){
+            if (photoRes.record && photoRes.record.path === path){
+              node.classList.add('profile-avatar--uploaded');
+              node.style.backgroundSize = 'cover';
+              node.style.backgroundPosition = 'center';
+              node.textContent = '';
+              node.style.backgroundImage = 'url("' + photoRes.record.dataUrl + '")';
+              node.dataset.avatarShownPath = path;
+              return;
+            }
+            node.dataset.avatarWant = path;
+            node.dataset.avatarLoading = 'true';
+            if (node.setAttribute) node.setAttribute('aria-busy', 'true');
+            node.classList.add('profile-avatar--uploaded');
+            node.style.backgroundSize = 'cover';
+            node.style.backgroundPosition = 'center';
+            node.textContent = '';
+
+            var loadKey = ownUserId + '|' + path;
+            var capturedGen = publicGeneration;
+            if (!photoLoads[loadKey]){
+              photoLoads[loadKey] = downloadPhoto(avatar.url).finally(function(){
+                delete photoLoads[loadKey];
+              });
+            }
+            photoLoads[loadKey].then(async function(dataUrl){
+              var nowUser = await currentUserId();
+              if (nowUser !== ownUserId || publicGeneration !== capturedGen || node.dataset.avatarWant !== path) return;
+              delete node.dataset.avatarLoading;
+              delete node.dataset.avatarWant;
+              if (node.setAttribute) node.setAttribute('aria-busy', 'false');
+              node.textContent = '';
+              node.style.backgroundImage = 'url("' + dataUrl + '")';
+              node.dataset.avatarShownPath = path;
+              if (ui && typeof ui.writePhoto === 'function'){
+                var saved = ui.writePhoto(ownUserId, { path: path, dataUrl: dataUrl });
+                if (!saved) storageUsable = false;
+              }
+            }).catch(async function(){
+              var nowUser = await currentUserId();
+              if (nowUser !== ownUserId || publicGeneration !== capturedGen || node.dataset.avatarWant !== path) return;
+              delete node.dataset.avatarLoading;
+              delete node.dataset.avatarWant;
+              if (node.setAttribute) node.setAttribute('aria-busy', 'false');
+              applyAvatar(node, null);
+            });
+            return;
+          }
+        }
+      }
+    }
+
     if (applyPhoto(node, profile)) return;
     // Missing confirmation or an unusable photo is not a confirmed Arcade selection.
     if (!profile || !profile.avatar || profile.avatar.type === 'uploaded'){ node.textContent = 'AH'; return; }
@@ -191,6 +342,6 @@
     return function done(){ if (!open) return; open = false; writeSeq += 1; writesInFlight -= 1; };
   }
 
-  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, invalidate: invalidate, beginWrite: beginWrite, applyAvatar: applyAvatar, initials: initials };
+  window.ProfileClient = { getMe: getMe, updateMe: updateMe, getPublic: getPublic, clear: clear, invalidate: invalidate, beginWrite: beginWrite, applyAvatar: applyAvatar, initials: initials, photoPath: photoPath };
   klog('profile:client_ready', {});
 })();
