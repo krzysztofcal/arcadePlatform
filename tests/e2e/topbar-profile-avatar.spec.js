@@ -62,7 +62,8 @@ test.describe('authenticated topbar profile avatar', () => {
     });
   }
 
-  test('shows neutral AH during delayed revalidation and the confirmed avatar afterwards', async ({ page }) => {
+  // #1140 avatar follow-up (spec D2/US3, OWNER-approved): the hydrated avatar is shown during revalidation instead of a neutral AH.
+  test('shows the hydrated avatar during delayed revalidation and the confirmed avatar afterwards', async ({ page }) => {
     await mockAuthenticatedSession(page);
     const avatar = page.locator('#avatarInitials');
     const menuAvatar = page.locator('#avatarMenuInitials');
@@ -112,13 +113,13 @@ test.describe('authenticated topbar profile avatar', () => {
     const pendingFrames = frames.filter((frame) => frame.state === 'hydrated');
     expect(pendingFrames.length).toBeGreaterThan(0);
     for (const frame of pendingFrames) {
-      expect(frame.text, JSON.stringify(frame)).toBe('AH');
-      expect(frame.image, JSON.stringify(frame)).toBe('none');
+      expect(frame.text, JSON.stringify(frame)).not.toBe('AH');
+      expect(frame.variant, JSON.stringify(frame)).toBe('fox-blue');
     }
-    await expect(avatar).toHaveText('AH');
-    await expect(menuAvatar).toHaveText('AH');
-    await expect(avatar).toHaveCSS('background-image', 'none');
-    await expect(menuAvatar).toHaveCSS('background-image', 'none');
+    await expect(avatar).not.toHaveText('AH');
+    await expect(menuAvatar).not.toHaveText('AH');
+    await expect(avatar).toHaveAttribute('data-avatar-variant', 'fox-blue');
+    await expect(menuAvatar).toHaveAttribute('data-avatar-variant', 'fox-blue');
     releaseProfile();
     await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-profile-state', 'ready');
     releaseAvatar();
