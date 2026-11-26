@@ -1,0 +1,17 @@
+{
+  "privacyVersion": "2026-11-26-a6",
+  "termsVersion": "2026-11-26-a3",
+  "status": "OWNER_APPROVED_PUBLICATION_PENDING",
+  "basedOn": {
+    "legal/privacy.2026-11-21-a5.en.html": "9ea685a820686f4895ebb33dff23e2da99ef92c280db20fc7f1bd6e7e1d3b177",
+    "legal/privacy.2026-11-21-a5.pl.html": "e26835035acaa37ec4f0b452c08a3499ef069f93dcc3adbc75b8cebd9de6fc0b",
+    "legal/terms.2026-10-28-a2.en.html": "7cfd21a2e0cbc2b8b8eecc0fc20008b4a5086237d94a1772f5fca72f87bbb0f6",
+    "legal/terms.2026-10-28-a2.pl.html": "c1bb796d7af552a60bc6ca0d4d32671bde0751dbfec7cd5fda980b8f7adff24c"
+  },
+  "files": {
+    "legal/privacy.2026-11-26-a6.en.html": "5978d467105485215b67ffa62d55e34f5a36c6c47a8fa4388b3416c45b02993c",
+    "legal/privacy.2026-11-26-a6.pl.html": "cad36d19acd20125049e2e81b9efb40c47860b6193cef6d1594cbc155cb0777e",
+    "legal/terms.2026-11-26-a3.en.html": "d5efb656653537db5db712820bbe4f92c3c358886320b71dc2f9ca42e8b029b2",
+    "legal/terms.2026-11-26-a3.pl.html": "4f7a914263486e923421b1b060f5ba084cc4a7ea53fe395ab8fc934471a291cd"
+  }
+}
