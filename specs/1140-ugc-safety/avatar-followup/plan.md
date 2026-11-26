@@ -36,47 +36,55 @@ Plain ES5 IIFEs loaded with `defer` on static pages, the same files packaged int
 - `js/i18n.js`: `ugcBlockTitle` (PL "Zablokować gracza?", EN "Block player?") and `ugcBlockConfirmButton` (PL "Zablokuj gracza", EN "Block player").
 
 ### 3. Own-photo cache (US3, FR-003, FR-004, FR-006, FR-007)
+**Simplification (series 2):** all guards are per tab. There is no cross-tab epoch, lock or broadcast. The only cross-tab effect left is accepted under D2: a fetch that was already running in tab A when tab B changed the avatar, or signed out, can still write the old photo of the same owner. On a later page, that owner can see their own old photo only until `profile-me` confirms (D2). After a sign-out, the next signed-out page load removes every photo key. No other account can ever read it, because keys are per user ID and the hydration reads only the current user's key.
+
 - `js/user-ui-state.js`:
   - add a separate key `kcswh:user-ui:photo:v1:<userId>` with `readPhoto(userId)`, `writePhoto(userId, { path, dataUrl })` and `clearPhoto(userId)`. `readPhoto` returns `{ available: false }` when storage is missing or throws, and `{ available: true, record: <record|null> }` otherwise. `writePhoto` returns `true` or `false`;
-  - **not** added to `MAX_AGE`, `normalize`, `publish`, `acceptExternal` or the `BroadcastChannel`/`storage` handling, so no other tab can rewrite or re-announce it;
+  - **not** added to `MAX_AGE`, `normalize`, `publish`, `acceptExternal` or the `BroadcastChannel`/`storage` handling, so no other tab rewrites or re-announces it;
   - `validPhoto(record, userId, now)` checks the following. Anything invalid is not written, and an invalid stored record is removed when it is read:
     - `version` and `userId` match;
     - `savedAt` is at most 7 days ago;
     - `path` matches `^pending/[0-9a-f-]{36}$`;
     - `dataUrl` is `data:image/webp;base64,` followed by `^[A-Za-z0-9+/]+={0,2}$`, at most 65,536 Base64 characters, with a length that is a multiple of 4;
     - the **whole** payload decodes with `atob` inside `try`. The decoded string is at most 49,152 bytes, and bytes 0–3 read `RIFF` and bytes 8–11 read `WEBP`;
-  - `clearUser` also removes `photo:v1:<userId>`. `setAnonymous` removes the active user's photo key before it resets `activeUserId`.
-- `js/profile-client.js`:
+  - `clearUser(userId)` also removes `photo:v1:<userId>`;
+  - `setAnonymous()` removes **every** `kcswh:user-ui:photo:v1:*` key, which also covers a late write from another tab.
+- `js/profile-client.js` (all state is in memory, per tab):
   - `photoPath(url)` returns `pending/<uuid>` from a URL that already passes `PHOTO_URL_RE` and the storage-origin check, and `null` otherwise;
-  - `ownPhotoLoads` is an in-memory map keyed by `userId + '|' + publicGeneration + '|' + epoch + '|' + path`, so a render after a newer confirmation can never join an older load, holding the shared fetch-and-convert promise. When the promise settles, its entry is deleted if it is still the same entry, so a later render with a fresh link can retry after a failure. `clear()` (called on account switch and sign-out by `supabaseClient.js`) increments `publicGeneration` and empties the map;
-  - `ownConfirmed[userId] = { type, path, epoch }` holds the last authoritative avatar in memory, together with the stored epoch in force when it was accepted;
-  - the photo epoch per user lives in `localStorage` (`kcswh:user-ui:photo-epoch:v1:<userId>`, an integer, via `UserUiState.photoEpoch(userId)` and `bumpPhotoEpoch(userId)`). It is not broadcast; the value is re-read synchronously when checked, so a change in another tab is seen. It is bumped by `ownProfileConfirmed` when the confirmed type or path differs from the previous confirmation. On a fresh page with no previous confirmation, it compares with the valid stored record: the same path keeps the record and bumps nothing; a different type or path bumps and clears. `clearUser` also bumps it. Without storage it falls back to an in-memory counter, and no photo is stored then anyway;
-  - `applyAvatar(node, profile, options)`:
-    - every call increments `node.avatarRequest`. Every reset removes `data-avatar-shown-path`;
-    - **shortcut:** if the new avatar is a photo whose path equals `node.dataset.avatarShownPath`, return without any change;
-    - `options.ownUserId` set, avatar uploaded and `readPhoto(...).available` true: call `applyOwnPhoto`;
-    - otherwise: today's `applyPhoto` or catalog path. Without usable storage, the plain `applyPhoto` path is used, as today, plus US4;
-  - `applyOwnPhoto(node, profile, userId)`:
-    - a cached record with the same path (or a hydrated `{ type: 'uploaded' }` with no URL while a record exists): show the data URL and set `data-avatar-shown-path`. No request;
-    - a URL whose path differs from the cached record: start or join a fetch only if that path equals `ownConfirmed[userId].path` **and** the stored epoch still equals `ownConfirmed[userId].epoch`. Another tab's later change therefore blocks new fetches of the old path, not just running ones. Otherwise keep today's fallback. A stale profile object can therefore never delete a newer record or fetch an older path. Clearing the old record is done by `ownProfileConfirmed`, not here. Then take or start the shared load (one `fetch`, `mode: 'cors'`, `credentials: 'omit'`, `cache: 'no-store'`, `referrerPolicy: 'no-referrer'`, `redirect: 'error'`, 15 s abort; `content-type` `image/webp`; at most 48 KiB; `FileReader.readAsDataURL`; header check);
-    - on completion: `await currentUserId()`. Then, synchronously and immediately before touching the DOM or storage, check that the user equals `userId`, `publicGeneration` equals the value captured at start, the stored epoch (re-read now) equals the captured epoch and `ownConfirmed[userId].epoch`, and `node.avatarRequest` is still the starting request. If any check fails, discard. Otherwise apply and call `writePhoto`; if it returns `false`, keep the image for this page, log `klog('profile:own_photo_not_saved')` and do not retry;
-    - on failure: today's fallback, nothing written, `klog('profile:own_photo_failed', { code })` with no URL.
-  - **Authoritative clearing** goes through the internal `ownProfileConfirmed(userId, profile)`, called **only inside ProfileClient**:
-    - by `getMe` on success, and only when `seq === writeSeq` and `writesInFlight === 0`, so a GET that started before an accepted PATCH or an invalidation can never re-confirm an older profile. The answer itself is returned unchanged, so `profile-me` counts and #1313 behaviour stay the same;
-    - by `updateMe` in its existing `notify` branch, which is the accepted, not-overtaken PATCH answer.
+  - `ownConfirmed[userId] = { type, path, rev }`: the last avatar confirmed in this tab. `rev` is an in-memory counter that grows on every confirmed type or path change, including A→B→A;
+  - `ownPhotoLoads`: map from `userId|publicGeneration|rev|path` to the shared fetch-and-convert promise. A render after A→B→A therefore never joins the load started for the first A. When the promise settles, its entry is deleted if it is still the same entry, so a later render with a fresh link can retry. `clear()` (account switch, sign-out) increments `publicGeneration`, empties the map and empties `ownConfirmed`;
+  - **Confirmation** (`ownProfileConfirmed(userId, profile)`) runs **only inside ProfileClient**:
+    - from `getMe` on success, only when `seq === writeSeq` and `writesInFlight === 0` (no write or invalidation since the read started). The answer is still returned unchanged, so `profile-me` counts and #1313 behaviour stay the same. How the top bar publishes and renders an overtaken GET is today's behaviour and is not changed here;
+    - from `updateMe`, in its existing `notify` branch.
 
-    It updates `ownConfirmed` and, on a type or path change, bumps the stored epoch and calls `clearPhoto`; then `applyOwnPhoto` fetches the new path. `applyAvatar` itself never clears, and callers outside ProfileClient never confirm.
-  - **Transitional renders:** `applyAvatar(node, profile, { ownUserId })` with no avatar data keeps a photo the node already shows when `node.dataset.avatarOwner === ownUserId` and the node's recorded `publicGeneration` is current. It resets when the owner changes, `ownUserId` is null (sign-out) or a confirmed change has bumped the epoch.
+    It sets `ownConfirmed[userId]`. If no record exists, or the record's path equals the confirmed photo path, the record stays. A non-uploaded avatar or a different path calls `clearPhoto(userId)`.
+  - `applyAvatar(node, profile, options)`:
+    - the keep-rules below (own transitional render, URL-less own marker, shortcut) are evaluated **before** `node.avatarRequest` is incremented, so keeping a node never cancels its running load. Every other call increments it. Every reset removes `data-avatar-shown-path` and `data-avatar-owner`;
+    - **own URL-less marker** (`options.ownUserId` set, avatar `{ type: 'uploaded' }` without URL, as `UserUiState` publishes it and `wireAvatar` renders it on `user-ui:change`): for the same owner and generation, keep the node, including a running load. Otherwise show the stored record only if its path equals `ownConfirmed[ownUserId].path`, or nothing is confirmed yet. Otherwise use today's path;
+    - **own transitional render** (`options.ownUserId` set, no avatar data): keep the node as it is when `node.dataset.avatarOwner === ownUserId` and its recorded generation is current. Otherwise use today's path. A null `ownUserId` (sign-out) or another owner resets the node;
+    - **shortcut** (a photo whose path equals `node.dataset.avatarShownPath`): keep the node only if it is not an own node, or if it is the same owner and generation and the path still equals `ownConfirmed[ownUserId].path` (or nothing is confirmed yet, the D2 window). Otherwise reset and continue;
+    - `options.ownUserId` set, avatar uploaded and `readPhoto(...).available` true: call `applyOwnPhoto`;
+    - otherwise: today's `applyPhoto` or catalog path, plus US4. Without usable storage the plain `applyPhoto` path is used. For an own node it also records the owner and generation markers after a successful display, so the transitional-render and shortcut rules work without storage too. Every reset removes these markers.
+  - `applyOwnPhoto(node, profile, userId)`:
+    - **cached:** a record whose path equals the profile's path, or a hydrated `{ type: 'uploaded' }` with no URL while a record exists and nothing is confirmed yet. Show the data URL and set the shown-path and owner markers. No request;
+    - **fetch:** start or join a shared load only when the profile's path equals `ownConfirmed[userId].path`. A stale profile object can therefore never fetch an older path or delete a record. The load is one `fetch` (`mode: 'cors'`, `credentials: 'omit'`, `cache: 'no-store'`, `referrerPolicy: 'no-referrer'`, `redirect: 'error'`, 15 s abort), requires `content-type` `image/webp` and at most 48 KiB, converts with `FileReader.readAsDataURL` and checks the header;
+    - **completion:** this covers success **and** failure. `await currentUserId()`, then check synchronously that the user equals `userId`, `publicGeneration` and `node.avatarRequest` are unchanged, and `ownConfirmed[userId]` still has the loaded path **and** the `rev` captured at start. If any check fails, change nothing. Otherwise:
+      - on success, show the image and call `writePhoto`. If it returns `false`, keep the image for this page, log `klog('profile:own_photo_not_saved')` and do not retry;
+      - on failure, show today's fallback and log `klog('profile:own_photo_failed', { code })` with no URL.
 - `js/auth/supabaseClient.js`:
-  - confirmation happens inside `ProfileClient.getMe`/`updateMe`, before `refreshProfile` or the `profile:updated` listener render. `supabaseClient.js` makes no confirmation call and no extra `profile-me` read;
   - `applyResolvedUser`: when `hydrated.profile` exists, render `{ displayName, avatar: hydrated.profile.avatar }`. For `uploaded`, this shows the cached photo only if `readPhoto(userId)` returns a record; otherwise it keeps today's name-only render;
-  - `applyProfileAvatar(node, profile, name)` passes `{ ownUserId: state.user && String(state.user.id) }`. `renderUser(state.user)` with no profile therefore clears nothing;
-  - sign-out and account switch keep calling `ProfileClient.clear()`, `ui.clearUser` and `setAnonymous`. Account deletion ends with `auth.signOut({ scope: 'local' })` in `js/account-page.js`, which reaches `applyResolvedUser(null)`, so the photo is removed and pending loads are invalidated.
-- `js/account-page.js`: the owner summary and `publicProfileAvatar` calls pass `{ ownUserId }`. The gallery and the Google preview are unchanged.
+  - `applyProfileAvatar(node, profile, name)` passes `{ ownUserId: state.user ? String(state.user.id) : null }`;
+  - no confirmation call and no extra `profile-me` read;
+  - sign-out and account switch keep calling `ProfileClient.clear()`, `ui.clearUser` and `setAnonymous`. Account deletion ends with `auth.signOut({ scope: 'local' })` in `js/account-page.js`, which reaches `applyResolvedUser(null)`, so the photo keys are removed and pending loads are discarded.
+- `js/account-page.js`:
+  - the owner summary and `publicProfileAvatar` calls pass `{ ownUserId }`;
+  - the `!profile` branch of `renderPublicProfile` resets **both** nodes through `applyAvatar(node, null)`, so pending loads for either node are discarded;
+  - the gallery and the Google preview are unchanged.
 
 ### 4. No expiry after load (US4, FR-005)
 - `js/profile-client.js::applyPhoto`:
   - in `image.onload`, when the node's current request is still the one that started, clear and delete `node.profileAvatarExpiry`, show the image and set `data-avatar-shown-path`;
+  - the shared `fallback` (used by `image.onerror` and the expiry timer) also checks the captured request counter, not only the URL, so a late error from an earlier `Image` never resets a newer render of the same URL;
   - drop the `Date.now() >= deadline` fallback on load. The server already refuses an expired token, so a late successful load means the image is valid;
   - the fallback and every reset or mask remove `data-avatar-shown-path`, so re-applying the same path after a mask or an error loads it again.
 - Poker table photos are untouched.
@@ -101,15 +109,18 @@ Plain ES5 IIFEs loaded with `defer` on static pages, the same files packaged int
   - a changed path removes the old record first and fetches once, shared by four nodes rendered together;
   - Account confirms a catalog avatar or a new path while a top-bar fetch is still running: the late result writes nothing and changes no node;
   - a failed shared fetch is removed from `ownPhotoLoads`, and a later render with a fresh link fetches again;
-  - A → B → A: a render of A after B was confirmed does not join the load of A started before B, and re-confirming A while that load runs does not apply it;
-  - another tab bumps the stored epoch (catalog confirmed there) while this tab's fetch runs: nothing is written;
+  - A → B → A within one tab: a render of A after B was confirmed starts no fetch until A is confirmed again; neither the load started for B nor the still-pending load started for the first A applies after A is re-confirmed, and a new render of A starts a fresh load;
+  - with storage unavailable: a name-only render keeps the own photo already shown, and a re-render of the same path does not reload it;
+  - after confirmation, a `user-ui:change` render with a URL-less `uploaded` marker keeps the shown photo and does not cancel a running load;
+  - two renders of the same URL on one node, then the first `Image` fails or its timer fires: the second render is kept;
+  - a failed or late load after a newer render on the same node changes nothing;
+  - `setAnonymous` removes every photo key, including one written late for the same user;
   - an accepted PATCH to a catalog avatar (`profile:updated`) clears the record and discards a running fetch;
   - a stale profile object with an older path neither deletes the record nor fetches;
   - a fresh ProfileClient (new page) with a valid stored record, then `profile-me` with the same path, then a new node: no `fetch`, record kept;
-  - another tab bumps the epoch, then a re-render here with the old profile object: no new fetch, no write;
   - GET started → accepted PATCH (catalog) → old GET finishes: the old answer confirms nothing, and the record stays cleared;
   - a render with no avatar data for the same owner keeps the shown photo on the node and in storage. Sign-out (no `ownUserId`) resets the node;
-  - account deletion: the local sign-out drives `applyResolvedUser(null)` (in the existing `tests/account-auth.contract.test.mjs` or `tests/topbar-contract.test.mjs` harness), which removes the record, bumps the epoch, and leaves a running fetch writing nothing;
+  - account deletion: the local sign-out drives `applyResolvedUser(null)` (in the existing `tests/account-auth.contract.test.mjs` or `tests/topbar-contract.test.mjs` harness), which removes the record and leaves a running fetch writing nothing;
   - `readPhoto` throwing → plain `applyPhoto`; no record → fetch; `writePhoto` throwing → image shown, nothing stored;
   - a failed fetch after a path change leaves no old record, so the next hydration shows no stale photo;
   - a fetch that finishes after `clear()` or an account switch writes nothing and changes no node;
