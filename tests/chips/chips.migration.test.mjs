@@ -5261,6 +5261,49 @@ async function assertProductionUgcEquivalents(sql, dbUrl) {
   await reject(file2, /user_profiles_block_guard preflight mismatch/);
   await sql.unsafe("alter table public.user_profiles enable trigger user_profiles_block_guard;");
 
+  // Preflight refusal: missing public_profile_blocked column
+  await sql.unsafe("alter table public.user_profiles drop column public_profile_blocked;");
+  await reject(file2, /public_profile_blocked preflight mismatch/);
+  await sql.unsafe("alter table public.user_profiles add column public_profile_blocked boolean not null default false;");
+
+  // Preflight refusal: wrong default on public_profile_blocked
+  await sql.unsafe("alter table public.user_profiles alter column public_profile_blocked set default true;");
+  await reject(file2, /public_profile_blocked preflight mismatch/);
+  await sql.unsafe("alter table public.user_profiles alter column public_profile_blocked set default false;");
+
+  // Preflight refusal: guard trigger bound to different function
+  await sql.unsafe("create function private.dummy_block_guard() returns trigger language plpgsql as $$ begin return new; end $$;");
+  await sql.unsafe("drop trigger user_profiles_block_guard on public.user_profiles;");
+  await sql.unsafe("create trigger user_profiles_block_guard before insert or update on public.user_profiles for each row execute function private.dummy_block_guard();");
+  await reject(file2, /user_profiles_block_guard preflight mismatch/);
+  await sql.unsafe("drop trigger user_profiles_block_guard on public.user_profiles;");
+  await sql.unsafe("create trigger user_profiles_block_guard before insert or update on public.user_profiles for each row execute function private.guard_public_profile_block();");
+  await sql.unsafe("drop function private.dummy_block_guard();");
+
+  // Predecessor receipt refusal for File 2
+  await sql`update supabase_migrations.schema_migrations set statements = array['source_sha256=wrong00000000000000000000000000000000000000000000000000000000000'] where version = '20261107120000';`;
+  await reject(file2, /source receipt drift/);
+  await sql`update supabase_migrations.schema_migrations set statements = array['source_sha256=' || ${hash1}] where version = '20261107120000';`;
+
+  // Extra DML refusal for File 2
+  const extraDmlFile2 = file2.replace(
+    "execute $schema$",
+    "execute $schema$update public.user_profiles set updated_at = now();"
+  );
+  await reject(extraDmlFile2, /Unexpected data DML/);
+
+  // Missing counter trigger post-check refusal
+  const file2NoCounterTrg = file2.replace(
+    /create trigger ugc_reports_count_removed_pending[\s\S]*?execute function private\.ugc_count_removed_pending_report\(\);/,
+    "-- trigger omitted"
+  );
+  await reject(file2NoCounterTrg, /ugc_reports_count_removed_pending trigger contract mismatch/);
+
+  // Extra service_role DELETE grant refusal via pre-existing default privilege
+  await sql.unsafe("alter default privileges in schema private grant delete on tables to service_role;");
+  await reject(file2, /table privileges mismatch/);
+  await sql.unsafe("alter default privileges in schema private revoke delete on tables from service_role;");
+
   // Late error in File 2 rolls back File 2 only
   const lateErrorFile2 = file2.replace(/commit;\s*$/i, "select 1/0;commit;");
   await reject(lateErrorFile2, (err) => err.code === "22012");
@@ -5296,6 +5339,13 @@ async function assertProductionUgcEquivalents(sql, dbUrl) {
     { key: "pending_removed_with_deleted_account", value: 0 }
   ], "ugc_moderation_counters must contain exactly the single seed row");
 
+  // Trigger ugc_reports_count_removed_pending check
+  const [cntTrg] = await sql`select tgtype, tgenabled, not tgisinternal as not_internal, tgfoid = 'private.ugc_count_removed_pending_report()'::regprocedure as foid_ok from pg_trigger where tgrelid = 'private.ugc_reports'::regclass and tgname = 'ugc_reports_count_removed_pending';`;
+  assert.equal(cntTrg.tgtype, 9);
+  assert.equal(cntTrg.tgenabled, "O");
+  assert.equal(cntTrg.not_internal, true);
+  assert.equal(cntTrg.foid_ok, true);
+
   // Functions owner, prosecdef, search_path and ACL
   const [f1] = await sql`select proowner='postgres'::regrole as is_postgres, prosecdef, proconfig from pg_proc where oid = 'private.ugc_count_removed_pending_report()'::regprocedure;`;
   assert.equal(f1.is_postgres, true);
@@ -5303,6 +5353,8 @@ async function assertProductionUgcEquivalents(sql, dbUrl) {
   assert.deepEqual(f1.proconfig, ["search_path=pg_catalog"]);
   assert.equal((await sql`select has_function_privilege('anon', 'private.ugc_count_removed_pending_report()', 'EXECUTE') as ok;`)[0].ok, false);
   assert.equal((await sql`select has_function_privilege('authenticated', 'private.ugc_count_removed_pending_report()', 'EXECUTE') as ok;`)[0].ok, false);
+  assert.equal((await sql`select has_function_privilege('public', 'private.ugc_count_removed_pending_report()', 'EXECUTE') as ok;`)[0].ok, false);
+  assert.equal((await sql`select has_function_privilege('service_role', 'private.ugc_count_removed_pending_report()', 'EXECUTE') as ok;`)[0].ok, false);
 
   const [f2] = await sql`select proowner='postgres'::regrole as is_postgres, prosecdef, proconfig from pg_proc where oid = 'private.ugc_set_profile_blocked(uuid,boolean)'::regprocedure;`;
   assert.equal(f2.is_postgres, true);
@@ -5310,6 +5362,7 @@ async function assertProductionUgcEquivalents(sql, dbUrl) {
   assert.deepEqual(f2.proconfig, ["search_path=pg_catalog"]);
   assert.equal((await sql`select has_function_privilege('anon', 'private.ugc_set_profile_blocked(uuid,boolean)', 'EXECUTE') as ok;`)[0].ok, false);
   assert.equal((await sql`select has_function_privilege('authenticated', 'private.ugc_set_profile_blocked(uuid,boolean)', 'EXECUTE') as ok;`)[0].ok, false);
+  assert.equal((await sql`select has_function_privilege('public', 'private.ugc_set_profile_blocked(uuid,boolean)', 'EXECUTE') as ok;`)[0].ok, false);
   assert.equal((await sql`select has_function_privilege('service_role', 'private.ugc_set_profile_blocked(uuid,boolean)', 'EXECUTE') as ok;`)[0].ok, true);
 
   assert.deepEqual(await snapshot(), beforeAll, "protected tables unchanged after file 2");
@@ -5326,6 +5379,21 @@ async function assertProductionUgcEquivalents(sql, dbUrl) {
   await sql`insert into supabase_migrations.schema_migrations(version) values('20990101000000');`;
   await reject(file3, /history drift/);
   await sql`delete from supabase_migrations.schema_migrations where version='20990101000000';`;
+
+  // Predecessor receipt refusal for File 3 (wrong file 1 receipt)
+  await sql`update supabase_migrations.schema_migrations set statements = array['source_sha256=wrong00000000000000000000000000000000000000000000000000000000000'] where version = '20261107120000';`;
+  await reject(file3, /source receipt drift/);
+  await sql`update supabase_migrations.schema_migrations set statements = array['source_sha256=' || ${hash1}] where version = '20261107120000';`;
+
+  // Predecessor receipt refusal for File 3 (wrong file 2 receipt)
+  await sql`update supabase_migrations.schema_migrations set statements = array['source_sha256=wrong00000000000000000000000000000000000000000000000000000000000'] where version = '20261107130000';`;
+  await reject(file3, /source receipt drift/);
+  await sql`update supabase_migrations.schema_migrations set statements = array['source_sha256=' || ${hash2}] where version = '20261107130000';`;
+
+  // Extra service_role TRUNCATE grant refusal via pre-existing default privilege
+  await sql.unsafe("alter default privileges in schema private grant truncate on tables to service_role;");
+  await reject(file3, /table privileges mismatch/);
+  await sql.unsafe("alter default privileges in schema private revoke truncate on tables from service_role;");
 
   // Late error in File 3 rolls back File 3 only
   const lateErrorFile3 = file3.replace(/commit;\s*$/i, "select 1/0;commit;");

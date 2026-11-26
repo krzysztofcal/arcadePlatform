@@ -65,6 +65,24 @@ $schema$;
  or not exists(select 1 from pg_class where oid='private.ugc_reports'::regclass and relowner='postgres'::regrole and relrowsecurity)
  then raise exception 'UGC reports/blocks owner/RLS mismatch'; end if;
  if exists(select 1 from private.user_blocks) or exists(select 1 from private.ugc_reports) then raise exception 'UGC reports/blocks tables not empty'; end if;
+ if exists(
+   select 1 from (values('anon'),('authenticated'),('public')) r(role),
+                 (values('private.user_blocks'),('private.ugc_reports')) t(tbl)
+   where has_table_privilege(role, tbl, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ or not (
+   has_table_privilege('service_role', 'private.user_blocks', 'SELECT') and
+   has_table_privilege('service_role', 'private.user_blocks', 'INSERT') and
+   has_table_privilege('service_role', 'private.user_blocks', 'DELETE') and
+   not has_table_privilege('service_role', 'private.user_blocks', 'UPDATE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ or not (
+   has_table_privilege('service_role', 'private.ugc_reports', 'SELECT') and
+   has_table_privilege('service_role', 'private.ugc_reports', 'INSERT') and
+   has_table_privilege('service_role', 'private.ugc_reports', 'UPDATE') and
+   not has_table_privilege('service_role', 'private.ugc_reports', 'DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ then raise exception 'UGC reports/blocks table privileges mismatch'; end if;
  for stat in select * from pg_stat_xact_user_tables where schemaname<>'supabase_migrations' loop
   delta:=array[stat.n_tup_ins-coalesce((stats_before->stat.relid::text->>0)::bigint,0),stat.n_tup_upd-coalesce((stats_before->stat.relid::text->>1)::bigint,0),stat.n_tup_del-coalesce((stats_before->stat.relid::text->>2)::bigint,0)];
   if delta is distinct from (array[0,0,0]::bigint[]) then raise exception 'Unexpected data DML: %.%',stat.schemaname,stat.relname; end if;

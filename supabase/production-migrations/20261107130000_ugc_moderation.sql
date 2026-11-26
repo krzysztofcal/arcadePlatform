@@ -17,6 +17,7 @@ begin
  lock table supabase_migrations.schema_migrations in share row exclusive mode nowait;
  select array_agg(version order by version) into actual from supabase_migrations.schema_migrations;
  if actual is distinct from expected then raise exception 'Production UGC moderation history drift'; end if;
+ if not exists(select 1 from supabase_migrations.schema_migrations where version='20261107120000' and statements=array['source_sha256=328ea29e4cd7c661cc9a67b6103c724bce9e16767d9e1e17f077029e6a3844b6']) then raise exception 'UGC reports/blocks source receipt drift'; end if;
  if not exists(
    select 1 from pg_attribute a join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum
    where a.attrelid='public.user_profiles'::regclass and a.attname='public_profile_blocked'
@@ -25,7 +26,8 @@ begin
  if not exists(
    select 1 from pg_trigger t
    where t.tgrelid='public.user_profiles'::regclass and t.tgname='user_profiles_block_guard'
-     and not t.tgisinternal and t.tgenabled in ('O','A')
+     and t.tgfoid='private.guard_public_profile_block()'::regprocedure
+     and t.tgtype=23 and not t.tgisinternal and t.tgenabled='O'
  ) then raise exception 'user_profiles_block_guard preflight mismatch'; end if;
  if to_regclass('private.ugc_moderation_actions') is not null or to_regclass('private.ugc_avatar_holds') is not null
  or to_regclass('private.ugc_moderation_counters') is not null
@@ -117,12 +119,41 @@ $schema$;
  or not exists(select 1 from private.ugc_moderation_counters where key='pending_removed_with_deleted_account' and value=0)
  then raise exception 'UGC moderation counter seed mismatch'; end if;
  if not exists(
+   select 1 from pg_trigger t
+   where t.tgrelid='private.ugc_reports'::regclass and t.tgname='ugc_reports_count_removed_pending'
+     and t.tgfoid='private.ugc_count_removed_pending_report()'::regprocedure
+     and t.tgtype=9 and not t.tgisinternal and t.tgenabled='O'
+ ) then raise exception 'ugc_reports_count_removed_pending trigger contract mismatch'; end if;
+ if exists(
+   select 1 from (values('anon'),('authenticated'),('public')) r(role),
+                 (values('private.ugc_moderation_actions'),('private.ugc_avatar_holds'),('private.ugc_moderation_counters')) t(tbl)
+   where has_table_privilege(role, tbl, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ or not (
+   has_table_privilege('service_role', 'private.ugc_moderation_actions', 'SELECT') and
+   has_table_privilege('service_role', 'private.ugc_moderation_actions', 'INSERT') and
+   not has_table_privilege('service_role', 'private.ugc_moderation_actions', 'UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ or not (
+   has_table_privilege('service_role', 'private.ugc_avatar_holds', 'SELECT') and
+   has_table_privilege('service_role', 'private.ugc_avatar_holds', 'INSERT') and
+   has_table_privilege('service_role', 'private.ugc_avatar_holds', 'DELETE') and
+   not has_table_privilege('service_role', 'private.ugc_avatar_holds', 'UPDATE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ or not (
+   has_table_privilege('service_role', 'private.ugc_moderation_counters', 'SELECT') and
+   not has_table_privilege('service_role', 'private.ugc_moderation_counters', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ then raise exception 'UGC moderation table privileges mismatch'; end if;
+ if not exists(
    select 1 from pg_proc
    where oid='private.ugc_count_removed_pending_report()'::regprocedure
      and proowner='postgres'::regrole and prosecdef
      and proconfig=array['search_path=pg_catalog']
  ) or has_function_privilege('anon','private.ugc_count_removed_pending_report()','EXECUTE')
    or has_function_privilege('authenticated','private.ugc_count_removed_pending_report()','EXECUTE')
+   or has_function_privilege('public','private.ugc_count_removed_pending_report()','EXECUTE')
+   or has_function_privilege('service_role','private.ugc_count_removed_pending_report()','EXECUTE')
  then raise exception 'ugc_count_removed_pending_report contract mismatch'; end if;
  if not exists(
    select 1 from pg_proc
@@ -131,6 +162,7 @@ $schema$;
      and proconfig=array['search_path=pg_catalog']
  ) or has_function_privilege('anon','private.ugc_set_profile_blocked(uuid,boolean)','EXECUTE')
    or has_function_privilege('authenticated','private.ugc_set_profile_blocked(uuid,boolean)','EXECUTE')
+   or has_function_privilege('public','private.ugc_set_profile_blocked(uuid,boolean)','EXECUTE')
    or not has_function_privilege('service_role','private.ugc_set_profile_blocked(uuid,boolean)','EXECUTE')
  then raise exception 'ugc_set_profile_blocked contract mismatch'; end if;
  for stat in select * from pg_stat_xact_user_tables where schemaname<>'supabase_migrations' loop
