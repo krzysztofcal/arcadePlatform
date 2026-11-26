@@ -13,6 +13,7 @@
   The BIO contract `20261027173627` is not a prerequisite: none of these files references `bio`.
 - **Session settings** (exact names; each value is checked by its file):
   - common: `chips.production_project_ref=otbqfijerkieoxwpxjnm`;
+  - each `*_source_sha256` is the approved SHA-256 of that **Production** file's exact bytes, as recorded in the manifest's `replacement_migrations` entry (same convention as #1114, e.g. `edf83e55…` for `production-migrations/20261026120000_profile_phase_a.sql`);
   - file 1: `arcade.production_ugc_reports_confirmation=INSTALL UGC REPORTS BLOCKS otbqfijerkieoxwpxjnm`, `arcade.production_ugc_reports_source_sha256=<approved sha256 of file 1>`;
   - file 2: `arcade.production_ugc_moderation_confirmation=INSTALL UGC MODERATION otbqfijerkieoxwpxjnm`, `arcade.production_ugc_moderation_source_sha256=<approved sha256 of file 2>`;
   - file 3: `arcade.production_photo_consent_confirmation=INSTALL GOOGLE PHOTO CONSENT otbqfijerkieoxwpxjnm`, `arcade.production_photo_consent_source_sha256=<approved sha256 of file 3>`.
@@ -47,7 +48,7 @@
 - **Phase 1:** the tables and functions are additive and dark (no flag reads them on Production), so a failure or regret needs no action; leave them. No automatic DROP. Any removal is a separate, reviewed forward migration.
 - **Terms a3:** the prepared `disable-terms-production` operation for a3 returns the policy to the a2 state (separate GO). The legal pages stay versioned and immutable.
 - **Flags:** the OWNER clears the flag in Netlify, then an immediate Candidate and Publish of the current main. The flag stays effective until that rebuild is published, so plan for a delay of minutes. #1324 researches runtime switches without a release.
-- **Release A or B regression:** roll forward through the same Candidate/Publish path (no rollback mode before T004).
+- **Release A or B regression:** roll forward through the same Candidate/Publish path (the WWW release SOP has no rollback mode before #1159 T004).
 
 ## Delivery
 - SQL drafting can be delegated to Antigravity with exact pins. The coordinator reviews every line, runs the guard and harness on the disposable local PostgreSQL, and does the independent review.

@@ -23,7 +23,7 @@
 - **FR-003** Validation in the existing harness (`tests/chips/chips.migration.test.mjs` with a disposable local PostgreSQL rebuilt from the Production history and synthetic data):
   - identity, confirmation and hash refusals;
   - history-drift refusal;
-  - a late error rolls everything back;
+  - a late error rolls back that file only; earlier committed files stay (dark, additive);
   - valid N→N+3;
   - protected financial, poker and profile tables unchanged.
 - **FR-004** Legal (OWNER decision 2026-11-25: **Privacy and Terms**):
