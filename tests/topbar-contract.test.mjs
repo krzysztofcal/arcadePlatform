@@ -246,6 +246,8 @@ test('xp badge placeholders are compact', () => {
 
 test('poker pages place xp badge inside topbar', () => {
   assert.match(pokerIndex, /topbar-right[\s\S]*id="xpBadge"/);
+  // poker/table-v2.html has its own live topbar without the XP badge.
+  assert.doesNotMatch(pokerTable, /id="xpBadge"/);
 });
 
 test('poker pages boot the XP renderer after loading the XP core', () => {
