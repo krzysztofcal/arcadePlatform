@@ -50,7 +50,6 @@
     var b64 = dataUrl.slice(prefix.length);
     if (!b64 || b64.length > 65536 || b64.length % 4 !== 0) return false;
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return false;
-    if (b64.indexOf('?') !== -1 || b64.indexOf('token=') !== -1 || b64.indexOf('http') !== -1) return false;
     var raw = decodeBase64(b64);
     if (!raw || raw.length < 12 || raw.length > 49152) return false;
     if (raw.slice(0, 4) !== 'RIFF' || raw.slice(8, 12) !== 'WEBP') return false;

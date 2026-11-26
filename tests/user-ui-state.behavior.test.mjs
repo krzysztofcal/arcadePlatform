@@ -143,6 +143,12 @@ const profileRecord = (userId, displayName, confirmedAt = Date.now()) => JSON.st
   assert.equal(readSuccess.record.dataUrl, validDataUrl);
   assert.ok(readSuccess.record.savedAt > 0);
 
+  // 1b. Image bytes whose Base64 happens to contain "http" are still a valid photo
+  const httpBytes = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.from('http'), Buffer.alloc(8)]);
+  const httpDataUrl = 'data:image/webp;base64,' + httpBytes.toString('base64');
+  assert.ok(httpDataUrl.slice(23).includes('aHR0cA'));
+  assert.equal(state.api.writePhoto('user-photo-http', { path: validPath, dataUrl: httpDataUrl }), true);
+
   // 2. Reject path not matching ^pending/[0-9a-f-]{36}$
   assert.equal(state.api.writePhoto('user-photo-1', { path: 'pending/too-short', dataUrl: validDataUrl }), false);
   assert.equal(state.api.writePhoto('user-photo-1', { path: validPath + '?token=xyz', dataUrl: validDataUrl }), false);
