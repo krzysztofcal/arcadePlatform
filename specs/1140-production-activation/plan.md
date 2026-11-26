@@ -41,11 +41,12 @@
 4. The OWNER sets the Netlify Production flags: `UGC_SAFETY_ENABLED=1`, `GOOGLE_PHOTO_IMPORT_ENABLED=1`, `POKER_TABLE_PHOTO_ENABLED=1`. The agent never changes Netlify configuration.
 5. **Release B**: a Candidate and Publish of the then-current main (env vars take effect only on a build). Smoke (SC-003).
 
-## Phase 4: 16-avatar catalog (separate PR and GOs)
+## Phase 4: 16-avatar catalog (separate PR and GOs; only after Phase 1 is fully applied)
+- Do not apply the BIO contract or any catalog operation before the three Phase 1 files are applied: their exact history pins would then drift and need re-pinning, re-hashing and review.
 - Production-pinned variants of `normalize-profiles.sql` and `enable-catalog.sql` where only the Stage variant exists; the order with the BIO contract per #1114. Runtime DB switch, no WWW release.
 
 ## Rollback
-- **Phase 1:** the tables and functions are additive and dark (no flag reads them on Production), so a failure or regret needs no action; leave them. No automatic DROP. Any removal is a separate, reviewed forward migration.
+- **Phase 1:** the tables and functions are additive. The UGC tables stay dark while `UGC_SAFETY_ENABLED` is off. The photo-consent tables become live readers as soon as file 3 is applied, because `profile-google-photo.mjs` keeps status and withdrawal working with `GOOGLE_PHOTO_IMPORT_ENABLED` off (today the missing table returns 404). After file 3 it reads the empty table and answers "no consent"; the Account section stays hidden because import is disabled. A failure or regret needs no action: leave them. No automatic DROP; any removal is a separate, reviewed forward migration that must account for those live readers.
 - **Terms a3:** the prepared `disable-terms-production` operation for a3 returns the policy to the a2 state (separate GO). The legal pages stay versioned and immutable.
 - **Flags:** the OWNER clears the flag in Netlify, then an immediate Candidate and Publish of the current main. The flag stays effective until that rebuild is published, so plan for a delay of minutes. #1324 researches runtime switches without a release.
 - **Release A or B regression:** roll forward through the same Candidate/Publish path (the WWW release SOP has no rollback mode before #1159 T004).
