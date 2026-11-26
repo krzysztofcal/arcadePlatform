@@ -54,18 +54,17 @@ Owner-only staleness is accepted under D2. There are no cross-tab, revision or w
     - rule 3: a URL-less `uploaded` marker shows the record if one exists;
     - rule 4: an avatar of type `default` removes the record; a profile with no `avatar` field removes nothing;
   - every reset clears `data-avatar-want` and the shown-path marker;
-  - without usable storage, or without `ownUserId`, today's `applyPhoto`/catalog path applies, plus FR-005;
+  - without usable storage, or without `ownUserId`, today's `applyPhoto`/catalog path applies, plus FR-005. When `writePhoto` returns `false` (for example `setItem` throws while `getItem` works), the downloaded image is still shown, and an in-memory flag marks storage unusable for the rest of that page, so later nodes use the plain path. Later pages try once again, which is today's one download per page;
   - errors log `klog('profile:own_photo_failed', { code })` with no URL.
 - `js/auth/supabaseClient.js`:
-  - `applyResolvedUser` renders `{ displayName, avatar: hydrated.profile.avatar }` when a hydrated profile exists;
+  - `applyResolvedUser` renders `{ displayName, avatar: hydrated.profile.avatar }` when a hydrated profile exists **and** `ProfileClient.applyAvatar` is available; otherwise it keeps today's name-only render, so pages without `ProfileClient` (legal fallback, `ArcadeAvatars.apply`) are unchanged;
   - `applyProfileAvatar` passes `{ ownUserId: state.user ? String(state.user.id) : null }`;
   - nothing else changes. Sign-out and account switch keep calling `ProfileClient.clear()`, `ui.clearUser` and `setAnonymous`, and account deletion reaches the same path through `auth.signOut({ scope: 'local' })`.
 - `js/account-page.js`: the owner summary and `publicProfileAvatar` calls pass `{ ownUserId }`.
 
 ### 4. No expiry after load (US4, FR-005)
 - `js/profile-client.js::applyPhoto`:
-  - in `image.onload`, after the existing URL check, clear and delete `node.profileAvatarExpiry`, show the image and set `data-avatar-shown-path`;
-  - drop the `Date.now() >= deadline` check on load;
+  - `image.onload` keeps the existing URL and `Date.now() >= deadline` checks, so a photo whose link expired before it loaded still falls back. Only on a load before the deadline does it clear and delete `node.profileAvatarExpiry`, show the image and set `data-avatar-shown-path`;
   - at the top of `applyAvatar`, a photo whose path equals `data-avatar-shown-path` returns without a reset;
   - every reset, fallback or mask removes the marker.
 - Poker table photos are untouched.
@@ -91,6 +90,8 @@ Owner-only staleness is accepted under D2. There are no cross-tab, revision or w
   - a catalog avatar removes the record; a name-only render does not;
   - a URL-less `uploaded` marker shows the stored record;
   - `localStorage` throwing → plain `applyPhoto`;
+  - `getItem` works but `setItem` throws: the first own photo is shown, and a second node on the same page uses the plain `applyPhoto` path;
+  - `onload` after the deadline but before the timer fires: fallback, as today;
   - the existing `profile-me` read-count tests in `tests/account-page.test.mjs` and `tests/topbar-contract.test.mjs` still pass unchanged.
 - Run: the changed test files plus `tests/account-page.test.mjs`, `tests/account-auth.contract.test.mjs`, `tests/topbar-contract.test.mjs`, `tests/leaderboard-ui.contract.test.mjs` and `tests/public-profiles.behavior.test.mjs`, one file at a time (no full suite on the VPS).
 
