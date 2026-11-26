@@ -8,8 +8,8 @@
 |---|---|---|
 | Legal version | `2026-11-26-a3` | New Terms version adding UGC conduct, reporting, blocking, and moderation rules (#1140, #1328) |
 | Production identity | system `7575202818581710058`, project `otbqfijerkieoxwpxjnm` | Production catalog read |
-| Migration history | 73 rows, hash `f6a26af98255afd27ef743cecd68f923948e9974f4160c7997e45fd1c14863f9` | Hash of `string_agg(version\|\|':'\|\|coalesce(name,'<NULL>'),E'\n' ORDER BY version)` across 54 baseline + 2 poker single-player + 17 replacement migrations (including 3 UGC Phase 1 schema files) |
-| Published WWW/API | `08afb53ff34db2e6df6699ce12aa2cec43900711` | Published Production release A commit (`08afb53f`), serving Terms a3 and Privacy a6 |
+| Migration history | 73 rows, hash `f6a26af98255afd27ef743cecd68f923948e9974f4160c7997e45fd1c14863f9` | Hash of `string_agg(version\|\|':'\|\|coalesce(name,'<NULL>'),E'\n' ORDER BY version)` (70 rows reconciled for the a2 activation plus the 3 UGC Phase 1 files from #1327); manifest reconciliation remains an external preflight |
+| Published WWW/API | `08afb53ff34db2e6df6699ce12aa2cec43900711` | Published Production release A commit (`08afb53f`); serves the versioned Terms a3/Privacy a6 files while the aliases stay on a2/a5 until release B |
 | WS Production | `cddc65befd5c03851fdc5e67a6676c269d85ee03` | Running WS Production release (`cddc65be`), verified on VPS / GitHub deploy history |
 | Legal documents | `3e3cc30391acd84f4bb49d12b2958c5763bf41c6ae0e847230ecabeac5cf8750` | SHA-256 of sorted `<path>:<sha256>` lines for `legal/terms.2026-11-26-a3.{en,pl}.html` and `legal/privacy.2026-11-21-a5.{en,pl}.html` joined by `\n` without trailing newline |
 | Android APK | `NO_PRODUCTION_APK` | Explicit OWNER attestation that **no installed Production APK reader exists** (`NO PRODUCTION APK otbqfijerkieoxwpxjnm`). Web-only scope |
@@ -30,7 +30,7 @@ The sentinel guards stay for every pin, so an operator-supplied sentinel is alwa
    - Confirm system identifier `7575202818581710058` and project `otbqfijerkieoxwpxjnm`.
    - Confirm policy row has `version = '2026-10-28-a2'` and `active = true`.
    - Confirm 73 migration rows and history hash `f6a26af98255afd27ef743cecd68f923948e9974f4160c7997e45fd1c14863f9`.
-   - Scan inventory to obtain fresh counts and fingerprints:
+   - First read both counts; if either exceeds 1000, STOP without fingerprinting. Then obtain fresh fingerprints:
      ```sql
      SELECT
        (SELECT md5(coalesce(jsonb_agg(to_jsonb(r) ORDER BY subject_kind,subject_id,terms_version),'[]'::jsonb)::text) FROM private.profile_terms_receipts r) AS receipts_fingerprint,

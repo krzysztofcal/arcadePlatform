@@ -59,15 +59,15 @@ BEGIN
  -- No lifecycle/profile lock is acquired after the policy lock. Acceptances wait
  -- on the policy row; SHARE additionally prevents receipt DML during this operation.
  LOCK TABLE private.profile_terms_receipts IN SHARE MODE;
+ -- Bound the scan before fingerprinting: growth beyond the reviewed size is a STOP, not a longer scan.
+ SELECT count(*) INTO receipts_count FROM private.profile_terms_receipts;
+ SELECT count(*) INTO profiles_count FROM public.user_profiles;
+ IF receipts_count > 1000 OR profiles_count > 1000 THEN RAISE EXCEPTION 'Read-only inventory drift'; END IF;
  SELECT md5(coalesce(jsonb_agg(to_jsonb(r) ORDER BY subject_kind,subject_id,terms_version),'[]'::jsonb)::text)
  INTO receipts_before FROM private.profile_terms_receipts r;
  SELECT md5(coalesce(jsonb_agg(to_jsonb(p) ORDER BY user_id),'[]'::jsonb)::text)
  INTO profiles_before FROM public.user_profiles p;
- SELECT count(*) INTO receipts_count FROM private.profile_terms_receipts;
- SELECT count(*) INTO profiles_count FROM public.user_profiles;
- IF receipts_count > 1000
-  OR profiles_count > 1000
-  OR current_setting('arcade.terms_receipts_fingerprint',true) IS DISTINCT FROM receipts_before
+ IF current_setting('arcade.terms_receipts_fingerprint',true) IS DISTINCT FROM receipts_before
   OR current_setting('arcade.terms_profiles_fingerprint',true) IS DISTINCT FROM profiles_before
   OR current_setting('arcade.terms_receipts_count',true) IS DISTINCT FROM receipts_count::text
   OR current_setting('arcade.terms_profiles_count',true) IS DISTINCT FROM profiles_count::text
