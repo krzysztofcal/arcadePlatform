@@ -334,14 +334,15 @@
       return Promise.all([publicRequest(signal), meRequest(signal)]);
     }).then(async function(results){
       if (generation !== state.generation || document.hidden) return;
-      var viewer = await window.SupabaseAuth.getCurrentUser();
-      if (generation !== state.generation || document.hidden) return;
-      if (!viewer || viewer.id !== viewerId) throw { status: 401 };
+      // Wait (bounded) for the block list before the viewer re-check, so the identity check stays right before rendering.
       var blockWaitTimer;
       var blockTimeout = new Promise(function(resolve){ blockWaitTimer = setTimeout(resolve, 3000); });
       await Promise.race([blocksPromise, blockTimeout]);
       clearTimeout(blockWaitTimer);
       if (generation !== state.generation || document.hidden) return;
+      var viewer = await window.SupabaseAuth.getCurrentUser();
+      if (generation !== state.generation || document.hidden) return;
+      if (!viewer || viewer.id !== viewerId) throw { status: 401 };
       state.publicData = results[0];
       if (meGeneration === state.meGeneration) state.me = results[1];
       renderResults(state.publicData, state.me);

@@ -51,12 +51,13 @@
     var options = { mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', redirect: 'error' };
     if (controller) options.signal = controller.signal;
     return fetch(url, options).then(function(res){
-      if (timer) clearTimeout(timer);
       if (!res.ok) throw new Error('http_' + res.status);
       var contentType = res.headers && typeof res.headers.get === 'function' ? (res.headers.get('content-type') || '') : '';
       if (contentType && contentType.indexOf('image/webp') === -1) throw new Error('invalid_content_type');
       return res.blob();
     }).then(function(blob){
+      // The 15 s limit covers the body read too; it is cleared only once the body has arrived.
+      if (timer) clearTimeout(timer);
       if (!blob || blob.size > 49152) throw new Error('image_too_large');
       if (blob.type && blob.type.indexOf('image/webp') === -1) throw new Error('invalid_blob_type');
       if (typeof FileReader !== 'undefined'){

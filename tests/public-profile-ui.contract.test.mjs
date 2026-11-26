@@ -374,7 +374,7 @@ test("profile-client own-photo cache, expiry prevention, and fallbacks", async (
     resolveBlob({
       size: webpBuffer.length,
       type: "image/webp",
-      arrayBuffer: async () => webpBuffer.buffer
+      arrayBuffer: async () => webpBuffer.buffer.slice(webpBuffer.byteOffset, webpBuffer.byteOffset + webpBuffer.byteLength)
     });
     await new Promise((r) => setTimeout(r, 20));
 
@@ -382,6 +382,13 @@ test("profile-client own-photo cache, expiry prevention, and fallbacks", async (
     assert.ok(nodeB.style.backgroundImage.includes("data:image/webp;base64,"));
     assert.equal(nodeA.style.backgroundImage, nodeB.style.backgroundImage);
     assert.equal(savedRecord && savedRecord.path, "pending/00000000-0000-0000-0000-000000000002");
+    // The saved data URL holds exactly the downloaded bytes, so the real UserUiState validation can accept it.
+    assert.equal(savedRecord.dataUrl, "data:image/webp;base64," + webpBuffer.toString("base64"));
+    // A later node with the same path reuses the saved record: no new download.
+    const nodeC = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeC, profileNew, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 1, "saved record is reused without a new fetch");
+    assert.equal(nodeC.style.backgroundImage, 'url("' + savedRecord.dataUrl + '")');
   }
 
   // 4. Download finishing after clear() or account switch writes nothing and changes no node
@@ -423,7 +430,7 @@ test("profile-client own-photo cache, expiry prevention, and fallbacks", async (
     // Client clear() before download settles
     window.ProfileClient.clear();
     const webpBuffer = Buffer.concat([Buffer.from("RIFF\x00\x00\x00\x00WEBP"), Buffer.alloc(16)]);
-    resolveBlob({ size: webpBuffer.length, type: "image/webp", arrayBuffer: async () => webpBuffer.buffer });
+    resolveBlob({ size: webpBuffer.length, type: "image/webp", arrayBuffer: async () => webpBuffer.buffer.slice(webpBuffer.byteOffset, webpBuffer.byteOffset + webpBuffer.byteLength) });
     await new Promise((r) => setTimeout(r, 20));
 
     assert.equal(wrotePhoto, false, "download finishing after clear() writes nothing");
@@ -454,7 +461,7 @@ test("profile-client own-photo cache, expiry prevention, and fallbacks", async (
         ok: true,
         status: 200,
         headers: { get: () => "image/webp" },
-        blob: async () => ({ size: webpBuffer.length, type: "image/webp", arrayBuffer: async () => webpBuffer.buffer })
+        blob: async () => ({ size: webpBuffer.length, type: "image/webp", arrayBuffer: async () => webpBuffer.buffer.slice(webpBuffer.byteOffset, webpBuffer.byteOffset + webpBuffer.byteLength) })
       }),
       Date,
       Image: class { constructor() { images.push(this); } },
