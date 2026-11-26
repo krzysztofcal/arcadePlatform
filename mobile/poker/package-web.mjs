@@ -80,8 +80,12 @@ for (const version of ['2026-10-26-a1', '2026-10-28-a2']) {
     for (const kind of ['terms', 'privacy']) legalPages.push(`legal/${kind}.${version}.${lang}.html`);
   }
 }
-// Keep Privacy a3/a4 and the g4 a5 candidate alongside the current aliases. Bundling does not publish a policy.
-for (const version of ['2026-11-12-a3', '2026-11-20-a4', '2026-11-21-a5']) {
+// Keep Terms a3 alongside the current aliases. Bundling does not activate it.
+for (const version of ['2026-11-26-a3']) {
+  for (const lang of ['en', 'pl']) legalPages.push(`legal/terms.${version}.${lang}.html`);
+}
+// Keep Privacy a3/a4, the g4 a5 candidate and a6 alongside the current aliases. Bundling does not publish a policy.
+for (const version of ['2026-11-12-a3', '2026-11-20-a4', '2026-11-21-a5', '2026-11-26-a6']) {
   for (const lang of ['en', 'pl']) legalPages.push(`legal/privacy.${version}.${lang}.html`);
 }
 const pages = ['poker/index.html', 'poker/table-v2.html', 'poker/offline/play.html', 'account.html', ...legalPages];

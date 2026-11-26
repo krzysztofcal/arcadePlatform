@@ -93,24 +93,32 @@ test('approved legal content, historical policies and active a5 survive the real
     }
     assert.ok(!receipt.sourcePages.some(page => page.startsWith('legal/terms.') && page.includes(a4.candidateVersion)), 'a4 adds no Terms page');
     for (const lang of ['pl', 'en']) {
-      for (const version of ['2026-10-26-a1', manifest.candidateVersion]) {
-        for (const kind of ['terms', 'privacy']) assert.ok(receipt.sourcePages.includes(`legal/${kind}.${version}.${lang}.html`));
+      for (const version of ['2026-10-26-a1', manifest.candidateVersion, '2026-11-26-a3']) {
+        assert.ok(receipt.sourcePages.includes(`legal/terms.${version}.${lang}.html`));
       }
+      for (const version of ['2026-10-26-a1', manifest.candidateVersion, '2026-11-26-a6']) {
+        assert.ok(receipt.sourcePages.includes(`legal/privacy.${version}.${lang}.html`));
+      }
+      const packagedTermsA3 = await readFile(path.join(fixture, `mobile/poker/www/legal/terms.2026-11-26-a3.${lang}.html`), 'utf8');
+      const termsA3 = await readFile(path.join(root, `legal/terms.2026-11-26-a3.${lang}.html`), 'utf8');
+      assert.equal(main(packagedTermsA3), main(termsA3));
+      const packagedPrivacyA6 = await readFile(path.join(fixture, `mobile/poker/www/legal/privacy.2026-11-26-a6.${lang}.html`), 'utf8');
+      const privacyA6 = await readFile(path.join(root, `legal/privacy.2026-11-26-a6.${lang}.html`), 'utf8');
+      assert.equal(main(packagedPrivacyA6), main(privacyA6));
       const alias = await readFile(path.join(root, `legal/privacy.${lang}.html`), 'utf8');
       assert.match(alias, /id="account-deletion"/);
       assert.match(alias, /href="mailto:contact@kcswh\.pl"/);
-      // Active Privacy aliases match the approved a5 text; historical checks remain intact.
-      const active = await readFile(path.join(root, `legal/privacy.${a5.candidateVersion}.${lang}.html`), 'utf8');
+      // Active Privacy aliases match the approved a6 text; historical checks remain intact.
+      const active = await readFile(path.join(root, `legal/privacy.2026-11-26-a6.${lang}.html`), 'utf8');
       const inner = html => html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)[1];
-      assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the approved a5 text');
+      assert.equal(inner(alias), inner(active), 'active Privacy alias must equal the approved a6 text');
       const packagedAlias = await readFile(path.join(fixture, `mobile/poker/www/legal/privacy.${lang}.html`), 'utf8');
       assert.equal(main(packagedAlias), main(alias), 'packaging changed the active Privacy alias');
       const legacy = await readFile(path.join(root, `legal/privacy.2026-10-26-a1.${lang}.html`), 'utf8');
       assert.equal(createHash('sha256').update(legacy).digest('hex'), PRIVACY_A1_SHA256[lang], 'Privacy a1 must stay immutable');
-      // #1140: the active Terms alias carries the approved a2 text byte for byte; Terms a1 stays immutable for past acceptances.
+      // #1140: the active Terms alias carries the approved a3 text byte for byte; Terms a1/a2 stay immutable for past acceptances.
       const terms = await readFile(path.join(root, `legal/terms.${lang}.html`), 'utf8');
-      const termsA2 = await readFile(path.join(root, `legal/terms.${manifest.candidateVersion}.${lang}.html`), 'utf8');
-      assert.equal(inner(terms), inner(termsA2), 'active Terms alias must equal the approved a2 text');
+      assert.equal(inner(terms), inner(termsA3), 'active Terms alias must equal the approved a3 text');
       const packagedTerms = await readFile(path.join(fixture, `mobile/poker/www/legal/terms.${lang}.html`), 'utf8');
       assert.equal(main(packagedTerms), main(terms), 'packaging changed the active Terms alias');
       const termsA1 = await readFile(path.join(root, `legal/terms.2026-10-26-a1.${lang}.html`), 'utf8');
