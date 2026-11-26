@@ -1,6 +1,6 @@
 # Legal draft: Privacy a6 and Terms a3 (#1140 Phase 2), for OWNER acceptance
 
-Status: **draft, not published.** Base texts:
+Status: **ACCEPTED by the OWNER on 2026-11-26** (texts as below). Moderators: the OWNER and the admin accounts (`ADMIN_USER_IDS`). Not published yet. Base texts:
 - Privacy `2026-11-21-a5`
 - Terms `2026-10-28-a2`
 
