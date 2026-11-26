@@ -54,7 +54,8 @@ The sentinel guards stay for every pin, so an operator-supplied sentinel is alwa
    SELECT set_config('arcade.terms_receipts_count', '<FRESH_RECEIPTS_COUNT>', false);
    SELECT set_config('arcade.terms_profiles_count', '<FRESH_PROFILES_COUNT>', false);
    ```
-5. Execute `enable-terms-a3-production.sql` once.
+5. Execute `enable-terms-a3-production.sql` once. If the client already wraps the batch in a transaction (for example the Supabase SQL tool), send `BEGIN ISOLATION LEVEL REPEATABLE READ;` first and the session settings right after it; the rest of the file is unchanged.
+   Executed on 2026-11-26 (OWNER GO): a2/ON → a3/ON, receipts 3 and profiles 12 unchanged, history 73.
    - On any error: `ROLLBACK`, `STOP`, never retry or hand-edit pins.
 6. **SELECT-only verification:**
    - Confirm policy row has `version = '2026-11-26-a3'` and `active = true`.
