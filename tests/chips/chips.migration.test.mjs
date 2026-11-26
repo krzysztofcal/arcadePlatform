@@ -5092,6 +5092,285 @@ async function assertSettledRetention12mContracts(sql) {
   }).catch((error) => { if (error !== rollback) throw error; });
 }
 
+// #1140: Production equivalents for UGC reports/blocks, UGC moderation and Google photo consent.
+async function assertProductionUgcEquivalents(sql, dbUrl) {
+  const [identity] = await sql.unsafe("select system_identifier::text from pg_catalog.pg_control_system();");
+  const fixtureSystemIdentifier = identity.system_identifier;
+  const canonicalSystemIdentifier = "7575202818581710058";
+
+  const prodDir = path.join(process.cwd(), "supabase", "production-migrations");
+  const file1Name = "20261107120000_ugc_reports_blocks.sql";
+  const file2Name = "20261107130000_ugc_moderation.sql";
+  const file3Name = "20261107140000_google_photo_consent.sql";
+
+  const raw1 = fs.readFileSync(path.join(prodDir, file1Name), "utf8");
+  const raw2 = fs.readFileSync(path.join(prodDir, file2Name), "utf8");
+  const raw3 = fs.readFileSync(path.join(prodDir, file3Name), "utf8");
+
+  const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
+  const hash1 = sha256(raw1);
+  const hash2 = sha256(raw2);
+  const hash3 = sha256(raw3);
+
+  // Read manifest to verify manifest sha256 matches
+  const manifest = JSON.parse(fs.readFileSync(path.join(prodDir, "manifest.json"), "utf8"));
+  const m1 = manifest.replacement_migrations.find(m => m.file === file1Name);
+  const m2 = manifest.replacement_migrations.find(m => m.file === file2Name);
+  const m3 = manifest.replacement_migrations.find(m => m.file === file3Name);
+  assert.equal(m1?.sha256, hash1, "manifest hash mismatch for file 1");
+  assert.equal(m2?.sha256, hash2, "manifest hash mismatch for file 2");
+  assert.equal(m3?.sha256, hash3, "manifest hash mismatch for file 3");
+
+  const file1 = raw1.replaceAll(canonicalSystemIdentifier, fixtureSystemIdentifier);
+  const file2 = raw2.replaceAll(canonicalSystemIdentifier, fixtureSystemIdentifier);
+  const file3 = raw3.replaceAll(canonicalSystemIdentifier, fixtureSystemIdentifier);
+
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  const rows = async (table) => plain(await sql.unsafe(`select to_jsonb(t) value from ${table} t order by to_jsonb(t)::text`));
+  const protectedTables = [
+    "auth.users",
+    "public.user_profiles",
+    "public.chips_accounts",
+    "public.chips_transactions",
+    "public.chips_entries",
+    "public.chips_transaction_idempotency",
+    "public.poker_state",
+    "public.poker_tables",
+    "public.poker_seats",
+    "public.poker_actions",
+    "public.account_deletion_requests",
+    "public.account_deletion_release",
+    "public.profile_avatar_uploads",
+    "private.account_avatar_objects",
+    "private.avatar_tracking_cutover",
+    "storage.buckets",
+    "storage.objects",
+  ];
+  const snapshot = async () => {
+    const data = {};
+    for (const t of protectedTables) data[t] = await rows(t);
+    return data;
+  };
+
+  const metadata = async () => plain(await sql`select * from supabase_migrations.schema_migrations order by version`);
+  const initialHistory = await metadata();
+  assert.equal(initialHistory.length, 70, "expected exact 70 versions baseline N");
+  assert.equal(initialHistory[initialHistory.length - 1].version, "20261105160500", "expected baseline N ends at 20261105160500");
+
+  const beforeAll = await snapshot();
+
+  const reject = async (text, pattern) => {
+    await assert.rejects(sql.unsafe(text), pattern);
+    await sql.unsafe("rollback;");
+  };
+
+  // --- File 1 Refusal Tests ---
+  await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
+
+  // Confirmation mismatch
+  await sql.unsafe("set arcade.production_ugc_reports_confirmation = '';");
+  await reject(file1, /identity\/confirmation mismatch/);
+  await sql.unsafe("set arcade.production_ugc_reports_confirmation = 'WRONG';");
+  await reject(file1, /identity\/confirmation mismatch/);
+
+  // Identity mismatch (wrong project_ref or system_identifier)
+  await sql.unsafe("set chips.production_project_ref = 'wrong';");
+  await sql.unsafe("set arcade.production_ugc_reports_confirmation = 'INSTALL UGC REPORTS BLOCKS otbqfijerkieoxwpxjnm';");
+  await reject(file1, /identity\/confirmation mismatch/);
+  await sql.unsafe("set chips.production_project_ref = 'otbqfijerkieoxwpxjnm';");
+  await reject(file1.replaceAll(fixtureSystemIdentifier, "0"), /identity\/confirmation mismatch/);
+
+  // Hash refusal
+  await sql.unsafe("set arcade.production_ugc_reports_source_sha256 = '';");
+  await reject(file1, /Approved source hash receipt required/);
+  await sql.unsafe("set arcade.production_ugc_reports_source_sha256 = 'not-a-valid-sha256';");
+  await reject(file1, /Approved source hash receipt required/);
+
+  // Coordination lock refusal
+  await sql.unsafe(`set arcade.production_ugc_reports_source_sha256 = '${hash1}';`);
+  const locker = postgres(dbUrl, { max: 1, prepare: false });
+  try {
+    await locker.begin(async (tx) => {
+      await tx.unsafe("select pg_advisory_xact_lock(hashtextextended('chips-ledger-production-automation-v1:otbqfijerkieoxwpxjnm',0))");
+      await reject(file1, /coordination busy/);
+    });
+  } finally {
+    await locker.end();
+  }
+
+  // History drift refusal: wrong N (e.g. extra version)
+  await sql`insert into supabase_migrations.schema_migrations(version) values('20990101000000');`;
+  await reject(file1, /history drift/);
+  await sql`delete from supabase_migrations.schema_migrations where version='20990101000000';`;
+
+  // Out-of-order refusal: File 2 and File 3 refused when only N applied
+  await sql.unsafe("set arcade.production_ugc_moderation_confirmation = 'INSTALL UGC MODERATION otbqfijerkieoxwpxjnm';");
+  await sql.unsafe(`set arcade.production_ugc_moderation_source_sha256 = '${hash2}';`);
+  await reject(file2, /history drift/);
+
+  await sql.unsafe("set arcade.production_photo_consent_confirmation = 'INSTALL GOOGLE PHOTO CONSENT otbqfijerkieoxwpxjnm';");
+  await sql.unsafe(`set arcade.production_photo_consent_source_sha256 = '${hash3}';`);
+  await reject(file3, /history drift/);
+
+  // Late error in File 1 rolls back File 1 only
+  const lateErrorFile1 = file1.replace(/commit;\s*$/i, "select 1/0;commit;");
+  await reject(lateErrorFile1, (err) => err.code === "22012");
+  assert.deepEqual(await metadata(), initialHistory, "history unchanged after late error rollback in file 1");
+  assert.deepEqual(await snapshot(), beforeAll, "protected tables unchanged after late error in file 1");
+  assert.equal((await sql`select to_regclass('private.user_blocks') t;`)[0].t, null);
+  assert.equal((await sql`select to_regclass('private.ugc_reports') t;`)[0].t, null);
+
+  // Apply File 1 successfully (N -> N+1)
+  await sql.unsafe("set arcade.production_ugc_reports_confirmation = 'INSTALL UGC REPORTS BLOCKS otbqfijerkieoxwpxjnm';");
+  await sql.unsafe(`set arcade.production_ugc_reports_source_sha256 = '${hash1}';`);
+  await sql.unsafe(file1);
+
+  const historyAfter1 = await metadata();
+  assert.equal(historyAfter1.length, 71, "N+1 versions after file 1");
+  assert.equal(historyAfter1[historyAfter1.length - 1].version, "20261107120000");
+  assert.deepEqual(historyAfter1[historyAfter1.length - 1].statements, [`source_sha256=${hash1}`]);
+
+  // Check tables empty and RLS on
+  for (const table of ["private.user_blocks", "private.ugc_reports"]) {
+    const [info] = await sql.unsafe(`select relrowsecurity from pg_class where oid = '${table}'::regclass;`);
+    assert.equal(info.relrowsecurity, true, `${table} must have RLS enabled`);
+    const [cnt] = await sql.unsafe(`select count(*)::int as count from ${table};`);
+    assert.equal(cnt.count, 0, `${table} must be empty`);
+  }
+  assert.deepEqual(await snapshot(), beforeAll, "protected tables unchanged after file 1");
+
+  // --- File 2 Refusal Tests ---
+  // Out-of-order refusal: File 3 refused when only N+1 applied
+  await reject(file3, /history drift/);
+
+  // Confirmation / Identity / Hash refusal for File 2
+  await sql.unsafe("set arcade.production_ugc_moderation_confirmation = '';");
+  await reject(file2, /identity\/confirmation mismatch/);
+  await sql.unsafe("set arcade.production_ugc_moderation_confirmation = 'INSTALL UGC MODERATION otbqfijerkieoxwpxjnm';");
+  await sql.unsafe("set arcade.production_ugc_moderation_source_sha256 = 'bad';");
+  await reject(file2, /Approved source hash receipt required/);
+  await sql.unsafe(`set arcade.production_ugc_moderation_source_sha256 = '${hash2}';`);
+
+  // History drift refusal for File 2
+  await sql`insert into supabase_migrations.schema_migrations(version) values('20990101000000');`;
+  await reject(file2, /history drift/);
+  await sql`delete from supabase_migrations.schema_migrations where version='20990101000000';`;
+
+  // Preflight refusal for File 2 (user_profiles_block_guard trigger disabled)
+  await sql.unsafe("alter table public.user_profiles disable trigger user_profiles_block_guard;");
+  await reject(file2, /user_profiles_block_guard preflight mismatch/);
+  await sql.unsafe("alter table public.user_profiles enable trigger user_profiles_block_guard;");
+
+  // Late error in File 2 rolls back File 2 only
+  const lateErrorFile2 = file2.replace(/commit;\s*$/i, "select 1/0;commit;");
+  await reject(lateErrorFile2, (err) => err.code === "22012");
+  assert.deepEqual(await metadata(), historyAfter1, "history remains at N+1 after late error in file 2");
+  assert.equal((await sql`select to_regclass('private.ugc_moderation_actions') t;`)[0].t, null);
+  assert.equal((await sql`select to_regclass('private.ugc_avatar_holds') t;`)[0].t, null);
+  assert.equal((await sql`select to_regclass('private.ugc_moderation_counters') t;`)[0].t, null);
+  assert.equal((await sql`select to_regprocedure('private.ugc_count_removed_pending_report()') p;`)[0].p, null);
+  assert.equal((await sql`select to_regprocedure('private.ugc_set_profile_blocked(uuid,boolean)') p;`)[0].p, null);
+  // File 1 tables still exist!
+  assert.ok((await sql`select to_regclass('private.user_blocks') t;`)[0].t !== null);
+
+  // Apply File 2 successfully (N+1 -> N+2)
+  await sql.unsafe(file2);
+
+  const historyAfter2 = await metadata();
+  assert.equal(historyAfter2.length, 72, "N+2 versions after file 2");
+  assert.equal(historyAfter2[historyAfter2.length - 1].version, "20261107130000");
+  assert.deepEqual(historyAfter2[historyAfter2.length - 1].statements, [`source_sha256=${hash2}`]);
+
+  for (const table of ["private.ugc_moderation_actions", "private.ugc_avatar_holds"]) {
+    const [info] = await sql.unsafe(`select relrowsecurity from pg_class where oid = '${table}'::regclass;`);
+    assert.equal(info.relrowsecurity, true, `${table} must have RLS enabled`);
+    const [cnt] = await sql.unsafe(`select count(*)::int as count from ${table};`);
+    assert.equal(cnt.count, 0, `${table} must be empty`);
+  }
+
+  // UGC moderation counter must have RLS on and exactly the single seed row
+  const [counterInfo] = await sql.unsafe("select relrowsecurity from pg_class where oid = 'private.ugc_moderation_counters'::regclass;");
+  assert.equal(counterInfo.relrowsecurity, true, "ugc_moderation_counters must have RLS enabled");
+  const counterRows = await sql`select * from private.ugc_moderation_counters;`;
+  assert.deepEqual(counterRows.map(r => ({ key: r.key, value: Number(r.value) })), [
+    { key: "pending_removed_with_deleted_account", value: 0 }
+  ], "ugc_moderation_counters must contain exactly the single seed row");
+
+  // Functions owner, prosecdef, search_path and ACL
+  const [f1] = await sql`select proowner='postgres'::regrole as is_postgres, prosecdef, proconfig from pg_proc where oid = 'private.ugc_count_removed_pending_report()'::regprocedure;`;
+  assert.equal(f1.is_postgres, true);
+  assert.equal(f1.prosecdef, true);
+  assert.deepEqual(f1.proconfig, ["search_path=pg_catalog"]);
+  assert.equal((await sql`select has_function_privilege('anon', 'private.ugc_count_removed_pending_report()', 'EXECUTE') as ok;`)[0].ok, false);
+  assert.equal((await sql`select has_function_privilege('authenticated', 'private.ugc_count_removed_pending_report()', 'EXECUTE') as ok;`)[0].ok, false);
+
+  const [f2] = await sql`select proowner='postgres'::regrole as is_postgres, prosecdef, proconfig from pg_proc where oid = 'private.ugc_set_profile_blocked(uuid,boolean)'::regprocedure;`;
+  assert.equal(f2.is_postgres, true);
+  assert.equal(f2.prosecdef, true);
+  assert.deepEqual(f2.proconfig, ["search_path=pg_catalog"]);
+  assert.equal((await sql`select has_function_privilege('anon', 'private.ugc_set_profile_blocked(uuid,boolean)', 'EXECUTE') as ok;`)[0].ok, false);
+  assert.equal((await sql`select has_function_privilege('authenticated', 'private.ugc_set_profile_blocked(uuid,boolean)', 'EXECUTE') as ok;`)[0].ok, false);
+  assert.equal((await sql`select has_function_privilege('service_role', 'private.ugc_set_profile_blocked(uuid,boolean)', 'EXECUTE') as ok;`)[0].ok, true);
+
+  assert.deepEqual(await snapshot(), beforeAll, "protected tables unchanged after file 2");
+
+  // --- File 3 Refusal Tests ---
+  await sql.unsafe("set arcade.production_photo_consent_confirmation = '';");
+  await reject(file3, /identity\/confirmation mismatch/);
+  await sql.unsafe("set arcade.production_photo_consent_confirmation = 'INSTALL GOOGLE PHOTO CONSENT otbqfijerkieoxwpxjnm';");
+  await sql.unsafe("set arcade.production_photo_consent_source_sha256 = 'bad';");
+  await reject(file3, /Approved source hash receipt required/);
+  await sql.unsafe(`set arcade.production_photo_consent_source_sha256 = '${hash3}';`);
+
+  // History drift refusal for File 3
+  await sql`insert into supabase_migrations.schema_migrations(version) values('20990101000000');`;
+  await reject(file3, /history drift/);
+  await sql`delete from supabase_migrations.schema_migrations where version='20990101000000';`;
+
+  // Late error in File 3 rolls back File 3 only
+  const lateErrorFile3 = file3.replace(/commit;\s*$/i, "select 1/0;commit;");
+  await reject(lateErrorFile3, (err) => err.code === "22012");
+  assert.deepEqual(await metadata(), historyAfter2, "history remains at N+2 after late error in file 3");
+  assert.equal((await sql`select to_regclass('private.profile_photo_consents') t;`)[0].t, null);
+  assert.equal((await sql`select to_regclass('private.profile_photo_pending_deletions') t;`)[0].t, null);
+  // File 1 and 2 tables still exist!
+  assert.ok((await sql`select to_regclass('private.user_blocks') t;`)[0].t !== null);
+  assert.ok((await sql`select to_regclass('private.ugc_moderation_actions') t;`)[0].t !== null);
+
+  // Apply File 3 successfully (N+2 -> N+3)
+  await sql.unsafe(file3);
+
+  const historyAfter3 = await metadata();
+  assert.equal(historyAfter3.length, 73, "N+3 versions after file 3");
+  assert.equal(historyAfter3[historyAfter3.length - 1].version, "20261107140000");
+  assert.deepEqual(historyAfter3[historyAfter3.length - 1].statements, [`source_sha256=${hash3}`]);
+
+  for (const table of ["private.profile_photo_consents", "private.profile_photo_pending_deletions"]) {
+    const [info] = await sql.unsafe(`select relrowsecurity from pg_class where oid = '${table}'::regclass;`);
+    assert.equal(info.relrowsecurity, true, `${table} must have RLS enabled`);
+    const [cnt] = await sql.unsafe(`select count(*)::int as count from ${table};`);
+    assert.equal(cnt.count, 0, `${table} must be empty`);
+  }
+
+  // Protected tables completely unchanged
+  assert.deepEqual(await snapshot(), beforeAll, "protected tables unchanged after file 3");
+
+  // Re-apply refusal (already applied files reject with history drift)
+  await reject(file1, /history drift/);
+  await reject(file2, /history drift/);
+  await reject(file3, /history drift/);
+
+  // Clear GUCs
+  await sql.unsafe("set arcade.production_ugc_reports_confirmation = '';");
+  await sql.unsafe("set arcade.production_ugc_reports_source_sha256 = '';");
+  await sql.unsafe("set arcade.production_ugc_moderation_confirmation = '';");
+  await sql.unsafe("set arcade.production_ugc_moderation_source_sha256 = '';");
+  await sql.unsafe("set arcade.production_photo_consent_confirmation = '';");
+  await sql.unsafe("set arcade.production_photo_consent_source_sha256 = '';");
+
+  process.stdout.write("[klog] assertProductionUgcEquivalents PASS: exact N(70)→N+1→N+2→N+3; refusal/late-error/RLS/seed/protected tables checked\n");
+}
+
 async function main() {
   // Fundamental consent regressions run before any connection or fixture DDL.
   let reads = 0;
@@ -5187,6 +5466,7 @@ async function main() {
   await assertProductionDeletionCompatibility({ runMigration, migrationFiles });
   await assertStageSettledRetentionNullExecute(sql);
   await assertProductionSettledRetentionInstall(sql);
+  await assertProductionUgcEquivalents(sql, dbUrl);
 
   // The integration workflow reuses this disposable database for the
   // following Stage contract jobs. Leave it in the normal main-migration

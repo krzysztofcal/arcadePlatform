@@ -1208,6 +1208,39 @@
       "prerequisites": [
         "20261026120000_profile_phase_a.sql"
       ]
+    },
+    {
+      "file": "20261107120000_ugc_reports_blocks.sql",
+      "purpose": "#1140 UGC phase B dark private report and block tables; separate exact-file GO required; no activation",
+      "sha256": "3eb16e234d791f6862d0a49a243944e9f95b0454d1d5676ed4c2e9cb6125fa42",
+      "prerequisites": [
+        "20261028180000_public_profile_block.sql"
+      ],
+      "source_versions": [
+        "20261107120000"
+      ]
+    },
+    {
+      "file": "20261107130000_ugc_moderation.sql",
+      "purpose": "#1140 UGC phase C dark private moderation audit, avatar hold and anonymous counter tables; separate exact-file GO required; no activation",
+      "sha256": "14d35eb3ad0afd24e4fd0cdf5025e11fb7423f6b8b4512f379417340cfad3a4d",
+      "prerequisites": [
+        "20261107120000_ugc_reports_blocks.sql"
+      ],
+      "source_versions": [
+        "20261107130000"
+      ]
+    },
+    {
+      "file": "20261107140000_google_photo_consent.sql",
+      "purpose": "#1140 voluntary Google photo consent; dark private schema; separate exact-file GO required; no activation",
+      "sha256": "328b079e57789106d40021e52c3340ef09ac594c2eaeb754d4e7400797562a62",
+      "prerequisites": [
+        "20261107130000_ugc_moderation.sql"
+      ],
+      "source_versions": [
+        "20261107140000"
+      ]
     }
   ],
   "provenance_rules": [
