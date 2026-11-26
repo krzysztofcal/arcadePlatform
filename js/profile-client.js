@@ -180,43 +180,50 @@
               node.dataset.avatarShownPath = path;
               return;
             }
-            node.dataset.avatarWant = path;
-            node.dataset.avatarLoading = 'true';
-            if (node.setAttribute) node.setAttribute('aria-busy', 'true');
-            node.classList.add('profile-avatar--uploaded');
-            node.style.backgroundSize = 'cover';
-            node.style.backgroundPosition = 'center';
-            node.textContent = '';
-
-            var loadKey = ownUserId + '|' + path;
-            var capturedGen = publicGeneration;
-            if (!photoLoads[loadKey]){
-              photoLoads[loadKey] = downloadPhoto(avatar.url).finally(function(){
-                delete photoLoads[loadKey];
-              });
-            }
-            photoLoads[loadKey].then(async function(dataUrl){
-              var nowUser = await currentUserId();
-              if (nowUser !== ownUserId || publicGeneration !== capturedGen || node.dataset.avatarWant !== path) return;
-              delete node.dataset.avatarLoading;
-              delete node.dataset.avatarWant;
-              if (node.setAttribute) node.setAttribute('aria-busy', 'false');
+            // A link that has already expired is not fetched; the plain path below shows today's fallback.
+            if (photoExpiresAt(avatar.url) > Date.now()){
+              node.dataset.avatarWant = path;
+              node.dataset.avatarLoading = 'true';
+              if (node.setAttribute) node.setAttribute('aria-busy', 'true');
+              node.classList.add('profile-avatar--uploaded');
+              node.style.backgroundSize = 'cover';
+              node.style.backgroundPosition = 'center';
               node.textContent = '';
-              node.style.backgroundImage = 'url("' + dataUrl + '")';
-              node.dataset.avatarShownPath = path;
-              if (ui && typeof ui.writePhoto === 'function'){
-                var saved = ui.writePhoto(ownUserId, { path: path, dataUrl: dataUrl });
-                if (!saved) storageUsable = false;
+
+              var loadKey = ownUserId + '|' + path;
+              if (!photoLoads[loadKey]){
+                // One shared entry per user and path covers the download, the session check and the save,
+                // so a render during the check joins it instead of downloading again.
+                var photoUrl = avatar.url;
+                var capturedGen = publicGeneration;
+                var entry = downloadPhoto(photoUrl).then(async function(dataUrl){
+                  if (photoExpiresAt(photoUrl) <= Date.now()) throw new Error('link_expired');
+                  var nowUser = await currentUserId();
+                  if (nowUser !== ownUserId || publicGeneration !== capturedGen) throw new Error('stale_session');
+                  if (ui && typeof ui.writePhoto === 'function' && !ui.writePhoto(ownUserId, { path: path, dataUrl: dataUrl })) storageUsable = false;
+                  return dataUrl;
+                });
+                photoLoads[loadKey] = entry;
+                var release = function(){ if (photoLoads[loadKey] === entry) delete photoLoads[loadKey]; };
+                entry.then(release, release);
               }
-            }).catch(async function(){
-              var nowUser = await currentUserId();
-              if (nowUser !== ownUserId || publicGeneration !== capturedGen || node.dataset.avatarWant !== path) return;
-              delete node.dataset.avatarLoading;
-              delete node.dataset.avatarWant;
-              if (node.setAttribute) node.setAttribute('aria-busy', 'false');
-              applyAvatar(node, null);
-            });
-            return;
+              photoLoads[loadKey].then(function(dataUrl){
+                if (node.dataset.avatarWant !== path) return;
+                delete node.dataset.avatarLoading;
+                delete node.dataset.avatarWant;
+                if (node.setAttribute) node.setAttribute('aria-busy', 'false');
+                node.textContent = '';
+                node.style.backgroundImage = 'url("' + dataUrl + '")';
+                node.dataset.avatarShownPath = path;
+              }).catch(function(){
+                if (node.dataset.avatarWant !== path) return;
+                delete node.dataset.avatarLoading;
+                delete node.dataset.avatarWant;
+                if (node.setAttribute) node.setAttribute('aria-busy', 'false');
+                applyAvatar(node, null);
+              });
+              return;
+            }
           }
         }
       }

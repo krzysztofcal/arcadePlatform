@@ -376,7 +376,16 @@ test("profile-client own-photo cache, expiry prevention, and fallbacks", async (
       type: "image/webp",
       arrayBuffer: async () => webpBuffer.buffer.slice(webpBuffer.byteOffset, webpBuffer.byteOffset + webpBuffer.byteLength)
     });
+    // A render while the shared entry is still checking the session and saving joins it: no second download.
+    const nodeD = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeD, profileNew, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 1, "render during the session check joins the shared entry");
     await new Promise((r) => setTimeout(r, 20));
+    assert.equal(nodeD.style.backgroundImage, nodeA.style.backgroundImage);
+    // An already expired link is not fetched.
+    const nodeE = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeE, { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000009", Math.floor(Date.now() / 1000) - 5) } }, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 1, "expired link is not fetched");
 
     assert.ok(nodeA.style.backgroundImage.includes("data:image/webp;base64,"));
     assert.ok(nodeB.style.backgroundImage.includes("data:image/webp;base64,"));
