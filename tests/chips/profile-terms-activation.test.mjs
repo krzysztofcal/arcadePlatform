@@ -187,3 +187,69 @@ test('guarded Production Terms activation/OFF preserves legacy profiles and rece
   await denied(off,/Expected active Terms a2/);
  }finally{try{if(allocated){await sql.unsafe('rollback');await sql.unsafe('drop schema if exists private cascade;drop schema if exists supabase_migrations cascade;drop table if exists public.user_profiles,public.protected_fixture');}}finally{await sql.end();}}
 });
+
+test('guarded Production Terms a2 -> a3 activation and rollback: pins, inventory drift, one update and rollback', {skip:!productionUrl}, async()=>{
+ const target=new URL(productionUrl);assert.ok(['127.0.0.1','localhost','[::1]'].includes(target.hostname));assert.match(target.pathname,/\/[^/]+_test$/);
+ const sql=postgres(productionUrl,{max:1,prepare:false});let allocated=false;
+ try{
+  assert.match((await sql`show server_version`)[0].server_version,/^17\./);
+  assert.equal((await sql`select count(*)::int n from pg_tables where schemaname in ('public','private','auth','supabase_migrations')`)[0].n,0,'fresh synthetic database required');
+  allocated=true;
+  await sql.unsafe(`create schema private;create schema supabase_migrations;
+   create table supabase_migrations.schema_migrations(version text primary key,name text);
+   insert into supabase_migrations.schema_migrations select i::text,null from generate_series(1,73) i;
+   create table private.profile_terms_policy(singleton boolean primary key,version text,active boolean,variants_enabled boolean,identity_normalized_at timestamptz);
+   insert into private.profile_terms_policy values(true,'2026-10-28-a2',true,false,null);
+   create table private.profile_terms_receipts(subject_kind text,subject_id text,terms_version text,request_id text);
+   insert into private.profile_terms_receipts values('account','synthetic-1','2026-10-28-a2','receipt-1'),('account','synthetic-2','2026-10-28-a2','receipt-2');
+   create table public.user_profiles(user_id integer primary key,bio text);
+   insert into public.user_profiles select i,'legacy' from generate_series(1,11) i;
+   create table public.protected_fixture(value text);insert into public.protected_fixture values('unchanged');`);
+  const root=new URL('../../specs/1140-production-activation/operations/',import.meta.url);
+  const original=await readFile(new URL('enable-terms-a3-production.sql',root),'utf8');
+  const originalRollback=await readFile(new URL('rollback-terms-a3-production.sql',root),'utf8');
+  const system=(await sql`select system_identifier::text id from pg_control_system()`)[0].id;
+  assert.notEqual(system,'7575202818581710058');assert.notEqual(system,'7656985631720456337');
+  const set=async(k,v)=>sql`select set_config(${k},${v},false)`;
+  const state=async()=> (await sql.unsafe(`select jsonb_build_object('policy',(select to_jsonb(p) from private.profile_terms_policy p),
+   'profiles',(select jsonb_agg(to_jsonb(p) order by user_id) from public.user_profiles p),'receipts',(select coalesce(jsonb_agg(to_jsonb(r)),'[]'::jsonb) from private.profile_terms_receipts r),
+   'protected',(select value from public.protected_fixture)) s`))[0].s;
+  const denied=async(source,pattern)=>{const before=await state();await assert.rejects(sql.unsafe(source),pattern);await sql.unsafe('rollback');assert.deepEqual(await state(),before);};
+  await denied(original,/identity\/operator/);
+  const local=original.replaceAll('7575202818581710058',system);
+  await set('arcade.terms_project','otbqfijerkieoxwpxjnm');await set('arcade.terms_confirmation','ENABLE TERMS A3 otbqfijerkieoxwpxjnm');
+  await set('arcade.terms_legal_version','2026-11-26-a3');
+  const readers={version:'2026-11-26-a3'};
+  for(const key of ['apiSha','wsSha','apkSha','documentsSha256'])readers[key]=original.match(new RegExp("readers->>'"+key+"' IS DISTINCT FROM '([^']+)'"))[1];
+  await set('arcade.terms_readers',JSON.stringify(readers));
+  await denied(local,/readers preflight/); // web-only scope needs its own explicit OWNER decision
+  await set('arcade.terms_apk_confirmation','NO PRODUCTION APK otbqfijerkieoxwpxjnm');
+  await denied(local,/migration version\/name/);
+  const hash=(await sql.unsafe("select encode(sha256(convert_to(string_agg(version||':'||coalesce(name,'<NULL>'),E'\\n' order by version),'UTF8')),'hex') h from supabase_migrations.schema_migrations"))[0].h;
+  const ready=local.replace(/history_hash constant text := '[0-9a-f]{64}'/,"history_hash constant text := '"+hash+"'");
+  await denied(ready,/inventory drift/);
+  const fp=(await sql.unsafe(`select (select md5(coalesce(jsonb_agg(to_jsonb(r) order by subject_kind,subject_id,terms_version),'[]'::jsonb)::text) from private.profile_terms_receipts r) receipts,
+   (select md5(coalesce(jsonb_agg(to_jsonb(p) order by user_id),'[]'::jsonb)::text) from public.user_profiles p) profiles,
+   (select count(*)::text from private.profile_terms_receipts) receipts_count,
+   (select count(*)::text from public.user_profiles) profiles_count`))[0];
+  await set('arcade.terms_receipts_fingerprint',fp.receipts);await set('arcade.terms_profiles_fingerprint',fp.profiles);
+  await set('arcade.terms_receipts_count','999');await set('arcade.terms_profiles_count',fp.profiles_count);
+  await denied(ready,/inventory drift/);
+  await set('arcade.terms_receipts_count',fp.receipts_count);
+  await sql.unsafe(`create function private.bad_write_a3() returns trigger language plpgsql as $$begin update public.protected_fixture set value='bad';return new;end$$;
+   create trigger bad_write_a3 after update on private.profile_terms_policy for each row execute function private.bad_write_a3();`);
+  await denied(ready,/Unexpected transaction data write/);await sql.unsafe('drop trigger bad_write_a3 on private.profile_terms_policy');
+  await denied(ready.replace('COMMIT;','SELECT 1/0; COMMIT;'),/division by zero/);
+  const before=await state();await sql.unsafe(ready);const after=await state();
+  assert.deepEqual(after,{...before,policy:{...before.policy,version:'2026-11-26-a3',active:true}});
+  await denied(ready,/Expected Production a2\/ON policy/);
+  // Real acceptance may create receipts between activation and rollback; all receipts must be retained.
+  await sql.unsafe("insert into private.profile_terms_receipts values('account','synthetic-3','2026-11-26-a3','retained-a3')");
+  await denied(originalRollback,/identity\/operator/);const rollback=originalRollback.replaceAll('7575202818581710058',system);
+  await denied(rollback,/identity\/operator/);
+  await set('arcade.terms_confirmation','WRONG CONFIRMATION');await denied(rollback,/identity\/operator/);
+  await set('arcade.terms_confirmation','ROLLBACK TERMS A3 otbqfijerkieoxwpxjnm');
+  const active=await state();await sql.unsafe(rollback);assert.deepEqual(await state(),{...active,policy:{...active.policy,version:'2026-10-28-a2',active:true}});
+  await denied(rollback,/Expected active Terms a3 policy/);
+ }finally{try{if(allocated){await sql.unsafe('rollback');await sql.unsafe('drop schema if exists private cascade;drop schema if exists supabase_migrations cascade;drop table if exists public.user_profiles,public.protected_fixture');}}finally{await sql.end();}}
+});
