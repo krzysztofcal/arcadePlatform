@@ -17,6 +17,9 @@ begin
  lock table supabase_migrations.schema_migrations in share row exclusive mode nowait;
  select array_agg(version order by version) into actual from supabase_migrations.schema_migrations;
  if actual is distinct from expected then raise exception 'Production photo consent history drift'; end if;
+ if not exists(select 1 from supabase_migrations.schema_migrations where version='20261107120000' and statements=array['source_sha256=328ea29e4cd7c661cc9a67b6103c724bce9e16767d9e1e17f077029e6a3844b6'])
+ or not exists(select 1 from supabase_migrations.schema_migrations where version='20261107130000' and statements=array['source_sha256=b5b6b7921594e20e7aaae77f5fa49aca89cb0ece35b8c21915d906ef6d1d3412'])
+ then raise exception 'UGC moderation source receipt drift'; end if;
  if to_regclass('private.profile_photo_consents') is not null or to_regclass('private.profile_photo_pending_deletions') is not null
  then raise exception 'Unexpected existing photo consent objects'; end if;
  select jsonb_object_agg(relid::text,jsonb_build_array(n_tup_ins,n_tup_upd,n_tup_del)) into stats_before from pg_stat_xact_user_tables;
@@ -56,6 +59,25 @@ $schema$;
  if exists(select 1 from private.profile_photo_consents)
  or exists(select 1 from private.profile_photo_pending_deletions)
  then raise exception 'Photo consent tables not empty'; end if;
+ if exists(
+   select 1 from (values('anon'),('authenticated'),('public')) r(role),
+                 (values('private.profile_photo_consents'),('private.profile_photo_pending_deletions')) t(tbl)
+   where has_table_privilege(role, tbl, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ or not (
+   has_table_privilege('service_role', 'private.profile_photo_consents', 'SELECT') and
+   has_table_privilege('service_role', 'private.profile_photo_consents', 'INSERT') and
+   has_table_privilege('service_role', 'private.profile_photo_consents', 'UPDATE') and
+   not has_table_privilege('service_role', 'private.profile_photo_consents', 'DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ )
+ or not (
+   has_table_privilege('service_role', 'private.profile_photo_pending_deletions', 'SELECT') and
+   has_table_privilege('service_role', 'private.profile_photo_pending_deletions', 'INSERT') and
+   has_table_privilege('service_role', 'private.profile_photo_pending_deletions', 'UPDATE') and
+   has_table_privilege('service_role', 'private.profile_photo_pending_deletions', 'DELETE') and
+   not has_table_privilege('service_role', 'private.profile_photo_pending_deletions', 'TRUNCATE,REFERENCES,TRIGGER')
+ )
+ then raise exception 'Photo consent table privileges mismatch'; end if;
  for stat in select * from pg_stat_xact_user_tables where schemaname<>'supabase_migrations' loop
   delta:=array[stat.n_tup_ins-coalesce((stats_before->stat.relid::text->>0)::bigint,0),stat.n_tup_upd-coalesce((stats_before->stat.relid::text->>1)::bigint,0),stat.n_tup_del-coalesce((stats_before->stat.relid::text->>2)::bigint,0)];
   if delta is distinct from (array[0,0,0]::bigint[]) then raise exception 'Unexpected data DML: %.%',stat.schemaname,stat.relname; end if;
