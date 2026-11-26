@@ -28,11 +28,11 @@
   - stop at the first error: that file rolls back by itself, and earlier committed files stay. They are empty, dark schema with no reader impact, so the run is resumable without retry tricks. Never splice or edit files at apply time.
 
 ## Phase 2: Legal and procedure (separate PR, OWNER legal acceptance)
-- Privacy `a6` PL/EN plus the alias: reports, blocks, moderation, retention, legal basis.
-- Terms `a3` PL/EN plus the alias: conduct rules, reporting, blocking, moderation actions.
+- Privacy `a6` PL/EN (the alias switches in release B): reports, blocks, moderation, retention, legal basis.
+- Terms `a3` PL/EN (the alias switches in release B): conduct rules, reporting, blocking, moderation actions.
 - Code legal version a3 (`shared/profile-terms.mjs`, the client Terms dialog), following the existing a1→a2 change.
-- A Production-pinned `enable-terms-production` operation for a3 (identity, history, confirmation, legal document hash, reader pins) and its matching `disable-terms-production` rollback, modelled on #1114.
-- The moderator procedure: the OWNER verifies that the existing Production `ADMIN_USER_IDS` lists the intended moderators, and sets the review cadence.
+- A Production-pinned `enable-terms-production` operation for a3 (identity, history, confirmation, legal document hash, reader pins) and its matching `disable-terms-production` rollback, modelled on #1114. The reader pins name the exact release A WWW SHA, the WS SHA and the Android state, so both operations are prepared in a separate small PR **after release A**.
+- The moderator procedure (OWNER 2026-11-26): the moderators are the OWNER and the admin accounts in the existing `ADMIN_USER_IDS`; reports are reviewed manually in the admin panel.
 
 ## Phase 3: Activation (each step a separate OWNER GO)
 1. Apply Phase 1 on Production; independent postflight (SC-002).
