@@ -23,24 +23,27 @@ Each finding states a concrete scenario (inputs or sequence → wrong result) an
 | **P2** | Wrong behaviour in normal use that does not self-heal, a transient wrong view for other users, or a contradiction that blocks correct implementation. |
 | **P3** | Visible only to the acting user and self-healing on the next read or page, needing unusual timing, or a style or wording issue. |
 
+Apply the table top-down: **P0 and P1 criteria take precedence**. A finding that meets a P0/P1 criterion keeps that rating even when it is brief, self-healing or needs unusual timing; rarity and short duration only distinguish P2 from P3. P2 for "a transient wrong view for other users" applies only when no P1 effect (such as another user's data) is involved.
+
 Example: "the owner briefly sees their own previous avatar in a multi-tab race" is P3. The same race showing one player's photo to **another** player is P1.
 
 ## 3. High-risk areas: races are at least P2
 
-These areas come from `AGENTS.md` High-Risk Areas: WS reconnect, poker state transitions, table lifecycle, UI ↔ WS sync, chips ledger and balances, migrations. A race here is P1 when it can affect money or game state.
+These areas are the `AGENTS.md` High-Risk Areas: WS reconnect, poker state transitions, table lifecycle, UI ↔ WS sync and global CSS. This file adds the chips ledger and balances, and migrations. A race in any of them is at least P2, and P1 when it can affect money or game state.
 
 ## 4. Accepted trade-offs are out of scope within their bounds
 
 When the spec records an OWNER-approved decision with stated limits:
-- a finding **inside** those limits is not reported again;
-- a finding that **exceeds** them is reported and rated normally. For example, a decision says "only the owner" and a scenario shows the effect to someone else.
+- a finding about the **accepted effect, inside** those limits, is not reported again;
+- a finding that **exceeds** them is reported and rated normally. For example, a decision says "only the owner" and a scenario shows the effect to someone else;
+- a recorded decision never exempts a violation of a GO gate, the merge policy, deployment authority or the WS Preview Deploy rule. Those are always reported.
 
 Do not reopen approved decisions, the fundamental-tests-only policy or the scope the OWNER set.
 
 ## 5. Proportional fixes
 
 - P2 and P3 findings propose the simplest fix, or "accept and document in the spec".
-- New mechanisms (counters, cross-tab sync, locks, retries, extra endpoints) may be proposed only for P0 or P1.
+- New mechanisms (counters, cross-tab sync, locks, retries, extra endpoints) are for P0 or P1. For P2, propose a small mechanism only when existing code cannot fix the problem and it is the simplest effective fix. Say why.
 - Never ask for UI rendering, CSS, layout, JSP-view or simple-glue tests (`AGENTS.md` Testing Policy).
 
 ## 6. What to check by task type
@@ -54,6 +57,6 @@ Do not reopen approved decisions, the fundamental-tests-only policy or the scope
 
 ## 7. Scope
 
-- Skip generated files (`*.generated.js`, built bundles) and the immutable `legal/*.html` versions unless the change targets them.
+- Do not review generated files (`*.generated.js`, built bundles) line by line. When a change affects a shipped artifact, check that the artifact was regenerated from the changed source and that its SRI pins match. Do not review the immutable `legal/*.html` versions unless the change targets them.
 - Report each issue once, with the highest justified severity.
 - If nothing reaches P2, say so plainly. P3 alone does not block a handoff.
