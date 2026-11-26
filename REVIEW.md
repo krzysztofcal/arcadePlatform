@@ -34,15 +34,15 @@ These areas are the `AGENTS.md` High-Risk Areas: WS reconnect, poker state trans
 ## 4. Accepted trade-offs are out of scope within their bounds
 
 When the spec records an OWNER-approved decision with stated limits:
-- a finding about the **accepted effect, inside** those limits, is not reported again;
+- a finding about the **accepted effect, inside** those limits **and within all binding repository rules**, is not reported again;
 - a finding that **exceeds** them is reported and rated normally. For example, a decision says "only the owner" and a scenario shows the effect to someone else;
-- a recorded decision never exempts a violation of a GO gate, the merge policy, deployment authority or the WS Preview Deploy rule. Those are always reported.
+- a recorded decision never exempts a violation of a binding rule in `AGENTS.md`, `skills.md` or the constitution (for example GO gates, the merge policy, deployment authority, the WS Preview Deploy rule or the testing policy). Those are always reported.
 
 Do not reopen approved decisions, the fundamental-tests-only policy or the scope the OWNER set.
 
 ## 5. Proportional fixes
 
-- P2 and P3 findings propose the simplest fix, or "accept and document in the spec".
+- P2 and P3 findings propose the simplest fix. "Accept and document in the spec" is allowed only for a trade-off that complies with all binding rules; a rule violation is fixed in the plan or code.
 - New mechanisms (counters, cross-tab sync, locks, retries, extra endpoints) are for P0 or P1. For P2, propose a small mechanism only when existing code cannot fix the problem and it is the simplest effective fix. Say why.
 - Never ask for UI rendering, CSS, layout, JSP-view or simple-glue tests (`AGENTS.md` Testing Policy).
 
