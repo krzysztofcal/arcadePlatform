@@ -12,7 +12,7 @@ A finding without these answers is speculation and is rejected.
 4. **Does it increase load?** More requests, loops, egress or writes.
 5. **How realistic is it?** Normal use, or precise timing such as several tabs, sub-second interleaving or fast back-and-forth changes.
 
-Each finding states a concrete scenario (inputs or sequence → wrong result) and cites the exact file and line, or plan section.
+Each finding states a concrete scenario (inputs or sequence → wrong result) and cites the exact file and line, or plan section. An answer may be "not applicable" or "cannot be determined from the material", with one line of reason. A violation of a binding rule (§4) needs no impact analysis: cite the rule and the plan or code passage that breaks it.
 
 ## 2. Severity follows from the answers
 
@@ -44,7 +44,7 @@ Do not reopen approved decisions, the fundamental-tests-only policy or the scope
 
 - P2 and P3 findings propose the simplest fix. "Accept and document in the spec" is allowed only for a trade-off that complies with all binding rules; a rule violation is fixed in the plan or code.
 - New mechanisms (counters, cross-tab sync, locks, retries, extra endpoints) are for P0 or P1. For P2, propose a small mechanism only when existing code cannot fix the problem and it is the simplest effective fix. Say why.
-- Never ask for UI rendering, CSS, layout, JSP-view or simple-glue tests (`AGENTS.md` Testing Policy).
+- Never ask to **add** UI rendering, CSS, layout, JSP-view or simple-glue tests (`AGENTS.md` Testing Policy). Asking for targeted verification with the methods that policy allows (existing preview, E2E, manual checks, optional real-device diagnostics) remains fine.
 
 ## 6. What to check by task type
 
