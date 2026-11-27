@@ -173,3 +173,17 @@ The Production APK signs in with Google through Android Credential Manager (`Pok
   - the Supabase Google provider accepting that Web client ID as audience;
   - a signed AAB with versionCode ≥ 2 tested through Play internal testing on the Galaxy S24+.
 - **Breaking for optional Google photo import:** ID-token sign-in provides no `session.provider_token`. The photo reconnect flow (`js/profile-google-photo.js`, owned separately, see #1295) cannot obtain Google photo proof from this login in the Production APK, and must handle that explicitly.
+
+### Android diagnostics (#1306)
+
+Android builds require `mobile/poker/google-services.json` from the dedicated
+Firebase Spark project and the matching project ID pinned in
+`configure-android.mjs`. The file must contain the Stage and Production Android
+clients. See the [execution plan](../../specs/1306-android-crash-diagnostics/plan.md)
+for the project settings and device verification matrix.
+
+Both channels default to Crashlytics automatic collection off. The native
+bridge also declines app-originated non-fatal reports. Firebase initialization
+can precede Capacitor startup, and local reports, identifiers, Sessions,
+Installations and transport may still be involved. Stage verification must
+inspect these effects and measure network traffic before any activation decision.

@@ -721,3 +721,31 @@ test('#1300 native Google sign-in: Production only, SHA-256 nonce pairing, cance
   await chained;
   assert.equal(chainPicker, 1);
 });
+
+test('JS diagnostics forwards only bounded categories and local source coordinates', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const events = {};
+  const reports = [];
+  const window = {
+    location: { origin: 'https://localhost', pathname: '/poker/offline/play.html' },
+    addEventListener(name, listener) { events[name] = listener; },
+    Capacitor: { Plugins: { PokerDiagnostics: { report(payload) {
+      reports.push({ ...payload });
+      events.unhandledrejection({ reason: 'nested private detail' });
+      return Promise.reject(new Error('bridge unavailable'));
+    } } } },
+  };
+  runInNewContext(readFileSync(new URL('../mobile/poker/diagnostics.js', import.meta.url), 'utf8'), { window, URL });
+  events.error({ filename: 'https://other.test/private.js', lineno: 2 });
+  events.error({ filename: 'https://localhost/path/runtime.js?token=private', lineno: 23, message: 'private' });
+  await new Promise(setImmediate);
+  events.error({ filename: 'https://localhost/account.html#private', lineno: 9 });
+  await new Promise(setImmediate);
+  events.unhandledrejection({ reason: 'private' });
+  await new Promise(setImmediate);
+  assert.deepEqual(reports, [
+    { code: 'js_uncaught', stage: 'offline', js_file: 'runtime.js', js_line: 23 },
+    { code: 'js_uncaught', stage: 'offline', js_line: 9 },
+    { code: 'js_unhandled_rejection', stage: 'offline' },
+  ]);
+});

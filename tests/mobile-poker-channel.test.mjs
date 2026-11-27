@@ -8,6 +8,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   callbackIntentFilter,
+  assertFirebaseConfig,
+  buildResources,
+  configureDiagnosticsManifest,
   configureManifest,
   resolveChannel,
   APPROVED_PRODUCTION_APP_ID,
@@ -425,10 +428,41 @@ test('capacitor.production.json equals capacitor.config.json except appId and ap
   assert.deepEqual(prodRest, stageRest);
 });
 
+function addFirebaseFixture(dir) {
+  const configure = path.join(dir, 'configure-android.mjs');
+  writeFileSync(configure, readFileSync(configure, 'utf8').replace(
+    /^const FIREBASE_PROJECT_ID = .*;$/m, "const FIREBASE_PROJECT_ID = 'poker-test';"
+  ));
+  writeFileSync(path.join(dir, 'google-services.json'), JSON.stringify({
+    project_info: { project_id: 'poker-test', project_number: '123456789' },
+    client: ['pl.kcswh.arcadepoker', 'pl.kcswh.arcadepoker.stage'].map((appId, index) => ({
+      client_info: {
+        mobilesdk_app_id: `1:123456789:android:aabbccdd${index}`,
+        android_client_info: { package_name: appId },
+      },
+      api_key: [{ current_key: 'AIza' + 'a'.repeat(35) }],
+    })),
+  }));
+  mkdirSync(path.join(dir, 'www'));
+  writeFileSync(path.join(dir, 'www/build-receipt.json'), JSON.stringify({ sha: 'a'.repeat(40) }));
+  writeFileSync(path.join(dir, 'android/build.gradle'), "classpath 'com.google.gms:google-services:4.4.4'\n");
+  const appGradle = path.join(dir, 'android/app/build.gradle');
+  writeFileSync(appGradle, readFileSync(appGradle, 'utf8') + `
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found")
+}
+`);
+}
+
 // Minimal writable copy of the generated Android tree; never touches mobile/poker itself.
 function androidFixture() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'configure-android-'));
-  for (const name of ['configure-android.mjs', 'capacitor.config.json', 'PokerAudioPlugin.java', 'PokerGoogleSignInPlugin.java', 'launch-mark.xml']) {
+  for (const name of ['configure-android.mjs', 'capacitor.config.json', 'PokerAudioPlugin.java', 'PokerGoogleSignInPlugin.java', 'PokerDiagnosticsPlugin.java', 'launch-mark.xml']) {
     copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(dir, name));
   }
   const files = {
@@ -442,6 +476,7 @@ function androidFixture() {
     writeFileSync(path.join(dir, name), value);
   }
   mkdirSync(path.join(dir, 'android/app/src/main/res/drawable'), { recursive: true });
+  addFirebaseFixture(dir);
   return dir;
 }
 function treeSnapshot(dir) {
@@ -465,7 +500,7 @@ function runConfigure(dir, channel) {
 
 function androidProductionFixture() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'configure-android-prod-'));
-  for (const name of ['configure-android.mjs', 'PokerAudioPlugin.java', 'PokerGoogleSignInPlugin.java', 'launch-mark.xml']) {
+  for (const name of ['configure-android.mjs', 'PokerAudioPlugin.java', 'PokerGoogleSignInPlugin.java', 'PokerDiagnosticsPlugin.java', 'launch-mark.xml']) {
     copyFileSync(path.join(rootDir, 'mobile/poker', name), path.join(dir, name));
   }
   copyFileSync(path.join(rootDir, 'mobile/poker/capacitor.production.json'), path.join(dir, 'capacitor.config.json'));
@@ -480,6 +515,7 @@ function androidProductionFixture() {
     writeFileSync(path.join(dir, name), value);
   }
   mkdirSync(path.join(dir, 'android/app/src/main/res/drawable'), { recursive: true });
+  addFirebaseFixture(dir);
   return dir;
 }
 
@@ -692,5 +728,30 @@ test('sign-release-aab.sh: synthetic upload key signs only with the pinned certi
     assert.deepEqual(readdirSync(runnerTemp), [], 'temporary keystore and password files removed');
   } finally {
     rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('Firebase configuration fails closed for a foreign project or ambiguous app', () => {
+  const appId = 'pl.kcswh.arcadepoker.stage';
+  const client = {
+    client_info: { mobilesdk_app_id: '1:123456789:android:aabbccdd', android_client_info: { package_name: appId } },
+    api_key: [{ current_key: 'AIza' + 'a'.repeat(35) }],
+  };
+  const config = { project_info: { project_id: 'poker-test', project_number: '123456789' }, client: [client] };
+  assert.doesNotThrow(() => assertFirebaseConfig(config, appId, 'poker-test'));
+  assert.throws(() => assertFirebaseConfig(config, appId, null), /pinned/);
+  assert.throws(() => assertFirebaseConfig(config, appId, 'other-project'), /project/);
+  assert.throws(() => assertFirebaseConfig(config, 'pl.kcswh.arcadepoker', 'poker-test'), /client/);
+  assert.throws(() => assertFirebaseConfig({ ...config, client: [client, client] }, appId, 'poker-test'), /client/);
+});
+
+test('both Android channels default diagnostics to off and reject ambiguous metadata', () => {
+  const template = '<application></application>';
+  for (const channel of ['stage', 'production']) {
+    const manifest = configureDiagnosticsManifest(template, channel);
+    assert.match(manifest, /name="firebase_crashlytics_collection_enabled" android:value="false"/);
+    assert.match(manifest, /name="poker_diagnostics_enabled" android:value="false"/);
+    assert.throws(() => configureDiagnosticsManifest(manifest, channel), /metadata/);
+    assert.throws(() => buildResources(channel, 'untrusted'), /source SHA/);
   }
 });

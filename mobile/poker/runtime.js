@@ -66,9 +66,12 @@
   var googleGeneration = 0;
   var pendingClear = Promise.resolve(true);
   var exchangeInFlight = Promise.resolve(true);
+  function reportDiagnostic(code, stage){
+    if (window.MobilePokerDiagnostics) window.MobilePokerDiagnostics.report(code, stage);
+  }
   function queueClear(native){
     pendingClear = pendingClear.then(function(){ return native.clearCredential(); })
-      .then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); return false; });
+      .then(function(){ return true; }, function(){ klog('mobile:google_clear_failed'); reportDiagnostic('google_clear_failed', 'sign_out'); return false; });
     return pendingClear;
   }
   function nonceHex(bytes){
@@ -81,15 +84,19 @@
     if (!client || !client.auth || typeof client.auth.signInWithIdToken !== 'function') throw new Error('google_unavailable');
     googleSigningIn = true;
     var generation = googleGeneration;
+    var stage = 'unexpected';
     try {
       await pendingClear;
       if (generation !== googleGeneration) throw new Error('google_canceled');
+      stage = 'bridge';
       var native = plugin('PokerGoogleSignIn');
+      stage = 'unexpected';
       var raw = nonceHex(window.crypto.getRandomValues(new Uint8Array(32)));
       var hashed = nonceHex(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw)));
       var credential;
       if (generation !== googleGeneration) throw new Error('google_canceled');
       var pickerError = null;
+      stage = 'credential_manager';
       try { credential = await native.signIn({ nonce: hashed }); }
       catch (err){ pickerError = err || {}; }
       // A sign-out while the picker was open discards its outcome (result or error), and clears again in case the
@@ -105,6 +112,7 @@
         throw new Error('google_failed');
       }
       if (!credential || typeof credential.idToken !== 'string' || !credential.idToken) throw new Error('google_failed');
+      stage = 'id_token_exchange';
       var exchange = Promise.resolve().then(function(){
         // Re-check right before the exchange: a sign-out queued just after the picker resolved must win.
         if (generation !== googleGeneration) throw new Error('google_canceled');
@@ -119,6 +127,7 @@
     } catch (err){
       var known = err && /^google_(canceled|unavailable|failed|in_progress)$/.test(err.message);
       klog(known ? 'mobile:' + err.message : 'mobile:google_failed');
+      if (!known || err.message === 'google_failed') reportDiagnostic('google_failed', stage);
       throw known ? err : new Error('google_failed');
     } finally {
       googleSigningIn = false;
@@ -147,6 +156,7 @@
     } catch (_err){
       notice('Sign-in return failed or expired. Please retry from Account.');
       klog('mobile:auth_callback_failed');
+      reportDiagnostic('auth_callback_failed', 'callback_exchange');
     } finally {
       exchanging = false;
     }

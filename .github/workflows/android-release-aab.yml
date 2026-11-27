@@ -126,6 +126,7 @@ jobs:
           cp "$AAB_SRC" "$AAB_DEST"
 
           java -jar "$BUNDLETOOL_JAR" dump manifest --bundle "$AAB_DEST" > artifacts/manifest.txt
+          node verify-android-diagnostics.mjs artifacts/manifest.txt production
           java -jar "$BUNDLETOOL_JAR" dump resources --bundle "$AAB_DEST" --resource string/poker_google_web_client_id --values > artifacts/google-signin-resource.txt
           grep -qF "$MOBILE_GOOGLE_WEB_CLIENT_ID" artifacts/google-signin-resource.txt
 
@@ -193,14 +194,8 @@ jobs:
               throw new Error("Manifest contains arcadepoker-stage");
             }
 
-            // 7. Only INTERNET plus the app-scoped AndroidX receiver permission (same as the Stage APK).
-            const permissions = [...manifest.matchAll(/<uses-permission\b[^>]*(?:android:)?name="([^"]+)"/g)].map(m => m[1]);
-            process.stdout.write("Permissions found: " + JSON.stringify(permissions) + "\n");
-            for (const perm of permissions) {
-              if (perm !== "android.permission.INTERNET" && perm !== "pl.kcswh.arcadepoker.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION") {
-                throw new Error("Disallowed permission: " + perm);
-              }
-            }
+            // 7. Permissions and collection-off metadata have passed the shared final-manifest check.
+            const permissions = [...manifest.matchAll(/<uses-permission(?:-sdk-\d+)?\b[^>]*\bandroid:name="([^"]+)"/g)].map(m => m[1]);
 
             // 8. Packaged config.js must equal the pinned Production endpoints exactly.
             const configJs = cp.execFileSync("unzip", ["-p", aabPath, "base/assets/public/mobile/config.js"], { encoding: "utf8" });
@@ -235,6 +230,7 @@ jobs:
               minSdk,
               targetSdk,
               permissions,
+              diagnostics: { provider: "firebase-crashlytics", manifestDefault: false, buildEligibility: false },
               aabSha256,
               signed: false,
               googleWebClientId: process.env.MOBILE_GOOGLE_WEB_CLIENT_ID,

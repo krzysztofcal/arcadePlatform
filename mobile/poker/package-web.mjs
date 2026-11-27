@@ -61,6 +61,11 @@ async function copy(name){
     }
   }
 }
+const diagnosticsPath = 'mobile/diagnostics.js';
+const selfTestPath = 'mobile/diagnostics-selftest.js';
+const diagnostics = await readFile(path.join(here, 'diagnostics.js'));
+await put(diagnosticsPath, diagnostics);
+if (channel === 'stage') await put(selfTestPath, await readFile(path.join(here, 'diagnostics-selftest.js')));
 await put('mobile/config.js', 'window.MOBILE_POKER_CONFIG = ' + JSON.stringify(config) + ';\n');
 await put('mobile/security.js', await readFile(path.join(here, 'security.cjs')));
 await put('mobile/audio.js', await readFile(path.join(here, 'audio.js')));
@@ -108,7 +113,11 @@ for (const name of pages) {
     html = html.replaceAll(sourceHash, packagedHash);
     const audioHash = hash(await readFile(path.join(out, 'mobile/audio.js')));
     if (!html.includes('script-src ')) throw new Error('Missing script-src anchor in poker/offline/play.html');
-    html = html.replace('script-src ', `script-src '${audioHash}' `);
+    const diagnosticsHash = hash(diagnostics);
+    html = html.replace('script-src ', `script-src '${audioHash}' '${diagnosticsHash}' `);
+    const offlineEntry = '<script src="/poker/offline/avatar-catalog.generated.js"';
+    if (!html.includes(offlineEntry)) throw new Error('Missing Offline script entry point');
+    html = html.replace(offlineEntry, `<script src="/${diagnosticsPath}" integrity="${diagnosticsHash}"></script>` + offlineEntry);
     const rendererTag = '<script src="/poker/offline/renderer.generated.js"';
     if (!html.includes(rendererTag)) throw new Error('Missing renderer script tag in poker/offline/play.html');
     html = html.replace(rendererTag, `<script src="/mobile/audio.js" integrity="${audioHash}" defer></script>` + rendererTag);
@@ -154,7 +163,13 @@ for (const name of pages) {
   }
   const hashes = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + createHash('sha256').update(m[1]).digest('base64') + "'");
   const csp = `default-src 'self'; script-src 'self' ${hashes.join(' ')} ${name === 'poker/index.html' ? "'" + launch.match(/integrity="([^"]+)"/)[1] + "'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${config.supabaseUrl}; connect-src 'self' ${config.apiOrigin} ${config.supabaseUrl} ${config.wsUrl}; font-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'`;
-  html = html.replace('<head>', '<head>\n<meta http-equiv="Content-Security-Policy" content="' + csp + '">\n<script src="/mobile/config.js"></script>\n<script src="/mobile/security.js"></script>\n<script src="/mobile/audio.js" defer></script>\n<script src="/mobile/runtime.js" defer></script>\n<link rel="stylesheet" href="/mobile/mobile.css">');
+  html = html.replace('<head>', '<head>\n<meta http-equiv="Content-Security-Policy" content="' + csp + '">\n<script src="/mobile/diagnostics.js"></script>\n<script src="/mobile/config.js"></script>\n<script src="/mobile/security.js"></script>\n<script src="/mobile/audio.js" defer></script>\n<script src="/mobile/runtime.js" defer></script>\n<link rel="stylesheet" href="/mobile/mobile.css">');
+  if (channel === 'stage' && name === 'account.html') {
+    html = html.replace('</body>', `<script src="/${selfTestPath}" defer></script></body>`);
+  }
+  if (channel === 'production' && (copied.has(selfTestPath) || html.includes(selfTestPath))) {
+    throw new Error('Stage diagnostics self-test in Production package');
+  }
   await put(name, html);
 }
 await cp(path.join(root, 'poker/assets'), path.join(out, 'poker/assets'), { recursive: true });
