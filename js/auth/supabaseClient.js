@@ -4,6 +4,8 @@
   var doc = document;
   var nodes = {};
   var state = { user: null, profile: null, open: false, client: null, resolved: false, profileHydrated: false };
+  var domContentLoaded = doc.readyState !== 'loading' && doc.readyState !== 'interactive';
+  doc.addEventListener('DOMContentLoaded', function(){ domContentLoaded = true; }, { once: true });
   var authListeners = [];
   var authSubscriptionAttached = false;
   var recoverySession = null;
@@ -412,8 +414,30 @@
 
   function refreshProfile(user, uiGeneration, hadCachedProfile){
     if (!user) return;
-    var sessionGen = profileSessionGeneration;
     var hasProfileClient = !!(window.ProfileClient && typeof window.ProfileClient.getMe === 'function');
+    // ProfileClient is a later deferred script: until DOMContentLoaded (all deferred scripts have run), wait, so
+    // repeated session events share its one in-flight read instead of each sending a raw request. Pages without
+    // ProfileClient use the raw read after that.
+    if (!hasProfileClient && !domContentLoaded){
+      var waited = false;
+      var deferredSessionGen = profileSessionGeneration;
+      var retry = function(){
+        if (waited) return;
+        waited = true;
+        domContentLoaded = true;
+        // A sign-out or account switch during the wait supersedes this read; the new session starts its own.
+        var ui = userUiState();
+        if (profileSessionGeneration !== deferredSessionGen || !state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
+        // A later session event may already have confirmed the profile through ProfileClient during the wait.
+        if (profileConfirmedUserId === String(user.id)) return;
+        refreshProfile(user, uiGeneration, hadCachedProfile);
+      };
+      doc.addEventListener('DOMContentLoaded', retry, { once: true });
+      // Fallback for a script injected after DOMContentLoaded: the window load still arrives.
+      if (typeof window.addEventListener === 'function') window.addEventListener('load', retry, { once: true });
+      return;
+    }
+    var sessionGen = profileSessionGeneration;
     var load = hasProfileClient
       ? window.ProfileClient.getMe()
       : getAccessToken().then(function(accessToken){
