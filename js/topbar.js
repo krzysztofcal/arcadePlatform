@@ -556,11 +556,30 @@
           }, timeoutMs);
         });
         if (hasSnapshot){
-          const snapshot = await Promise.race([window.ChipsClient.fetchTopbarSnapshot(), timeoutPromise]);
-          if (requestGeneration !== chipRequestGeneration) return;
-          if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
-          renderChipBadgeBalance(snapshot ? snapshot.balance : null);
-          renderPokerBadge(snapshot ? snapshot.poker : null);
+          let snapshot = null;
+          let snapshotFailed = false;
+          try {
+            snapshot = await Promise.race([window.ChipsClient.fetchTopbarSnapshot(), timeoutPromise]);
+          } catch (snapErr){
+            if (snapErr && snapErr.code === 'timeout') throw snapErr;
+            if (requestGeneration !== chipRequestGeneration) return;
+            if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
+            renderPokerBadge(null);
+            snapshotFailed = true;
+          }
+          if (snapshotFailed){
+            const balance = await Promise.race([window.ChipsClient.fetchBalance(), timeoutPromise]);
+            if (requestGeneration !== chipRequestGeneration) return;
+            if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
+            const raw = balance && balance.balance != null ? Number(balance.balance) : null;
+            const value = Number.isFinite(raw) ? raw : null;
+            renderChipBadgeBalance(value);
+          } else {
+            if (requestGeneration !== chipRequestGeneration) return;
+            if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
+            renderChipBadgeBalance(snapshot ? snapshot.balance : null);
+            renderPokerBadge(snapshot ? snapshot.poker : null);
+          }
         } else {
           const balance = await Promise.race([window.ChipsClient.fetchBalance(), timeoutPromise]);
           if (requestGeneration !== chipRequestGeneration) return;

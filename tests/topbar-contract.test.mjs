@@ -644,7 +644,7 @@ test('topbar without ProfileClient shares raw in-flight reads for same user and 
 test('ProfileClient present, ChipsClient absent before DOMContentLoaded and present after issues exactly one includePoker read', async () => {
   const getMeCalls = [];
   const f = await topbarProfileFixture({
-    readyState: 'loading',
+    readyState: 'interactive',
     respond: (force, options) => {
       getMeCalls.push({ force, options });
       return { displayName: 'Player With Late Chips', avatar: { variant: 'wizard-indigo' } };
@@ -680,4 +680,119 @@ test('stale session during includePoker rejection does not call fallback getMe',
   rejectPoker(new Error('include_poker_failed'));
   await f.flush();
   assert.equal(getMeCalls.length, 1, 'stale session must not issue fallback getMe()');
+});
+
+test('topbar refreshChipBadge snapshot rejects with server error, fetchBalance resolves 900 -> CH badge shows 900 and exactly one fetchBalance call', async () => {
+  const elements = {};
+  const listeners = {};
+  const doc = {
+    readyState: 'complete',
+    getElementById: (id) => elements[id] || null,
+    querySelector: (sel) => {
+      if (sel === '.topbar') return doc.topbarEl;
+      if (sel === '#sbToggle') return null;
+      return null;
+    },
+    querySelectorAll: (sel) => {
+      if (sel === '.topbar') return [doc.topbarEl];
+      if (sel === '#sbToggle') return [];
+      return [];
+    },
+    createElement: (tag) => {
+      const el = {
+        tagName: tag.toUpperCase(),
+        classList: { add() {}, remove() {}, contains: () => false },
+        setAttribute(k, v) { this[k] = v; },
+        getAttribute(k) { return this[k]; },
+        hasAttribute: () => false,
+        appendChild(child) {
+          this.children.push(child);
+          if (child.id) elements[child.id] = child;
+          return child;
+        },
+        insertBefore(child) {
+          this.children.push(child);
+          if (child.id) elements[child.id] = child;
+          return child;
+        },
+        children: [],
+        querySelector: (s) => {
+          if (s === '#chipBadgeAmount') return elements['chipBadgeAmount'] || null;
+          if (s === '#welcomeBonusTopbarBadge') return elements['welcomeBonusTopbarBadge'] || null;
+          if (s === '#chipBadgePoker') return elements['chipBadgePoker'] || null;
+          if (s === '.chip-badge__label') return null;
+          return null;
+        },
+      };
+      return el;
+    },
+    createTextNode: (text) => ({ text }),
+    addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); },
+    documentElement: { dataset: {} },
+  };
+  const topbarEl = doc.createElement('div');
+  doc.topbarEl = topbarEl;
+  const topbarRight = doc.createElement('div');
+  topbarRight.className = 'topbar-right';
+  topbarEl.appendChild(topbarRight);
+
+  let fetchBalanceCalls = 0;
+  let snapshotCalls = 0;
+  const win = {
+    document: doc,
+    ProfileClient: {
+      getMe: async () => ({ displayName: 'Player' }),
+    },
+    ChipsClient: {
+      fetchTopbarSnapshot: async () => {
+        snapshotCalls++;
+        const err = new Error('profile_me_500');
+        err.status = 500;
+        throw err;
+      },
+      fetchBalance: async () => {
+        fetchBalanceCalls++;
+        return { balance: 900 };
+      },
+    },
+    SupabaseAuth: {
+      getCurrentUser: async () => ({ id: 'user-1' }),
+      onAuthChange: (cb) => { win.authCb = cb; },
+    },
+    UserUiState: {
+      getActiveContext: () => ({ userId: 'user-1', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+    },
+    ArcadeFormat: {
+      formatCompactNumber: (val) => String(val),
+    },
+  };
+  win.window = win;
+
+  const vm = await import('node:vm');
+  vm.runInNewContext(topbarSource, {
+    window: win,
+    document: doc,
+    CustomEvent: class { constructor(t, opts) { this.type = t; this.detail = opts?.detail; } },
+    setTimeout,
+    clearTimeout,
+    Promise,
+    Number,
+    String,
+    Math,
+    Array,
+    Date,
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (fetchBalanceCalls > 0) break;
+  }
+
+  assert.equal(snapshotCalls, 1, 'fetchTopbarSnapshot must be called first');
+  assert.equal(fetchBalanceCalls, 1, 'fetchBalance must be called exactly once after snapshot failure');
+  const amountEl = elements['chipBadgeAmount'];
+  assert.ok(amountEl, 'chipBadgeAmount element must exist');
+  assert.equal(amountEl.textContent, '900', 'CH badge must show 900');
 });
