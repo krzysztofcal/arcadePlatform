@@ -14,37 +14,60 @@ Spec: `specs/vps-maintenance-reboot/spec.md`. Implementation starts only after t
 | `docs/vps-admin-operations.md` | Catalog rows for the five operations. |
 | `ws-tests/maintenance-reboot.behavior.test.mjs` | New fundamental tests (below), alongside `ws-tests/vps-maintenance.behavior.test.mjs`. |
 | `docs/vps-maintenance-reboot.md` | Runbook: what it does, how to read `status`, how to disable, what to do on `FAILED` (C7). |
-| `.github/workflows/maintenance-reboot-watch.yml` | Only with D3(a). Scheduled 30 minutes after the window end: GET the public WS health and the site. On failure it opens or updates an issue. No secrets beyond `GITHUB_TOKEN`. |
+| `.github/workflows/maintenance-reboot-watch.yml` | Only with D3(a). Hourly on `ubuntu-latest` (a GitHub-hosted runner, never the VPS runner), independent of the window: GET the public WS health and the site. On failure it opens or updates an issue. No secrets beyond `GITHUB_TOKEN`. |
 
 ## `run` flow (timer)
 
-1. Read the config. If it is invalid or disabled → `SKIPPED disabled` (does not count toward the skip series).
-2. Read the boot ID and state. Run `reconcile`, which may stop with `FAILED` or `IDLE` (spec → State machine). A `FAILED` latch → `SKIPPED failed_latch`.
-3. Take the deploy maintenance lock with `flock -n`. If it is busy → skip.
+Every step runs under the deploy maintenance lock (`/opt/ws-server/.deploy-maintenance.lock`). It is taken first with `flock -n`; if it is busy, the run skips. `enable`, `disable`, `clear` and the boot unit take the same lock.
+
+1. Under the lock, read the config, the state and the boot ID.
+2. Run `reconcile` (spec → State machine). A `FAILED` latch → `SKIPPED failed_latch`.
+3. If the config is invalid or `ENABLED!=1` → `SKIPPED disabled`; this does not count toward the skip series.
 4. `decideStart`:
-   - in the window;
-   - `reboot-required` present;
-   - no attempt in the last 24 h (the attempt log; unreadable → skip);
+   - the approved script and gate blob SHAs match the installed files;
+   - inside the window;
+   - `reboot-required` is present;
+   - no other attempt in the last 24 h (unreadable log → skip);
    - no `Runner.Worker` process.
-5. Stop the two ledger dispatch timers (D6). Both services must be `inactive`, otherwise start the timers again and skip.
-6. Write `PREPARING` (`opId` from `nextOpId`, release sha from `readlink -f /opt/ws-server/current`, `bootIdBefore`) and append one line to the attempt log.
-7. `prepare <opId>`. Anything other than exit 0 with `PREPARED` → `abort <opId>`:
-   - `ABORTED` or `ABORTED not_held` → `IDLE`, `SKIPPED gate_<code>`, timers started again;
-   - anything else → `FAILED abort_<code>`, alert.
-8. `check`. It must print `RESTART_SAFE` with exit 0, and the MainPID must equal the one in the marker. Otherwise abort as in 7.
-9. `decideSwitch`: re-read the config (enabled, window), `reboot-required`, both ledger services `inactive`, and no `Runner.Worker`. If it fails, abort as in 7.
-10. Write `SWITCHING`, call `switching <opId>` (exit 0 and `SWITCH_MARKED`), write `REBOOTING`, call `systemctl reboot`.
-    - If `switching` fails → `FAILED switching_<code>`, alert (abort may no longer apply).
-    - If `systemctl reboot` returns an error → `FAILED reboot_refused`, alert.
+5. Release identity. `readlink -f /opt/ws-server/current` must equal `/opt/ws-server/releases/<sha>/ws-server`, with `<sha>` 40 lowercase hex characters. `release-metadata.json` there must say `<sha>`, and the running WS process directory must be the same. Otherwise skip.
+6. Ledger and runner:
+   - Both ledger timers must be active, else skip without changes.
+   - Stop both timers and record that this run stopped them. Both dispatch services must be `inactive`.
+   - Stop the runner service and record it. There must still be no `Runner.Worker`.
+   - If any of this fails, start again only what this run stopped, and skip.
+7. Write `PREPARING` (`opId` from `nextOpId`, `<sha>`, `bootIdBefore`, the stopped units) and append the reservation line.
+8. `prepare <opId>`. Anything other than exit 0 with `PREPARED` → `abort <opId>`:
+   - `ABORTED` or `ABORTED not_held` → `IDLE`, `SKIPPED gate_<code>`, and this run's units are started again;
+   - anything else → `FAILED abort_<code>`, `ENABLED=0`, alert. The units stay as they are and the state records them.
+9. `check` must exit 0 with `RESTART_SAFE`, and the MainPID must equal the one in the marker. Otherwise abort as in step 8.
+10. `decideSwitch`:
+    - re-read the config (enabled, window, approved SHAs) under the same lock;
+    - `reboot-required` is present;
+    - this run's own reservation is there and there is no other attempt in 24 h;
+    - both ledger services are `inactive` and there is no `Runner.Worker`.
+
+    If it fails, abort as in step 8.
+11. Write `SWITCHING`. Call `switching <opId>` (exit 0 and `SWITCH_MARKED`). Write `REBOOTING`. Call `systemctl reboot`.
+    - If `switching` fails → `FAILED switching_<code>`.
+    - If `systemctl reboot` returns an error → `FAILED reboot_refused`.
+
+    Both cases set `ENABLED=0` and alert.
 
 ## `resume` flow (boot)
 
-1. If the stage is not `REBOOTING`, exit 0. If the boot ID equals `bootIdBefore` → `FAILED reboot_not_started`.
-2. Within one 15-minute budget:
-   - wait until `ws-server` is active, `/healthz` is ok, and `ws-server-preview`, `caddy`, `postgresql` and the runner service are active;
-   - then call `resume <opId> <sha>` every 20 s until it exits 0 with `RESUMED`.
-3. `RESUMED` → `IDLE` (`RESUMED` journal line, attempt log updated, skip series reset). Budget used up or a service down → `FAILED <reason>`, hold kept, alert.
-4. Ten minutes after `RESUMED`, check the services once more. If any is down → `RESUMED_DEGRADED`, alert.
+Runs under the same lock, whatever `ENABLED` says.
+
+1. Run `reconcile`; it handles `PREPARING`, `SWITCHING`, the same boot and `RESUMING`. Continue only for `REBOOTING` (or `RESUMING`) with a new boot ID.
+2. Within one 15-minute budget, repeat:
+   1. Require `ws-server` active, `/healthz` ok, and `ws-server-preview`, `caddy`, `postgresql`, `docker` active. The runner is not required here, because this run stopped it and it starts at boot by itself.
+   2. Confirm the gate marker still carries this `opId` with `stage=switching`, and the hold file exists.
+   3. Write `RESUMING` (first time only).
+   4. Call `resume <opId> <sha>`.
+      - Exit 0 with `RESUMED` → done.
+      - `RESUME_BLOCKED not_restarted` → `FAILED pid_reused` (the gate limitation in the spec).
+      - Anything else → wait 20 s and repeat from 2.1.
+3. Done: write `IDLE`, the `RESUMED` journal line and the follow-up deadline (now + 10 min) in the state, and reset the skip series. Budget used up → `FAILED <reason>`, hold kept, `ENABLED=0`, alert.
+4. Follow-up check: a separate oneshot timer (`OnActiveSec=10min`), also reconciled on every timer run, so an interrupted process still runs it. Any required service down → `RESUMED_DEGRADED`, alert.
 
 ## Tests (fundamental only, per AGENTS.md Testing Policy)
 
@@ -62,6 +85,9 @@ Spec: `specs/vps-maintenance-reboot/spec.md`. Implementation starts only after t
 - `nextOpId` matches `^[1-9][0-9]{0,19}$` and has 20 digits.
 - `parseConfig`: malformed values or a window across midnight or overlapping Sunday 03:00–04:30 → disabled.
 - `skipSeries`: only qualifying windows count; reset after `RESUMED`.
+- Release identity: the sha is taken from `/opt/ws-server/releases/<sha>/ws-server` and checked against the metadata; any other path → skip.
+- Reconciliation: `PREPARING`/`SWITCHING` on a new boot → `FAILED`; `RESUMING` + `RESUMED not_held` → reconciled; `not_restarted` → `FAILED pid_reused`.
+- Unit restore: only the units this run stopped are started again; a ledger timer that was already stopped → skip without changes.
 - A fake command runner covers these sequences:
   - `prepare` fails → `abort` with no reboot;
   - `check` fails → `abort`;
@@ -74,7 +100,7 @@ No UI, CSS or broad suites.
 
 1. PR with spec, code and tests: Codex review per `REVIEW.md` (ops rules), CI green.
 2. OWNER GO, then the executor update via `stage-vps-admin.sh` (OWNER), then `maintenance-reboot-install` (disabled), then `status`.
-3. D7 approval. `maintenance-reboot-enable` with a one-time window right after it, watched by the OWNER. Verify `RESUMED`, the services and the external check.
+3. A reviewed `AGENTS.md` change approved by the OWNER (D7). Then `maintenance-reboot-enable` with a one-time window right after it, watched by the OWNER. Verify `RESUMED`, the services and the external check.
 4. `enable` with the D1/D2 window. After the first automatic reboot, report the evidence (journal lines, state, attempt log, service status).
 
 ## Rollback

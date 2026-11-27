@@ -9,4 +9,4 @@ Blocked until the OWNER decides D1–D7 in `spec.md` and gives a GO for implemen
 - [ ] T005 `docs/vps-maintenance-reboot.md`: runbook (status, disable, `FAILED` and C7).
 - [ ] T006 Alerts per D3 (with D3(a): the VPS issue comment and `.github/workflows/maintenance-reboot-watch.yml`); no new secret without a separate GO.
 - [ ] T007 Codex review per `REVIEW.md` (max 3 rounds) and CI.
-- [ ] T008 After OWNER GO: executor update (OWNER, `stage-vps-admin.sh`), install (disabled), D7 approval, first watched run, then the D1/D2 window and evidence.
+- [ ] T008 After OWNER GO and an approved AGENTS.md change (D7): executor update (OWNER, `stage-vps-admin.sh`), install (disabled), D7 approval, first watched run, then the D1/D2 window and evidence.
