@@ -446,10 +446,11 @@
   function refreshProfile(user, uiGeneration, hadCachedProfile){
     if (!user) return;
     var hasProfileClient = !!(window.ProfileClient && typeof window.ProfileClient.getMe === 'function');
-    // ProfileClient is a later deferred script: until DOMContentLoaded (all deferred scripts have run), wait, so
-    // repeated session events share its one in-flight read instead of each sending a raw request. Pages without
-    // ProfileClient use the raw read after that.
-    if (!hasProfileClient && !domContentLoaded){
+    var hasChipsClient = !!(window.ChipsClient);
+    // ProfileClient and ChipsClient are later deferred scripts: until DOMContentLoaded (all deferred scripts have run),
+    // wait, so repeated session events share ProfileClient's one in-flight read with includePoker instead of sending
+    // premature or duplicate requests. Pages without ProfileClient or ChipsClient proceed after that.
+    if ((!hasProfileClient || !hasChipsClient) && !domContentLoaded){
       var waited = false;
       var deferredSessionGen = profileSessionGeneration;
       var retry = function(){

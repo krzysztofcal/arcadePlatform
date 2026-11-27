@@ -273,7 +273,7 @@ async function topbarProfileFixture(options) {
   const shell = opts.withAvatarShell ? stubNode() : null;
   const button = opts.withAvatarShell ? stubNode() : null;
   const document = {
-    readyState: 'complete',
+    readyState: opts.readyState || 'complete',
     getElementById: (id) => {
       if (id === 'avatarLabel') return label;
       if (id === 'avatarMenuName') return menuName;
@@ -329,6 +329,7 @@ async function topbarProfileFixture(options) {
   return {
     flush,
     topbar,
+    window,
     get profileReads() { return profileReads; },
     get renderedName() { return menuName.textContent || label.textContent; },
     dispatch(type, detail) { (docListeners[type] || []).forEach((fn) => fn({ type, detail })); },
@@ -638,4 +639,24 @@ test('topbar without ProfileClient shares raw in-flight reads for same user and 
   releaseRaw();
   await f.flush();
   assert.equal(f.renderedName, 'User Shared Raw');
+});
+
+test('ProfileClient present, ChipsClient absent before DOMContentLoaded and present after issues exactly one includePoker read', async () => {
+  const getMeCalls = [];
+  const f = await topbarProfileFixture({
+    readyState: 'loading',
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      return { displayName: 'Player With Late Chips', avatar: { variant: 'wizard-indigo' } };
+    },
+  });
+  await f.flush();
+  assert.equal(getMeCalls.length, 0, 'must not call getMe before DOMContentLoaded when ChipsClient is absent');
+  f.window.ChipsClient = { fetchBalance() {} };
+  f.dispatch('DOMContentLoaded');
+  await f.flush();
+  assert.equal(getMeCalls.length, 1, 'must issue exactly one getMe call after DOMContentLoaded');
+  assert.equal(getMeCalls[0].force, false);
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(f.renderedName, 'Player With Late Chips');
 });
