@@ -728,11 +728,12 @@ const STAGE_ENVIRONMENT_JOBS = [
   ["chips-ledger-stage-settled-retention.yml", "stage-settled-retention"],
   ["stage-bonus-campaigns.yml", "stage-operator"],
   ["stage-supabase-resource-health.yml", "monitor"],
-  ["db-stage-apply-pr.yml", "apply-stage"],
+  ["db-stage-apply-pr.yml", "inspect-stage"],
+  ["db-stage-apply-pr.yml", "apply-stage", "stage-db-apply"],
 ];
-for (const [file, job] of STAGE_ENVIRONMENT_JOBS) {
+for (const [file, job, environment = "stage-automation"] of STAGE_ENVIRONMENT_JOBS) {
   const stageWorkflow = YAML.parse(fs.readFileSync(`.github/workflows/${file}`, "utf8"));
-  assert.equal(stageWorkflow.jobs?.[job]?.environment, "stage-automation", `${file}: ${job} must use stage-automation`);
+  assert.equal(stageWorkflow.jobs?.[job]?.environment, environment, `${file}: ${job} must use ${environment}`);
 }
 
 // #1157: the Stage settled retention workflow is owner-dispatch only and shares
