@@ -588,6 +588,12 @@
     if (nodes.menuAction){ nodes.menuAction.addEventListener('click', handleAction); }
     if (nodes.menuUser){ nodes.menuUser.addEventListener('click', handleMenuUserClick); }
     doc.addEventListener('langchange', function(){ renderUser(state.user, state.profile, state.profileHydrated); });
+    // ProfileClient is a later deferred script: once it exists, show the cached avatar the first render had to skip.
+    function renderHydratedWithProfileClient(){
+      if (state.profileHydrated && window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function') renderUser(state.user, state.profile, true);
+    }
+    doc.addEventListener('DOMContentLoaded', renderHydratedWithProfileClient, { once: true });
+    if (typeof window.addEventListener === 'function') window.addEventListener('load', renderHydratedWithProfileClient, { once: true });
     doc.addEventListener('profile:updated', function(event){
       if (!state.user) return;
       var profile = event && event.detail ? event.detail : state.profile;
