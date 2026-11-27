@@ -129,7 +129,7 @@ export function createPlaySupportPublisher({ environment, credentials, fetchImpl
     return refreshing;
   }
 
-  async function callPlay(path, method, json) {
+  async function callPlay(path, method, json, phase = 'purchase') {
     const bearer = await accessToken();
     try {
       return await request(PUBLISHER_ROOT + '/' + packageName + path, {
@@ -140,7 +140,7 @@ export function createPlaySupportPublisher({ environment, credentials, fetchImpl
           ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {})
         },
         ...(method === 'POST' ? { body: '{}' } : {})
-      }, json);
+      }, json, phase);
     } catch (error) {
       if (error.status === 401 && cachedToken === bearer) expiresAt = 0;
       throw error;
@@ -150,6 +150,37 @@ export function createPlaySupportPublisher({ environment, credentials, fetchImpl
   return {
     async readPurchase(token) {
       return callPlay('/purchases/productsv2/tokens/' + encodeToken(token), 'GET', true);
+    },
+    async listVoidedPurchases({ startMs, endMs, pageToken = null }) {
+      const currentTime = now();
+      if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs) ||
+          startMs < currentTime - 30 * 86_400_000 || startMs >= endMs || endMs > currentTime ||
+          (pageToken !== null && (typeof pageToken !== 'string' || !/^[\x21-\x7e]{1,2048}$/.test(pageToken)))) {
+        throw failure('play_support_invalid_void_window');
+      }
+      const query = new URLSearchParams({
+        type: '0',
+        includeQuantityBasedPartialRefund: 'true',
+        maxResults: '50'
+      });
+      // Use the flat v3 Discovery parameters, also used by Google's curl sample.
+      if (pageToken) query.set('token', pageToken);
+      else {
+        query.set('startTime', String(startMs));
+        query.set('endTime', String(endMs));
+      }
+      const result = await callPlay('/purchases/voidedpurchases?' + query, 'GET', true, 'voided');
+      const purchases = result.voidedPurchases ?? [];
+      const pagination = result.tokenPagination;
+      const nextPageToken = pagination?.nextPageToken ?? null;
+      if (!Array.isArray(purchases) || purchases.length > 50 ||
+          purchases.some(purchase => !purchase || typeof purchase !== 'object' || Array.isArray(purchase)) ||
+          (pagination != null && (typeof pagination !== 'object' || Array.isArray(pagination))) ||
+          (nextPageToken !== null && (typeof nextPageToken !== 'string' || nextPageToken === pageToken ||
+            !/^[\x21-\x7e]{1,2048}$/.test(nextPageToken)))) {
+        throw failure('play_support_publisher_response', { phase: 'voided' });
+      }
+      return { purchases, nextPageToken };
     },
     async acknowledge(sku, token) {
       if (!SKUS.has(sku)) throw failure('play_support_invalid_sku');
