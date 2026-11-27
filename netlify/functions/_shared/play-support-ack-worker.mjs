@@ -7,13 +7,13 @@ export function createPlaySupportAckStore(beginSupportSql) {
   });
   return {
     recoverAck: (id, generation) => run(
-      'select private.play_support_recover_ack($1::uuid, $2::bigint) as result', [id, generation]
+      'select arcade_play_api.play_support_recover_ack($1::uuid, $2::bigint) as result', [id, generation]
     ),
     beginAck: (id, generation) => run(
-      'select private.play_support_begin_ack($1::uuid, $2::bigint) as result', [id, generation]
+      'select arcade_play_api.play_support_begin_ack($1::uuid, $2::bigint) as result', [id, generation]
     ),
     finishAck: (id, generation, attemptId, outcome) => run(
-      'select private.play_support_finish_ack($1::uuid, $2::bigint, $3::uuid, $4::text) as result',
+      'select arcade_play_api.play_support_finish_ack($1::uuid, $2::bigint, $3::uuid, $4::text) as result',
       [id, generation, attemptId, outcome]
     )
   };
