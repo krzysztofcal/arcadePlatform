@@ -46,9 +46,12 @@
 ### US3: The system comes back, or the OWNER knows that it did not (P1)
 **Acceptance**
 1. Resume happens only after a **new boot**: the kernel `boot_id` differs from the one recorded before `switching`.
-2. Before `resume`, within one 15-minute budget, all of these must hold:
-   - `ws-server` is active and `/healthz` is ok;
-   - `ws-server-preview`, `caddy`, `postgresql` and the runner service are active.
+2. Before every `resume` attempt, within one 15-minute budget, the **required service list** must be active, with `/healthz` ok:
+   - `ws-server`;
+   - `ws-server-preview`, `caddy`, `postgresql`, `docker`;
+   - the runner service.
+
+   The follow-up check uses the same list.
 
    Then `resume` is retried within the same budget until it prints `RESUMED` with exit code 0.
 3. If the budget runs out or a service is down, the state becomes `FAILED`, the hold stays (C7) and an alert is sent.
@@ -60,7 +63,7 @@
 1. Ledger dispatch: before `prepare`, both dispatch timers are stopped (D6) and both dispatch services must be `inactive` (any other state, including `activating`, blocks). The idleness is re-checked before `switching`.
    - On any skip, the timers are started again.
    - After the reboot they start by themselves, because they are `enabled`.
-2. Runner: there must be no `Runner.Worker` process. The runner service is then stopped, so it takes no new jobs, and the check runs again. On any skip the runner is started again; after the reboot it starts by itself (`enabled`). If a job is running, the run skips; it never cancels a job.
+2. Runner: there must be no `Runner.Worker` process at the start and again right before `switching`. The runner service is **not** stopped: the self-hosted runner has no verified way to refuse new jobs without cancelling an assigned one. A job assigned in the seconds between the last check and the reboot can therefore be interrupted. GitHub marks it failed and it can be re-run. This residual risk is decision D8.
 3. One lock covers every step that reads or changes the operation state: timer runs, the boot unit, `enable`, `disable` and `clear`. It is the deploy maintenance lock, which releases and the weekly maintenance also take. It is taken before the state is read and held until the result is written, or until `systemctl reboot` is called. `disable` therefore either cancels a run that has not reached `switching`, or reports that the run is past the point of no return.
 4. WS Preview may be hard-restarted. The repository accepts hard-kick restarts of Stage/WS Preview.
 
@@ -68,7 +71,10 @@
 **Acceptance**
 1. The feature is off after installation.
 2. Enabling it, disabling it and clearing a `FAILED` latch are separate `VPS Admin Operation` entries.
-3. `disable` cancels any run that has not yet passed `switching`. The script reads the flag again right before `switching`. After `switching`, the reboot can no longer be cancelled; this is documented.
+3. `disable` first writes a cancel file, `/etc/arcadeplatform/maintenance-reboot.cancel`, atomically and without waiting for the lock. Then it sets `ENABLED=0` under the lock.
+   - A running attempt checks the cancel file as the very last step before writing `SWITCHING`, and aborts if it is there.
+   - `disable` reports `cancelled` or `past_point_of_no_return`, by reading the state once it gets the lock.
+   - After `switching`, the reboot can no longer be cancelled.
 4. After `FAILED`, no further attempt runs until the OWNER clears the latch.
 
 ## State machine
@@ -77,7 +83,7 @@ The state file is `/var/lib/arcadeplatform/maintenance-reboot/state` (root, writ
 
 The attempt log is a separate append-only file, `.../attempts`. Before `prepare` it gets one reservation line per attempt (`opId`, time, boot ID). The 24 h limit counts the other lines; before `switching` the script also confirms its own reservation is there. Results go to the state file and the journal, never as a second line. Plain skips never write to it.
 
-The state also records which ledger timers and which runner service **this run** stopped. Only those are started again. If a ledger timer was already stopped (for example a pause the OWNER approved), the run skips without touching anything.
+The state records the initial state of both ledger timers and the intent to stop them **before** the first stop. A run interrupted mid-stop is reconciled from that record. After a confirmed `abort`, the units this run stopped are started again and verified before the state returns to `IDLE`. If a ledger timer was already stopped (for example a pause the OWNER approved), the run skips without touching anything.
 
 | Stage | Entered when | Next |
 |---|---|---|
@@ -93,7 +99,13 @@ Reconciliation, under the lock, at every boot (whatever `ENABLED` says) and ever
 - `PREPARING` with the **same** boot ID: an earlier run died during `prepare`. The script calls `abort <opId>`. `ABORTED` or `ABORTED not_held` → `IDLE`; anything else → `FAILED`.
 - `PREPARING` or `SWITCHING` with a **new** boot ID: the host rebooted mid-operation. Result: `FAILED interrupted_by_boot`, hold kept (C7), alert. No `abort` runs across boots.
 - `REBOOTING` with a new boot ID: the boot unit resumes as in US3.
-- `RESUMING` (written before the first `resume` call) with a new boot ID: an earlier resume attempt may have lifted the hold. In this state only, `RESUMED not_held` is accepted as `RESUMED reconciled`.
+- `RESUMING` (written before the first `resume` call) with a new boot ID: an earlier attempt may have lifted part or all of the hold. The gate removes the hold first and the marker second. After re-checking the required services:
+  - own marker with `stage=switching` and the hold present → call `resume` again;
+  - own marker without the hold → call `resume`, which then clears the marker and prints `RESUMED`;
+  - neither file → accept `RESUMED not_held` as `RESUMED reconciled`;
+  - a marker of another owner → `FAILED foreign_hold`.
+
+  Every `FAILED` records whether the hold file was observed present or absent.
 
 Any `FAILED` also writes `ENABLED=0` to the config. Re-enabling needs a new `enable` operation, which is a new D7 approval; `clear` only clears the latch.
 
@@ -141,11 +153,13 @@ Known gate limitation: `resume` requires the WS MainPID to differ from the prepa
   Recommendation: (a). The VPS side needs a GitHub App token, which `github-app-token-prepare` is preparing; no new secret without a separate GO.
 - **D4 Skip series.** Proposed: alert after 7 qualifying skipped windows.
 - **D5 Livepatch.** Out of scope (libc and other libraries still need a restart).
-- **D6 Ledger timers.** The script stops both dispatch timers for the run, if both are running, and on any skip starts again only the ones it stopped. This is the same effect as `ledger-dispatchers-pause`/`-resume`, done automatically. It needs OWNER approval. Alternative: skip whenever a dispatch service is not `inactive`; the residual risk is a timer firing during `prepare`.
+- **D6 Ledger timers.** Proposed and planned: the script stops both dispatch timers for the run, if both are running, and on any skip starts again only the ones it stopped. This is the same effect as `ledger-dispatchers-pause`/`-resume`, done automatically, and is part of the D7 scope. If the OWNER rejects this, the plan changes to "skip whenever a dispatch service is not `inactive`" (residual risk: a timer firing during `prepare`), and spec, plan and tasks are updated before implementation.
+- **D8 Runner jobs.** A CI job assigned in the last seconds before the reboot may be interrupted (US4.2). Proposed: accept it, since the window is chosen when CI is idle. Otherwise the runner needs a verified way to refuse new jobs before this can be activated.
 - **D7 Standing approval.** After `maintenance-reboot-enable`, each automatic run does what otherwise needs a GO per run: drain WS Production and reboot the host. Today `AGENTS.md` requires a separate GO for a DRAIN change and runs root administration through `VPS Admin Operation`. So before activation, a reviewed and OWNER-approved `AGENTS.md` change must allow automatic runs of this exact mechanism, within this spec. Until then, every run needs its own GO, and the feature stays disabled.
-  - The config records the approved versions: the git blob SHA of the script and of the gate. Both `decideStart` and `decideSwitch` refuse when the installed files differ, so a gate or script update withdraws the approval until a new `enable`.
+  - The config records the approved versions: the git blob SHA of the script and of the gate. The script verifies the gate SHA immediately before **every** gate call, including recovery after a boot. A mismatch → `FAILED version_mismatch`, no automatic recovery, the OWNER decides.
+  - `ws-restart-gate-install` and `maintenance-reboot-install` take the deploy maintenance lock (T004), so they cannot swap a file in the middle of an attempt.
   - `disable` and any `FAILED` (which sets `ENABLED=0`) also withdraw the approval.
-  - The first run is a one-time window right after enable, watched by the OWNER.
+  - The first activation is a one-time window with an expiry (`ONE_TIME_UNTIL`), checked at the start and before `switching`, and watched by the OWNER. After it expires, nothing runs until `enable` with the recurring window.
 
 ## Out of scope
 

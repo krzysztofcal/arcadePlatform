@@ -30,14 +30,15 @@ Every step runs under the deploy maintenance lock (`/opt/ws-server/.deploy-maint
    - no other attempt in the last 24 h (unreadable log → skip);
    - no `Runner.Worker` process.
 5. Release identity. `readlink -f /opt/ws-server/current` must equal `/opt/ws-server/releases/<sha>/ws-server`, with `<sha>` 40 lowercase hex characters. `release-metadata.json` there must say `<sha>`, and the running WS process directory must be the same. Otherwise skip.
-6. Ledger and runner:
-   - Both ledger timers must be active, else skip without changes.
-   - Stop both timers and record that this run stopped them. Both dispatch services must be `inactive`.
-   - Stop the runner service and record it. There must still be no `Runner.Worker`.
-   - If any of this fails, start again only what this run stopped, and skip.
-7. Write `PREPARING` (`opId` from `nextOpId`, `<sha>`, `bootIdBefore`, the stopped units) and append the reservation line.
+6. Write `PREPARING` (`opId` from `nextOpId`, `<sha>`, `bootIdBefore`, the initial state of both ledger timers and the intent to stop them), then append the reservation line.
+7. Ledger (D6):
+   - both timers must be active, else return to `IDLE` and skip without changes;
+   - stop both and record each stop in the state;
+   - both dispatch services must be `inactive`.
+
+   On failure, start again what this run stopped, verify it, then `IDLE` and skip. The runner is not stopped (D8).
 8. `prepare <opId>`. Anything other than exit 0 with `PREPARED` → `abort <opId>`:
-   - `ABORTED` or `ABORTED not_held` → `IDLE`, `SKIPPED gate_<code>`, and this run's units are started again;
+   - `ABORTED` or `ABORTED not_held` → start this run's units again and verify them, then `IDLE` and `SKIPPED gate_<code>`;
    - anything else → `FAILED abort_<code>`, `ENABLED=0`, alert. The units stay as they are and the state records them.
 9. `check` must exit 0 with `RESTART_SAFE`, and the MainPID must equal the one in the marker. Otherwise abort as in step 8.
 10. `decideSwitch`:
@@ -47,7 +48,7 @@ Every step runs under the deploy maintenance lock (`/opt/ws-server/.deploy-maint
     - both ledger services are `inactive` and there is no `Runner.Worker`.
 
     If it fails, abort as in step 8.
-11. Write `SWITCHING`. Call `switching <opId>` (exit 0 and `SWITCH_MARKED`). Write `REBOOTING`. Call `systemctl reboot`.
+11. Last checks: the cancel file must be absent, `ONE_TIME_UNTIL` (if set) not passed, and the gate blob SHA verified again. Write `SWITCHING`. Call `switching <opId>` (exit 0 and `SWITCH_MARKED`). Write `REBOOTING`. Call `systemctl reboot`.
     - If `switching` fails → `FAILED switching_<code>`.
     - If `systemctl reboot` returns an error → `FAILED reboot_refused`.
 
@@ -59,8 +60,8 @@ Runs under the same lock, whatever `ENABLED` says.
 
 1. Run `reconcile`; it handles `PREPARING`, `SWITCHING`, the same boot and `RESUMING`. Continue only for `REBOOTING` (or `RESUMING`) with a new boot ID.
 2. Within one 15-minute budget, repeat:
-   1. Require `ws-server` active, `/healthz` ok, and `ws-server-preview`, `caddy`, `postgresql`, `docker` active. The runner is not required here, because this run stopped it and it starts at boot by itself.
-   2. Confirm the gate marker still carries this `opId` with `stage=switching`, and the hold file exists.
+   1. Require the spec's required service list to be active and `/healthz` ok (`ws-server`, `ws-server-preview`, `caddy`, `postgresql`, `docker`, the runner). Verify the gate blob SHA.
+   2. Read the gate marker and the hold file, and follow the matching `RESUMING` recovery case in the spec: own marker with or without the hold, neither file, or a foreign marker.
    3. Write `RESUMING` (first time only).
    4. Call `resume <opId> <sha>`.
       - Exit 0 with `RESUMED` → done.
