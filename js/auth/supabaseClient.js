@@ -428,6 +428,8 @@
         // A sign-out or account switch during the wait supersedes this read; the new session starts its own.
         var ui = userUiState();
         if (profileSessionGeneration !== deferredSessionGen || !state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
+        // A later session event may already have confirmed the profile through ProfileClient during the wait.
+        if (profileConfirmedUserId === String(user.id)) return;
         refreshProfile(user, uiGeneration, hadCachedProfile);
       };
       doc.addEventListener('DOMContentLoaded', retry, { once: true });
