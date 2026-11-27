@@ -197,9 +197,10 @@
                 var photoUrl = avatar.url;
                 var capturedGen = publicGeneration;
                 var entry = downloadPhoto(photoUrl).then(async function(dataUrl){
-                  if (photoExpiresAt(photoUrl) <= Date.now()) throw new Error('link_expired');
                   var nowUser = await currentUserId();
                   if (nowUser !== ownUserId || publicGeneration !== capturedGen) throw new Error('stale_session');
+                  // Checked after the session check, so a link that expired during it is not shown or saved.
+                  if (photoExpiresAt(photoUrl) <= Date.now()) throw new Error('link_expired');
                   if (ui && typeof ui.writePhoto === 'function' && !ui.writePhoto(ownUserId, { path: path, dataUrl: dataUrl })) storageUsable = false;
                   return dataUrl;
                 });
