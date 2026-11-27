@@ -12,7 +12,7 @@ function jsonResponse(body){
   return { status: 200, ok: true, async json(){ return body; } };
 }
 
-function createClient(fetchImpl){
+function createClient(fetchImpl, options){
   const published = [];
   const events = [];
   let context = { userId: 'chips-user', generation: 1 };
@@ -26,6 +26,7 @@ function createClient(fetchImpl){
     },
     KLog: { log(){} },
   };
+  if (options && options.profileClient) window.ProfileClient = options.profileClient;
   window.window = window;
   class CustomEvent {
     constructor(type, options){ this.type = type; this.detail = options && options.detail; }
@@ -108,6 +109,64 @@ function createClient(fetchImpl){
   assert.equal(welcome.code, 'welcome-2026');
   assert.equal(welcome.amount, 500);
   assert.equal(requests, 0, 'a shared campaigns payload must not cause another GET');
+}
+
+{
+  let getMeCalledWith = null;
+  const mockProfileClient = {
+    getMe: async (force, options) => {
+      getMeCalledWith = { force, options };
+      return { balance: 1500, poker: { inPoker: true, tables: [{ id: 't-1', stack: 200 }] } };
+    },
+  };
+  const state = createClient(async () => { throw new Error('unexpected_fetch'); }, { profileClient: mockProfileClient });
+  const snapshot = await state.client.fetchTopbarSnapshot();
+  assert.equal(getMeCalledWith.force, false);
+  assert.equal(getMeCalledWith.options.includePoker, true);
+  assert.equal(snapshot.balance, 1500);
+  assert.deepEqual(snapshot.poker, { inPoker: true, tables: [{ id: 't-1', stack: 200 }] });
+  assert.equal(JSON.stringify(state.published), JSON.stringify([{ userId: 'chips-user', slice: 'chips', value: { balance: 1500 } }]));
+  const balanceEvents = state.events.filter((e) => e.type === 'chips:balance');
+  assert.equal(balanceEvents.length, 1);
+  assert.equal(balanceEvents[0].detail.balance, 1500);
+}
+
+{
+  const mockProfileClient = {
+    getMe: async () => ({ balance: -50, poker: null }),
+  };
+  const state = createClient(async () => { throw new Error('unexpected_fetch'); }, { profileClient: mockProfileClient });
+  const snapshot = await state.client.fetchTopbarSnapshot();
+  assert.equal(snapshot.balance, null);
+  assert.equal(snapshot.poker, null);
+  assert.equal(state.published.length, 0);
+  assert.equal(state.events.filter((e) => e.type === 'chips:balance').length, 0);
+}
+
+{
+  let pokerFetches = 0;
+  let releasePoker;
+  const holdPoker = new Promise((resolve) => { releasePoker = resolve; });
+  const state = createClient(async (url) => {
+    if (url.includes('profile-me?includePoker=1')) {
+      pokerFetches++;
+      await holdPoker;
+      return jsonResponse({ poker: { inPoker: false } });
+    }
+    throw new Error('unexpected_fetch');
+  });
+
+  const p1 = state.client.fetchPokerProjection();
+  const p2 = state.client.fetchPokerProjection();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(pokerFetches, 1, 'in-flight poker requests for the same user must be shared');
+  releasePoker();
+  const [res1, res2] = await Promise.all([p1, p2]);
+  assert.deepEqual(res1, { inPoker: false });
+  assert.deepEqual(res2, { inPoker: false });
+
+  const p3 = state.client.fetchPokerProjection();
+  state.client.clearAuthCache();
 }
 
 console.log('chips client cache behavior tests passed');
