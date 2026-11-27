@@ -120,12 +120,35 @@ test('apply protection must be exact and current, with OWNER review of this run 
  await stageExecutor.verifyApplyProtection(false,readFrom([policy,branches],calls),applyEnv);
  assert.deepEqual(calls,endpoints.slice(0,2));
  await stageExecutor.verifyApplyProtection(true,readFrom([policy,branches,[approved]]),applyEnv);
- for(const weaker of [{...policy,can_admins_bypass:true},{...policy,protection_rules:[]},{...policy,name:'stage-automation'}]){
+ const rule=policy.protection_rules[0];
+ const reviewer=rule.reviewers[0];
+ for(const weaker of [
+  {...policy,can_admins_bypass:true}, {...policy,name:'stage-automation'},
+  {...policy,protection_rules:[]}, {...policy,protection_rules:{}},
+  {...policy,protection_rules:[{...rule,prevent_self_review:true}]},
+  {...policy,protection_rules:[{...rule,reviewers:[{...reviewer,reviewer:{login:bot}}]}]},
+  {...policy,protection_rules:[{...rule,reviewers:[{...reviewer,type:'Team'}]}]},
+  {...policy,protection_rules:[{...rule,reviewers:[reviewer,reviewer]}]},
+  {...policy,deployment_branch_policy:{...policy.deployment_branch_policy,custom_branch_policies:false}},
+  {...policy,deployment_branch_policy:{...policy.deployment_branch_policy,protected_branches:true}}
+ ]){
   await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([weaker,branches,[approved]]),applyEnv),/apply_environment_protection_required/);
  }
- await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([policy,{...branches,total_count:2},[approved]]),applyEnv),/apply_environment_branch_required/);
- for(const review of [[],[{...approved,state:'rejected'}],[{...approved,user:{login:bot}}],[{...approved,environments:[{name:'ws-preview'}]}]]){
+ for(const branchPolicy of [
+  {...branches,total_count:2}, {...branches,branch_policies:[{type:'branch',name:'release'}]},
+  {...branches,branch_policies:[{type:'tag',name:'main'}]}
+ ]){
+  await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([policy,branchPolicy,[approved]]),applyEnv),/apply_environment_branch_required/);
+ }
+ for(const review of [
+  [], [{...approved,state:'rejected'}], [{...approved,user:{login:bot}}],
+  [{...approved,environments:[{name:'ws-preview'}]}], [{...approved,environments:{name:'stage-db-apply'}}]
+ ]){
   await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([policy,branches,review]),applyEnv),/owner_approval_required/);
+ }
+ for(const GITHUB_RUN_ID of [undefined,'0','123/approvals']){
+  await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([policy,branches,[approved]]),
+   {...applyEnv,GITHUB_RUN_ID}),/apply_run_required/);
  }
 });
 
@@ -136,12 +159,44 @@ test('apply job waits on preflight and verifies review before binding Stage secr
  assert.match(front,/inspect-stage:[\s\S]*?environment: stage-automation/);
  const preflight=front.split(/^  preflight-apply:\s*$/m)[1];
  assert.ok(preflight);
- assert.match(preflight,/github\.run_attempt == '1'/);
- assert.match(apply,/github\.run_attempt == '1'/);
+ for(const job of [preflight,apply]){
+  const guard=job.match(/^    if: >-\n([\s\S]+?)(?=^    [a-z])/m)?.[1];
+  assert.ok(guard);
+  for(const clause of [
+   "github.event_name == 'workflow_dispatch'", "github.repository == 'krzysztofcal/arcadePlatform'",
+   "github.ref == 'refs/heads/main'", "inputs.operation == 'apply'", "github.run_attempt == '1'",
+   'github.actor == github.triggering_actor', "(github.actor == 'krzysztofcal' || github.actor == 'arcade-code-agent[bot]')"
+  ]) assert.ok(guard.includes(clause), clause);
+ }
  assert.doesNotMatch(preflight,/secrets\./);
  assert.match(apply,/needs: preflight-apply/);
  assert.match(apply,/environment: stage-db-apply/);
  assert.match(apply,/actions: read/);
  assert.ok(apply.indexOf('--verify-review')>=0 && apply.indexOf('--verify-review')<apply.indexOf('secrets.SUPABASE_STAGE_DIRECT_DB_URL'));
  assert.match(apply,/needs\.preflight-apply\.outputs\.approval_digest/);
+});
+
+test('preflight rejects incorrect confirmation and emits the exact no-op manifest without DB access',async()=>{
+ const a=bundle([]).approval;
+ const env={...applyEnv,GITHUB_SHA:'b'.repeat(40),STAGE_MIGRATION_APPROVAL:JSON.stringify(a),
+  STAGE_MIGRATION_CONFIRMATION:confirmation(a),GITHUB_OUTPUT:'output',GITHUB_STEP_SUMMARY:'summary'};
+ const api={
+  '/environments/stage-db-apply':{name:'stage-db-apply',can_admins_bypass:false,
+   deployment_branch_policy:{custom_branch_policies:true,protected_branches:false},
+   protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{login:owner}}]}]},
+  '/environments/stage-db-apply/deployment-branch-policies':{total_count:1,branch_policies:[{type:'branch',name:'main'}]},
+  '/commits/main':{sha:env.GITHUB_SHA},
+  '/pulls/1':{state:'open',head:{sha:sourceSha,repo:{full_name:env.GITHUB_REPOSITORY}}},
+  ['/git/trees/'+sourceSha+'?recursive=1']:{truncated:false,tree:[]}
+ };
+ const writes=new Map();
+ const read=async path=>{assert.ok(Object.hasOwn(api,path),path);return api[path];};
+ const append=(name,content)=>writes.set(name,content);
+ await assert.rejects(stageExecutor.preflightApply({...env,STAGE_MIGRATION_CONFIRMATION:'wrong'},read,append),/operator_confirmation_required/);
+ assert.equal(writes.size,0);
+ await stageExecutor.preflightApply(env,read,append);
+ assert.equal(writes.get('output'),'approval_digest='+approvalDigest(a)+'\n');
+ for(const expected of [sourceSha,approvalDigest(a),a.historySha256,'No migrations requested.']){
+  assert.ok(writes.get('summary').includes(expected),expected);
+ }
 });

@@ -15,6 +15,6 @@
 
 - [x] T006 Verify inspect remains read-only, preserves existing output and shares serialization with apply. Check sanitized pending/refused/no-op/applied states.
 - [x] T007 Update `docs/ai-agent-db-migration-checklist.md` for preflight, exact manifest, review, no rerun and independent readback.
-- [ ] T008 With separate OWNER scope, verify App dispatch and configure the protected environment before rollout. Verify rejection and authorized no-op without schema changes, using `quickstart.md`. Record source SHA, run IDs, approval evidence and history readback. Real migration dispatch requires its own scope.
+- [ ] T008 With separate OWNER scope, verify App dispatch and configure the protected environment before rollout. Verify and record that stage-automation allows only main and that neither Stage secret nor a broadly exposed copy of the write credential is available at repository or organization scope. An unverified or overly broad scope blocks rollout. Verify rejection and authorized no-op without schema changes, using `quickstart.md`. Record source SHA, run IDs, approval evidence and history readback. Real migration dispatch requires its own scope.
 
 T001 → T002 → T003/T004 → T005/T006/T007 → T008. Environment setup, merge and shared apply are OWNER gates.

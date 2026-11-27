@@ -189,15 +189,15 @@ export async function verifyApplyProtection(requireReview, read = github, env = 
     review.environments.some(e => e?.name === APPLY_ENVIRONMENT)), 'owner_approval_required');
 }
 
-async function preflightApply() {
-  await verifyApplyProtection(false);
-  const a = validateApproval(JSON.parse(process.env.STAGE_MIGRATION_APPROVAL || 'null'));
-  check(process.env.STAGE_MIGRATION_CONFIRMATION === confirmation(a), 'operator_confirmation_required');
-  await prepare(a);
+export async function preflightApply(env = process.env, read = github, append = fs.appendFileSync) {
+  await verifyApplyProtection(false, read, env);
+  const a = validateApproval(JSON.parse(env.STAGE_MIGRATION_APPROVAL || 'null'));
+  check(env.STAGE_MIGRATION_CONFIRMATION === confirmation(a), 'operator_confirmation_required');
+  await prepare(a, read, env);
   const sha = approvalDigest(a);
-  fs.appendFileSync(process.env.GITHUB_OUTPUT, `approval_digest=${sha}\n`);
+  append(env.GITHUB_OUTPUT, `approval_digest=${sha}\n`);
   const files = a.migrations.map(m => `- \`${m.file}\` \`${m.sha256}\``);
-  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+  append(env.GITHUB_STEP_SUMMARY, [
     '## Stage migration request', '', `- PR ${a.pr}`, `- Source SHA \`${a.sourceSha}\``,
     `- Approval digest \`${sha}\``, `- History ${a.historyCount} versions, \`${a.historySha256}\``,
     '', ...files, ...(files.length ? [] : ['No migrations requested.']), ''
