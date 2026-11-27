@@ -290,7 +290,10 @@
         poker: profile && profile.poker !== undefined ? profile.poker : null
       };
     }
-    var results = await Promise.all([fetchBalance(), fetchPokerProjection()]);
+    var results = await Promise.all([
+      fetchBalance(),
+      fetchPokerProjection().catch(function(){ return null; })
+    ]);
     return {
       balance: results[0],
       poker: results[1]

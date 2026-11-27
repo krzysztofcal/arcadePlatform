@@ -570,6 +570,9 @@
           renderChipBadgeBalance(value);
         }
       } catch (err){
+        if (hasSnapshot && requestGeneration === chipRequestGeneration){
+          renderPokerBadge(null);
+        }
         if (err && err.code === 'timeout'){
           if (!retainCachedChipBadge()) hideChipBadge();
           return;

@@ -169,4 +169,26 @@ function createClient(fetchImpl, options){
   state.client.clearAuthCache();
 }
 
+{
+  const state = createClient(async (url) => {
+    if (url.includes('/chips-balance')) {
+      return jsonResponse({ balance: 750 });
+    }
+    if (url.includes('profile-me?includePoker=1')) {
+      throw new Error('poker_projection_failed');
+    }
+    throw new Error('unexpected_fetch');
+  });
+
+  const snapshot = await state.client.fetchTopbarSnapshot();
+  const rawBalance = snapshot && snapshot.balance && typeof snapshot.balance === 'object'
+    ? snapshot.balance.balance
+    : snapshot.balance;
+  assert.equal(rawBalance, 750);
+  assert.equal(snapshot.poker, null);
+  const balanceEvents = state.events.filter((e) => e.type === 'chips:balance');
+  assert.equal(balanceEvents.length, 1);
+  assert.equal(balanceEvents[0].detail.balance, 750);
+}
+
 console.log('chips client cache behavior tests passed');
