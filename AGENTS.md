@@ -52,14 +52,15 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - PRs with no needed WWW testing MUST by default have `[skip netlify]` in the PR title from creation.
 - Build a Deploy Preview when actual WWW, UI or Netlify function testing is needed; relevant required validation uses exact PR HEAD.
 - Never skip required browser verification just to save a build.
-- **Preview feature flags (OWNER standing GO, 2026-11-27):** when a Deploy Preview test needs a feature flag (for example `UGC_SAFETY_ENABLED`, `GOOGLE_PHOTO_IMPORT_ENABLED`, `POKER_TABLE_PHOTO_ENABLED`), the agent sets it itself in the Netlify `deploy-preview` or `branch-deploy` context, without asking the OWNER. Steps:
+- **Preview feature flags (OWNER standing GO, 2026-11-27):** when a Deploy Preview test needs a feature flag (for example `UGC_SAFETY_ENABLED`, `GOOGLE_PHOTO_IMPORT_ENABLED`, `POKER_TABLE_PHOTO_ENABLED`), the agent sets its value itself in the Netlify `deploy-preview` context of the WWW site `playkcswh`, without asking the OWNER. Steps:
+  - Confirm that the account and `site_id` belong to `playkcswh`, the site that builds the tested PR's preview.
   - Read the variable first.
-  - Change only that one context with the Netlify API endpoint for one context value: `PATCH /api/v1/accounts/<account>/env/<KEY>?site_id=<site>` with `{"context":"deploy-preview","value":"1"}`.
-  - Read it again and confirm that the `production` value is unchanged.
+  - Change only the `deploy-preview` value with the Netlify API endpoint for one context value: `PATCH /api/v1/accounts/<account>/env/<KEY>?site_id=<site>` with `{"context":"deploy-preview","value":"1"}`.
+  - Read it again: the target value must be set and every other context unchanged. On any mismatch or failed read, stop and report the state to the OWNER.
   - Rebuild the preview (push or retrigger), because functions read the value at build time.
   - Report the change to the OWNER.
   - Do not use a whole-variable upsert (such as the Netlify MCP `manage-env-vars` upsert): it may replace the values of other contexts.
-  - This GO never covers the `production` context, secrets, other Netlify settings or a Production publish. Those keep their existing GO rules.
+  - This GO covers only the flag value in that context. It never covers other contexts (including `branch-deploy` and `production`), secrets, other Netlify settings or a Production publish. A feature activation that needs its own scope, and tests that write shared Stage data, JOIN tables or change the ledger, still need their own GO.
 
 ---
 
