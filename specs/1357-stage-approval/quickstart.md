@@ -1,0 +1,5 @@
+# Operational acceptance
+
+1. On reviewed main, inspect the environment policies and the App capability. OWNER sets up `stage-db-apply`, exactly one reviewer, main-only, admin bypass off, and approved Stage secrets after protection. Keep existing Stage automation config.
+2. Request an OWNER-authorized dry acceptance from the App using the relevant trusted-main workflow with an exact, already-applied approved bundle and current history in the supported no-op form. Before approval check that the apply step did not start. Reject one dry run and verify no database step. After approval of a fresh dry run confirm the actual OWNER record, applied count zero and independently unchanged Stage history. If no safe no-op bundle qualifies, stop and prove the approval flow without database secrets before requesting a separate proof.
+3. For real changes, compare request PR, SHA/hash manifest, history and confirmation before approving. Read back atomic receipts. A failed/uncertain result requires independent inspect and a fresh request if appropriate.
