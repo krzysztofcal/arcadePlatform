@@ -1,6 +1,6 @@
 # Feature Specification: Gated automatic reboot of the VPS in a maintenance window
 
-**Branch**: `docs/vps-maintenance-reboot-spec` · **Created**: 2026-11-27 · **Status**: draft for OWNER decision
+**Branch**: `docs/vps-maintenance-reboot-spec` · **Created**: 2026-11-27 · **Status**: draft for OWNER decision (D1–D7)
 **Scope**: the Production VPS (Hetzner, Ubuntu 24.04). It runs WS Production, WS Preview, Caddy, PostgreSQL, Docker, the GitHub Actions runner and the ledger dispatch timers. No application, Netlify, DB schema or WWW change.
 
 ## Evidence (2026-11-27, read-only)
@@ -14,118 +14,139 @@
   - `ssh.socket`;
   - the timers `arcade-chips-ledger-dispatch`, `arcade-chips-ledger-production-dispatch` and `arcadeplatform-vps-maintenance` (Sunday 03:30 UTC; prunes WS releases and temp directories, runs as `arcade`, cannot reboot).
 - A reboot is not in the `VPS Admin Operation` catalog (`docs/vps-admin-operations.md`). Today only the OWNER can reboot, by hand.
-- WS Production keeps game state in memory. Its restart gate (`/usr/local/sbin/arcade-ws-restart-gate`, `infra/vps/ws-restart-gate.mjs`) already provides what a safe stop needs:
-  - `prepare <runId>`: holds new hands, waits for running hands, drains, and requires `humanSeatsOpen=0` and `closedWithEscrow=0`;
-  - `switching <runId>`: the point of no return;
-  - `resume <runId> <sha>`: lifts the hold only after a restart into the same release, with `/healthz` ok and `RESTART_SAFE`;
-  - `abort <runId>`: removes the run's own hold before the switch.
-- The hold file `/etc/arcadeplatform/ws-hold/new-hands` is on disk, so it survives a reboot.
+- WS Production keeps game state in memory. Its restart gate (`infra/vps/ws-restart-gate.mjs`, installed as `/usr/local/sbin/arcade-ws-restart-gate`) provides these commands:
+  - `check`: prints `RESTART_SAFE` only when hold and drain are active, the queue is idle, money is verified, and `humanSeatsOpen=0` and `closedWithEscrow=0`.
+  - `prepare <opId>`: holds new hands, waits up to 10 min for running hands, drains, waits up to 2 min for `RESTART_SAFE`, and prints `PREPARED`. On a stop it removes its own hold. If the WS process changes while it waits, it prints `…_process_changed,hold_kept`.
+  - `switching <opId>`: checks only the owner, the unchanged PID and `drain`, then marks the point of no return. **It does not re-check presence or money.**
+  - `resume <opId> <sha>`: lifts the hold only after a marked switch and a restart into `releases/<sha>`, with `/healthz` ok and `RESTART_SAFE`. It prints `RESUMED`, or `RESUMED not_held` when no marker or hold exists.
+  - `abort <opId>`: works before the switch only, while the prepared PID still runs. It prints `ABORTED`, `ABORTED not_held` or `ABORT_BLOCKED <reason>`.
+  - `opId` must match `^[1-9][0-9]{0,19}$`. Releases use GitHub run IDs, currently 11 digits.
+- The hold file `/etc/arcadeplatform/ws-hold/new-hands` and its marker are on disk, so they survive a reboot.
 - Releases and the weekly maintenance serialize on `/opt/ws-server/.deploy-maintenance.lock` (`flock`).
 
 ## User stories
 
 ### US1: Kernel and libc fixes take effect without the OWNER doing it by hand (P1)
-When an update needs a reboot, the VPS reboots by itself in the next maintenance window in which nobody is playing.
-
 **Acceptance**
 1. No reboot happens while `/var/run/reboot-required` is absent.
 2. A reboot happens only inside the configured window.
-3. At most one reboot per 24 hours, also when `reboot-required` is still present after the boot.
+3. At most one reboot **attempt** per 24 hours, whatever its outcome, and also when `reboot-required` is still present after the boot.
 
 ### US2: Nobody loses a hand or money (P1)
-A reboot never interrupts seated human players or leaves chips in escrow.
-
 **Acceptance**
-1. The reboot starts only after `arcade-ws-restart-gate prepare <runId>` printed `PREPARED` and `switching <runId>` succeeded. Both already require `humanSeatsOpen=0`, `closedWithEscrow=0`, no running hands and verified money.
-2. Any other gate outcome skips the night: `abort <runId>` removes only this run's hold and the next window tries again. Nothing is restarted.
+1. The point of no return (`switching`) is passed only after all of these, in this order:
+   1. `prepare` printed `PREPARED`;
+   2. a fresh `check` printed `RESTART_SAFE` and the WS MainPID is unchanged;
+   3. window, enabled flag, `reboot-required`, the attempt limit, ledger idleness and runner idleness were re-checked.
+
+   If anything fails before `switching`, the run aborts.
+2. After `switching`, the host is rebooted at once, with no further waits.
 3. While the reboot is in progress, the hold stays on disk, so the restarted WS starts no new hands until `resume` succeeds.
 
 ### US3: The system comes back, or the OWNER knows that it did not (P1)
 **Acceptance**
-1. A boot-time unit runs `resume <runId> <sha>` for the recorded run once `ws-server` is active, after the WS warm-up.
-   - `<sha>` is the release that ran before the reboot.
-   - `resume` must print `RESUMED`.
-2. It also checks `ws-server`, `ws-server-preview`, `caddy`, `postgresql` and the runner service.
-3. Every outcome is written to the journal as one line: `MAINT_REBOOT_<SKIPPED|PREPARED|REBOOTING|RESUMED|FAILED> <reason>`. The last state is written to `/var/lib/arcadeplatform/maintenance-reboot/state`.
-4. On `RESUME_BLOCKED`, a failed service or no resume within 15 minutes of boot, the hold stays (C7) and the state says `FAILED`. The OWNER is alerted through the channel chosen in decision D3.
+1. Resume happens only after a **new boot**: the kernel `boot_id` differs from the one recorded before `switching`.
+2. Before `resume`, within one 15-minute budget, all of these must hold:
+   - `ws-server` is active and `/healthz` is ok;
+   - `ws-server-preview`, `caddy`, `postgresql` and the runner service are active.
+
+   Then `resume` is retried within the same budget until it prints `RESUMED` with exit code 0.
+3. If the budget runs out or a service is down, the state becomes `FAILED`, the hold stays (C7) and an alert is sent.
+4. A service failure seen after a successful `RESUMED` is recorded as `RESUMED_DEGRADED` with an alert. The hold is not put back.
+5. If the host never comes back, an **external** check alerts the OWNER (D3).
 
 ### US4: Other work is not cut off (P2)
 **Acceptance**
-1. The decision skips the night while any of these is running:
-   - a WS release or the weekly maintenance (the deploy maintenance lock is busy);
-   - a ledger dispatch service (`arcade-chips-ledger-dispatch.service`, `arcade-chips-ledger-production-dispatch.service`);
-   - an active GitHub Actions job on the runner (a `Runner.Worker` process).
-2. WS Preview may be hard-restarted by the reboot. The repository already accepts hard-kick restarts of Stage/WS Preview.
+1. Ledger dispatch: before `prepare`, both dispatch timers are stopped (D6) and both dispatch services must be `inactive` (any other state, including `activating`, blocks). The idleness is re-checked before `switching`.
+   - On any skip, the timers are started again.
+   - After the reboot they start by themselves, because they are `enabled`.
+2. Runner: no `Runner.Worker` process at the start, and again before `switching`.
+3. The deploy maintenance lock is held from the first check to the reboot.
+4. WS Preview may be hard-restarted. The repository accepts hard-kick restarts of Stage/WS Preview.
 
 ### US5: The OWNER can turn it off at once (P1)
 **Acceptance**
 1. The feature is off after installation.
-2. Enabling it and disabling it are separate `VPS Admin Operation` entries.
-3. When disabled, the timer runs but only logs `MAINT_REBOOT_SKIPPED disabled`.
+2. Enabling it, disabling it and clearing a `FAILED` latch are separate `VPS Admin Operation` entries.
+3. `disable` cancels any run that has not yet passed `switching`. The script reads the flag again right before `switching`. After `switching`, the reboot can no longer be cancelled; this is documented.
+4. After `FAILED`, no further attempt runs until the OWNER clears the latch.
+
+## State machine
+
+The state file is `/var/lib/arcadeplatform/maintenance-reboot/state` (root, written atomically with `fsync`). It holds `{ stage, opId, releaseSha, bootIdBefore, startedAt, reason }`.
+
+The attempt log is a separate append-only file, `.../attempts`. It holds one line per attempt that reached `PREPARING`, with its time and boot ID, and is used for the 24 h limit. Plain skips never write to it.
+
+| Stage | Entered when | Next |
+|---|---|---|
+| `IDLE` | Installed, or after `RESUMED` or `SKIPPED` | `PREPARING` |
+| `PREPARING` | Before `prepare` (`opId`, sha and boot ID recorded) | `IDLE`+`SKIPPED` after a confirmed `ABORTED`/`ABORTED not_held`; `FAILED` when an abort is blocked or uncertain |
+| `SWITCHING` | Written **before** calling `switching` | `REBOOTING` |
+| `REBOOTING` | `switching` printed `SWITCH_MARKED` | `RESUMED`, `RESUMED_DEGRADED` or `FAILED` (after boot) |
+| `FAILED` | Any uncertain step | `IDLE` only by the OWNER `clear` operation |
+
+Reconciliation on every timer run and every boot:
+- `SWITCHING` or `REBOOTING` with the **same** boot ID as recorded: the reboot did not happen (the process died, or `systemctl reboot` was refused or never took effect). Result: `FAILED reboot_not_started`, hold kept, alert.
+- `PREPARING` on a timer run: an earlier run died during `prepare`. The script calls `abort <opId>`. `ABORTED` or `ABORTED not_held` → `IDLE`; anything else → `FAILED`.
+- `REBOOTING` with a new boot ID: the boot unit resumes as in US3.
 
 ## Functional requirements
 
-- **FR-001** A root-owned script `/usr/local/sbin/arcade-maintenance-reboot`, from `infra/vps/maintenance-reboot.mjs`, with two modes: `run` (timer) and `resume` (boot). It uses fixed absolute commands and no shell interpolation. It prints only codes and counts. It never reads or prints secrets.
-- **FR-002** A pure decision function `decideReboot(facts)` returns `skip:<reason>` or `proceed`. It checks in this order:
-  1. disabled;
-  2. outside the window;
-  3. no `reboot-required`;
-  4. a reboot in the last 24 h;
-  5. deploy lock busy;
-  6. a ledger dispatch active;
-  7. a runner job active;
-  8. a previous run not finished.
+- **FR-001** A root-owned script `/usr/local/sbin/arcade-maintenance-reboot`, from `infra/vps/maintenance-reboot.mjs`, with two modes: `run` (timer) and `resume` (boot). It uses fixed absolute commands, checks exit code **and** the exact output line of every gate call, prints only codes and counts, and never reads or prints secrets.
+- **FR-002** Pure functions: `decideStart(facts)`, `decideSwitch(facts)`, `reconcile(state, bootId)`, `resumeOutcome(exitCode, line, stage)`, `parseConfig(text)`, and the skip-series counter. They are the unit-tested core.
+- **FR-003** `opId` = `9` followed by the epoch milliseconds zero-padded to 19 digits (20 digits in total). It matches the gate pattern, cannot collide with GitHub run IDs, and the same recorded value is used for every gate call.
+- **FR-004** `resumeOutcome`:
+  - `RESUMED` with exit code 0 succeeds.
+  - `RESUMED not_held` succeeds only during reconciliation of a run whose earlier `resume` call may have completed, and is logged as `RESUMED reconciled`.
+  - Everything else fails.
+- **FR-005** Systemd units:
+  - `arcade-maintenance-reboot.timer`, whose `OnCalendar` is written by the enable operation from the config (UTC, `Persistent=false`) and read back by `status`;
+  - `arcade-maintenance-reboot.service`, running `run`;
+  - `arcade-maintenance-reboot-resume.service`: `Type=oneshot`, `After=ws-server.service network-online.target`, running `resume`.
 
-  `facts` are collected by the script. This function is the unit-tested core.
-- **FR-003** On `proceed` the script, holding the deploy maintenance lock:
-  1. records the run ID (`maint-<UTC timestamp>`) and the current release SHA (from `readlink -f /opt/ws-server/current`);
-  2. runs `prepare`, then `switching`;
-  3. writes `REBOOTING` and calls `systemctl reboot`.
-
-  Any non-success line before `switching` runs `abort` and ends with `SKIPPED`.
-- **FR-004** The boot unit `arcade-maintenance-reboot-resume.service` (`Type=oneshot`, `After=ws-server.service network-online.target`) runs only when the state is `REBOOTING`:
-  1. waits for `ws-server` to be active and `/healthz` to be ok, for at most 15 minutes;
-  2. runs `resume <runId> <sha>`;
-  3. checks the services in US3;
-  4. writes `RESUMED` or `FAILED <reason>`.
-
-  It never retries a reboot.
-- **FR-005** Systemd units: `arcade-maintenance-reboot.timer` (`OnCalendar` = the D1 window start, `RandomizedDelaySec=0`, `Persistent=false`), the service for `run`, and the boot unit. The window end is enforced by the script, not by systemd.
+  The config is the single source of the schedule.
 - **FR-006** Configuration in `/etc/arcadeplatform/maintenance-reboot.conf` (root:root 0644):
   - `ENABLED=0|1`;
-  - `WINDOW_START` and `WINDOW_END` (UTC, `HH:MM`);
+  - `WINDOW_START` and `WINDOW_END` (UTC, `HH:MM`, start before end, no window across midnight);
   - `DAYS` (D2).
 
-  Values outside a strict pattern disable the feature.
-- **FR-007** New `VPS Admin Operation` entries, added to `docs/vps-admin-operations.md` and the executor by a reviewed PR:
-  - `maintenance-reboot-install`: installs the script and units from `main` with the same SHA and blob checks as `ws-restart-gate-install`, leaving the feature disabled;
-  - `maintenance-reboot-enable` and `maintenance-reboot-disable`;
+  Any value outside a strict pattern disables the feature. The window may not overlap Sunday 03:00–04:30 UTC (weekly maintenance).
+- **FR-007** New `VPS Admin Operation` entries, added to `docs/vps-admin-operations.md` and `infra/vps/vps-admin.mjs` by a reviewed PR:
+  - `maintenance-reboot-install`: script and units from `main`, with the `ws-restart-gate-install` checks, disabled;
+  - `maintenance-reboot-enable`: writes the config and timer, reads both back;
+  - `maintenance-reboot-disable`;
+  - `maintenance-reboot-clear`: `FAILED` → `IDLE`. It never touches the WS hold; a kept hold is lifted by the OWNER per C7;
   - `maintenance-reboot-status`: read-only.
-- **FR-008** The alert for `FAILED` and for `SKIPPED` on more than `N` nights in a row (D4) uses the channel from D3. No new secret is stored for it without a separate GO.
+
+  The installed executor only knows the current catalog, so updating it goes through its existing OWNER installation path (`infra/vps/stage-vps-admin.sh`) after merge.
+- **FR-008** Alerts (D3) are sent for `FAILED`, `RESUMED_DEGRADED` and a skip series (D4). The skip series counts only qualifying windows: enabled, `reboot-required` present, inside the window, and skipped by a blocking condition. It is written once per window and reset by a successful reboot.
 
 ## Decisions for the OWNER
 
-- **D1 Window.** Proposed: 03:00–04:00 UTC (04:00–05:00 in Warsaw in winter), avoiding the Sunday 03:30 maintenance. Better: confirm the quietest hour from Production traffic first; the coordinator can read it (read-only).
-- **D2 Days.** Proposed: every night, since a reboot only happens when needed. Alternative: one or two fixed nights a week.
-- **D3 Alert channel.** Options:
-  - (a) a GitHub issue comment by the App identity;
-  - (b) e-mail;
-  - (c) only the journal and the state file, checked by `maintenance-reboot-status`.
+- **D1 Window.** Proposed: 02:00–02:45 UTC every day (03:00–03:45 in Warsaw in winter). This keeps clear of the Sunday 03:30 maintenance. Better: first confirm the quietest hour from Production traffic; the coordinator can read it (read-only).
+- **D2 Days.** Proposed: every day; a reboot happens only when needed. Alternative: fixed days.
+- **D3 Alerts.** Options:
+  - (a) A GitHub issue comment from the VPS for `FAILED`, `RESUMED_DEGRADED` and skip series, **plus** a scheduled GitHub Actions workflow that checks the public WS health and Caddy from outside after each window, for the case where the host does not come back.
+  - (b) Only the journal, the state file and `status`. Then US3.5 is dropped and the OWNER checks by hand.
 
-  Recommendation: (a), which needs no new secret on the VPS beyond what `github-app-token-prepare` is preparing. Otherwise (c) for the first version.
-- **D4 Skip alert.** Proposed: alert after 7 skipped nights while a reboot is required.
-- **D5 Livepatch.** Canonical Livepatch could apply kernel fixes without a reboot. It is out of scope here, because libc and other library updates still need a restart.
+  Recommendation: (a). The VPS side needs a GitHub App token, which `github-app-token-prepare` is preparing; no new secret without a separate GO.
+- **D4 Skip series.** Proposed: alert after 7 qualifying skipped windows.
+- **D5 Livepatch.** Out of scope (libc and other libraries still need a restart).
+- **D6 Ledger timers.** The script stops both dispatch timers for the run and starts them again on any skip. This is the same effect as `ledger-dispatchers-pause`/`-resume`, done automatically. It needs OWNER approval. Alternative: skip whenever a dispatch service is not `inactive`; the residual risk is a timer firing during `prepare`.
+- **D7 Standing approval.** After `maintenance-reboot-enable`, each automatic run does what otherwise needs a GO per run: drain WS Production and reboot the host. The OWNER approves this once, as a standing approval limited to the conditions in this spec.
+  - `disable`, any change of this spec, the gate or the executor, and any `FAILED` withdraw the standing approval until it is approved again.
+  - The first run is a one-time window right after enable, watched by the OWNER.
 
 ## Out of scope
 
 - Installing updates (`unattended-upgrades` already does it).
 - Reboots that are not required.
-- Changing the WS restart gate itself. Only its existing commands are used.
+- Changing the WS restart gate. Only its existing commands are used.
 - WS Preview presence checks, Android and WWW.
 
 ## Risks
 
-- **The VPS does not come back after a reboot** (hardware, disk, network). Recovery is the Hetzner console (OWNER). The alert from D3 must not depend on the VPS itself for this case; otherwise only the existing external monitoring notices.
-- **A boot that is not new, or a kernel that fails to boot.** `reboot-required` stays; the 24 h limit prevents a loop and D4 alerts.
-- **A gate change in the future.** The script depends on gate output lines (`PREPARED`, `RESUMED`). The plan pins them in tests.
-- **The runner job check may miss a job that starts after the check.** Accepted: such a job fails and GitHub retries can rerun it. The window is chosen when CI is idle.
+- **The host does not come back** (hardware, disk, network). Recovery is the Hetzner console (OWNER). Only the external check in D3(a) notices this.
+- **A kernel that fails to boot.** The 24 h attempt limit and the `FAILED` latch prevent a loop.
+- **The gate changes in the future.** The script depends on gate output lines and exit codes, which tests pin. Any gate change withdraws D7.
+- **The seconds between the final `check` and the reboot.** The hold blocks new hands and `drain` is set, but the gate does not re-check presence after `switching`. The final `check` runs immediately before `switching`, and the reboot follows `switching` with no wait. The remaining window is seconds, and joins during it are blocked from playing by the hold. Accepted, subject to D7.
