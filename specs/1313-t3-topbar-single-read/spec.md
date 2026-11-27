@@ -35,8 +35,8 @@ A signed-in page load sends three top-bar requests:
 
 ### US3: Legal pages stop duplicating requests (P2)
 **Acceptance**
-1. On a page without `ProfileClient`, `supabaseClient.js` sends one raw `profile-me` per session (repeated session events share one in-flight raw read for the same user and session generation).
-2. `ChipsClient.fetchPokerProjection`'s raw fallback shares one in-flight request.
+1. On a page without `ProfileClient`, overlapping session events in `supabaseClient.js` share one in-flight raw `profile-me` (same user and session generation). A later event after that read has finished (for example `TOKEN_REFRESHED`) may read again, as on `main`. The T1 confirmation rule applies to the ProfileClient path only and is not changed here.
+2. `ChipsClient.fetchPokerProjection`'s raw fallback shares one in-flight request per auth generation.
 3. The values shown are unchanged.
 
 ### US4: Nothing else changes (P1)
@@ -49,12 +49,16 @@ A signed-in page load sends three top-bar requests:
 ## Functional requirements
 
 - **FR-001** `js/chips/client.js` gets `fetchTopbarSnapshot()`.
-  - With `ProfileClient`: it calls `ProfileClient.getMe(false, { includePoker: true })` and returns `{ balance, poker }`, with `balance` checked as a non-negative safe integer.
-  - A valid balance goes through the same publish/emit step as `fetchBalance`, factored into one private helper used by both.
-  - Without `ProfileClient`: it returns `{ balance: <fetchBalance()>, poker: <fetchPokerProjection()> }` (today's behaviour), with the raw poker fallback deduplicated by one shared in-flight promise per user.
-- **FR-002** `js/topbar.js::refreshChipBadge`: when `ChipsClient.fetchTopbarSnapshot` exists, it uses that one call (under the existing `chipInFlight`, generation, UI-context and 5 s timeout rules) to render the CH badge and the Poker badge. In that path it no longer calls `refreshPokerBadge` separately. Otherwise it keeps today's path.
+  - With `ProfileClient`:
+    - it captures the UI context, calls `ProfileClient.getMe(false, { includePoker: true })` and re-checks the context after the call (stale → `null`, nothing published or emitted);
+    - it returns `{ balance, poker }`, with `balance` checked as a non-negative safe integer;
+    - for a valid balance it publishes the `chips` slice through the shared helper and emits `chips:balance`.
+  - Without `ProfileClient` it returns `null`; the top bar then uses the separate, independent CH and Poker reads.
+  - `fetchBalance` keeps the emit rule from `main`.
+  - The raw poker fallback shares one in-flight promise per auth generation.
+- **FR-002** `js/topbar.js::refreshChipBadge`: when `ChipsClient.fetchTopbarSnapshot` exists **and** `ProfileClient.getMe` exists, it uses that one call (under the existing `chipInFlight`, generation, UI-context and 5 s timeout rules) to render the CH badge and the Poker badge. In that path it no longer calls `refreshPokerBadge` separately. Otherwise it keeps today's path.
 - **FR-003** `js/auth/supabaseClient.js::refreshProfile` with `ProfileClient`:
-  - when `window.ChipsClient` is present it calls `getMe(false, { includePoker: true })`, so it shares the top bar's in-flight request; on failure it falls back to one `getMe()`;
+  - when `window.ChipsClient` is present it calls `getMe(false, { includePoker: true })`, so it shares the top bar's in-flight request. While ProfileClient or ChipsClient is not loaded yet, it waits for `DOMContentLoaded` (with `load` as a fallback). On failure it falls back to one `getMe()`, but only while the session, user and UI context are still current;
   - before `ui.publish(..., 'profile', ...)` and `renderUser`, it removes `balance` and `poker` from a copy of the profile.
 
   Without `ProfileClient`: one shared in-flight raw read per user and `profileSessionGeneration`.
