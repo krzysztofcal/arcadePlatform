@@ -52,6 +52,14 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - PRs with no needed WWW testing MUST by default have `[skip netlify]` in the PR title from creation.
 - Build a Deploy Preview when actual WWW, UI or Netlify function testing is needed; relevant required validation uses exact PR HEAD.
 - Never skip required browser verification just to save a build.
+- **Preview feature flags (OWNER standing GO, 2026-11-27):** when a Deploy Preview test needs a feature flag (for example `UGC_SAFETY_ENABLED`, `GOOGLE_PHOTO_IMPORT_ENABLED`, `POKER_TABLE_PHOTO_ENABLED`), the agent sets it itself in the Netlify `deploy-preview` or `branch-deploy` context, without asking the OWNER. Steps:
+  - Read the variable first.
+  - Change only that one context with the Netlify API endpoint for one context value: `PATCH /api/v1/accounts/<account>/env/<KEY>?site_id=<site>` with `{"context":"deploy-preview","value":"1"}`.
+  - Read it again and confirm that the `production` value is unchanged.
+  - Rebuild the preview (push or retrigger), because functions read the value at build time.
+  - Report the change to the OWNER.
+  - Do not use a whole-variable upsert (such as the Netlify MCP `manage-env-vars` upsert): it may replace the values of other contexts.
+  - This GO never covers the `production` context, secrets, other Netlify settings or a Production publish. Those keep their existing GO rules.
 
 ---
 
