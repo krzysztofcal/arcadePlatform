@@ -355,14 +355,16 @@
     if(followSaved)avatarSelection=savedAvatarSelection()||null;
     setBlockVisibility(nodes.publicProfileEditor, !!profile);
     if (nodes.publicProfileBrowserHint) nodes.publicProfileBrowserHint.hidden = !window.MobilePoker;
+    var ownUserId = currentUser ? getUserKey(currentUser) : null;
+    var avatarOpts = ownUserId ? { ownUserId: ownUserId } : undefined;
     if (!profile){
-      if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(doc.getElementById('accountSummaryAvatar'), null);
+      if (window.ProfileClient && window.ProfileClient.applyAvatar) window.ProfileClient.applyAvatar(doc.getElementById('accountSummaryAvatar'), null, avatarOpts);
       return;
     }
     if (window.ProfileClient && window.ProfileClient.applyAvatar){
-      window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile);
+      window.ProfileClient.applyAvatar(nodes.publicProfileAvatar, profile, avatarOpts);
       var summaryAv = doc.getElementById('accountSummaryAvatar');
-      if (summaryAv) window.ProfileClient.applyAvatar(summaryAv, profile);
+      if (summaryAv) window.ProfileClient.applyAvatar(summaryAv, profile, avatarOpts);
     }
     if (nodes.publicDisplayName) nodes.publicDisplayName.textContent = profile.displayName || '';
     if(nodes.publicHandle)nodes.publicHandle.textContent='@'+(profile.handle||'');

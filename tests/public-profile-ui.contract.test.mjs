@@ -209,3 +209,289 @@ test('public profile masking passes only the default avatar when the viewer bloc
  blocked=true;vm.runInNewContext(source.slice(start,end)+'\napplyProfileAvatar();',context);
  assert.equal(seen[0].avatar.type,'uploaded');assert.equal(seen[1].avatar.type,'default');assert.equal(seen[1].avatar.url,undefined);
 });
+
+test("profile-client own-photo cache, expiry prevention, and fallbacks", async () => {
+  const source = await read("js/profile-client.js");
+  const url = (uuid = "00000000-0000-0000-0000-000000000001", exp = Math.floor(Date.now() / 1000) + 60) =>
+    `https://stage.supabase.co/storage/v1/object/sign/profile-avatar-uploads/pending/${uuid}?token=x.${btoa(JSON.stringify({ exp }))}.x`;
+  const makeWebpDataUrl = () => 'data:image/webp;base64,' + Buffer.concat([Buffer.from('RIFF\x00\x00\x00\x00WEBP'), Buffer.alloc(20)]).toString('base64');
+  const storedDataUrl = makeWebpDataUrl();
+
+  // 1. A loaded photo is still shown after its expiry timer; the same path on re-render issues no new request; onload after deadline falls back
+  {
+    const images = [], timers = [];
+    let now = Date.now();
+    const window = {
+      SUPABASE_CONFIG: { SUPABASE_URL: "https://stage.supabase.co" },
+      ArcadeAvatars: { apply(node) { node.style.backgroundImage = "catalog"; } }
+    };
+    vm.runInNewContext(source, {
+      window,
+      URL,
+      atob,
+      btoa,
+      Date: { now: () => now },
+      Image: class { constructor() { images.push(this); } },
+      setTimeout: (fn) => { timers.push(fn); return timers.length; },
+      clearTimeout(id) { if (timers[id - 1]) timers[id - 1] = () => {}; }
+    });
+    const node = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    const profile = { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000001") } };
+
+    // Apply photo and load before deadline
+    window.ProfileClient.applyAvatar(node, profile);
+    assert.equal(images.length, 1);
+    images[0].onload();
+    assert.equal(node.style.backgroundImage, `url("${profile.avatar.url}")`);
+    assert.equal(node.dataset.avatarShownPath, "pending/00000000-0000-0000-0000-000000000001");
+
+    // After expiry timer would have fired, photo is still shown
+    now += 65000;
+    if (timers[0]) timers[0]();
+    assert.equal(node.style.backgroundImage, `url("${profile.avatar.url}")`);
+
+    // Re-rendering with same path issues no new image request
+    window.ProfileClient.applyAvatar(node, profile);
+    assert.equal(images.length, 1, "no new image request for same path");
+
+    // Onload after deadline falls back
+    const node2 = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    now = Date.now();
+    window.ProfileClient.applyAvatar(node2, profile);
+    assert.equal(images.length, 2);
+    now += 65000;
+    images[1].onload();
+    assert.equal(node2.style.backgroundImage, "", "onload after deadline falls back");
+    assert.equal(node2.textContent, "AH");
+  }
+
+  // 2. Own photo: same path -> no fetch; URL-less uploaded marker -> stored record; catalog removes record; name-only does not
+  {
+    const fetchCalls = [];
+    let clearedUserId = null;
+    let userId = "user-own-1";
+    const path1 = "pending/00000000-0000-0000-0000-000000000001";
+    let storedRecord = { path: path1, dataUrl: storedDataUrl };
+    const window = {
+      SUPABASE_CONFIG: { SUPABASE_URL: "https://stage.supabase.co" },
+      SupabaseAuth: { getCurrentUser: async () => ({ id: userId }) },
+      SupabaseAuthBridge: { getAccessToken: async () => "token" },
+      UserUiState: {
+        readPhoto: (uid) => ({ available: true, record: uid === userId ? storedRecord : null }),
+        writePhoto: (uid, rec) => { storedRecord = rec; return true; },
+        clearPhoto: (uid) => { clearedUserId = uid; storedRecord = null; }
+      },
+      ArcadeAvatars: { apply(node) { node.style.backgroundImage = "catalog"; } }
+    };
+    vm.runInNewContext(source, {
+      window,
+      URL,
+      atob,
+      btoa,
+      fetch: async (fetchUrl, opts) => { fetchCalls.push({ url: fetchUrl, opts }); },
+      Date,
+      Image: class {},
+      setTimeout,
+      clearTimeout
+    });
+
+    const node = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    const profileSame = { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000001") } };
+
+    // Same path: shows stored record without fetch
+    window.ProfileClient.applyAvatar(node, profileSame, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 0, "no fetch for same path");
+    assert.equal(node.style.backgroundImage, `url("${storedDataUrl}")`);
+    assert.equal(node.dataset.avatarShownPath, path1);
+
+    // URL-less uploaded marker shows stored record
+    const nodeHydrated = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeHydrated, { avatar: { type: "uploaded" } }, { ownUserId: userId });
+    assert.equal(nodeHydrated.style.backgroundImage, `url("${storedDataUrl}")`);
+
+    // Name-only render removes nothing
+    clearedUserId = null;
+    window.ProfileClient.applyAvatar(node, { displayName: "Just Name" }, { ownUserId: userId });
+    assert.equal(clearedUserId, null, "name-only render removes nothing");
+    assert.ok(storedRecord !== null);
+
+    // Catalog avatar removes record
+    window.ProfileClient.applyAvatar(node, { avatar: { type: "default", variant: "fox-blue" } }, { ownUserId: userId });
+    assert.equal(clearedUserId, userId, "catalog avatar removes stored record");
+    assert.equal(storedRecord, null);
+
+    // URL-less marker without stored record falls back to AH
+    const nodeNoRecord = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeNoRecord, { avatar: { type: "uploaded" } }, { ownUserId: userId });
+    assert.equal(nodeNoRecord.textContent, "AH");
+  }
+
+  // 3. Own photo: new path, two nodes share one fetch, both shown, record saved
+  {
+    const fetchCalls = [];
+    let resolveBlob;
+    let userId = "user-own-2";
+    let savedRecord = null;
+    const window = {
+      SUPABASE_CONFIG: { SUPABASE_URL: "https://stage.supabase.co" },
+      SupabaseAuth: { getCurrentUser: async () => ({ id: userId }) },
+      SupabaseAuthBridge: { getAccessToken: async () => "token" },
+      UserUiState: {
+        readPhoto: () => ({ available: true, record: savedRecord }),
+        writePhoto: (_uid, rec) => { savedRecord = rec; return true; }
+      }
+    };
+    vm.runInNewContext(source, {
+      window,
+      URL,
+      atob,
+      btoa,
+      fetch: async (fetchUrl) => {
+        fetchCalls.push(fetchUrl);
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: (h) => (h && h.toLowerCase() === "content-type" ? "image/webp" : "") },
+          blob: async () => new Promise((resolve) => { resolveBlob = resolve; })
+        };
+      },
+      Date,
+      Image: class {},
+      setTimeout,
+      clearTimeout
+    });
+
+    const nodeA = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    const nodeB = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    const profileNew = { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000002") } };
+
+    window.ProfileClient.applyAvatar(nodeA, profileNew, { ownUserId: userId });
+    window.ProfileClient.applyAvatar(nodeB, profileNew, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 1, "two nodes share one in-flight fetch");
+
+    await new Promise((r) => setTimeout(r, 10));
+    const webpBuffer = Buffer.concat([Buffer.from("RIFF\x00\x00\x00\x00WEBP"), Buffer.alloc(24)]);
+    resolveBlob({
+      size: webpBuffer.length,
+      type: "image/webp",
+      arrayBuffer: async () => webpBuffer.buffer.slice(webpBuffer.byteOffset, webpBuffer.byteOffset + webpBuffer.byteLength)
+    });
+    // A render while the shared entry is still checking the session and saving joins it: no second download.
+    const nodeD = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeD, profileNew, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 1, "render during the session check joins the shared entry");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(nodeD.style.backgroundImage, nodeA.style.backgroundImage);
+    // An already expired link is not fetched.
+    const nodeE = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeE, { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000009", Math.floor(Date.now() / 1000) - 5) } }, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 1, "expired link is not fetched");
+
+    assert.ok(nodeA.style.backgroundImage.includes("data:image/webp;base64,"));
+    assert.ok(nodeB.style.backgroundImage.includes("data:image/webp;base64,"));
+    assert.equal(nodeA.style.backgroundImage, nodeB.style.backgroundImage);
+    assert.equal(savedRecord && savedRecord.path, "pending/00000000-0000-0000-0000-000000000002");
+    // The saved data URL holds exactly the downloaded bytes, so the real UserUiState validation can accept it.
+    assert.equal(savedRecord.dataUrl, "data:image/webp;base64," + webpBuffer.toString("base64"));
+    // A later node with the same path reuses the saved record: no new download.
+    const nodeC = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    window.ProfileClient.applyAvatar(nodeC, profileNew, { ownUserId: userId });
+    assert.equal(fetchCalls.length, 1, "saved record is reused without a new fetch");
+    assert.equal(nodeC.style.backgroundImage, 'url("' + savedRecord.dataUrl + '")');
+  }
+
+  // 4. Download finishing after clear() or account switch writes nothing and changes no node
+  {
+    let resolveBlob;
+    let userId = "user-own-3";
+    let wrotePhoto = false;
+    const window = {
+      SUPABASE_CONFIG: { SUPABASE_URL: "https://stage.supabase.co" },
+      SupabaseAuth: { getCurrentUser: async () => ({ id: userId }) },
+      SupabaseAuthBridge: { getAccessToken: async () => "token" },
+      UserUiState: {
+        readPhoto: () => ({ available: true, record: null }),
+        writePhoto: () => { wrotePhoto = true; return true; }
+      }
+    };
+    vm.runInNewContext(source, {
+      window,
+      URL,
+      atob,
+      btoa,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => "image/webp" },
+        blob: async () => new Promise((resolve) => { resolveBlob = resolve; })
+      }),
+      Date,
+      Image: class {},
+      setTimeout,
+      clearTimeout
+    });
+
+    const node = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    const profile = { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000003") } };
+    window.ProfileClient.applyAvatar(node, profile, { ownUserId: userId });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Client clear() before download settles
+    window.ProfileClient.clear();
+    const webpBuffer = Buffer.concat([Buffer.from("RIFF\x00\x00\x00\x00WEBP"), Buffer.alloc(16)]);
+    resolveBlob({ size: webpBuffer.length, type: "image/webp", arrayBuffer: async () => webpBuffer.buffer.slice(webpBuffer.byteOffset, webpBuffer.byteOffset + webpBuffer.byteLength) });
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.equal(wrotePhoto, false, "download finishing after clear() writes nothing");
+    assert.equal(node.style.backgroundImage, "", "node background not updated after clear()");
+  }
+
+  // 5. localStorage throwing -> plain applyPhoto; getItem works but setItem throws -> first shown, second uses plain applyPhoto
+  {
+    const images = [];
+    let userId = "user-throw";
+    let setItemThrew = false;
+    const window = {
+      SUPABASE_CONFIG: { SUPABASE_URL: "https://stage.supabase.co" },
+      SupabaseAuth: { getCurrentUser: async () => ({ id: userId }) },
+      SupabaseAuthBridge: { getAccessToken: async () => "token" },
+      UserUiState: {
+        readPhoto: () => ({ available: true, record: null }),
+        writePhoto: () => { setItemThrew = true; return false; }
+      }
+    };
+    const webpBuffer = Buffer.concat([Buffer.from("RIFF\x00\x00\x00\x00WEBP"), Buffer.alloc(16)]);
+    vm.runInNewContext(source, {
+      window,
+      URL,
+      atob,
+      btoa,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => "image/webp" },
+        blob: async () => ({ size: webpBuffer.length, type: "image/webp", arrayBuffer: async () => webpBuffer.buffer.slice(webpBuffer.byteOffset, webpBuffer.byteOffset + webpBuffer.byteLength) })
+      }),
+      Date,
+      Image: class { constructor() { images.push(this); } },
+      setTimeout,
+      clearTimeout
+    });
+
+    const node1 = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    const profile = { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000004") } };
+
+    // First node downloads and displays, but writePhoto returns false
+    window.ProfileClient.applyAvatar(node1, profile, { ownUserId: userId });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(setItemThrew, true);
+    assert.ok(node1.style.backgroundImage.includes("data:image/webp;base64,"));
+
+    // Second node on same page detects storageUsable = false and falls back to plain applyPhoto (uses Image)
+    const node2 = { dataset: {}, style: {}, classList: { add() {}, remove() {} }, textContent: "" };
+    const profile2 = { avatar: { type: "uploaded", url: url("00000000-0000-0000-0000-000000000005") } };
+    window.ProfileClient.applyAvatar(node2, profile2, { ownUserId: userId });
+    assert.equal(images.length, 1, "second node uses plain applyPhoto (Image created)");
+    if (node2.profileAvatarExpiry) clearTimeout(node2.profileAvatarExpiry);
+  }
+});
