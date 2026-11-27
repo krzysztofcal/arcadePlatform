@@ -23,3 +23,4 @@
 .ugc-dialog__actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
 .ugc-dialog__cancel,.ugc-dialog__confirm{ min-height:40px; padding:8px 16px; border-radius:8px; border:1px solid rgba(255,255,255,.25); background:transparent; color:inherit; font:inherit; cursor:pointer; }
 .ugc-dialog__confirm{ background:#3b5bdb; border-color:#3b5bdb; }
+.ugc-dialog--danger .ugc-dialog__confirm{ background:var(--red, #ff7b7b); border-color:var(--red, #ff7b7b); color:#2a0606; }

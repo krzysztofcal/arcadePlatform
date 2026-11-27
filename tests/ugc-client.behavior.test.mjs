@@ -27,7 +27,7 @@ class Node {
   }
   querySelectorAll(selector) { return this.all().filter((node) => selector === "input" ? node.tagName === "input" : String(node.className).split(" ").includes(selector.slice(1))); }
   closest(selector) { for (let node = this; node; node = node.parentNode) if (selector === "[data-ugc-section]" && "ugcSection" in node.dataset) return node; return null; }
-  focus() {}
+  focus() { this.focused = true; }
   showModal() { this.open = true; }
   close() { this.open = false; }
 }
@@ -341,4 +341,63 @@ test("a block right after an unblock reads the list again after the running relo
   assert.equal(env.ugc.isBlocked(FIRST), false);
   assert.equal(env.ugc.isBlocked(SECOND), true, "the block is in the list: a fresh GET ran after the running one");
   assert.deepEqual(env.calls.map((c) => c.method || "GET"), ["GET", "DELETE", "GET", "POST", "GET"]);
+});
+
+test("report sends only POST ugc-report and no user-blocks writes, while block dialog requires explicit confirm and cancel sends nothing", async () => {
+  const { ugc, calls, byId, body } = setup();
+  await flush();
+  ugc.tablePlayers("00000000-0000-4000-8000-0000000000f1", [
+    { userId: OTHER, displayName: "Target Player" },
+  ]);
+  const container = byId.pokerSafetyPlayers;
+  assert.equal(container.hidden, false);
+
+  // 1. Report flow: sends only POST ugc-report, never user-blocks write
+  calls.length = 0;
+  const reportBtn = container.querySelector(".ugc-actions__report");
+  const reportClick = reportBtn.fire("click");
+  await flush();
+  const reportDialog = body.children.find((node) => node.tagName === "dialog");
+  assert.ok(reportDialog && reportDialog.open);
+  assert.equal(reportDialog.className.includes("ugc-dialog--danger"), false, "report dialog is not danger styled");
+  const reportConfirm = reportDialog.querySelector(".ugc-dialog__confirm");
+  assert.equal(reportConfirm.focused, true, "report dialog focuses confirm");
+  await reportDialog.children[0].fire("submit");
+  await reportClick;
+  await flush();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url.endsWith("/ugc-report"), true);
+  assert.equal(calls.some((c) => c.url.includes("user-blocks")), false, "no user-blocks call from report");
+
+  // 2. Block flow with cancel: cancel has initial focus, cancelling sends nothing
+  calls.length = 0;
+  const blockBtn = container.querySelector(".ugc-actions__block");
+  const blockClickCancel = blockBtn.fire("click");
+  await flush();
+  const blockDialog = body.children.find((node) => node.tagName === "dialog");
+  assert.ok(blockDialog && blockDialog.open);
+  assert.ok(blockDialog.className.includes("ugc-dialog--danger"), "block dialog has danger class");
+  const cancelBtn = blockDialog.querySelector(".ugc-dialog__cancel");
+  const confirmBtn = blockDialog.querySelector(".ugc-dialog__confirm");
+  assert.equal(cancelBtn.focused, true, "cancel has initial focus in block dialog");
+  assert.notEqual(confirmBtn.focused, true, "confirm is not focused");
+  await cancelBtn.fire("click");
+  await blockClickCancel;
+  await flush();
+  assert.equal(calls.length, 0, "cancelling block dialog sends nothing");
+  assert.equal(body.children.includes(blockDialog), false, "dialog was removed");
+
+  // 3. Block flow with confirm: explicit confirm sends POST user-blocks
+  calls.length = 0;
+  const blockClickConfirm = blockBtn.fire("click");
+  await flush();
+  const blockDialog2 = body.children.find((node) => node.tagName === "dialog");
+  assert.ok(blockDialog2 && blockDialog2.open);
+  await blockDialog2.children[0].fire("submit");
+  await blockClickConfirm;
+  await flush();
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url.endsWith("/user-blocks"), true);
+  assert.deepEqual(calls[0].body, { targetUserId: OTHER });
 });

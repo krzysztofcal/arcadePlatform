@@ -114,14 +114,40 @@
 
   function clear(node){ while (node && node.firstChild) node.removeChild(node.firstChild); }
 
+  function isBlockedHandle(handle){
+    try {
+      return !!(window.ArcadeUgc && typeof window.ArcadeUgc.isBlockedHandle === 'function' && window.ArcadeUgc.isBlockedHandle(handle));
+    } catch (_err){ return false; }
+  }
+
+  function resolveAvatarProfile(row){
+    if (isBlockedHandle(row.handle)){
+      return { displayName: row.displayName, avatar: { type: 'default', variant: 'default' } };
+    }
+    return row;
+  }
+
+  function renderAvatar(avatar, row){
+    var profile = resolveAvatarProfile(row);
+    avatar.setAttribute('aria-label', t('leaderboardAvatarAria', 'Avatar of ' + row.displayName, { name: row.displayName }));
+    if (window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function') window.ProfileClient.applyAvatar(avatar, profile);
+    else avatar.textContent = profile.displayName.slice(0, 2).toUpperCase();
+  }
+
   function avatarNode(row){
     var avatar = document.createElement('span');
     avatar.className = 'leaderboard-entry__avatar';
     avatar.setAttribute('role', 'img');
-    avatar.setAttribute('aria-label', t('leaderboardAvatarAria', 'Avatar of ' + row.displayName, { name: row.displayName }));
-    if (window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function') window.ProfileClient.applyAvatar(avatar, row);
-    else avatar.textContent = row.displayName.slice(0, 2).toUpperCase();
+    avatar._row = row;
+    renderAvatar(avatar, row);
     return avatar;
+  }
+
+  function reapplyAvatars(){
+    var avatarEls = document.querySelectorAll('.leaderboard-entry__avatar');
+    for (var i = 0; i < avatarEls.length; i++){
+      if (avatarEls[i]._row) renderAvatar(avatarEls[i], avatarEls[i]._row);
+    }
   }
 
   function entryNode(row, options){
@@ -298,12 +324,21 @@
     setPeriodControls();
     showLoading();
     resetText(null);
+    var blocksPromise = window.ArcadeUgc && typeof window.ArcadeUgc.loadBlocks === 'function'
+      ? window.ArcadeUgc.loadBlocks(false).catch(function(){ return []; })
+      : Promise.resolve([]);
     return Promise.resolve().then(function(){ return window.SupabaseAuth && window.SupabaseAuth.getCurrentUser(); }).then(function(user){
       if (generation !== state.generation || document.hidden) return null;
       if (!user || !user.id) throw { status: 401 };
       viewerId = user.id;
       return Promise.all([publicRequest(signal), meRequest(signal)]);
     }).then(async function(results){
+      if (generation !== state.generation || document.hidden) return;
+      // Wait (bounded) for the block list before the viewer re-check, so the identity check stays right before rendering.
+      var blockWaitTimer;
+      var blockTimeout = new Promise(function(resolve){ blockWaitTimer = setTimeout(resolve, 3000); });
+      await Promise.race([blocksPromise, blockTimeout]);
+      clearTimeout(blockWaitTimer);
       if (generation !== state.generation || document.hidden) return;
       var viewer = await window.SupabaseAuth.getCurrentUser();
       if (generation !== state.generation || document.hidden) return;
@@ -383,6 +418,7 @@
     readRoute();
     writeRoute(false);
     bind();
+    if (window.ArcadeUgc && typeof window.ArcadeUgc.onChange === 'function') window.ArcadeUgc.onChange(reapplyAvatars);
     load();
   }
 
