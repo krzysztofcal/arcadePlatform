@@ -470,9 +470,6 @@
         const canClaim = !!(status && status.eligible && !status.alreadyClaimed);
         setWelcomeBonusBadgeVisible(canClaim, status && status.amount);
       } catch (err){
-        if (err && err.code === 'not_authenticated'){
-          setAuthState(AuthState.SIGNED_OUT);
-        }
         hideWelcomeBonusBadge();
       } finally {
         welcomeBonusInFlight = null;
@@ -597,11 +594,6 @@
           return;
         }
         if (err && (err.status === 404 || err.code === 'not_found')){
-          hideChipBadge();
-          return;
-        }
-        if (err && err.code === 'not_authenticated'){
-          setAuthState(AuthState.SIGNED_OUT);
           hideChipBadge();
           return;
         }

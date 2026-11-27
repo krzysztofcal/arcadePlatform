@@ -234,4 +234,43 @@ function createClient(fetchImpl, options){
   assert.deepEqual(res2, { inPoker: false });
 }
 
+{
+  // token promise superseded by clearAuthCache() during an authedFetch
+  let releaseTokenA;
+  const tokenAPromise = new Promise((resolve) => { releaseTokenA = resolve; });
+  let fetchCalls = 0;
+  const authHeaders = [];
+  const state = createClient(async (_url, options) => {
+    fetchCalls++;
+    authHeaders.push(options.headers.Authorization);
+    return response(777);
+  });
+  state.setToken(tokenAPromise);
+
+  const pending = state.client.fetchBalance();
+  await Promise.resolve();
+
+  state.client.clearAuthCache();
+  state.setToken('token-fresh');
+  releaseTokenA('token-stale');
+
+  const result = await pending;
+  assert.equal(fetchCalls, 1, 'superseded token promise must still result in exactly one HTTP request');
+  assert.deepEqual(authHeaders, ['Bearer token-fresh'], 'second fetchAuthToken must provide the fresh generation token');
+  assert.equal(result.balance, 777);
+
+  // Unchanged generation + null token -> still not_authenticated
+  state.client.clearAuthCache();
+  state.setToken(null);
+  let notAuthError = null;
+  try {
+    await state.client.fetchBalance();
+  } catch (err) {
+    notAuthError = err;
+  }
+  assert.ok(notAuthError, 'null token must throw');
+  assert.equal(notAuthError.code, 'not_authenticated');
+  assert.equal(fetchCalls, 1, 'failed auth must not make an HTTP request');
+}
+
 console.log('chips client cache behavior tests passed');

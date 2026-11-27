@@ -826,3 +826,239 @@ test('topbar refreshChipBadge snapshot rejects with server error, fetchBalance r
   assert.ok(amountEl, 'chipBadgeAmount element must exist');
   assert.equal(amountEl.textContent, '900', 'CH badge must show 900');
 });
+
+async function setupTopbarHarness(options = {}) {
+  const elements = {};
+  const listeners = {};
+  const doc = {
+    readyState: 'complete',
+    getElementById: (id) => elements[id] || null,
+    querySelector: (sel) => {
+      if (sel === '.topbar') return doc.topbarEl;
+      if (sel === '#sbToggle') return null;
+      return null;
+    },
+    querySelectorAll: (sel) => {
+      if (sel === '.topbar') return [doc.topbarEl];
+      if (sel === '#sbToggle') return [];
+      return [];
+    },
+    createElement: (tag) => {
+      const el = {
+        tagName: tag.toUpperCase(),
+        classList: { add() {}, remove() {}, contains: () => false },
+        setAttribute(k, v) { this[k] = v; },
+        getAttribute(k) { return this[k]; },
+        hasAttribute: () => false,
+        appendChild(child) {
+          this.children.push(child);
+          if (child.id) elements[child.id] = child;
+          return child;
+        },
+        insertBefore(child) {
+          this.children.push(child);
+          if (child.id) elements[child.id] = child;
+          return child;
+        },
+        children: [],
+        querySelector: (s) => {
+          if (s === '#chipBadgeAmount') return elements['chipBadgeAmount'] || null;
+          if (s === '#welcomeBonusTopbarBadge') return elements['welcomeBonusTopbarBadge'] || null;
+          if (s === '#chipBadgePoker') return elements['chipBadgePoker'] || null;
+          if (s === '.chip-badge__label') return null;
+          return null;
+        },
+      };
+      return el;
+    },
+    createTextNode: (text) => ({ text }),
+    addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); },
+    documentElement: { dataset: {} },
+  };
+  const topbarEl = doc.createElement('div');
+  doc.topbarEl = topbarEl;
+  const topbarRight = doc.createElement('div');
+  topbarRight.className = 'topbar-right';
+  topbarEl.appendChild(topbarRight);
+
+  const win = {
+    document: doc,
+    ProfileClient: options.profileClient !== undefined ? options.profileClient : {
+      getMe: async () => ({ displayName: 'Player' }),
+    },
+    ChipsClient: options.chipsClient || {
+      fetchBalance: async () => ({ balance: 100 }),
+    },
+    SupabaseAuth: {
+      getCurrentUser: async () => (options.user !== undefined ? options.user : { id: 'user-1' }),
+      onAuthChange: (cb) => { win.authCb = cb; },
+    },
+    UserUiState: options.userUiState || {
+      getActiveContext: () => ({ userId: 'user-1', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => null,
+    },
+    ArcadeFormat: {
+      formatCompactNumber: (val) => String(val),
+    },
+  };
+  win.window = win;
+
+  const vm = await import('node:vm');
+  vm.runInNewContext(topbarSource, {
+    window: win,
+    document: doc,
+    CustomEvent: class { constructor(t, opts) { this.type = t; this.detail = opts?.detail; } },
+    setTimeout,
+    clearTimeout,
+    Promise,
+    Number,
+    String,
+    Math,
+    Array,
+    Date,
+  });
+
+  return { elements, doc, win };
+}
+
+test('topbar: not_authenticated rejection from fetchWelcomeBonusStatus does not hide CH badge or sign out', async () => {
+  let bonusCalls = 0;
+  let balanceCalls = 0;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => {
+        balanceCalls++;
+        return { balance: 900 };
+      },
+      fetchWelcomeBonusStatus: async () => {
+        bonusCalls++;
+        throw notAuthErr;
+      },
+    },
+    profileClient: null,
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (bonusCalls > 0 && balanceCalls > 0) break;
+  }
+
+  assert.equal(bonusCalls, 1, 'fetchWelcomeBonusStatus must be called');
+  assert.equal(balanceCalls, 1, 'fetchBalance must be called');
+  assert.equal(harness.doc.documentElement.dataset.auth, 'in', 'auth state must remain signed in');
+  assert.equal(harness.elements['chipBadge'].hidden, false, 'CH badge must not be hidden');
+  assert.equal(harness.elements['chipBadgeAmount'].textContent, '900', 'CH badge must show balance');
+  assert.equal(harness.elements['welcomeBonusTopbarBadge'].hidden, true, 'welcome bonus badge must hide on error');
+});
+
+test('topbar: not_authenticated rejection from CH read does not change auth state to SIGNED_OUT (retains cached badge)', async () => {
+  let balanceCalls = 0;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => {
+        balanceCalls++;
+        throw notAuthErr;
+      },
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    profileClient: null,
+    userUiState: {
+      getActiveContext: () => ({ userId: 'user-1', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: (slice) => (slice === 'chips' ? { balance: 350 } : null),
+    },
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (balanceCalls > 0) break;
+  }
+
+  assert.equal(balanceCalls, 1, 'fetchBalance must be called');
+  assert.equal(harness.doc.documentElement.dataset.auth, 'in', 'auth state must remain signed in');
+  assert.equal(harness.elements['chipBadge'].hidden, false, 'CH badge must retain cached value and stay visible');
+  assert.equal(harness.elements['chipBadgeAmount'].textContent, '350', 'CH badge must show cached balance');
+});
+
+test('topbar: not_authenticated rejection from CH read without cached value hides badge but does not change auth state to SIGNED_OUT', async () => {
+  let balanceCalls = 0;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => {
+        balanceCalls++;
+        throw notAuthErr;
+      },
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    profileClient: null,
+    userUiState: {
+      getActiveContext: () => ({ userId: 'user-1', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => null,
+    },
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (balanceCalls > 0) break;
+  }
+
+  assert.equal(balanceCalls, 1, 'fetchBalance must be called');
+  assert.equal(harness.doc.documentElement.dataset.auth, 'in', 'auth state must remain signed in');
+  assert.equal(harness.elements['chipBadge'].hidden, true, 'CH badge without cache must be hidden locally');
+});
+
+test('topbar: snapshot path not_authenticated does not change auth state to SIGNED_OUT', async () => {
+  let snapshotCalls = 0;
+  let balanceCalls = 0;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: async () => {
+        snapshotCalls++;
+        throw notAuthErr;
+      },
+      fetchBalance: async () => {
+        balanceCalls++;
+        throw notAuthErr;
+      },
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    profileClient: {
+      getMe: async () => ({ displayName: 'Player' }),
+    },
+    userUiState: {
+      getActiveContext: () => ({ userId: 'user-1', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => null,
+    },
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (snapshotCalls > 0 && balanceCalls > 0) break;
+  }
+
+  assert.equal(snapshotCalls, 1, 'fetchTopbarSnapshot must be called');
+  assert.equal(balanceCalls, 1, 'fallback fetchBalance must be called');
+  assert.equal(harness.doc.documentElement.dataset.auth, 'in', 'auth state must remain signed in');
+});

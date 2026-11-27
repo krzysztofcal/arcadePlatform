@@ -156,7 +156,11 @@
   }
 
   async function authedFetch(url, options){
+    var startGen = state.authGeneration;
     var token = await fetchAuthToken();
+    if (!token && state.authGeneration !== startGen){
+      token = await fetchAuthToken();
+    }
     if (!token){
       var err = new Error('not_authenticated');
       err.code = 'not_authenticated';
