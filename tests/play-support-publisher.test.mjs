@@ -83,3 +83,37 @@ test('OAuth failure is distinguishable from a purchase failure', async () => {
     return true;
   });
 });
+
+test('reads one pinned page of void evidence and refuses an expired window without contacting Play', async () => {
+  const now = Date.UTC(2026, 10, 27);
+  const startMs = now - 86400000;
+  const queries = [];
+  const publisher = createPlaySupportPublisher({
+    environment: 'stage', credentials, now: () => now,
+    fetchImpl: async url => {
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return Response.json({ access_token: 'fixture-access', token_type: 'Bearer', expires_in: 3600 });
+      }
+      const target = new URL(url);
+      assert.equal(target.pathname, '/androidpublisher/v3/applications/pl.kcswh.arcadepoker.stage/purchases/voidedpurchases');
+      queries.push(target.searchParams);
+      return target.searchParams.has('token')
+        ? Response.json({})
+        : Response.json({ voidedPurchases: [{ orderId: 'fixture' }], tokenPagination: { nextPageToken: 'next+/=' } });
+    }
+  });
+  assert.deepEqual(await publisher.listVoidedPurchases({ startMs, endMs: now }), {
+    purchases: [{ orderId: 'fixture' }], nextPageToken: 'next+/='
+  });
+  assert.equal(queries[0].get('startTime'), String(startMs));
+  assert.equal(queries[0].get('type'), '0');
+  assert.equal(queries[0].get('maxResults'), '50');
+  assert.deepEqual(await publisher.listVoidedPurchases({ startMs, endMs: now, pageToken: 'next+/=' }), {
+    purchases: [], nextPageToken: null
+  });
+  assert.equal(queries[1].get('token'), 'next+/=');
+  assert.equal(queries[1].get('startTime'), null);
+  await assert.rejects(publisher.listVoidedPurchases({ startMs: now - 31 * 86400000, endMs: now }),
+    { code: 'play_support_invalid_void_window' });
+  assert.equal(queries.length, 2);
+});
