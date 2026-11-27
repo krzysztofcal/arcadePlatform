@@ -1,6 +1,6 @@
 # Plan: gated automatic VPS reboot
 
-Spec: `specs/vps-maintenance-reboot/spec.md`. Implementation starts only after the OWNER decides D1–D7 and gives a GO. Installation, enabling and clearing are separate `VPS Admin Operation` runs, each approved in `vps-admin`.
+Spec: `specs/vps-maintenance-reboot/spec.md`. Implementation starts only after the OWNER decides D1–D8 and gives a GO. Installation, enabling and clearing are separate `VPS Admin Operation` runs, each approved in `vps-admin`.
 
 ## Files
 

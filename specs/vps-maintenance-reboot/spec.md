@@ -1,6 +1,6 @@
 # Feature Specification: Gated automatic reboot of the VPS in a maintenance window
 
-**Branch**: `docs/vps-maintenance-reboot-spec` · **Created**: 2026-11-27 · **Status**: draft for OWNER decision (D1–D7)
+**Branch**: `docs/vps-maintenance-reboot-spec` · **Created**: 2026-11-27 · **Status**: draft for OWNER decision (D1–D8)
 **Scope**: the Production VPS (Hetzner, Ubuntu 24.04). It runs WS Production, WS Preview, Caddy, PostgreSQL, Docker, the GitHub Actions runner and the ledger dispatch timers. No application, Netlify, DB schema or WWW change.
 
 ## Evidence (2026-11-27, read-only)
