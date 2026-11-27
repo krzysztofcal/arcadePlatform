@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 export const STAGE_REF = 'krydukthwdvccggbyjfw';
 export const STAGE_SYSTEM = '7656985631720456337';
 const REPO = 'krzysztofcal/arcadePlatform';
+const OWNER = 'krzysztofcal';
+const APPLY_ENVIRONMENT = 'stage-db-apply';
 const FILE = /^(\d{14})_([a-z0-9][a-z0-9_]*)\.sql$/;
 const HEX = /^[a-f0-9]{64}$/;
 export const digest = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -129,8 +131,11 @@ commit;
 select json_build_object('applied',${pending.length},'historyCount',${expected.length},'historySha256',${literal(historyDigest(expected))});`;
   return psql(sql,pg);
 }
-async function github(url) {
-  const r=await fetch(`https://api.github.com/repos/${REPO}${url}`, {headers:{Authorization:`Bearer ${process.env.GITHUB_TOKEN}`,'X-GitHub-Api-Version':'2022-11-28'}});
+async function github(url, authenticated = true) {
+  const headers = { 'X-GitHub-Api-Version': '2022-11-28' };
+  if (authenticated) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const r = await fetch(`https://api.github.com/repos/${REPO}${url}`,
+    { headers, signal: AbortSignal.timeout(15_000), redirect: 'error' });
   check(r.ok,'github_read_failed');return r.json();
 }
 export async function verifySource(a, read=github, env=process.env) {
@@ -149,19 +154,66 @@ export async function prepare(a, read=github, env=process.env) {
   const bundle={approval:a,files:entries.map(e=>e.path.slice('supabase/migrations/'.length)).sort(),sql};validateBundle(bundle);return bundle;
 }
 
-// Dispatch permission/confirmation alone are not OWNER authorization.
+// GitHub independently gates the apply job on the OWNER's environment review.
 export function authorizeApply(env = process.env) {
   check(env.GITHUB_EVENT_NAME === 'workflow_dispatch' && env.GITHUB_REF === 'refs/heads/main' &&
-    env.GITHUB_REPOSITORY === REPO && env.GITHUB_ACTOR === 'krzysztofcal' &&
-    env.GITHUB_TRIGGERING_ACTOR === 'krzysztofcal', 'owner_apply_required');
+    env.GITHUB_REPOSITORY === REPO && env.GITHUB_RUN_ATTEMPT === '1' &&
+    [OWNER, 'arcade-code-agent[bot]'].includes(env.GITHUB_ACTOR) &&
+    env.GITHUB_TRIGGERING_ACTOR === env.GITHUB_ACTOR, 'apply_dispatch_required');
+}
+
+export async function verifyApplyProtection(requireReview, read = github, env = process.env) {
+  authorizeApply(env);
+  const endpoint = '/environments/' + APPLY_ENVIRONMENT;
+  const policy = await read(endpoint, false);
+  const reviewers = Array.isArray(policy?.protection_rules) &&
+    policy.protection_rules.filter(rule => rule?.type === 'required_reviewers');
+  const reviewer = reviewers?.[0]?.reviewers?.[0];
+  check(policy?.name === APPLY_ENVIRONMENT && policy.can_admins_bypass === false &&
+    policy.deployment_branch_policy?.custom_branch_policies === true &&
+    policy.deployment_branch_policy.protected_branches === false &&
+    reviewers?.length === 1 && reviewers[0].prevent_self_review === false &&
+    Array.isArray(reviewers[0].reviewers) && reviewers[0].reviewers.length === 1 &&
+    reviewer?.type === 'User' && reviewer.reviewer?.login === OWNER, 'apply_environment_protection_required');
+
+  const branches = await read(endpoint + '/deployment-branch-policies', false);
+  check(branches?.total_count === 1 && Array.isArray(branches.branch_policies) &&
+    branches.branch_policies.length === 1 && branches.branch_policies[0]?.type === 'branch' &&
+    branches.branch_policies[0].name === 'main', 'apply_environment_branch_required');
+  if (!requireReview) return;
+
+  check(/^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? ''), 'apply_run_required');
+  const reviews = await read('/actions/runs/' + env.GITHUB_RUN_ID + '/approvals');
+  check(Array.isArray(reviews) && reviews.some(review => review?.state === 'approved' &&
+    review.user?.login === OWNER && Array.isArray(review.environments) &&
+    review.environments.some(e => e?.name === APPLY_ENVIRONMENT)), 'owner_approval_required');
+}
+
+async function preflightApply() {
+  await verifyApplyProtection(false);
+  const a = validateApproval(JSON.parse(process.env.STAGE_MIGRATION_APPROVAL || 'null'));
+  check(process.env.STAGE_MIGRATION_CONFIRMATION === confirmation(a), 'operator_confirmation_required');
+  await prepare(a);
+  const sha = approvalDigest(a);
+  fs.appendFileSync(process.env.GITHUB_OUTPUT, `approval_digest=${sha}\n`);
+  const files = a.migrations.map(m => `- \`${m.file}\` \`${m.sha256}\``);
+  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+    '## Stage migration request', '', `- PR ${a.pr}`, `- Source SHA \`${a.sourceSha}\``,
+    `- Approval digest \`${sha}\``, `- History ${a.historyCount} versions, \`${a.historySha256}\``,
+    '', ...files, ...(files.length ? [] : ['No migrations requested.']), ''
+  ].join('\n'));
 }
 
 async function main() {
-  const args=process.argv.slice(2);check(args.length===1 && ['--prepare','--inspect','--apply'].includes(args[0]),'explicit_mode_required');
+  const args=process.argv.slice(2);check(args.length===1 &&
+    ['--prepare','--inspect','--apply','--preflight-apply','--verify-review'].includes(args[0]),'explicit_mode_required');
+  if (args[0] === '--preflight-apply') return preflightApply();
+  if (args[0] === '--verify-review') return verifyApplyProtection(true);
   if(args[0]==='--apply')authorizeApply();
   const file=process.env.STAGE_MIGRATION_BUNDLE;check(file,'bundle_path_required');
   if(args[0]==='--prepare') {const a=validateApproval(JSON.parse(process.env.STAGE_MIGRATION_APPROVAL||'null'));const b=await prepare(a);fs.writeFileSync(file,JSON.stringify(b),{mode:0o600,flag:'wx'});process.stdout.write(JSON.stringify({approvalSha256:approvalDigest(a),confirmation:confirmation(a)})+'\n');return;}
   const b=JSON.parse(fs.readFileSync(file,'utf8'));validateBundle(b);await verifySource(b.approval);
+  if (args[0] === '--apply') check(approvalDigest(b.approval) === process.env.STAGE_PREFLIGHT_DIGEST, 'preflight_digest_mismatch');
   const pg=connectionEnv(process.env.SUPABASE_STAGE_DB_URL,process.env.SUPABASE_STAGE_PROJECT_REF);
   const state=inspect(pg);
   if(args[0]==='--inspect'){process.stdout.write(JSON.stringify({historyCount:state.historyCount,historySha256:state.historySha256,history:state.rows,pending:b.files.filter(f=>!state.rows.some(r=>r.file===f))})+'\n');return;}

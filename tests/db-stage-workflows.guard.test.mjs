@@ -92,16 +92,56 @@ test('prepare reads trusted main executor and only approved SQL blobs, refusing 
 });
 
 import * as stageExecutor from '../scripts/stage-db-migrate.mjs';
-test('apply requires OWNER dispatch and OWNER rerun, before Stage credentials or SQL',()=>{
- assert.equal(typeof stageExecutor.authorizeApply,'function');
- const env={GITHUB_ACTOR:'krzysztofcal',GITHUB_TRIGGERING_ACTOR:'krzysztofcal',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',GITHUB_REPOSITORY:'krzysztofcal/arcadePlatform'};
- assert.doesNotThrow(()=>stageExecutor.authorizeApply(env));
- for(const denied of [ {...env,GITHUB_ACTOR:'other-writer'}, {...env,GITHUB_TRIGGERING_ACTOR:'other-writer'}, {...env,GITHUB_ACTOR:'other-writer',GITHUB_TRIGGERING_ACTOR:'krzysztofcal'}, {...env,GITHUB_TRIGGERING_ACTOR:undefined}, {...env,GITHUB_EVENT_NAME:'pull_request'}, {...env,GITHUB_REF:'refs/heads/feature'} ])assert.throws(()=>stageExecutor.authorizeApply(denied),/owner_apply_required/);
+const owner = 'krzysztofcal';
+const bot = 'arcade-code-agent[bot]';
+const applyEnv = {GITHUB_ACTOR:owner,GITHUB_TRIGGERING_ACTOR:owner,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REF:'refs/heads/main',GITHUB_REPOSITORY:'krzysztofcal/arcadePlatform',GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'123'};
+
+test('apply request requires the pinned first-attempt dispatcher',()=>{
+ for (const actor of [owner,bot]) assert.doesNotThrow(()=>stageExecutor.authorizeApply({...applyEnv,GITHUB_ACTOR:actor,GITHUB_TRIGGERING_ACTOR:actor}));
+ for (const overrides of [
+  {GITHUB_ACTOR:'other',GITHUB_TRIGGERING_ACTOR:'other'}, {GITHUB_TRIGGERING_ACTOR:bot},
+  {GITHUB_TRIGGERING_ACTOR:undefined}, {GITHUB_EVENT_NAME:'pull_request'},
+  {GITHUB_REF:'refs/heads/feature'}, {GITHUB_REPOSITORY:'fork/arcadePlatform'}, {GITHUB_RUN_ATTEMPT:'2'}
+ ]) assert.throws(()=>stageExecutor.authorizeApply({...applyEnv,...overrides}),/apply_dispatch_required/);
+ const denied=spawnSync(process.execPath,['scripts/stage-db-migrate.mjs','--apply'],{env:{PATH:process.env.PATH,...applyEnv,GITHUB_RUN_ATTEMPT:'2'},encoding:'utf8'});
+ assert.equal(denied.status,1);assert.match(denied.stderr,/apply_dispatch_required/);assert.equal(denied.stdout,'');
+});
+
+test('apply protection must be exact and current, with OWNER review of this run and environment',async()=>{
+ const policy={name:'stage-db-apply',can_admins_bypass:false,
+  deployment_branch_policy:{custom_branch_policies:true,protected_branches:false},
+  protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{login:owner}}]}]};
+ const branches={total_count:1,branch_policies:[{type:'branch',name:'main'}]};
+ const approved={state:'approved',user:{login:owner},environments:[{name:'stage-db-apply'}]};
+ const config='/environments/stage-db-apply';
+ const endpoints=[config,config+'/deployment-branch-policies','/actions/runs/123/approvals'];
+ const readFrom=(values,calls=[])=>async path=>{calls.push(path);return values[endpoints.indexOf(path)];};
+ const calls=[];
+ await stageExecutor.verifyApplyProtection(false,readFrom([policy,branches],calls),applyEnv);
+ assert.deepEqual(calls,endpoints.slice(0,2));
+ await stageExecutor.verifyApplyProtection(true,readFrom([policy,branches,[approved]]),applyEnv);
+ for(const weaker of [{...policy,can_admins_bypass:true},{...policy,protection_rules:[]},{...policy,name:'stage-automation'}]){
+  await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([weaker,branches,[approved]]),applyEnv),/apply_environment_protection_required/);
+ }
+ await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([policy,{...branches,total_count:2},[approved]]),applyEnv),/apply_environment_branch_required/);
+ for(const review of [[],[{...approved,state:'rejected'}],[{...approved,user:{login:bot}}],[{...approved,environments:[{name:'ws-preview'}]}]]){
+  await assert.rejects(stageExecutor.verifyApplyProtection(true,readFrom([policy,branches,review]),applyEnv),/owner_approval_required/);
+ }
+});
+
+test('apply job waits on preflight and verifies review before binding Stage secrets',()=>{
  const s=read('.github/workflows/db-stage-apply-pr.yml');
- assert.match(s,/github\.actor == 'krzysztofcal' && github\.triggering_actor == 'krzysztofcal'/);
- assert.match(s,/inputs\.operation == 'inspect' \|\|/);
- assert.deepEqual(s.match(/^ +environment:.*$/gm),['    environment: stage-automation'],'only the preconfigured Stage Environment is allowed');
- const script=read('scripts/stage-db-migrate.mjs');assert.ok(script.indexOf("if(args[0]==='--apply')authorizeApply()")<script.indexOf('const file=process.env.STAGE_MIGRATION_BUNDLE'));
- const deniedRun=spawnSync(process.execPath,['scripts/stage-db-migrate.mjs','--apply'],{env:{PATH:process.env.PATH,...env,GITHUB_TRIGGERING_ACTOR:'other-writer'},encoding:'utf8'});
- assert.equal(deniedRun.status,1);assert.match(deniedRun.stderr,/owner_apply_required/);assert.equal(deniedRun.stdout,'');
+ const [front,apply]=s.split(/^  apply-stage:\s*$/m);
+ assert.ok(apply);
+ assert.match(front,/inspect-stage:[\s\S]*?environment: stage-automation/);
+ const preflight=front.split(/^  preflight-apply:\s*$/m)[1];
+ assert.ok(preflight);
+ assert.match(preflight,/github\.run_attempt == '1'/);
+ assert.match(apply,/github\.run_attempt == '1'/);
+ assert.doesNotMatch(preflight,/secrets\./);
+ assert.match(apply,/needs: preflight-apply/);
+ assert.match(apply,/environment: stage-db-apply/);
+ assert.match(apply,/actions: read/);
+ assert.ok(apply.indexOf('--verify-review')>=0 && apply.indexOf('--verify-review')<apply.indexOf('secrets.SUPABASE_STAGE_DIRECT_DB_URL'));
+ assert.match(apply,/needs\.preflight-apply\.outputs\.approval_digest/);
 });

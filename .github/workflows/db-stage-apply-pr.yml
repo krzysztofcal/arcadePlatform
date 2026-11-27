@@ -27,11 +27,9 @@ permissions:
   pull-requests: read
 
 jobs:
-  apply-stage:
+  inspect-stage:
     environment: stage-automation
-    # Only OWNER may dispatch/rerun apply; the phrase pins the approved scope.
-    # Both original dispatch and any rerun must be OWNER-authenticated.
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.operation == 'inspect' || (inputs.operation == 'apply' && github.actor == 'krzysztofcal' && github.triggering_actor == 'krzysztofcal')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'inspect' }}
     runs-on: [self-hosted, linux, x64, stage-db-ipv6]
     env:
       STAGE_MIGRATION_BUNDLE: ${{ github.workspace }}/.stage-migration-${{ github.run_id }}-${{ github.run_attempt }}.json
@@ -52,17 +50,86 @@ jobs:
           STAGE_MIGRATION_APPROVAL: ${{ inputs.approval }}
         run: node scripts/stage-db-migrate.mjs --prepare
       - name: Read-only Stage inspect
-        if: ${{ inputs.operation == 'inspect' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DIRECT_DB_URL }}
           SUPABASE_STAGE_PROJECT_REF: ${{ secrets.SUPABASE_STAGE_PROJECT_REF }}
         run: node scripts/stage-db-migrate.mjs --inspect
+      - name: Remove this run's bundle
+        if: ${{ always() }}
+        run: rm -f -- "$STAGE_MIGRATION_BUNDLE"
+
+  preflight-apply:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform'
+      && github.ref == 'refs/heads/main' && inputs.operation == 'apply' && github.run_attempt == '1'
+      && github.actor == github.triggering_actor
+      && (github.actor == 'krzysztofcal' || github.actor == 'arcade-code-agent[bot]') }}
+    runs-on: ubuntu-latest
+    outputs:
+      approval_digest: ${{ steps.scope.outputs.approval_digest }}
+    steps:
+      - name: Checkout trusted workflow revision only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/stage-db-migrate.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify protection and show exact migration request
+        id: scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STAGE_MIGRATION_APPROVAL: ${{ inputs.approval }}
+          STAGE_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/stage-db-migrate.mjs --preflight-apply
+
+  apply-stage:
+    needs: preflight-apply
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && github.repository == 'krzysztofcal/arcadePlatform'
+      && github.ref == 'refs/heads/main' && inputs.operation == 'apply' && github.run_attempt == '1'
+      && github.actor == github.triggering_actor
+      && (github.actor == 'krzysztofcal' || github.actor == 'arcade-code-agent[bot]') }}
+    environment: stage-db-apply
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    runs-on: [self-hosted, linux, x64, stage-db-ipv6]
+    env:
+      STAGE_MIGRATION_BUNDLE: ${{ github.workspace }}/.stage-migration-${{ github.run_id }}-${{ github.run_attempt }}.json
+    steps:
+      - name: Checkout trusted workflow revision only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/stage-db-migrate.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify current protection and OWNER approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/stage-db-migrate.mjs --verify-review
+      - name: Prepare approved SQL as data (no Stage credentials)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STAGE_MIGRATION_APPROVAL: ${{ inputs.approval }}
+        run: node scripts/stage-db-migrate.mjs --prepare
       - name: Apply exact approved set atomically
-        if: ${{ inputs.operation == 'apply' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SUPABASE_STAGE_DB_URL: ${{ secrets.SUPABASE_STAGE_DIRECT_DB_URL }}
           SUPABASE_STAGE_PROJECT_REF: ${{ secrets.SUPABASE_STAGE_PROJECT_REF }}
+          STAGE_PREFLIGHT_DIGEST: ${{ needs.preflight-apply.outputs.approval_digest }}
           STAGE_MIGRATION_CONFIRMATION: ${{ inputs.confirmation }}
         run: node scripts/stage-db-migrate.mjs --apply
+      - name: Remove this run's bundle
+        if: ${{ always() }}
+        run: rm -f -- "$STAGE_MIGRATION_BUNDLE"
