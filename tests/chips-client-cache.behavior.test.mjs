@@ -208,4 +208,30 @@ function createClient(fetchImpl, options){
   assert.equal(balanceEvents[0].detail.balance, -1);
 }
 
+{
+  // no ProfileClient; two overlapping fetchPokerProjection calls while the session resolves -> exactly one raw GET
+  let resolveToken;
+  let pokerGets = 0;
+  const tokenPromise = new Promise((resolve) => { resolveToken = resolve; });
+  const state = createClient(async (url) => {
+    if (url.includes('profile-me?includePoker=1')) {
+      pokerGets++;
+      return jsonResponse({ poker: { inPoker: false } });
+    }
+    throw new Error('unexpected_fetch');
+  });
+  state.setToken(tokenPromise);
+  state.setContext(null);
+
+  const call1 = state.client.fetchPokerProjection();
+  state.setContext({ userId: 'signed-in-user', generation: 1 });
+  const call2 = state.client.fetchPokerProjection();
+
+  resolveToken('token-late-session');
+  const [res1, res2] = await Promise.all([call1, call2]);
+  assert.equal(pokerGets, 1, 'two overlapping fetchPokerProjection calls while session resolves must send exactly one GET');
+  assert.deepEqual(res1, { inPoker: false });
+  assert.deepEqual(res2, { inPoker: false });
+}
+
 console.log('chips client cache behavior tests passed');

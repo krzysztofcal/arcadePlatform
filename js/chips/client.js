@@ -7,26 +7,15 @@
   var BONUS_CAMPAIGNS_URL = '/.netlify/functions/bonus-campaigns';
   var AUTH_CACHE_MS = 60000;
 
-  var state = { token: null, checkedAt: 0, tokenPromise: null, authGeneration: 0, userId: null };
-  var rawPokerByUserId = {};
-
-  function getActiveUserId(){
-    var ui = window.UserUiState;
-    if (ui && typeof ui.getActiveContext === 'function'){
-      var ctx = ui.getActiveContext();
-      if (ctx && ctx.userId) return String(ctx.userId);
-    }
-    if (state.userId) return state.userId;
-    return '__anon__';
-  }
+  var state = { token: null, checkedAt: 0, tokenPromise: null, authGeneration: 0 };
+  var rawPokerInFlight = {};
 
   function clearAuthCache(){
     state.authGeneration += 1;
     state.token = null;
     state.checkedAt = 0;
     state.tokenPromise = null;
-    state.userId = null;
-    rawPokerByUserId = {};
+    rawPokerInFlight = {};
   }
 
   function toNumber(value){
@@ -143,9 +132,6 @@
             var res = await client.auth.getSession();
             var session = res && res.data ? res.data.session : null;
             token = session && session.access_token ? session.access_token : null;
-            if (session && session.user && session.user.id){
-              state.userId = String(session.user.id);
-            }
             klog('chips:auth_client', { hasToken: !!token });
           }
         }
@@ -222,21 +208,21 @@
       var profile = await window.ProfileClient.getMe(true, { includePoker: true });
       return profile.poker;
     }
-    var userId = getActiveUserId();
-    if (rawPokerByUserId[userId]){
-      return rawPokerByUserId[userId];
+    var key = String(state.authGeneration);
+    if (rawPokerInFlight[key]){
+      return rawPokerInFlight[key];
     }
     var promise = (async function(){
       try {
         var payload = await authedFetchWithRetry('/.netlify/functions/profile-me?includePoker=1', { method: 'GET' });
         return payload.data && payload.data.poker;
       } finally {
-        if (rawPokerByUserId[userId] === promise){
-          delete rawPokerByUserId[userId];
+        if (rawPokerInFlight[key] === promise){
+          delete rawPokerInFlight[key];
         }
       }
     })();
-    rawPokerByUserId[userId] = promise;
+    rawPokerInFlight[key] = promise;
     return promise;
   }
 
