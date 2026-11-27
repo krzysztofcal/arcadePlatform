@@ -61,3 +61,69 @@ test('ignores authenticated test messages and rejects malformed envelopes withou
   assert.equal((await f.handler(push({ message: { messageId: 'fixture-id', data: '%' } }))).status, 400);
   assert.deepEqual(f.calls, []);
 });
+
+test('runtime stores only encrypted token evidence and verifies a settled duplicate in the scoped store', async () => {
+  const { createPlaySupportRtdnRuntime } = await import('../netlify/functions/_shared/play-support-rtdn-runtime.mjs');
+  const { createPlaySupportTokenCodec } = await import('../netlify/functions/_shared/play-support-token.mjs');
+  const { createHash } = await import('node:crypto');
+  const expectedHash = createHash('sha256').update(token).digest();
+  const codec = createPlaySupportTokenCodec({ activeVersion: 1, keys: new Map([[1, Buffer.alloc(32, 7)]]) });
+  const calls = [];
+  let storedEnvelope;
+  const handler = createPlaySupportRtdnRuntime({
+    ...target, verifyAuthorization: async () => true, codec,
+    publisher: {
+      readPurchase: async recoveredToken => {
+        assert.equal(recoveredToken, token);
+        calls.push('provider');
+        return {
+          obfuscatedExternalAccountId: 'fixture_binding',
+          testPurchaseContext: { fopType: 'TEST' },
+          purchaseStateContext: { purchaseState: 'PURCHASED' },
+          acknowledgementState: 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+          orderId: 'fixture-order',
+          productLineItem: [{ productId: 'supporter_gold', productOfferDetails: {
+            quantity: 1, consumptionState: 'CONSUMPTION_STATE_YET_TO_BE_CONSUMED'
+          } }]
+        };
+      }
+    },
+    store: {
+      enqueue: async (pkg, hash, envelope, event) => {
+        assert.equal(pkg, target.packageName);
+        assert.deepEqual(hash, expectedHash);
+        assert.equal(event.messageId, 'fixture-id');
+        assert.notDeepEqual(envelope.ciphertext, Buffer.from(token));
+        assert.equal(codec.decrypt(envelope, { ...target, tokenHash: hash.toString('hex') }), token);
+        storedEnvelope = envelope;
+        calls.push('enqueue');
+        return true;
+      },
+      claim: async (pkg, hash) => {
+        assert.equal(pkg, target.packageName);
+        assert.deepEqual(hash, expectedHash);
+        calls.push('claim');
+        return calls.includes('complete') ? null : {
+          packageName: pkg, tokenHash: hash, generation: 1, failureCount: 0, envelope: storedEnvelope
+        };
+      },
+      applyPurchase: async input => {
+        assert.equal(input.acknowledged, true);
+        return { outcome: 'GRANTED', receiptId: 'fixture-receipt' };
+      },
+      recoverAck: async () => null,
+      beginAck: async () => null,
+      complete: async () => { calls.push('complete'); return true; },
+      isComplete: async (pkg, hash, messageId) => {
+        assert.equal(pkg, target.packageName);
+        assert.deepEqual(hash, expectedHash);
+        assert.equal(messageId, 'fixture-id');
+        calls.push('settled');
+        return true;
+      }
+    }
+  });
+  assert.equal((await handler(push())).status, 204);
+  assert.equal((await handler(push())).status, 204);
+  assert.deepEqual(calls, ['enqueue', 'claim', 'provider', 'complete', 'enqueue', 'claim', 'settled']);
+});

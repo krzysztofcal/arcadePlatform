@@ -45,6 +45,12 @@ export function createPlaySupportWorkStore(beginSupportSql) {
       return row?.result === true;
     },
 
+    async isComplete(packageName, tokenHash, messageId) {
+      const row = await query('select arcade_play_api.play_support_inbox_is_complete($1,$2,$3) as result',
+        [packageName, tokenHash, messageId]);
+      return row?.result === true;
+    },
+
     async reschedule(claim, nextCheckAt, failed) {
       const row = await query('select arcade_play_api.play_support_reschedule_inbox($1,$2,$3,$4,$5) as result',
         [claim.packageName, claim.tokenHash, claim.generation, nextCheckAt, failed]);
