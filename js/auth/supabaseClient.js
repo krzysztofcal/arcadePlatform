@@ -420,7 +420,16 @@
     // ProfileClient use the raw read after that.
     if (!hasProfileClient && !domContentLoaded){
       var waited = false;
-      var retry = function(){ if (waited) return; waited = true; domContentLoaded = true; refreshProfile(user, uiGeneration, hadCachedProfile); };
+      var deferredSessionGen = profileSessionGeneration;
+      var retry = function(){
+        if (waited) return;
+        waited = true;
+        domContentLoaded = true;
+        // A sign-out or account switch during the wait supersedes this read; the new session starts its own.
+        var ui = userUiState();
+        if (profileSessionGeneration !== deferredSessionGen || !state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
+        refreshProfile(user, uiGeneration, hadCachedProfile);
+      };
       doc.addEventListener('DOMContentLoaded', retry, { once: true });
       // Fallback for a script injected after DOMContentLoaded: the window load still arrives.
       if (typeof window.addEventListener === 'function') window.addEventListener('load', retry, { once: true });
