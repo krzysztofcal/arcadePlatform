@@ -473,7 +473,10 @@
     var load;
     if (hasProfileClient){
       if (window.ChipsClient){
-        load = window.ProfileClient.getMe(false, { includePoker: true }).catch(function(){
+        load = window.ProfileClient.getMe(false, { includePoker: true }).catch(function(err){
+          var ui = userUiState();
+          var isCurrent = profileSessionGeneration === sessionGen && state.user && state.user.id === user.id && (!ui || ui.isCurrent(user.id, uiGeneration));
+          if (!isCurrent) throw err;
           return window.ProfileClient.getMe();
         });
       } else {

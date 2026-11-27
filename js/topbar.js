@@ -535,7 +535,7 @@
       return;
     }
     chipsClientWaitTries = 0;
-    const hasSnapshot = typeof window.ChipsClient.fetchTopbarSnapshot === 'function';
+    const hasSnapshot = typeof window.ChipsClient.fetchTopbarSnapshot === 'function' && !!(window.ProfileClient && typeof window.ProfileClient.getMe === 'function');
     if (!hasSnapshot){
       refreshPokerBadge();
     }

@@ -240,7 +240,7 @@
     return promise;
   }
 
-  function publishAndEmitBalance(balance, rawPayloadData, uiContext){
+  function publishChipsSlice(balance, uiContext){
     var ui = window.UserUiState;
     var context = uiContext !== undefined ? uiContext : (ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null);
     var contextIsCurrent = !context
@@ -253,7 +253,6 @@
       if (context && ui && typeof ui.publish === 'function'){
         ui.publish(context.userId, 'chips', { balance: balance }, Date.now());
       }
-      emit('chips:balance', rawPayloadData || { balance: balance });
       return true;
     }
     return false;
@@ -273,30 +272,32 @@
       || ui.isCurrent(uiContext.userId, uiContext.generation);
     if (!contextIsCurrent) return null;
     var balance = payload && payload.data ? payload.data.balance : null;
-    publishAndEmitBalance(balance, payload && payload.data, uiContext);
-    return payload ? payload.data : null;
+    publishChipsSlice(balance, uiContext);
+    emit('chips:balance', payload.data);
+    return payload.data;
   }
 
   async function fetchTopbarSnapshot(){
-    if (window.ProfileClient && typeof window.ProfileClient.getMe === 'function'){
-      var profile = await window.ProfileClient.getMe(false, { includePoker: true });
-      var raw = profile && profile.balance != null ? toNumber(profile.balance) : null;
-      var validBalance = raw != null && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
-      if (validBalance != null){
-        publishAndEmitBalance(validBalance, { balance: validBalance });
-      }
-      return {
-        balance: validBalance,
-        poker: profile && profile.poker !== undefined ? profile.poker : null
-      };
+    // Without ProfileClient, topbar uses the separate fetchBalance + fetchPokerProjection path.
+    if (!window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return null;
+    var ui = window.UserUiState;
+    var uiContext = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
+    var profile = await window.ProfileClient.getMe(false, { includePoker: true });
+    var contextIsCurrent = !uiContext
+      || !ui
+      || typeof ui.isCurrent !== 'function'
+      || ui.isCurrent(uiContext.userId, uiContext.generation);
+    if (!contextIsCurrent) return null;
+
+    var raw = profile && profile.balance != null ? toNumber(profile.balance) : null;
+    var validBalance = raw != null && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+    if (validBalance != null){
+      publishChipsSlice(validBalance, uiContext);
+      emit('chips:balance', { balance: validBalance });
     }
-    var results = await Promise.all([
-      fetchBalance(),
-      fetchPokerProjection().catch(function(){ return null; })
-    ]);
     return {
-      balance: results[0],
-      poker: results[1]
+      balance: validBalance,
+      poker: profile && profile.poker !== undefined ? profile.poker : null
     };
   }
 

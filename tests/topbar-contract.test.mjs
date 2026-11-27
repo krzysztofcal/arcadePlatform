@@ -660,3 +660,24 @@ test('ProfileClient present, ChipsClient absent before DOMContentLoaded and pres
   assert.equal(getMeCalls[0].options?.includePoker, true);
   assert.equal(f.renderedName, 'Player With Late Chips');
 });
+
+test('stale session during includePoker rejection does not call fallback getMe', async () => {
+  const getMeCalls = [];
+  let rejectPoker;
+  const holdPoker = new Promise((_, reject) => { rejectPoker = reject; });
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      if (options && options.includePoker) {
+        return holdPoker;
+      }
+      return { displayName: 'Fallback Player' };
+    },
+  });
+  f.emit('SIGNED_OUT', null);
+  await f.flush();
+  rejectPoker(new Error('include_poker_failed'));
+  await f.flush();
+  assert.equal(getMeCalls.length, 1, 'stale session must not issue fallback getMe()');
+});

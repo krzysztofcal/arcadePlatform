@@ -170,25 +170,42 @@ function createClient(fetchImpl, options){
 }
 
 {
-  const state = createClient(async (url) => {
-    if (url.includes('/chips-balance')) {
-      return jsonResponse({ balance: 750 });
-    }
-    if (url.includes('profile-me?includePoker=1')) {
-      throw new Error('poker_projection_failed');
-    }
-    throw new Error('unexpected_fetch');
-  });
-
+  // without ProfileClient, fetchTopbarSnapshot returns null (topbar uses separate paths)
+  const state = createClient(async () => { throw new Error('unexpected_fetch'); });
   const snapshot = await state.client.fetchTopbarSnapshot();
-  const rawBalance = snapshot && snapshot.balance && typeof snapshot.balance === 'object'
-    ? snapshot.balance.balance
-    : snapshot.balance;
-  assert.equal(rawBalance, 750);
-  assert.equal(snapshot.poker, null);
+  assert.equal(snapshot, null);
+}
+
+{
+  // F1: account switch during getMe -> null, no publish, no emit
+  let release;
+  const hold = new Promise((resolve) => { release = resolve; });
+  const mockProfileClient = {
+    getMe: async () => {
+      await hold;
+      return { balance: 1500, poker: { inPoker: false } };
+    },
+  };
+  const state = createClient(async () => { throw new Error('unexpected_fetch'); }, { profileClient: mockProfileClient });
+  const pending = state.client.fetchTopbarSnapshot();
+  await Promise.resolve();
+  state.setContext({ userId: 'switched-user', generation: 2 });
+  release();
+  const snapshot = await pending;
+  assert.equal(snapshot, null);
+  assert.equal(state.published.length, 0);
+  assert.equal(state.events.filter((e) => e.type === 'chips:balance').length, 0);
+}
+
+{
+  // F4: fetchBalance with balance -1 -> emits chips:balance, no publish
+  const state = createClient(async () => response(-1));
+  const result = await state.client.fetchBalance();
+  assert.equal(result.balance, -1);
+  assert.equal(state.published.length, 0, 'chips slice must not publish an invalid balance');
   const balanceEvents = state.events.filter((e) => e.type === 'chips:balance');
-  assert.equal(balanceEvents.length, 1);
-  assert.equal(balanceEvents[0].detail.balance, 750);
+  assert.equal(balanceEvents.length, 1, 'chips:balance must still emit for caller compatibility');
+  assert.equal(balanceEvents[0].detail.balance, -1);
 }
 
 console.log('chips client cache behavior tests passed');
