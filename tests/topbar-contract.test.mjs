@@ -299,12 +299,18 @@ async function topbarProfileFixture(options) {
       }),
     },
   };
+  if (opts.chipsClient) {
+    window.ChipsClient = opts.chipsClient;
+  }
+  if (opts.userUiState) {
+    window.UserUiState = opts.userUiState;
+  }
   if (!opts.withoutProfileClient) {
     window.ProfileClient = {
       clear() {},
-      getMe: async () => {
+      getMe: async (force, getMeOpts) => {
         profileReads++;
-        if (typeof opts.respond === 'function') return opts.respond();
+        if (typeof opts.respond === 'function') return opts.respond(force, getMeOpts);
         return { displayName: 'Player', avatar: { variant: 'wizard-indigo' } };
       },
     };
@@ -554,4 +560,82 @@ test('topbar shows the saved profile after profile:updated and keeps it on the n
   await f.flush();
   assert.equal(f.profileReads, readsBefore, 'a same-user event after a published save must not read again');
   assert.equal(f.renderedName, 'User A Saved', 'the next same-user event must keep the saved profile, not an older one');
+});
+
+test('topbar with ProfileClient and ChipsClient issues includePoker read and strips balance and poker', async () => {
+  const getMeCalls = [];
+  const published = [];
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    userUiState: {
+      isCurrent: () => true,
+      publish: (userId, slice, val) => { published.push({ userId, slice, val }); },
+      markSliceApplied: () => {},
+      hydrate: () => ({ generation: 1, profile: null }),
+    },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      return { displayName: 'Player With Poker', balance: 1250, poker: { inPoker: true, tables: [] }, avatar: { variant: 'wizard-indigo' } };
+    },
+  });
+  assert.equal(getMeCalls.length, 1);
+  assert.equal(getMeCalls[0].force, false);
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(f.renderedName, 'Player With Poker');
+  assert.equal(published.length, 1);
+  assert.equal(published[0].slice, 'profile');
+  assert.equal('balance' in published[0].val, false);
+  assert.equal('poker' in published[0].val, false);
+  assert.equal(published[0].val.displayName, 'Player With Poker');
+});
+
+test('topbar with ProfileClient falls back to plain getMe() if includePoker read rejects', async () => {
+  const getMeCalls = [];
+  const published = [];
+  let shouldFailPoker = true;
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    userUiState: {
+      isCurrent: () => true,
+      publish: (userId, slice, val) => { published.push({ userId, slice, val }); },
+      markSliceApplied: () => {},
+      hydrate: () => ({ generation: 1, profile: null }),
+    },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      if (options && options.includePoker && shouldFailPoker) {
+        throw new Error('include_poker_balance_error');
+      }
+      return { displayName: 'Player Avatar Fallback', avatar: { variant: 'wizard-indigo' } };
+    },
+  });
+  assert.equal(getMeCalls.length, 2);
+  assert.equal(getMeCalls[0].force, false);
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(getMeCalls[1].options, undefined);
+  assert.equal(f.renderedName, 'Player Avatar Fallback');
+  assert.equal(published.length, 1);
+  assert.equal('balance' in published[0].val, false);
+  assert.equal('poker' in published[0].val, false);
+});
+
+test('topbar without ProfileClient shares raw in-flight reads for same user and session generation', async () => {
+  let releaseRaw;
+  const holdRaw = new Promise((resolve) => { releaseRaw = resolve; });
+  let rawFetches = 0;
+  const f = await topbarProfileFixture({
+    withoutProfileClient: true,
+    fetch: async () => {
+      rawFetches++;
+      await holdRaw;
+      return { ok: true, json: async () => ({ displayName: 'User Shared Raw' }) };
+    },
+  });
+  f.emit('INITIAL_SESSION');
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  assert.equal(rawFetches, 1, 'concurrent same-user reads in the same generation must share one fetch');
+  releaseRaw();
+  await f.flush();
+  assert.equal(f.renderedName, 'User Shared Raw');
 });

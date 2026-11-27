@@ -342,13 +342,16 @@
   }
 
   function renderChipBadgeBalance(amount, uiState){
+    const raw = amount && typeof amount === 'object' && amount.balance !== undefined ? amount.balance : amount;
+    const num = raw == null ? null : Number(raw);
+    const valid = Number.isFinite(num) ? num : null;
     const formatKey = 'format' + 'CompactNumber';
     const formatter = window && window.ArcadeFormat && typeof window.ArcadeFormat[formatKey] === 'function'
       ? window.ArcadeFormat[formatKey]
       : null;
-    const text = amount == null ? '—' : formatter ? formatter(amount) : String(Math.round(amount));
+    const text = valid == null ? '—' : formatter ? formatter(valid) : String(Math.round(valid));
     setChipBadge(text, { loading: false });
-    chipHasHydratedValue = amount != null;
+    chipHasHydratedValue = valid != null;
     if (window.UserUiState && typeof window.UserUiState.markActiveSliceApplied === 'function'){
       window.UserUiState.markActiveSliceApplied('chips', uiState || 'ready');
     }
@@ -532,7 +535,10 @@
       return;
     }
     chipsClientWaitTries = 0;
-    refreshPokerBadge();
+    const hasSnapshot = typeof window.ChipsClient.fetchTopbarSnapshot === 'function';
+    if (!hasSnapshot){
+      refreshPokerBadge();
+    }
     if (chipInFlight){ return chipInFlight; }
     if (!chipHasHydratedValue) setChipBadge('', { loading: true });
     const requestGeneration = chipRequestGeneration;
@@ -549,13 +555,24 @@
             reject(err);
           }, timeoutMs);
         });
-        const balance = await Promise.race([window.ChipsClient.fetchBalance(), timeoutPromise]);
-        if (requestGeneration !== chipRequestGeneration) return;
-        if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
-        const raw = balance && balance.balance != null ? Number(balance.balance) : null;
-        const value = Number.isFinite(raw) ? raw : null;
-        renderChipBadgeBalance(value);
+        if (hasSnapshot){
+          const snapshot = await Promise.race([window.ChipsClient.fetchTopbarSnapshot(), timeoutPromise]);
+          if (requestGeneration !== chipRequestGeneration) return;
+          if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
+          renderChipBadgeBalance(snapshot ? snapshot.balance : null);
+          renderPokerBadge(snapshot ? snapshot.poker : null);
+        } else {
+          const balance = await Promise.race([window.ChipsClient.fetchBalance(), timeoutPromise]);
+          if (requestGeneration !== chipRequestGeneration) return;
+          if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
+          const raw = balance && balance.balance != null ? Number(balance.balance) : null;
+          const value = Number.isFinite(raw) ? raw : null;
+          renderChipBadgeBalance(value);
+        }
       } catch (err){
+        if (hasSnapshot && requestGeneration === chipRequestGeneration){
+          renderPokerBadge(null);
+        }
         if (err && err.code === 'timeout'){
           if (!retainCachedChipBadge()) hideChipBadge();
           return;
