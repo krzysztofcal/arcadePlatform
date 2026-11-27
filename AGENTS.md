@@ -52,6 +52,15 @@ This is a real-time gaming platform (poker + arcade), not a typical CRUD app.
 - PRs with no needed WWW testing MUST by default have `[skip netlify]` in the PR title from creation.
 - Build a Deploy Preview when actual WWW, UI or Netlify function testing is needed; relevant required validation uses exact PR HEAD.
 - Never skip required browser verification just to save a build.
+- **Preview feature flags (OWNER standing GO, 2026-11-27):** when a Deploy Preview test needs a feature flag (for example `UGC_SAFETY_ENABLED`, `GOOGLE_PHOTO_IMPORT_ENABLED`, `POKER_TABLE_PHOTO_ENABLED`), the agent sets its value itself in the Netlify `deploy-preview` context of the WWW site `playkcswh`, without asking the OWNER. Steps:
+  - Confirm that the account and `site_id` belong to `playkcswh`, the site that builds the tested PR's preview.
+  - Read the variable first and record the values of all its contexts. If the read fails or does not show the full state, stop before writing and report to the OWNER.
+  - Change only the `deploy-preview` value with the Netlify API endpoint for one context value: `PATCH /api/v1/accounts/<account>/env/<KEY>?site_id=<site>` with `{"context":"deploy-preview","value":"<value the test needs>"}` (for example `"1"` to enable).
+  - Read it again: the `deploy-preview` value must equal the value the test needs and every other context must match the recorded values. On any mismatch or failed read, stop and report the state to the OWNER.
+  - Rebuild the preview, because functions read the value at build time: push to the tested PR's branch, or retry that PR's `deploy-preview` deploy for its current HEAD SHA. Never use a site build hook or any Production/Candidate path. If the right deploy cannot be identified, stop and report to the OWNER.
+  - Report the change to the OWNER.
+  - Do not use a whole-variable upsert (such as the Netlify MCP `manage-env-vars` upsert): it may replace the values of other contexts.
+  - This GO covers only the flag value in that context. It never covers other contexts (including `branch-deploy` and `production`), secrets, other Netlify settings or a Production publish. A feature activation that needs its own scope, and tests that write shared Stage data, JOIN tables or change the ledger, still need their own GO.
 
 ---
 
