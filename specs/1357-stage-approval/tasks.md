@@ -7,9 +7,9 @@
 
 ## Phase 1 — Protected apply [US1]
 
-- [ ] T003 Update `.github/workflows/db-stage-apply-pr.yml` to separate inspect, apply preflight and protected apply with shared queue and immutable manifest. Check exact environment/branch/reviewer policy preflight and current policy plus run approval before secrets.
+- [ ] T003 Update `.github/workflows/db-stage-apply-pr.yml` to separate inspect, apply preflight and protected apply with shared queue and immutable manifest. Enforce actor/ref/attempt at both job boundaries. Check exact policy before approval and current policy plus owner review before secrets. Add minimal Actions read, compare preflight digest and clean scratch data.
 - [ ] T004 Update `authorizeApply()` in `scripts/stage-db-migrate.mjs` for the pinned actors and first attempt. Preserve trusted source, confirmation, target and database invariants.
-- [ ] T005 Extend `tests/db-stage-workflows.guard.test.mjs` and existing executor tests for role/ref/rerun, missing or wrong reviewer/history and policy failures. Run existing SQL safety regression checks, actionlint and independent code review.
+- [ ] T005 Extend `tests/db-stage-workflows.guard.test.mjs` and existing executor tests for role/ref/rerun, missing or wrong reviewer/history and policy failures, job ordering and both dispatchers requiring the protected path. Run existing SQL safety regression checks, actionlint and independent code review.
 
 ## Phase 2 — Compatibility and support [US2, US3]
 
