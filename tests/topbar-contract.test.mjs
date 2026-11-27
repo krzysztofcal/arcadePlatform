@@ -682,6 +682,36 @@ test('stale session during includePoker rejection does not call fallback getMe',
   assert.equal(getMeCalls.length, 1, 'stale session must not issue fallback getMe()');
 });
 
+test('includePoker getMe rejects, fallback getMe pending: second refreshProfile shares confirmation attempt and renders once', async () => {
+  const getMeCalls = [];
+  let releaseFallback;
+  const holdFallback = new Promise((resolve) => { releaseFallback = resolve; });
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      if (options && options.includePoker) {
+        return Promise.reject(new Error('include_poker_failed'));
+      }
+      return holdFallback;
+    },
+  });
+
+  await f.flush();
+  assert.equal(getMeCalls.length, 2, 'must issue includePoker and fallback getMe');
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(getMeCalls[1].options, undefined);
+  assert.notEqual(f.renderedName, 'Fallback Player', 'profile must not render before fallback resolves');
+
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  assert.equal(getMeCalls.length, 2, 'must not issue a second includePoker or second fallback getMe');
+
+  releaseFallback({ displayName: 'Fallback Player' });
+  await f.flush();
+  assert.equal(f.renderedName, 'Fallback Player', 'profile must render once fallback resolves');
+});
+
 test('topbar refreshChipBadge snapshot rejects with server error, fetchBalance resolves 900 -> CH badge shows 900 and exactly one fetchBalance call', async () => {
   const elements = {};
   const listeners = {};

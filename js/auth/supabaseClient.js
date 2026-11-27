@@ -13,6 +13,7 @@
   var profileConfirmedUserId = null;
   var profileSessionGeneration = 0;
   var rawProfileInFlight = {};
+  var profileConfirmationInFlight = {};
 
   function sanitizeProfile(profile){
     if (!profile || typeof profile !== 'object') return profile;
@@ -472,15 +473,27 @@
     var sessionGen = profileSessionGeneration;
     var load;
     if (hasProfileClient){
-      if (window.ChipsClient){
-        load = window.ProfileClient.getMe(false, { includePoker: true }).catch(function(err){
-          var ui = userUiState();
-          var isCurrent = profileSessionGeneration === sessionGen && state.user && state.user.id === user.id && (!ui || ui.isCurrent(user.id, uiGeneration));
-          if (!isCurrent) throw err;
-          return window.ProfileClient.getMe();
-        });
+      var confirmKey = String(user.id) + ':' + sessionGen;
+      if (profileConfirmationInFlight[confirmKey]){
+        load = profileConfirmationInFlight[confirmKey];
       } else {
-        load = window.ProfileClient.getMe();
+        if (window.ChipsClient){
+          load = window.ProfileClient.getMe(false, { includePoker: true }).catch(function(err){
+            var ui = userUiState();
+            var isCurrent = profileSessionGeneration === sessionGen && state.user && state.user.id === user.id && (!ui || ui.isCurrent(user.id, uiGeneration));
+            if (!isCurrent) throw err;
+            return window.ProfileClient.getMe();
+          });
+        } else {
+          load = window.ProfileClient.getMe();
+        }
+        profileConfirmationInFlight[confirmKey] = load;
+        var clearConfirmation = function(){
+          if (profileConfirmationInFlight[confirmKey] === load){
+            delete profileConfirmationInFlight[confirmKey];
+          }
+        };
+        load.then(clearConfirmation, clearConfirmation);
       }
     } else {
       load = fetchRawProfile(user, sessionGen);
@@ -526,6 +539,7 @@
       profileSessionGeneration += 1;
       profileConfirmedUserId = null;
       rawProfileInFlight = {};
+      profileConfirmationInFlight = {};
       if (ui && previousUserId) ui.clearUser(previousUserId);
       if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
       renderUser(null, null);
@@ -536,6 +550,7 @@
       profileSessionGeneration += 1;
       profileConfirmedUserId = null;
       rawProfileInFlight = {};
+      profileConfirmationInFlight = {};
     }
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
     if (previousUserId === userId && profileConfirmedUserId === userId && window.ProfileClient && typeof window.ProfileClient.getMe === 'function'){
