@@ -3,7 +3,7 @@
 
   var doc = document;
   var nodes = {};
-  var state = { user: null, profile: null, open: false, client: null };
+  var state = { user: null, profile: null, open: false, client: null, resolved: false };
   var authListeners = [];
   var authSubscriptionAttached = false;
   var recoverySession = null;
@@ -331,6 +331,9 @@
       window.ProfileClient.applyAvatar(node, profile, { ownUserId: state.user ? String(state.user.id) : null });
       return;
     }
+    // Without ProfileClient (it loads after this script, or not at all on legal pages) only a catalog avatar is
+    // shown; a cached photo marker (no URL) keeps the current node until ProfileClient or the confirmed profile renders it.
+    if(profile&&profile.avatar&&profile.avatar.type==='uploaded'&&!profile.avatar.url)return;
     if(profile&&window.ArcadeAvatars){window.ArcadeAvatars.apply(node,profile);return;}
     node.textContent=computeInitials(name);
   }
@@ -381,8 +384,11 @@
 
     var initials = computeInitials(name);
 
-    applyProfileAvatar(nodes.initials, profile, name);
-    applyProfileAvatar(nodes.menuInitials, profile, name);
+    // Until the session is known, keep the empty placeholder: a signed-in player must not see a guest avatar first.
+    if (user || state.resolved){
+      applyProfileAvatar(nodes.initials, profile, name);
+      applyProfileAvatar(nodes.menuInitials, profile, name);
+    }
     if (nodes.label){ nodes.label.textContent = user ? name : t('signIn', 'Sign in'); }
     if (nodes.menuName){ nodes.menuName.textContent = name; }
     if (nodes.menuEmail){ nodes.menuEmail.textContent = email; }
@@ -438,6 +444,7 @@
   }
 
   function applyResolvedUser(user){
+    state.resolved = true;
     var previousUserId = state.user && state.user.id ? String(state.user.id) : null;
     var ui = userUiState();
     var nextUserId = user && user.id ? String(user.id) : null;
@@ -463,13 +470,8 @@
     }
     var hydrated = ui ? ui.hydrate(userId) : { generation: 0, profile: null };
     if (!ui) setUserUiState('loading');
-    var hasProfileClient = !!(window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function');
-    var initialProfile = null;
-    if (hydrated.profile){
-      initialProfile = hasProfileClient
-        ? { displayName: hydrated.profile.displayName, avatar: hydrated.profile.avatar }
-        : { displayName: hydrated.profile.displayName };
-    }
+    // The avatar marker is kept even before ProfileClient has loaded, so a later re-render (langchange) still has it.
+    var initialProfile = hydrated.profile ? { displayName: hydrated.profile.displayName, avatar: hydrated.profile.avatar } : null;
     renderUser(user, initialProfile);
     if (ui && hydrated.profile) ui.markSliceApplied(userId, 'profile', 'hydrated');
     refreshProfile(user, hydrated.generation, !!hydrated.profile);
