@@ -3,7 +3,7 @@
 
   var doc = document;
   var nodes = {};
-  var state = { user: null, profile: null, open: false, client: null, resolved: false };
+  var state = { user: null, profile: null, open: false, client: null, resolved: false, profileHydrated: false };
   var authListeners = [];
   var authSubscriptionAttached = false;
   var recoverySession = null;
@@ -325,15 +325,23 @@
     return str.slice(0, 2).toUpperCase();
   }
 
-  function applyProfileAvatar(node, profile, name){
+  function clearAvatarNode(node){
+    node.textContent = '';
+    node.style.backgroundImage = '';
+    node.classList.remove('profile-avatar--uploaded');
+    delete node.dataset.avatarVariant;
+    delete node.dataset.avatarUrl;
+  }
+
+  function applyProfileAvatar(node, profile, name, hydrated){
     if (!node) return;
     if (window.ProfileClient && typeof window.ProfileClient.applyAvatar === 'function'){
       window.ProfileClient.applyAvatar(node, profile, { ownUserId: state.user ? String(state.user.id) : null });
       return;
     }
-    // Without ProfileClient (it loads after this script, or not at all on legal pages) only a catalog avatar is
-    // shown; a cached photo marker (no URL) keeps the current node until ProfileClient or the confirmed profile renders it.
-    if(profile&&profile.avatar&&profile.avatar.type==='uploaded'&&!profile.avatar.url)return;
+    // Without ProfileClient (it loads after this script, or not at all on legal pages) a cached, unconfirmed profile
+    // shows only the empty placeholder: no cached avatar (FR-006) and nothing left over from a previous account.
+    if (hydrated){ clearAvatarNode(node); return; }
     if(profile&&window.ArcadeAvatars){window.ArcadeAvatars.apply(node,profile);return;}
     node.textContent=computeInitials(name);
   }
@@ -371,9 +379,10 @@
     return fallback || key;
   }
 
-  function renderUser(user, profile){
+  function renderUser(user, profile, hydrated){
     state.user = user || null;
     state.profile = profile || null;
+    state.profileHydrated = !!(user && profile && hydrated);
     var name = t('guest', 'Guest');
     var email = t('signInToSyncProgress', 'Sign in to sync progress');
 
@@ -386,8 +395,8 @@
 
     // Until the session is known, keep the empty placeholder: a signed-in player must not see a guest avatar first.
     if (user || state.resolved){
-      applyProfileAvatar(nodes.initials, profile, name);
-      applyProfileAvatar(nodes.menuInitials, profile, name);
+      applyProfileAvatar(nodes.initials, profile, name, state.profileHydrated);
+      applyProfileAvatar(nodes.menuInitials, profile, name, state.profileHydrated);
     }
     if (nodes.label){ nodes.label.textContent = user ? name : t('signIn', 'Sign in'); }
     if (nodes.menuName){ nodes.menuName.textContent = name; }
@@ -472,7 +481,7 @@
     if (!ui) setUserUiState('loading');
     // The avatar marker is kept even before ProfileClient has loaded, so a later re-render (langchange) still has it.
     var initialProfile = hydrated.profile ? { displayName: hydrated.profile.displayName, avatar: hydrated.profile.avatar } : null;
-    renderUser(user, initialProfile);
+    renderUser(user, initialProfile, true);
     if (ui && hydrated.profile) ui.markSliceApplied(userId, 'profile', 'hydrated');
     refreshProfile(user, hydrated.generation, !!hydrated.profile);
   }
@@ -578,7 +587,7 @@
     doc.addEventListener('keydown', handleEscape);
     if (nodes.menuAction){ nodes.menuAction.addEventListener('click', handleAction); }
     if (nodes.menuUser){ nodes.menuUser.addEventListener('click', handleMenuUserClick); }
-    doc.addEventListener('langchange', function(){ renderUser(state.user, state.profile); });
+    doc.addEventListener('langchange', function(){ renderUser(state.user, state.profile, state.profileHydrated); });
     doc.addEventListener('profile:updated', function(event){
       if (!state.user) return;
       var profile = event && event.detail ? event.detail : state.profile;
