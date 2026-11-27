@@ -31,7 +31,7 @@ function createClient(fetchImpl, options){
   class CustomEvent {
     constructor(type, options){ this.type = type; this.detail = options && options.detail; }
   }
-  vm.runInNewContext(source, { window, document: { dispatchEvent(event){ events.push(event); } }, CustomEvent, fetch: fetchImpl, Date, JSON, Number });
+  vm.runInNewContext(source, { window, document: { dispatchEvent(event){ events.push(event); } }, CustomEvent, fetch: fetchImpl, Date, JSON, Number, atob });
   return { client: window.ChipsClient, events, published, setContext(value){ context = value; }, setToken(value){ token = value; } };
 }
 
@@ -234,43 +234,93 @@ function createClient(fetchImpl, options){
   assert.deepEqual(res2, { inPoker: false });
 }
 
+function makeJwt(sub){
+  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ sub })).toString('base64url');
+  return `${header}.${payload}.sig`;
+}
+
 {
-  // token promise superseded by clearAuthCache() during an authedFetch
+  // (a) generation changes during the token wait, the new token's sub equals the expected user → one HTTP request succeeds
   let releaseTokenA;
   const tokenAPromise = new Promise((resolve) => { releaseTokenA = resolve; });
-  let fetchCalls = 0;
-  const authHeaders = [];
-  const state = createClient(async (_url, options) => {
-    fetchCalls++;
-    authHeaders.push(options.headers.Authorization);
+  let fetchCallsA = 0;
+  const authHeadersA = [];
+  const stateA = createClient(async (_url, options) => {
+    fetchCallsA++;
+    authHeadersA.push(options.headers.Authorization);
     return response(777);
   });
-  state.setToken(tokenAPromise);
+  stateA.setContext({ userId: 'chips-user', generation: 1 });
+  stateA.setToken(tokenAPromise);
 
-  const pending = state.client.fetchBalance();
+  const pendingA = stateA.client.fetchBalance();
   await Promise.resolve();
 
-  state.client.clearAuthCache();
-  state.setToken('token-fresh');
+  stateA.client.clearAuthCache();
+  const validToken = makeJwt('chips-user');
+  stateA.setToken(validToken);
   releaseTokenA('token-stale');
 
-  const result = await pending;
-  assert.equal(fetchCalls, 1, 'superseded token promise must still result in exactly one HTTP request');
-  assert.deepEqual(authHeaders, ['Bearer token-fresh'], 'second fetchAuthToken must provide the fresh generation token');
-  assert.equal(result.balance, 777);
+  const resultA = await pendingA;
+  assert.equal(fetchCallsA, 1, 'superseded token promise must still result in exactly one HTTP request');
+  assert.deepEqual(authHeadersA, ['Bearer ' + validToken], 'second fetchAuthToken must provide the fresh generation token');
+  assert.equal(resultA.balance, 777);
+
+  // (b) the new token's sub is a different user → not_authenticated and zero HTTP requests
+  let releaseTokenB;
+  const tokenBPromise = new Promise((resolve) => { releaseTokenB = resolve; });
+  let fetchCallsB = 0;
+  const stateB = createClient(async () => {
+    fetchCallsB++;
+    return response(888);
+  });
+  stateB.setContext({ userId: 'chips-user-b', generation: 1 });
+  stateB.setToken(tokenBPromise);
+
+  const pendingB = stateB.client.fetchBalance();
+  await Promise.resolve();
+
+  stateB.client.clearAuthCache();
+  stateB.setToken(makeJwt('different-user'));
+  releaseTokenB('token-stale');
+
+  await assert.rejects(async () => { await pendingB; }, (err) => err.code === 'not_authenticated');
+  assert.equal(fetchCallsB, 0, 'mismatched sub must not issue any HTTP request');
+
+  // (c) no active UI context → not_authenticated, zero requests
+  let releaseTokenC;
+  const tokenCPromise = new Promise((resolve) => { releaseTokenC = resolve; });
+  let fetchCallsC = 0;
+  const stateC = createClient(async () => {
+    fetchCallsC++;
+    return response(999);
+  });
+  stateC.setContext(null);
+  stateC.setToken(tokenCPromise);
+
+  const pendingC = stateC.client.fetchBalance();
+  await Promise.resolve();
+
+  stateC.client.clearAuthCache();
+  stateC.setToken(makeJwt('chips-user'));
+  releaseTokenC('token-stale');
+
+  await assert.rejects(async () => { await pendingC; }, (err) => err.code === 'not_authenticated');
+  assert.equal(fetchCallsC, 0, 'missing active context must not issue any HTTP request');
 
   // Unchanged generation + null token -> still not_authenticated
-  state.client.clearAuthCache();
-  state.setToken(null);
+  stateA.client.clearAuthCache();
+  stateA.setToken(null);
   let notAuthError = null;
   try {
-    await state.client.fetchBalance();
+    await stateA.client.fetchBalance();
   } catch (err) {
     notAuthError = err;
   }
   assert.ok(notAuthError, 'null token must throw');
   assert.equal(notAuthError.code, 'not_authenticated');
-  assert.equal(fetchCalls, 1, 'failed auth must not make an HTTP request');
+  assert.equal(fetchCallsA, 1, 'failed auth must not make an extra HTTP request');
 }
 
 console.log('chips client cache behavior tests passed');

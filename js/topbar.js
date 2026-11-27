@@ -351,6 +351,10 @@
       : null;
     const text = valid == null ? '—' : formatter ? formatter(valid) : String(Math.round(valid));
     setChipBadge(text, { loading: false });
+    if (valid != null && isAuthed()){
+      ensureChipNodes();
+      if (chipNodes.badge) chipNodes.badge.hidden = false;
+    }
     chipHasHydratedValue = valid != null;
     if (window.UserUiState && typeof window.UserUiState.markActiveSliceApplied === 'function'){
       window.UserUiState.markActiveSliceApplied('chips', uiState || 'ready');
@@ -471,6 +475,16 @@
         setWelcomeBonusBadgeVisible(canClaim, status && status.amount);
       } catch (err){
         hideWelcomeBonusBadge();
+        if (err && err.code === 'not_authenticated' && requestGeneration === welcomeBonusRequestGeneration){
+          if (window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
+            try {
+              const user = await window.SupabaseAuth.getCurrentUser();
+              if (!user && requestGeneration === welcomeBonusRequestGeneration){
+                setAuthState(AuthState.SIGNED_OUT);
+              }
+            } catch (_authErr){}
+          }
+        }
       } finally {
         welcomeBonusInFlight = null;
         if (welcomeBonusRefreshQueued){
@@ -586,6 +600,7 @@
           renderChipBadgeBalance(value);
         }
       } catch (err){
+        if (timeoutId){ clearTimeout(timeoutId); timeoutId = null; }
         if (hasSnapshot && requestGeneration === chipRequestGeneration){
           renderPokerBadge(null);
         }
@@ -595,6 +610,18 @@
         }
         if (err && (err.status === 404 || err.code === 'not_found')){
           hideChipBadge();
+          return;
+        }
+        if (err && err.code === 'not_authenticated'){
+          if (!retainCachedChipBadge()) hideChipBadge();
+          if (requestGeneration === chipRequestGeneration && window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
+            try {
+              const user = await window.SupabaseAuth.getCurrentUser();
+              if (!user && requestGeneration === chipRequestGeneration){
+                setAuthState(AuthState.SIGNED_OUT);
+              }
+            } catch (_authErr){}
+          }
           return;
         }
         if (!retainCachedChipBadge()) hideChipBadge();

@@ -155,11 +155,47 @@
     return state.tokenPromise;
   }
 
+  function decodeJwtSub(token){
+    if (typeof token !== 'string') return null;
+    var parts = token.split('.');
+    if (parts.length < 2) return null;
+    try {
+      var b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      var jsonStr = null;
+      if (typeof atob === 'function'){
+        jsonStr = atob(b64);
+      } else if (typeof window !== 'undefined' && typeof window.atob === 'function'){
+        jsonStr = window.atob(b64);
+      } else if (typeof Buffer !== 'undefined'){
+        jsonStr = Buffer.from(b64, 'base64').toString('utf8');
+      }
+      if (!jsonStr) return null;
+      var payload = JSON.parse(jsonStr);
+      return (payload && payload.sub != null && String(payload.sub).trim()) ? String(payload.sub).trim() : null;
+    } catch (_err){
+      return null;
+    }
+  }
+
   async function authedFetch(url, options){
     var startGen = state.authGeneration;
+    var expectedUserId = null;
+    if (typeof window !== 'undefined' && window && window.UserUiState && typeof window.UserUiState.getActiveContext === 'function'){
+      try {
+        var context = window.UserUiState.getActiveContext();
+        if (context && context.userId != null && String(context.userId).trim()){
+          expectedUserId = String(context.userId).trim();
+        }
+      } catch (_errCtx){}
+    }
+
     var token = await fetchAuthToken();
-    if (!token && state.authGeneration !== startGen){
-      token = await fetchAuthToken();
+    if (!token && state.authGeneration !== startGen && expectedUserId){
+      var retriedToken = await fetchAuthToken();
+      if (retriedToken && decodeJwtSub(retriedToken) === expectedUserId){
+        token = retriedToken;
+      }
     }
     if (!token){
       var err = new Error('not_authenticated');
