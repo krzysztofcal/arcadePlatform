@@ -31,7 +31,7 @@ A signed-in page load sends three top-bar requests:
 ### US2: A balance failure does not break the avatar (P1)
 **Acceptance**
 1. If the combined read fails, `supabaseClient.js` falls back to one plain `ProfileClient.getMe()` for the avatar, and the CH badge keeps today's failure behaviour: it keeps the cached value or hides.
-2. The 5 s CH badge timeout and the 404 and `not_authenticated` handling stay as they are.
+2. The 5 s CH badge timeout and the 404 and `not_authenticated` handling stay as they are. After a non-timeout error of the combined read, the CH badge makes one `fetchBalance()` call within the remaining part of the same 5 s budget, so a working `chips-balance` still shows the current balance.
 
 ### US3: Legal pages stop duplicating requests (P2)
 **Acceptance**
@@ -73,6 +73,6 @@ A signed-in page load sends three top-bar requests:
 ## Success criteria
 
 - **SC-001** Deploy Preview, Stage account: top-bar requests per page load on `/`, `/xp.html`, `/leaderboard.html` and `/account.html`, before and after (Network evidence in the PR).
-- **SC-002** Legal page: one raw `profile-me` and one raw `profile-me?includePoker=1`, at most.
+- **SC-002** Legal page, first load: overlapping reads within one session or auth generation share one raw `profile-me` and one raw `profile-me?includePoker=1`. Later session events after a finished read behave as on `main` (US3.1).
 - **SC-003** Avatar, CH and Poker badges are visually unchanged; the CH badge updates after `chips:tx-complete`.
 - **SC-004** Fundamental tests pass; CI green.
