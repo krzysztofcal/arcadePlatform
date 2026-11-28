@@ -27,13 +27,13 @@ Apply the table top-down: **P0 and P1 criteria take precedence**. A finding that
 
 Example: "the owner briefly sees their own previous avatar in a multi-tab race" is P3. The same race showing one player's photo to **another** player is P1.
 
-The reviewer's severity is a proposal. Before accepting a finding, the coordinator derives the severity again from the five answers and this table, and records any change with a one-line reason. If no P0/P1 criterion applies, an effect that only the acting user sees, that self-heals on the next read or page and that needs unusual timing is P3 (it does not block), whatever label the reviewer gave it.
+The reviewer's severity is a proposal. Before accepting a finding, the coordinator derives the severity again from the five answers and this table, and records any change with a one-line reason. If no P0/P1 criterion and no §3 floor applies, an effect that only the acting user sees, that self-heals on the next read or page and that needs unusual timing is P3, whatever label the reviewer gave it. The re-rating decides how a finding is handled; it does not change the `AGENTS.md` readiness rules: a P0/P1/P2 that the reviewer still reports on the final diff blocks the handoff until the reviewer withdraws it in a later round or the OWNER accepts an exception.
 
 ## 3. High-risk areas: races are at least P2
 
 These areas are the `AGENTS.md` High-Risk Areas: WS reconnect, poker state transitions, table lifecycle, UI ↔ WS sync and global CSS. This file adds the chips ledger and balances, and migrations. A race in any of them is at least P2, and P1 when it can affect money or game state.
 
-"Chips ledger and balances" means stored state: ledger entries, balances and transactions, and the requests that write them. It does not cover how a balance is displayed. A display-only race, such as a top-bar badge briefly hidden or stale for the acting user until the next refresh, is rated by §2 alone (normally P3). The same race showing one account's balance to another account is P1.
+"Chips ledger and balances" means stored state: ledger entries, balances and transactions, and the requests that write them. It does not cover how a balance is displayed. A display-only race, such as a top-bar badge briefly hidden or stale for the acting user until the next refresh, does not get this category's P2 floor and is rated by §2 (normally P3). This exception covers only the chips ledger and balances category: a display race that also falls in another high-risk area (for example UI ↔ WS sync) keeps that area's floor. The same race showing one account's balance to another account is P1.
 
 ## 4. Accepted trade-offs are out of scope within their bounds
 
