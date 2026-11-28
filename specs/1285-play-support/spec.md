@@ -1,0 +1,23 @@
+# Supporter Badges V1 — Specification
+
+> Foundation T007/T008 authorized by OWNER after Claude R2 PASS. Role proof, shared Stage apply, Play operations, later phases and activation retain their separate gates.
+> Canonical issue: https://github.com/krzysztofcal/arcadePlatform/issues/1285
+> Plan review: https://github.com/krzysztofcal/arcadePlatform/issues/1285#issuecomment-7204794686
+
+## Product and scope (FR-001–010)
+- FR-001: Three independent permanent collectible non-consumable Google Play digital cosmetics; one active ownership per SKU, may buy any independently and own all three. No subscriptions, consume, gifts, transfer, CH, XP, odds, cash-out, prizes, ranking/gameplay advantage or charitable donation claim. No external checkout or other payment processor; free gameplay unchanged.
+- FR-002: Authenticated active Arcade UUID required. Approved design catalog (actual localized Play price shown, not hardcoded; EN-first EN/PL):
+  | SKU | EN name | PLN design price |
+  |---|---|---:|
+  | supporter_bronze | Bronze Supporter Badge | 4.99 |
+  | supporter_silver | Silver Supporter Badge | 14.99 |
+  | supporter_gold | Gold Supporter Badge | 29.99 |
+  Catalog/territories/charges separately gated.
+- FR-003: Online Poker V2 shows one equipped static local badge at the avatar edge for players and permitted guest spectators. Only existing profile fetches and existing WS frames can discover or update badges. There is no badge-specific 60-second display SLA. A badge already visible may remain stale after hide, block, deletion or revoke until an existing refresh, a full snapshot without it, or occupant change. Public profile visibility remains authoritative on read. No purchase metadata or interference with table controls.
+- FR-004: Authenticated public profile: equipped badge beside name + visible collection under existing auth/moderation/block/access rules. No purchase amounts, dates, orders, receipt tokens.
+- FR-005: Own profile collection owned/not-owned/equipped, select owned badge or hide all publicly (owner sees collection regardless); default highest owned unless explicit selection/hide; revoked selected badge falls back highest valid if visible. Restore/recovery action. No duplicate ownership.
+- FR-006: Compact Lobby Become a Supporter CTA after gameplay and permanent Profile collection entry; shared accessible shop/dialog, preview, localized prices, Buy/Owned/Equipped, busy/pending/cancel/error/recovery; no sixth nav tab. Android-only checkout; WWW and Android show badges. Stage test-only checkout under T020A, no real charges; no WWW checkout.
+- FR-007: Optional independent local per-account/install invitation, proposed first after 3 distinct active UTC days, Maybe later >=14 days, Don't show again permanent; no prompt when owner status unknown, existing supporter, first launch, active game/checkout/onboarding/auth/dialog. No push/email, bonus coupling, artificial urgency; final cadence/wording approved later.
+- FR-008: Google authoritative purchase verification, durable idempotent account-bound grant then acknowledgement; restore same active UUID, no automatic cross-account transfer, pending not owned. Recover interrupted purchase, missed RTDN, refunds and revocation without app reopen. Capped exponential backoff+jitter, 24h human escalation not cancellation. Account deletion proceeds even if Play unavailable, retain only justified financial/anti-replay records. Sales flag independent of recovery.
+- FR-009: Premium buyer-only Badge Unlock celebration inspired by #795 exceptional hand presentation, triggered only by fresh newly verified durable grant. Local metallic shield/spade tiers distinguish rank by shape/marks/color; gold richest. Proposed ~3s dim/glow, reveal/scale, ring/particles, BADGE UNLOCKED, tier and thanks, static Equip/View collection actions. Short elegant approved licensed sound obeys existing global Sound, reduced motion, skip, Back, accessibility, applicable celebration preference, no strobe. Never interrupt hand; show at safe Lobby/Profile/shop or static fallback. One healthy eligible animation, zero replays on restore/reload/duplicates/account switch; delayed pending may celebrate only with unambiguous original flow. Prefer static if uncertain/crash after atomic claim, no promise of exactly-once visual delivery. No WS FX broadcast, game engine import or gameplay rewards. Animation independent of finance. Final artwork/motion/UX deferred to OWNER, not foundation blocker.
+- FR-010: Default sales OFF, explicit OWNER approvals per stage. #1140 free/no-paid-IAP initial public release baseline remains unless separate OWNER decision. No new required release dependency inferred. Merchant bank verified 2026-11-26, not complete merchant/app eligibility.

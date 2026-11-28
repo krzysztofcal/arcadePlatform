@@ -4,3 +4,6 @@ export const BUILD_ARTIFACT_IDENTITY = "unspecified";
 export const BUILD_DEPLOY_ORIGIN = null;
 export const BUILD_XP_REDIS_VERSION = null;
 export const BUILD_XP_REDIS_ENV = null;
+export const BUILD_SOURCE_SHA = null;
+export const BUILD_DEPLOY_ID = null;
+export const BUILD_IMMUTABLE_ORIGIN = null;
