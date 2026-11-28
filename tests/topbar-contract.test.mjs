@@ -1190,3 +1190,65 @@ test('topbar: (f) hidden CH badge becomes visible after a later successful balan
   assert.equal(harness.elements['chipBadge'].hidden, false, 'hidden CH badge must become visible after later successful balance render');
   assert.equal(harness.elements['chipBadgeAmount'].textContent, '1250', 'CH badge text must show new balance');
 });
+
+test('topbar: (j) a stale not_authenticated (generation changed) does not hide the CH badge', async () => {
+  let balanceCalls = 0;
+  let rejectPending;
+  const pendingPromise = new Promise((_, reject) => { rejectPending = reject; });
+  let currentGen = 1;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => {
+        balanceCalls++;
+        if (balanceCalls === 1) {
+          return { balance: 500 };
+        }
+        return pendingPromise;
+      },
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    user: { id: 'user-j' },
+    profileClient: null,
+    userUiState: {
+      getActiveContext: () => ({ userId: 'user-j', generation: currentGen }),
+      isCurrent: (uid, gen) => uid === 'user-j' && gen === currentGen,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => ({ balance: 500 }),
+    },
+  });
+
+  // Wait for initial render to complete with visible badge
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (balanceCalls >= 1 && !harness.elements['chipBadge'].hidden) break;
+  }
+  assert.equal(harness.elements['chipBadge'].hidden, false, 'CH badge must start visible');
+  assert.equal(harness.elements['chipBadgeAmount'].textContent, '500');
+
+  // Trigger second balance request that stays pending
+  harness.doc.dispatchEvent('ui:visible');
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (balanceCalls >= 2) break;
+  }
+  assert.equal(balanceCalls, 2, 'second balance read must be in flight');
+
+  // Now advance context generation so request 2 becomes stale
+  currentGen = 2;
+
+  // Now request 2 rejects with not_authenticated
+  rejectPending(notAuthErr);
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+  }
+
+  // Stale rejection must be ignored; CH badge must NOT be hidden
+  assert.equal(harness.elements['chipBadge'].hidden, false, 'stale not_authenticated must not hide CH badge');
+  assert.equal(harness.elements['chipBadgeAmount'].textContent, '500', 'stale not_authenticated must not clear CH badge amount');
+  assert.equal(harness.doc.documentElement.dataset.auth, 'in', 'top bar must remain signed in');
+});

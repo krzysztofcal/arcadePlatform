@@ -613,11 +613,13 @@
           return;
         }
         if (err && err.code === 'not_authenticated'){
+          if (requestGeneration !== chipRequestGeneration) return;
+          if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
           if (!retainCachedChipBadge()) hideChipBadge();
-          if (requestGeneration === chipRequestGeneration && window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
+          if (requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation)) && window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
             try {
               const user = await window.SupabaseAuth.getCurrentUser();
-              if (!user && requestGeneration === chipRequestGeneration){
+              if (!user && requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation))){
                 setAuthState(AuthState.SIGNED_OUT);
               }
             } catch (_authErr){}

@@ -323,4 +323,66 @@ function makeJwt(sub){
   assert.equal(fetchCallsA, 1, 'failed auth must not make an extra HTTP request');
 }
 
+{
+  // (g) POST via authedFetchWithRetry gets 401, the account switches before the retry (new token sub = other user) → no second HTTP request, not_authenticated
+  let postCalls = 0;
+  const stateG = createClient(async (_url, options) => {
+    postCalls++;
+    if (postCalls === 1) {
+      stateG.setContext({ userId: 'account-2', generation: 2 });
+      stateG.setToken(makeJwt('account-2'));
+      return { status: 401, ok: false, async json() { return { error: 'invalid_token' }; } };
+    }
+    return { status: 200, ok: true, async json() { return { ok: true }; } };
+  });
+
+  stateG.setContext({ userId: 'account-1', generation: 1 });
+  stateG.setToken(makeJwt('account-1'));
+
+  await assert.rejects(
+    async () => {
+      await stateG.client.postTransaction({ type: 'test' });
+    },
+    (err) => err.code === 'not_authenticated'
+  );
+  assert.equal(postCalls, 1, 'account switch before 401 retry must not issue a second HTTP request');
+}
+
+{
+  // (h) token sub mismatch on the first attempt with a UI context → no HTTP request
+  let fetchCallsH = 0;
+  const stateH = createClient(async () => {
+    fetchCallsH++;
+    return response(100);
+  });
+  stateH.setContext({ userId: 'account-h', generation: 1 });
+  stateH.setToken(makeJwt('wrong-account'));
+
+  await assert.rejects(
+    async () => {
+      await stateH.client.fetchBalance();
+    },
+    (err) => err.code === 'not_authenticated'
+  );
+  assert.equal(fetchCallsH, 0, 'token sub mismatch on first attempt must not issue any HTTP request');
+}
+
+{
+  // (i) no UI context → first attempt sent as before
+  let fetchCallsI = 0;
+  let receivedAuth = null;
+  const stateI = createClient(async (_url, options) => {
+    fetchCallsI++;
+    receivedAuth = options.headers.Authorization;
+    return response(555);
+  });
+  stateI.setContext(null);
+  stateI.setToken('opaque-token-no-jwt');
+
+  const resI = await stateI.client.fetchBalance();
+  assert.equal(fetchCallsI, 1, 'when no UI context exists, first attempt must send request without sub check');
+  assert.equal(receivedAuth, 'Bearer opaque-token-no-jwt');
+  assert.equal(resI.balance, 555);
+}
+
 console.log('chips client cache behavior tests passed');

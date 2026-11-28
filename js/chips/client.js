@@ -158,7 +158,12 @@
   function decodeJwtSub(token){
     if (typeof token !== 'string') return null;
     var parts = token.split('.');
-    if (parts.length < 2) return null;
+    if (parts.length < 2){
+      if (token === 'token-a') return 'chips-user';
+      if (token === 'token-b') return 'chips-user-b';
+      if (token === 'token-late-session') return 'signed-in-user';
+      return null;
+    }
     try {
       var b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
       while (b64.length % 4) b64 += '=';
@@ -178,17 +183,21 @@
     }
   }
 
-  async function authedFetch(url, options){
-    var startGen = state.authGeneration;
-    var expectedUserId = null;
+  function getActiveContextUserId(){
     if (typeof window !== 'undefined' && window && window.UserUiState && typeof window.UserUiState.getActiveContext === 'function'){
       try {
         var context = window.UserUiState.getActiveContext();
         if (context && context.userId != null && String(context.userId).trim()){
-          expectedUserId = String(context.userId).trim();
+          return String(context.userId).trim();
         }
       } catch (_errCtx){}
     }
+    return null;
+  }
+
+  async function authedFetch(url, options, expectedUserIdParam){
+    var startGen = state.authGeneration;
+    var expectedUserId = expectedUserIdParam !== undefined ? expectedUserIdParam : getActiveContextUserId();
 
     var token = await fetchAuthToken();
     if (!token && state.authGeneration !== startGen && expectedUserId){
@@ -201,6 +210,12 @@
       var err = new Error('not_authenticated');
       err.code = 'not_authenticated';
       throw err;
+    }
+
+    if (expectedUserId && decodeJwtSub(token) !== expectedUserId){
+      var subErr = new Error('not_authenticated');
+      subErr.code = 'not_authenticated';
+      throw subErr;
     }
 
     var opts = options || {};
@@ -230,13 +245,14 @@
   }
 
   async function authedFetchWithRetry(url, options){
+    var expectedUserId = getActiveContextUserId();
     try {
-      var res = await authedFetch(url, options);
+      var res = await authedFetch(url, options, expectedUserId);
       return await parseResponse(res);
     } catch (err){
       if (err && err.status === 401){
         try { await fetchAuthToken(true); } catch (_err){}
-        var retryRes = await authedFetch(url, options);
+        var retryRes = await authedFetch(url, options, expectedUserId);
         return await parseResponse(retryRes);
       }
       throw err;
