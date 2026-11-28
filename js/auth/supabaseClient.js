@@ -12,6 +12,38 @@
   var recoveryPending = false;
   var profileConfirmedUserId = null;
   var profileSessionGeneration = 0;
+  var rawProfileInFlight = {};
+  var profileConfirmationInFlight = {};
+
+  function sanitizeProfile(profile){
+    if (!profile || typeof profile !== 'object') return profile;
+    var copy = Object.assign({}, profile);
+    delete copy.balance;
+    delete copy.poker;
+    return copy;
+  }
+
+  function fetchRawProfile(user, sessionGen){
+    var key = String(user.id) + ':' + sessionGen;
+    if (rawProfileInFlight[key]){
+      return rawProfileInFlight[key];
+    }
+    var promise = getAccessToken().then(function(accessToken){
+      if (!accessToken) throw new Error('not_authenticated');
+      return fetch(window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/profile-me') : '/.netlify/functions/profile-me', { headers: { Authorization: 'Bearer ' + accessToken } }).then(function(response){
+        if (!response.ok) throw new Error('profile_request_failed');
+        return response.json();
+      });
+    });
+    function clearInFlight(){
+      if (rawProfileInFlight[key] === promise){
+        delete rawProfileInFlight[key];
+      }
+    }
+    promise.then(clearInFlight, clearInFlight);
+    rawProfileInFlight[key] = promise;
+    return promise;
+  }
 
   function logDiag(label, payload){
     var logger = window && window.KLog;
@@ -415,10 +447,11 @@
   function refreshProfile(user, uiGeneration, hadCachedProfile){
     if (!user) return;
     var hasProfileClient = !!(window.ProfileClient && typeof window.ProfileClient.getMe === 'function');
-    // ProfileClient is a later deferred script: until DOMContentLoaded (all deferred scripts have run), wait, so
-    // repeated session events share its one in-flight read instead of each sending a raw request. Pages without
-    // ProfileClient use the raw read after that.
-    if (!hasProfileClient && !domContentLoaded){
+    var hasChipsClient = !!(window.ChipsClient);
+    // ProfileClient and ChipsClient are later deferred scripts: until DOMContentLoaded (all deferred scripts have run),
+    // wait, so repeated session events share ProfileClient's one in-flight read with includePoker instead of sending
+    // premature or duplicate requests. Pages without ProfileClient or ChipsClient proceed after that.
+    if ((!hasProfileClient || !hasChipsClient) && !domContentLoaded){
       var waited = false;
       var deferredSessionGen = profileSessionGeneration;
       var retry = function(){
@@ -438,20 +471,39 @@
       return;
     }
     var sessionGen = profileSessionGeneration;
-    var load = hasProfileClient
-      ? window.ProfileClient.getMe()
-      : getAccessToken().then(function(accessToken){
-        if (!accessToken) throw new Error('not_authenticated');
-        return fetch(window.ArcadeApi ? window.ArcadeApi.url('/.netlify/functions/profile-me') : '/.netlify/functions/profile-me', { headers: { Authorization: 'Bearer ' + accessToken } }).then(function(response){
-          if (!response.ok) throw new Error('profile_request_failed');
-          return response.json();
-        });
-      });
-    load.then(function(profile){
+    var load;
+    if (hasProfileClient){
+      var confirmKey = String(user.id) + ':' + sessionGen;
+      if (profileConfirmationInFlight[confirmKey]){
+        load = profileConfirmationInFlight[confirmKey];
+      } else {
+        if (window.ChipsClient){
+          load = window.ProfileClient.getMe(false, { includePoker: true }).catch(function(err){
+            var ui = userUiState();
+            var isCurrent = profileSessionGeneration === sessionGen && state.user && state.user.id === user.id && (!ui || ui.isCurrent(user.id, uiGeneration));
+            if (!isCurrent) throw err;
+            return window.ProfileClient.getMe();
+          });
+        } else {
+          load = window.ProfileClient.getMe();
+        }
+        profileConfirmationInFlight[confirmKey] = load;
+        var clearConfirmation = function(){
+          if (profileConfirmationInFlight[confirmKey] === load){
+            delete profileConfirmationInFlight[confirmKey];
+          }
+        };
+        load.then(clearConfirmation, clearConfirmation);
+      }
+    } else {
+      load = fetchRawProfile(user, sessionGen);
+    }
+    load.then(function(rawProfile){
       // A late answer from an earlier session never confirms the current one (ProfileClient path only).
       if (hasProfileClient && profileSessionGeneration !== sessionGen) return;
       var ui = userUiState();
       if (!state.user || state.user.id !== user.id || (ui && !ui.isCurrent(user.id, uiGeneration))) return;
+      var profile = sanitizeProfile(rawProfile);
       if (ui) ui.publish(user.id, 'profile', profile, Date.now());
       else setUserUiState('ready');
       if (hasProfileClient) {
@@ -486,6 +538,8 @@
     if (!user || !user.id){
       profileSessionGeneration += 1;
       profileConfirmedUserId = null;
+      rawProfileInFlight = {};
+      profileConfirmationInFlight = {};
       if (ui && previousUserId) ui.clearUser(previousUserId);
       if (ui) ui.setAnonymous(); else setUserUiState('anonymous');
       renderUser(null, null);
@@ -495,6 +549,8 @@
     if (previousUserId !== userId){
       profileSessionGeneration += 1;
       profileConfirmedUserId = null;
+      rawProfileInFlight = {};
+      profileConfirmationInFlight = {};
     }
     if (ui && previousUserId && previousUserId !== userId) ui.clearUser(previousUserId);
     if (previousUserId === userId && profileConfirmedUserId === userId && window.ProfileClient && typeof window.ProfileClient.getMe === 'function'){

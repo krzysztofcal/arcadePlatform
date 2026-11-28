@@ -273,7 +273,7 @@ async function topbarProfileFixture(options) {
   const shell = opts.withAvatarShell ? stubNode() : null;
   const button = opts.withAvatarShell ? stubNode() : null;
   const document = {
-    readyState: 'complete',
+    readyState: opts.readyState || 'complete',
     getElementById: (id) => {
       if (id === 'avatarLabel') return label;
       if (id === 'avatarMenuName') return menuName;
@@ -299,12 +299,18 @@ async function topbarProfileFixture(options) {
       }),
     },
   };
+  if (opts.chipsClient) {
+    window.ChipsClient = opts.chipsClient;
+  }
+  if (opts.userUiState) {
+    window.UserUiState = opts.userUiState;
+  }
   if (!opts.withoutProfileClient) {
     window.ProfileClient = {
       clear() {},
-      getMe: async () => {
+      getMe: async (force, getMeOpts) => {
         profileReads++;
-        if (typeof opts.respond === 'function') return opts.respond();
+        if (typeof opts.respond === 'function') return opts.respond(force, getMeOpts);
         return { displayName: 'Player', avatar: { variant: 'wizard-indigo' } };
       },
     };
@@ -323,6 +329,7 @@ async function topbarProfileFixture(options) {
   return {
     flush,
     topbar,
+    window,
     get profileReads() { return profileReads; },
     get renderedName() { return menuName.textContent || label.textContent; },
     dispatch(type, detail) { (docListeners[type] || []).forEach((fn) => fn({ type, detail })); },
@@ -554,4 +561,268 @@ test('topbar shows the saved profile after profile:updated and keeps it on the n
   await f.flush();
   assert.equal(f.profileReads, readsBefore, 'a same-user event after a published save must not read again');
   assert.equal(f.renderedName, 'User A Saved', 'the next same-user event must keep the saved profile, not an older one');
+});
+
+test('topbar with ProfileClient and ChipsClient issues includePoker read and strips balance and poker', async () => {
+  const getMeCalls = [];
+  const published = [];
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    userUiState: {
+      isCurrent: () => true,
+      publish: (userId, slice, val) => { published.push({ userId, slice, val }); },
+      markSliceApplied: () => {},
+      hydrate: () => ({ generation: 1, profile: null }),
+    },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      return { displayName: 'Player With Poker', balance: 1250, poker: { inPoker: true, tables: [] }, avatar: { variant: 'wizard-indigo' } };
+    },
+  });
+  assert.equal(getMeCalls.length, 1);
+  assert.equal(getMeCalls[0].force, false);
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(f.renderedName, 'Player With Poker');
+  assert.equal(published.length, 1);
+  assert.equal(published[0].slice, 'profile');
+  assert.equal('balance' in published[0].val, false);
+  assert.equal('poker' in published[0].val, false);
+  assert.equal(published[0].val.displayName, 'Player With Poker');
+});
+
+test('topbar with ProfileClient falls back to plain getMe() if includePoker read rejects', async () => {
+  const getMeCalls = [];
+  const published = [];
+  let shouldFailPoker = true;
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    userUiState: {
+      isCurrent: () => true,
+      publish: (userId, slice, val) => { published.push({ userId, slice, val }); },
+      markSliceApplied: () => {},
+      hydrate: () => ({ generation: 1, profile: null }),
+    },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      if (options && options.includePoker && shouldFailPoker) {
+        throw new Error('include_poker_balance_error');
+      }
+      return { displayName: 'Player Avatar Fallback', avatar: { variant: 'wizard-indigo' } };
+    },
+  });
+  assert.equal(getMeCalls.length, 2);
+  assert.equal(getMeCalls[0].force, false);
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(getMeCalls[1].options, undefined);
+  assert.equal(f.renderedName, 'Player Avatar Fallback');
+  assert.equal(published.length, 1);
+  assert.equal('balance' in published[0].val, false);
+  assert.equal('poker' in published[0].val, false);
+});
+
+test('topbar without ProfileClient shares raw in-flight reads for same user and session generation', async () => {
+  let releaseRaw;
+  const holdRaw = new Promise((resolve) => { releaseRaw = resolve; });
+  let rawFetches = 0;
+  const f = await topbarProfileFixture({
+    withoutProfileClient: true,
+    fetch: async () => {
+      rawFetches++;
+      await holdRaw;
+      return { ok: true, json: async () => ({ displayName: 'User Shared Raw' }) };
+    },
+  });
+  f.emit('INITIAL_SESSION');
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  assert.equal(rawFetches, 1, 'concurrent same-user reads in the same generation must share one fetch');
+  releaseRaw();
+  await f.flush();
+  assert.equal(f.renderedName, 'User Shared Raw');
+});
+
+test('ProfileClient present, ChipsClient absent before DOMContentLoaded and present after issues exactly one includePoker read', async () => {
+  const getMeCalls = [];
+  const f = await topbarProfileFixture({
+    readyState: 'interactive',
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      return { displayName: 'Player With Late Chips', avatar: { variant: 'wizard-indigo' } };
+    },
+  });
+  await f.flush();
+  assert.equal(getMeCalls.length, 0, 'must not call getMe before DOMContentLoaded when ChipsClient is absent');
+  f.window.ChipsClient = { fetchBalance() {} };
+  f.dispatch('DOMContentLoaded');
+  await f.flush();
+  assert.equal(getMeCalls.length, 1, 'must issue exactly one getMe call after DOMContentLoaded');
+  assert.equal(getMeCalls[0].force, false);
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(f.renderedName, 'Player With Late Chips');
+});
+
+test('stale session during includePoker rejection does not call fallback getMe', async () => {
+  const getMeCalls = [];
+  let rejectPoker;
+  const holdPoker = new Promise((_, reject) => { rejectPoker = reject; });
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      if (options && options.includePoker) {
+        return holdPoker;
+      }
+      return { displayName: 'Fallback Player' };
+    },
+  });
+  f.emit('SIGNED_OUT', null);
+  await f.flush();
+  rejectPoker(new Error('include_poker_failed'));
+  await f.flush();
+  assert.equal(getMeCalls.length, 1, 'stale session must not issue fallback getMe()');
+});
+
+test('includePoker getMe rejects, fallback getMe pending: second refreshProfile shares confirmation attempt and renders once', async () => {
+  const getMeCalls = [];
+  let releaseFallback;
+  const holdFallback = new Promise((resolve) => { releaseFallback = resolve; });
+  const f = await topbarProfileFixture({
+    chipsClient: { fetchBalance() {} },
+    respond: (force, options) => {
+      getMeCalls.push({ force, options });
+      if (options && options.includePoker) {
+        return Promise.reject(new Error('include_poker_failed'));
+      }
+      return holdFallback;
+    },
+  });
+
+  await f.flush();
+  assert.equal(getMeCalls.length, 2, 'must issue includePoker and fallback getMe');
+  assert.equal(getMeCalls[0].options?.includePoker, true);
+  assert.equal(getMeCalls[1].options, undefined);
+  assert.notEqual(f.renderedName, 'Fallback Player', 'profile must not render before fallback resolves');
+
+  f.emit('TOKEN_REFRESHED');
+  await f.flush();
+  assert.equal(getMeCalls.length, 2, 'must not issue a second includePoker or second fallback getMe');
+
+  releaseFallback({ displayName: 'Fallback Player' });
+  await f.flush();
+  assert.equal(f.renderedName, 'Fallback Player', 'profile must render once fallback resolves');
+});
+
+test('topbar refreshChipBadge snapshot rejects with server error, fetchBalance resolves 900 -> CH badge shows 900 and exactly one fetchBalance call', async () => {
+  const elements = {};
+  const listeners = {};
+  const doc = {
+    readyState: 'complete',
+    getElementById: (id) => elements[id] || null,
+    querySelector: (sel) => {
+      if (sel === '.topbar') return doc.topbarEl;
+      if (sel === '#sbToggle') return null;
+      return null;
+    },
+    querySelectorAll: (sel) => {
+      if (sel === '.topbar') return [doc.topbarEl];
+      if (sel === '#sbToggle') return [];
+      return [];
+    },
+    createElement: (tag) => {
+      const el = {
+        tagName: tag.toUpperCase(),
+        classList: { add() {}, remove() {}, contains: () => false },
+        setAttribute(k, v) { this[k] = v; },
+        getAttribute(k) { return this[k]; },
+        hasAttribute: () => false,
+        appendChild(child) {
+          this.children.push(child);
+          if (child.id) elements[child.id] = child;
+          return child;
+        },
+        insertBefore(child) {
+          this.children.push(child);
+          if (child.id) elements[child.id] = child;
+          return child;
+        },
+        children: [],
+        querySelector: (s) => {
+          if (s === '#chipBadgeAmount') return elements['chipBadgeAmount'] || null;
+          if (s === '#welcomeBonusTopbarBadge') return elements['welcomeBonusTopbarBadge'] || null;
+          if (s === '#chipBadgePoker') return elements['chipBadgePoker'] || null;
+          if (s === '.chip-badge__label') return null;
+          return null;
+        },
+      };
+      return el;
+    },
+    createTextNode: (text) => ({ text }),
+    addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); },
+    documentElement: { dataset: {} },
+  };
+  const topbarEl = doc.createElement('div');
+  doc.topbarEl = topbarEl;
+  const topbarRight = doc.createElement('div');
+  topbarRight.className = 'topbar-right';
+  topbarEl.appendChild(topbarRight);
+
+  let fetchBalanceCalls = 0;
+  let snapshotCalls = 0;
+  const win = {
+    document: doc,
+    ProfileClient: {
+      getMe: async () => ({ displayName: 'Player' }),
+    },
+    ChipsClient: {
+      fetchTopbarSnapshot: async () => {
+        snapshotCalls++;
+        const err = new Error('profile_me_500');
+        err.status = 500;
+        throw err;
+      },
+      fetchBalance: async () => {
+        fetchBalanceCalls++;
+        return { balance: 900 };
+      },
+    },
+    SupabaseAuth: {
+      getCurrentUser: async () => ({ id: 'user-1' }),
+      onAuthChange: (cb) => { win.authCb = cb; },
+    },
+    UserUiState: {
+      getActiveContext: () => ({ userId: 'user-1', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+    },
+    ArcadeFormat: {
+      formatCompactNumber: (val) => String(val),
+    },
+  };
+  win.window = win;
+
+  const vm = await import('node:vm');
+  vm.runInNewContext(topbarSource, {
+    window: win,
+    document: doc,
+    CustomEvent: class { constructor(t, opts) { this.type = t; this.detail = opts?.detail; } },
+    setTimeout,
+    clearTimeout,
+    Promise,
+    Number,
+    String,
+    Math,
+    Array,
+    Date,
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (fetchBalanceCalls > 0) break;
+  }
+
+  assert.equal(snapshotCalls, 1, 'fetchTopbarSnapshot must be called first');
+  assert.equal(fetchBalanceCalls, 1, 'fetchBalance must be called exactly once after snapshot failure');
+  const amountEl = elements['chipBadgeAmount'];
+  assert.ok(amountEl, 'chipBadgeAmount element must exist');
+  assert.equal(amountEl.textContent, '900', 'CH badge must show 900');
 });
