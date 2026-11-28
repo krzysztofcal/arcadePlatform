@@ -8,12 +8,14 @@
   var AUTH_CACHE_MS = 60000;
 
   var state = { token: null, checkedAt: 0, tokenPromise: null, authGeneration: 0 };
+  var rawPokerInFlight = {};
 
   function clearAuthCache(){
     state.authGeneration += 1;
     state.token = null;
     state.checkedAt = 0;
     state.tokenPromise = null;
+    rawPokerInFlight = {};
   }
 
   function toNumber(value){
@@ -206,8 +208,40 @@
       var profile = await window.ProfileClient.getMe(true, { includePoker: true });
       return profile.poker;
     }
-    var payload = await authedFetchWithRetry('/.netlify/functions/profile-me?includePoker=1', { method: 'GET' });
-    return payload.data && payload.data.poker;
+    var key = String(state.authGeneration);
+    if (rawPokerInFlight[key]){
+      return rawPokerInFlight[key];
+    }
+    var promise = (async function(){
+      try {
+        var payload = await authedFetchWithRetry('/.netlify/functions/profile-me?includePoker=1', { method: 'GET' });
+        return payload.data && payload.data.poker;
+      } finally {
+        if (rawPokerInFlight[key] === promise){
+          delete rawPokerInFlight[key];
+        }
+      }
+    })();
+    rawPokerInFlight[key] = promise;
+    return promise;
+  }
+
+  function publishChipsSlice(balance, uiContext){
+    var ui = window.UserUiState;
+    var context = uiContext !== undefined ? uiContext : (ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null);
+    var contextIsCurrent = !context
+      || !ui
+      || typeof ui.isCurrent !== 'function'
+      || ui.isCurrent(context.userId, context.generation);
+    if (!contextIsCurrent) return false;
+
+    if (Number.isSafeInteger(balance) && balance >= 0){
+      if (context && ui && typeof ui.publish === 'function'){
+        ui.publish(context.userId, 'chips', { balance: balance }, Date.now());
+      }
+      return true;
+    }
+    return false;
   }
 
   async function fetchBalance(){
@@ -223,13 +257,34 @@
       || typeof ui.isCurrent !== 'function'
       || ui.isCurrent(uiContext.userId, uiContext.generation);
     if (!contextIsCurrent) return null;
-    if (payload && payload.data && Number.isSafeInteger(payload.data.balance) && payload.data.balance >= 0){
-      if (uiContext && ui && typeof ui.publish === 'function'){
-        ui.publish(uiContext.userId, 'chips', { balance: payload.data.balance }, Date.now());
-      }
-    }
+    var balance = payload && payload.data ? payload.data.balance : null;
+    publishChipsSlice(balance, uiContext);
     emit('chips:balance', payload.data);
     return payload.data;
+  }
+
+  async function fetchTopbarSnapshot(){
+    // Without ProfileClient, topbar uses the separate fetchBalance + fetchPokerProjection path.
+    if (!window.ProfileClient || typeof window.ProfileClient.getMe !== 'function') return null;
+    var ui = window.UserUiState;
+    var uiContext = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
+    var profile = await window.ProfileClient.getMe(false, { includePoker: true });
+    var contextIsCurrent = !uiContext
+      || !ui
+      || typeof ui.isCurrent !== 'function'
+      || ui.isCurrent(uiContext.userId, uiContext.generation);
+    if (!contextIsCurrent) return null;
+
+    var raw = profile && profile.balance != null ? toNumber(profile.balance) : null;
+    var validBalance = raw != null && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+    if (validBalance != null){
+      publishChipsSlice(validBalance, uiContext);
+      emit('chips:balance', { balance: validBalance });
+    }
+    return {
+      balance: validBalance,
+      poker: profile && profile.poker !== undefined ? profile.poker : null
+    };
   }
 
   async function fetchLedger(options){
@@ -353,6 +408,7 @@
   }
 
   window.ChipsClient = {
+    fetchTopbarSnapshot: fetchTopbarSnapshot,
     fetchPokerProjection: fetchPokerProjection,
     fetchBalance: fetchBalance,
     fetchLedger: fetchLedger,
