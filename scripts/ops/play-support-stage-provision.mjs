@@ -19,6 +19,8 @@ const BRANCH = 'codex/1285-play-support-rtdn-entry';
 const SHA = '694c689dd08dbbf71d2a69daef81d20ccded4148';
 const REPO = 'krzysztofcal/arcadePlatform';
 const KEY = 'PLAY_SUPPORT_DB_URL';
+const PERSONAL_SECRET_SCOPES = ['builds', 'functions', 'runtime'];
+const VALUE_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const LOCK = [1356, 1285];
 const VALIDATOR = 'netlify/functions/_shared/play-support-db.mjs';
 
@@ -36,11 +38,12 @@ export function scramVerifier(password) {
 
 function valueId(entry) {
   requireState(entry?.key === KEY && entry.is_secret === true &&
-    Array.isArray(entry.scopes) && entry.scopes.length === 1 && entry.scopes[0] === 'functions' &&
+    Array.isArray(entry.scopes) && entry.scopes.length === PERSONAL_SECRET_SCOPES.length &&
+    PERSONAL_SECRET_SCOPES.every(scope => entry.scopes.includes(scope)) &&
     Array.isArray(entry.values) && entry.values.length === 1, 'netlify_scope_mismatch');
   const [value] = entry.values;
   requireState(value?.context === 'branch' && value.context_parameter === BRANCH &&
-    typeof value.id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value.id), 'netlify_scope_mismatch');
+    typeof value.id === 'string' && VALUE_ID.test(value.id), 'netlify_scope_mismatch');
   return value.id;
 }
 
@@ -64,7 +67,7 @@ export async function provision({ apply = false, ca, env, state, checkTarget, ac
   const password = randomBytes(32).toString('hex');
   const url = `postgresql://${WRITER}.${PROJECT}:${password}@${POOLER}:6543/postgres`;
   const connection = playSupportStageConnection(url, ca);
-  const payload = { key: KEY, scopes: ['functions'], is_secret: true,
+  const payload = { key: KEY, scopes: PERSONAL_SECRET_SCOPES, is_secret: true,
     values: [{ context: 'branch', context_parameter: BRANCH, value: url }] };
   let id;
   await checkTarget();
@@ -74,11 +77,13 @@ export async function provision({ apply = false, ca, env, state, checkTarget, ac
     beforeCreate.pid === first.pid && beforeCreate.login === false, 'stage_role_preflight_failed');
   let stage = 'create_post';
   let httpStatus;
+  let createdMetadata;
   try {
     const createdResponse = await env(true, payload);
     httpStatus = createdResponse.status;
     stage = 'create_metadata';
-    const created = entries(createdResponse.data);
+    createdMetadata = createdResponse.data;
+    const created = entries(createdMetadata);
     requireState(created.length === 1, 'netlify_create_invalid');
     id = valueId(created[0]);
     report(`NETLIFY_VALUE_ID ${id}`);
@@ -95,15 +100,26 @@ export async function provision({ apply = false, ca, env, state, checkTarget, ac
     requireState(!entries(team.data).length, 'netlify_readback_mismatch');
   } catch (error) {
     report(netlifyDiagnostic(stage, error, httpStatus));
-    let candidateStatus;
+    const candidates = new Set();
+    const collect = (data, source) => {
+      if (!Array.isArray(data)) return;
+      const matches = data.filter(entry => entry?.key === KEY);
+      report(`NETLIFY_CANDIDATE_COUNT source=${source} count=${matches.length}`);
+      for (const entry of matches) {
+        if (!Array.isArray(entry.values)) continue;
+        for (const value of entry.values) {
+          if (typeof value?.id === 'string' && VALUE_ID.test(value.id)) candidates.add(value.id);
+        }
+      }
+    };
+    collect(createdMetadata, 'create');
     try {
       const candidate = await env(true);
-      candidateStatus = candidate.status;
-      const found = entries(candidate.data);
-      if (found.length === 1) report(`NETLIFY_CANDIDATE_VALUE_ID ${valueId(found[0])}`);
+      collect(candidate.data, 'site_readback');
     } catch (error) {
-      report(netlifyDiagnostic('candidate_readback', error, candidateStatus));
+      report(netlifyDiagnostic('candidate_readback', error));
     }
+    for (const candidateId of candidates) report(`NETLIFY_CANDIDATE_VALUE_ID ${candidateId}`);
     throw new Error('netlify_write_unconfirmed');
   }
 
@@ -271,7 +287,7 @@ async function main() {
   process.stdout.write(`Stage CA SHA-256 ${fingerprint}\n`);
   requireState((await input('Confirm the full SHA-256 from an independent trusted copy: ')).replaceAll(':', '').toUpperCase() ===
     fingerprint.replaceAll(':', ''), 'ca_confirmation_failed');
-  if (apply) requireState(await input(`Freeze ${BRANCH} and type STAGE FIRST ACTIVATION: `) ===
+  if (apply) requireState(await input(`Freeze ${BRANCH}; the secret is visible to its builds. Type STAGE FIRST ACTIVATION: `) ===
     'STAGE FIRST ACTIVATION', 'operator_confirmation_failed');
 
   const password = await input('Existing Stage postgres password: ', true);

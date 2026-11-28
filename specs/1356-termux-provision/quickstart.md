@@ -18,3 +18,9 @@ The final success line proves a DB login from Termux and Netlify key placement o
 - Remove branch access on ending the approved proof and account for already built deploys. Deleting a Netlify value does not revoke snapshots already built with it.
 
 After a refusal, share only the `NETLIFY_DIAGNOSTIC` lines and the final code. These report a fixed stage, numeric HTTP status (or none), and an error category. They do not include API response bodies or credentials. Do not re-run apply after an unconfirmed create.
+
+## Personal plan exception — one Stage test
+
+The OWNER approved exposing this one Stage secret during the build of the pinned #1354 branch. Require the exact Builds, Functions and Runtime scopes, a single value for the pinned branch, and Contains secret values. Keep Secrets Controller and secret scanning enabled. Before apply and the separately approved preview build, confirm the untrusted-deploy policy, freeze the branch at the approved SHA, and check enabled build plugins and npm lifecycle code. Treat all of that code as able to read the credential. No Production precedent.
+
+On failed metadata validation, candidate IDs and counts are diagnostic only. They can refer to unexpected contexts or duplicate records. Verify which entry belongs to the attempt before considering manual cleanup. Never treat a candidate ID as authorization to delete it. The script still refuses to activate the role on a mismatch.

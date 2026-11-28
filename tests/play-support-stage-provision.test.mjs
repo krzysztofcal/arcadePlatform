@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { rootCertificates } from 'node:tls';
 import { netlify, provision } from '../scripts/ops/play-support-stage-provision.mjs';
 
+const valueId = '12345678-1234-1234-1234-123456789abc';
 const branch = 'codex/1285-play-support-rtdn-entry';
 function fixture({ login = false, ambiguous = false, wrongScope = false } = {}) {
   const calls = [];
@@ -10,8 +11,8 @@ function fixture({ login = false, ambiguous = false, wrongScope = false } = {}) 
   const env = async (site, creation) => {
     if (creation) {
       calls.push('create');
-      saved = { ...creation, scopes: wrongScope ? ['builds'] : ['functions'],
-        values: [{ ...creation.values[0], id: 'fixture-value', value: 'redacted' }] };
+      saved = { ...creation, scopes: wrongScope ? ['builds', 'functions', 'runtime', 'post_processing'] : creation.scopes,
+        values: [{ ...creation.values[0], id: valueId, value: 'redacted' }] };
       if (ambiguous) throw Error('network');
       return { status: 201, data: [saved] };
     }
@@ -67,7 +68,7 @@ test('POST follows Netlify createEnvVars contract and reports only stage and HTT
     const [entry] = JSON.parse(request.body);
     assert.equal(entry.key, 'PLAY_SUPPORT_DB_URL');
     assert.equal(entry.is_secret, true);
-    assert.deepEqual(entry.scopes, ['functions']);
+    assert.deepEqual(entry.scopes, ['builds', 'functions', 'runtime']);
     assert.equal(entry.values[0].context, 'branch');
     assert.equal(entry.values[0].context_parameter, branch);
     return new Response('private error body and token', { status: 403 });
@@ -76,7 +77,8 @@ test('POST follows Netlify createEnvVars contract and reports only stage and HTT
     { status: 200, data: [] };
   await assert.rejects(provision({ ...f.options, apply: true, env, report: line => lines.push(line) }),
     /netlify_write_unconfirmed/);
-  assert.deepEqual(lines, ['NETLIFY_DIAGNOSTIC stage=create_post http=403 reason=http']);
+  assert.deepEqual(lines, ['NETLIFY_DIAGNOSTIC stage=create_post http=403 reason=http',
+    'NETLIFY_CANDIDATE_COUNT source=site_readback count=0']);
   assert.deepEqual(f.calls, []);
 });
 
@@ -85,8 +87,11 @@ test('metadata refusal includes stage and successful HTTP status without echoing
   const lines = [];
   await assert.rejects(provision({ ...f.options, apply: true, report: line => lines.push(line) }),
     /netlify_write_unconfirmed/);
+  assert.deepEqual(f.calls, ['create']);
   assert.deepEqual(lines, [
     'NETLIFY_DIAGNOSTIC stage=create_metadata http=201 reason=metadata',
-    'NETLIFY_DIAGNOSTIC stage=candidate_readback http=200 reason=metadata'
+    'NETLIFY_CANDIDATE_COUNT source=create count=1',
+    'NETLIFY_CANDIDATE_COUNT source=site_readback count=1',
+    'NETLIFY_CANDIDATE_VALUE_ID ' + valueId
   ]);
 });
