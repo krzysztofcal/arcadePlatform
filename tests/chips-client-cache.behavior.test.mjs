@@ -12,11 +12,16 @@ function jsonResponse(body){
   return { status: 200, ok: true, async json(){ return body; } };
 }
 
+function fakeJwt(sub){
+  const payload = Buffer.from(JSON.stringify({ sub })).toString('base64url');
+  return `h.${payload}.s`;
+}
+
 function createClient(fetchImpl, options){
   const published = [];
   const events = [];
   let context = { userId: 'chips-user', generation: 1 };
-  let token = 'token-a';
+  let token = fakeJwt('chips-user');
   const window = {
     SupabaseAuthBridge: { getAccessToken: async () => token },
     UserUiState: {
@@ -31,7 +36,7 @@ function createClient(fetchImpl, options){
   class CustomEvent {
     constructor(type, options){ this.type = type; this.detail = options && options.detail; }
   }
-  vm.runInNewContext(source, { window, document: { dispatchEvent(event){ events.push(event); } }, CustomEvent, fetch: fetchImpl, Date, JSON, Number });
+  vm.runInNewContext(source, { window, document: { dispatchEvent(event){ events.push(event); } }, CustomEvent, fetch: fetchImpl, Date, JSON, Number, atob });
   return { client: window.ChipsClient, events, published, setContext(value){ context = value; }, setToken(value){ token = value; } };
 }
 
@@ -42,11 +47,11 @@ function createClient(fetchImpl, options){
     return response(authorization.length === 1 ? 896 : 950);
   });
   await state.client.fetchBalance();
-  state.setToken('token-b');
+  state.setToken(fakeJwt('chips-user-b'));
   state.setContext({ userId: 'chips-user-b', generation: 2 });
   state.client.clearAuthCache();
   await state.client.fetchBalance();
-  assert.deepEqual(authorization, ['Bearer token-a', 'Bearer token-b']);
+  assert.deepEqual(authorization, ['Bearer ' + fakeJwt('chips-user'), 'Bearer ' + fakeJwt('chips-user-b')]);
 }
 
 {
@@ -227,11 +232,85 @@ function createClient(fetchImpl, options){
   state.setContext({ userId: 'signed-in-user', generation: 1 });
   const call2 = state.client.fetchPokerProjection();
 
-  resolveToken('token-late-session');
+  resolveToken(fakeJwt('signed-in-user'));
   const [res1, res2] = await Promise.all([call1, call2]);
   assert.equal(pokerGets, 1, 'two overlapping fetchPokerProjection calls while session resolves must send exactly one GET');
   assert.deepEqual(res1, { inPoker: false });
   assert.deepEqual(res2, { inPoker: false });
+}
+
+{
+  // (a) generation changes during the token wait, the new token belongs to the same user -> one request succeeds
+  let releaseTokenA;
+  const tokenAPromise = new Promise((resolve) => { releaseTokenA = resolve; });
+  let fetchCallsA = 0;
+  const authHeadersA = [];
+  const stateA = createClient(async (_url, options) => {
+    fetchCallsA++;
+    authHeadersA.push(options.headers.Authorization);
+    return response(777);
+  });
+  stateA.setContext({ userId: 'chips-user', generation: 1 });
+  stateA.setToken(tokenAPromise);
+
+  const pendingA = stateA.client.fetchBalance();
+  await Promise.resolve();
+
+  stateA.client.clearAuthCache();
+  const validToken = fakeJwt('chips-user');
+  stateA.setToken(validToken);
+  releaseTokenA('token-stale');
+
+  const resultA = await pendingA;
+  assert.equal(fetchCallsA, 1, 'superseded token promise must still result in exactly one HTTP request');
+  assert.deepEqual(authHeadersA, ['Bearer ' + validToken], 'second fetchAuthToken must provide the fresh generation token');
+  assert.equal(resultA.balance, 777);
+
+  // (b) the token belongs to another user -> not_authenticated, zero requests (covers first attempt and 401 retry)
+  // First attempt:
+  let fetchCallsB1 = 0;
+  const stateB1 = createClient(async () => {
+    fetchCallsB1++;
+    return response(888);
+  });
+  stateB1.setContext({ userId: 'chips-user', generation: 1 });
+  stateB1.setToken(fakeJwt('other-user'));
+
+  await assert.rejects(async () => {
+    await stateB1.client.fetchBalance();
+  }, (err) => err && err.code === 'not_authenticated');
+  assert.equal(fetchCallsB1, 0, 'token for other user must throw not_authenticated with zero requests');
+
+  // 401 retry:
+  let fetchCallsB2 = 0;
+  const stateB2 = createClient(async () => {
+    fetchCallsB2++;
+    stateB2.setToken(fakeJwt('other-user-on-retry'));
+    return { status: 401, ok: false, async json(){ return { error: 'unauthorized' }; } };
+  });
+  stateB2.setContext({ userId: 'chips-user', generation: 1 });
+  stateB2.setToken(fakeJwt('chips-user'));
+
+  await assert.rejects(async () => {
+    await stateB2.client.fetchBalance();
+  }, (err) => err && err.code === 'not_authenticated');
+  assert.equal(fetchCallsB2, 1, '401 retry with token belonging to another user must abort without second fetch');
+
+  // (c) no UI context -> request sent as on main
+  let fetchCallsC = 0;
+  const authHeadersC = [];
+  const stateC = createClient(async (_url, options) => {
+    fetchCallsC++;
+    authHeadersC.push(options.headers.Authorization);
+    return response(555);
+  });
+  stateC.setContext(null);
+  stateC.setToken('raw-arbitrary-token');
+
+  const resultC = await stateC.client.fetchBalance();
+  assert.equal(fetchCallsC, 1, 'request must be sent when there is no UI context');
+  assert.deepEqual(authHeadersC, ['Bearer raw-arbitrary-token']);
+  assert.equal(resultC.balance, 555);
 }
 
 console.log('chips client cache behavior tests passed');
