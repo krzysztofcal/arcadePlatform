@@ -12,11 +12,16 @@ function jsonResponse(body){
   return { status: 200, ok: true, async json(){ return body; } };
 }
 
+function fakeJwt(sub){
+  const payload = Buffer.from(JSON.stringify({ sub })).toString('base64url');
+  return `h.${payload}.s`;
+}
+
 function createClient(fetchImpl, options){
   const published = [];
   const events = [];
   let context = { userId: 'chips-user', generation: 1 };
-  let token = 'token-a';
+  let token = fakeJwt('chips-user');
   const window = {
     SupabaseAuthBridge: { getAccessToken: async () => token },
     UserUiState: {
@@ -42,11 +47,11 @@ function createClient(fetchImpl, options){
     return response(authorization.length === 1 ? 896 : 950);
   });
   await state.client.fetchBalance();
-  state.setToken('token-b');
+  state.setToken(fakeJwt('chips-user-b'));
   state.setContext({ userId: 'chips-user-b', generation: 2 });
   state.client.clearAuthCache();
   await state.client.fetchBalance();
-  assert.deepEqual(authorization, ['Bearer token-a', 'Bearer token-b']);
+  assert.deepEqual(authorization, ['Bearer ' + fakeJwt('chips-user'), 'Bearer ' + fakeJwt('chips-user-b')]);
 }
 
 {
@@ -227,17 +232,11 @@ function createClient(fetchImpl, options){
   state.setContext({ userId: 'signed-in-user', generation: 1 });
   const call2 = state.client.fetchPokerProjection();
 
-  resolveToken('token-late-session');
+  resolveToken(fakeJwt('signed-in-user'));
   const [res1, res2] = await Promise.all([call1, call2]);
   assert.equal(pokerGets, 1, 'two overlapping fetchPokerProjection calls while session resolves must send exactly one GET');
   assert.deepEqual(res1, { inPoker: false });
   assert.deepEqual(res2, { inPoker: false });
-}
-
-function makeJwt(sub){
-  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(JSON.stringify({ sub })).toString('base64url');
-  return `${header}.${payload}.sig`;
 }
 
 {
@@ -258,7 +257,7 @@ function makeJwt(sub){
   await Promise.resolve();
 
   stateA.client.clearAuthCache();
-  const validToken = makeJwt('chips-user');
+  const validToken = fakeJwt('chips-user');
   stateA.setToken(validToken);
   releaseTokenA('token-stale');
 
@@ -282,7 +281,7 @@ function makeJwt(sub){
   await Promise.resolve();
 
   stateB.client.clearAuthCache();
-  stateB.setToken(makeJwt('different-user'));
+  stateB.setToken(fakeJwt('different-user'));
   releaseTokenB('token-stale');
 
   await assert.rejects(async () => { await pendingB; }, (err) => err.code === 'not_authenticated');
@@ -303,7 +302,7 @@ function makeJwt(sub){
   await Promise.resolve();
 
   stateC.client.clearAuthCache();
-  stateC.setToken(makeJwt('chips-user'));
+  stateC.setToken(fakeJwt('chips-user'));
   releaseTokenC('token-stale');
 
   await assert.rejects(async () => { await pendingC; }, (err) => err.code === 'not_authenticated');
@@ -330,14 +329,14 @@ function makeJwt(sub){
     postCalls++;
     if (postCalls === 1) {
       stateG.setContext({ userId: 'account-2', generation: 2 });
-      stateG.setToken(makeJwt('account-2'));
+      stateG.setToken(fakeJwt('account-2'));
       return { status: 401, ok: false, async json() { return { error: 'invalid_token' }; } };
     }
     return { status: 200, ok: true, async json() { return { ok: true }; } };
   });
 
   stateG.setContext({ userId: 'account-1', generation: 1 });
-  stateG.setToken(makeJwt('account-1'));
+  stateG.setToken(fakeJwt('account-1'));
 
   await assert.rejects(
     async () => {
@@ -356,7 +355,7 @@ function makeJwt(sub){
     return response(100);
   });
   stateH.setContext({ userId: 'account-h', generation: 1 });
-  stateH.setToken(makeJwt('wrong-account'));
+  stateH.setToken(fakeJwt('wrong-account'));
 
   await assert.rejects(
     async () => {

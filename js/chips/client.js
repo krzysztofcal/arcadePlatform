@@ -158,12 +158,7 @@
   function decodeJwtSub(token){
     if (typeof token !== 'string') return null;
     var parts = token.split('.');
-    if (parts.length < 2){
-      if (token === 'token-a') return 'chips-user';
-      if (token === 'token-b') return 'chips-user-b';
-      if (token === 'token-late-session') return 'signed-in-user';
-      return null;
-    }
+    if (parts.length < 2) return null;
     try {
       var b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
       while (b64.length % 4) b64 += '=';
