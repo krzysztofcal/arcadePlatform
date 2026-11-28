@@ -1,5 +1,10 @@
 const { test, expect } = require('@playwright/test');
 
+function fakeJwt(sub) {
+  const payload = Buffer.from(JSON.stringify({ sub })).toString('base64url');
+  return `h.${payload}.s`;
+}
+
 const USER_ID = 'chips-hydration-user';
 const CACHE_KEY = `kcswh:user-ui:chips:v1:${USER_ID}`;
 
@@ -9,12 +14,13 @@ async function mockAuthenticatedSession(page) {
     contentType: 'application/javascript',
     body: `
       window.SUPABASE_CONFIG = { SUPABASE_URL: 'https://stage-test.supabase.co', SUPABASE_ANON_KEY: 'test-key' };
+      function fakeJwt(sub){ return 'h.' + btoa(JSON.stringify({ sub: sub })).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'') + '.s'; }
       var currentAuthUser = { id: '${USER_ID}', email: 'private@example.test' };
-      var currentAccessToken = 'token-a';
+      var currentAccessToken = fakeJwt('${USER_ID}');
       var authStateCallback = null;
       window.__switchAuthUser = function(userId){
         currentAuthUser = { id: userId, email: 'private@example.test' };
-        currentAccessToken = 'token-b';
+        currentAccessToken = fakeJwt(userId);
         if (authStateCallback) authStateCallback('SIGNED_IN', { access_token: currentAccessToken, user: currentAuthUser });
       };
       window.supabase = { createClient: function(){ return { auth: {
@@ -242,7 +248,7 @@ test('hides account A chips during a direct signed-in switch to account B', asyn
 
   await page.evaluate(() => window.__switchAuthUser('chips-user-b'));
   await expect.poll(() => requests).toBe(3);
-  expect(authorization[2]).toBe('Bearer token-b');
+  expect(authorization[2]).toBe('Bearer ' + fakeJwt('chips-user-b'));
   await expect(page.locator('.topbar')).toHaveAttribute('data-user-ui-chips-state', 'loading');
   await expect(amount).toHaveCSS('visibility', 'hidden');
   await expect(amount).not.toHaveText('896');
