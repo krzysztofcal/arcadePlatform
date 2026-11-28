@@ -7,8 +7,9 @@ async function mockShell(page){
   await page.route('**/js/vendor/klaro/klaro.js', (route) => route.fulfill({ contentType: 'application/javascript', body: '' }));
   await page.route('**/js/auth/supabase-config.js', (route) => route.fulfill({ contentType: 'application/javascript', body: `
     window.SUPABASE_CONFIG = { SUPABASE_URL: 'https://stage-test.supabase.co', SUPABASE_ANON_KEY: 'test-key' };
+    function fakeJwt(sub){ return 'h.' + btoa(JSON.stringify({ sub: sub })).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'') + '.s'; }
     window.supabase = { createClient: function(){ return { auth: {
-      getSession: function(){ return Promise.resolve({ data: { session: { access_token: 'leaderboard-token', user: { id: '${USER_ID}', email: 'private@example.test' } } } }); },
+      getSession: function(){ return Promise.resolve({ data: { session: { access_token: fakeJwt('${USER_ID}'), user: { id: '${USER_ID}', email: 'private@example.test' } } } }); },
       onAuthStateChange: function(){ return { data: { subscription: { unsubscribe: function(){} } } }; },
       signOut: function(){ return Promise.resolve(); }
     } }; } };

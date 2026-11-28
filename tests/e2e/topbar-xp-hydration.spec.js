@@ -14,8 +14,9 @@ async function mockAuthenticatedSession(page) {
     contentType: 'application/javascript',
     body: `
       window.SUPABASE_CONFIG = { SUPABASE_URL: 'https://stage-test.supabase.co', SUPABASE_ANON_KEY: 'test-key' };
+      function fakeJwt(sub){ return 'h.' + btoa(JSON.stringify({ sub: sub })).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'') + '.s'; }
       window.supabase = { createClient: function(){ return { auth: {
-        getSession: function(){ return Promise.resolve({ data: { session: { access_token: 'test-token', user: { id: '${USER_ID}', email: 'private@example.test' } } } }); },
+        getSession: function(){ return Promise.resolve({ data: { session: { access_token: fakeJwt('${USER_ID}'), user: { id: '${USER_ID}', email: 'private@example.test' } } } }); },
         onAuthStateChange: function(){ return { data: { subscription: { unsubscribe: function(){} } } }; },
         signOut: function(){ return Promise.resolve(); }
       } }; } };
