@@ -470,10 +470,17 @@
         const canClaim = !!(status && status.eligible && !status.alreadyClaimed);
         setWelcomeBonusBadgeVisible(canClaim, status && status.amount);
       } catch (err){
-        if (err && err.code === 'not_authenticated'){
-          setAuthState(AuthState.SIGNED_OUT);
-        }
         hideWelcomeBonusBadge();
+        if (err && err.code === 'not_authenticated' && requestGeneration === welcomeBonusRequestGeneration){
+          if (window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
+            try {
+              const user = await window.SupabaseAuth.getCurrentUser();
+              if (!user && requestGeneration === welcomeBonusRequestGeneration){
+                setAuthState(AuthState.SIGNED_OUT);
+              }
+            } catch (_err){}
+          }
+        }
       } finally {
         welcomeBonusInFlight = null;
         if (welcomeBonusRefreshQueued){
@@ -589,6 +596,7 @@
           renderChipBadgeBalance(value);
         }
       } catch (err){
+        if (timeoutId){ clearTimeout(timeoutId); timeoutId = null; }
         if (hasSnapshot && requestGeneration === chipRequestGeneration){
           renderPokerBadge(null);
         }
@@ -601,8 +609,17 @@
           return;
         }
         if (err && err.code === 'not_authenticated'){
-          setAuthState(AuthState.SIGNED_OUT);
-          hideChipBadge();
+          if (!retainCachedChipBadge()) hideChipBadge();
+          const isCurrent = requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation));
+          if (isCurrent && window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
+            try {
+              const user = await window.SupabaseAuth.getCurrentUser();
+              const stillCurrent = requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation));
+              if (!user && stillCurrent){
+                setAuthState(AuthState.SIGNED_OUT);
+              }
+            } catch (_err){}
+          }
           return;
         }
         if (!retainCachedChipBadge()) hideChipBadge();
