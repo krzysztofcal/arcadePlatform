@@ -826,3 +826,151 @@ test('topbar refreshChipBadge snapshot rejects with server error, fetchBalance r
   assert.ok(amountEl, 'chipBadgeAmount element must exist');
   assert.equal(amountEl.textContent, '900', 'CH badge must show 900');
 });
+
+function createMockTopbarDoc(elements){
+  const doc = {
+    readyState: 'complete',
+    getElementById: (id) => elements[id] || null,
+    querySelector: (sel) => sel === '.topbar' ? doc.topbarEl : null,
+    querySelectorAll: (sel) => sel === '.topbar' ? [doc.topbarEl] : [],
+    createElement: (tag) => ({
+      tagName: tag.toUpperCase(),
+      classList: { add() {}, remove() {}, contains: () => false },
+      setAttribute(k, v) { this[k] = v; },
+      getAttribute(k) { return this[k]; },
+      hasAttribute: () => false,
+      appendChild(child) {
+        this.children.push(child);
+        if (child.id) elements[child.id] = child;
+        return child;
+      },
+      insertBefore(child) {
+        this.children.push(child);
+        if (child.id) elements[child.id] = child;
+        return child;
+      },
+      children: [],
+      querySelector: (s) => elements[s.replace('#', '')] || null,
+    }),
+    createTextNode: (text) => ({ text }),
+    addEventListener: () => {},
+    documentElement: { dataset: {} },
+  };
+  const topbarEl = doc.createElement('div');
+  doc.topbarEl = topbarEl;
+  const topbarRight = doc.createElement('div');
+  topbarRight.className = 'topbar-right';
+  topbarEl.appendChild(topbarRight);
+  return doc;
+}
+
+test('topbar (d) not_authenticated + getCurrentUser returns a user -> no SIGNED_OUT', async () => {
+  const elements = {};
+  const doc = createMockTopbarDoc(elements);
+
+  let userCalls = 0;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const win = {
+    document: doc,
+    ProfileClient: null,
+    ChipsClient: {
+      fetchBalance: async () => { throw notAuthErr; },
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    SupabaseAuth: {
+      getCurrentUser: async () => {
+        userCalls++;
+        return { id: 'user-d' };
+      },
+      onAuthChange: (cb) => { win.authCb = cb; },
+    },
+    UserUiState: {
+      getActiveContext: () => ({ userId: 'user-d', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+    },
+    ArcadeFormat: { formatCompactNumber: (val) => String(val) },
+  };
+  win.window = win;
+
+  const vm = await import('node:vm');
+  vm.runInNewContext(topbarSource, {
+    window: win,
+    document: doc,
+    CustomEvent: class { constructor(t, opts) { this.type = t; this.detail = opts?.detail; } },
+    setTimeout,
+    clearTimeout,
+    Promise,
+    Number,
+    String,
+    Math,
+    Array,
+    Date,
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (userCalls >= 2) break;
+  }
+
+  assert.ok(userCalls >= 2, 'getCurrentUser confirmation must have been called');
+  assert.equal(doc.documentElement.dataset.auth, 'in', 'auth state must remain signed in');
+});
+
+test('topbar (e) not_authenticated + getCurrentUser returns null -> SIGNED_OUT', async () => {
+  const elements = {};
+  const doc = createMockTopbarDoc(elements);
+
+  let userCalls = 0;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const win = {
+    document: doc,
+    ProfileClient: null,
+    ChipsClient: {
+      fetchBalance: async () => { throw notAuthErr; },
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    SupabaseAuth: {
+      getCurrentUser: async () => {
+        userCalls++;
+        if (userCalls === 1) return { id: 'user-e' };
+        return null;
+      },
+      onAuthChange: (cb) => { win.authCb = cb; },
+    },
+    UserUiState: {
+      getActiveContext: () => ({ userId: 'user-e', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+    },
+    ArcadeFormat: { formatCompactNumber: (val) => String(val) },
+  };
+  win.window = win;
+
+  const vm = await import('node:vm');
+  vm.runInNewContext(topbarSource, {
+    window: win,
+    document: doc,
+    CustomEvent: class { constructor(t, opts) { this.type = t; this.detail = opts?.detail; } },
+    setTimeout,
+    clearTimeout,
+    Promise,
+    Number,
+    String,
+    Math,
+    Array,
+    Date,
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (doc.documentElement.dataset.auth === 'out') break;
+  }
+
+  assert.ok(userCalls >= 2, 'getCurrentUser confirmation must have been called');
+  assert.equal(doc.documentElement.dataset.auth, 'out', 'auth state must be transitioned to SIGNED_OUT');
+});

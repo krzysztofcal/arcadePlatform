@@ -155,12 +155,57 @@
     return state.tokenPromise;
   }
 
-  async function authedFetch(url, options){
+  function decodeJwtSub(token){
+    if (typeof token !== 'string') return null;
+    var parts = token.split('.');
+    if (parts.length < 2) return null;
+    try {
+      var b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      var jsonStr = null;
+      if (typeof atob === 'function'){
+        jsonStr = atob(b64);
+      } else if (typeof window !== 'undefined' && typeof window.atob === 'function'){
+        jsonStr = window.atob(b64);
+      } else if (typeof Buffer !== 'undefined'){
+        jsonStr = Buffer.from(b64, 'base64').toString('utf8');
+      }
+      if (!jsonStr) return null;
+      var payload = JSON.parse(jsonStr);
+      return (payload && payload.sub != null && String(payload.sub).trim()) ? String(payload.sub).trim() : null;
+    } catch (_err){
+      return null;
+    }
+  }
+
+  function getActiveContextUserId(){
+    try {
+      var ui = window.UserUiState;
+      var context = ui && typeof ui.getActiveContext === 'function' ? ui.getActiveContext() : null;
+      return context && context.userId ? String(context.userId).trim() : null;
+    } catch (_err){
+      return null;
+    }
+  }
+
+  async function authedFetch(url, options, expectedUserId){
+    if (expectedUserId === undefined){
+      expectedUserId = getActiveContextUserId();
+    }
+    var startGen = state.authGeneration;
     var token = await fetchAuthToken();
+    if (!token && state.authGeneration !== startGen && expectedUserId){
+      token = await fetchAuthToken();
+    }
     if (!token){
       var err = new Error('not_authenticated');
       err.code = 'not_authenticated';
       throw err;
+    }
+    if (expectedUserId && decodeJwtSub(token) !== expectedUserId){
+      var subErr = new Error('not_authenticated');
+      subErr.code = 'not_authenticated';
+      throw subErr;
     }
 
     var opts = options || {};
@@ -189,14 +234,17 @@
     throw err;
   }
 
-  async function authedFetchWithRetry(url, options){
+  async function authedFetchWithRetry(url, options, expectedUserId){
+    if (expectedUserId === undefined){
+      expectedUserId = getActiveContextUserId();
+    }
     try {
-      var res = await authedFetch(url, options);
+      var res = await authedFetch(url, options, expectedUserId);
       return await parseResponse(res);
     } catch (err){
       if (err && err.status === 401){
         try { await fetchAuthToken(true); } catch (_err){}
-        var retryRes = await authedFetch(url, options);
+        var retryRes = await authedFetch(url, options, expectedUserId);
         return await parseResponse(retryRes);
       }
       throw err;
@@ -366,8 +414,8 @@
     return null;
   }
 
-  async function fetchWelcomeBonusStatus(campaigns){
-    campaigns = campaigns || await fetchBonusCampaigns();
+  async function fetchWelcomeBonusStatus(campaigns, expectedUserId){
+    campaigns = campaigns || await fetchBonusCampaigns(null, expectedUserId);
     var welcome = findWelcomeCampaign(campaigns);
     if (!welcome){
       return { eligible: false, alreadyClaimed: false, amount: null, reason: 'not_available', code: null };
@@ -375,23 +423,26 @@
     return welcome;
   }
 
-  async function claimWelcomeBonus(){
-    var status = await fetchWelcomeBonusStatus();
+  async function claimWelcomeBonus(expectedUserId){
+    if (expectedUserId === undefined){
+      expectedUserId = getActiveContextUserId();
+    }
+    var status = await fetchWelcomeBonusStatus(null, expectedUserId);
     if (!status || !status.code) return status;
-    return claimBonusCampaign(status.code);
+    return claimBonusCampaign(status.code, expectedUserId);
   }
 
-  async function fetchBonusCampaigns(options){
+  async function fetchBonusCampaigns(options, expectedUserId){
     var url = BONUS_CAMPAIGNS_URL + (options && options.includeDailyStatus ? '?includeDailyStatus=1' : '');
-    var payload = await authedFetchWithRetry(url, { method: 'GET' });
+    var payload = await authedFetchWithRetry(url, { method: 'GET' }, expectedUserId);
     return payload.data;
   }
 
-  async function claimBonusCampaign(code){
+  async function claimBonusCampaign(code, expectedUserId){
     var payload = await authedFetchWithRetry(BONUS_CAMPAIGNS_URL, {
       method: 'POST',
       body: JSON.stringify({ code: code }),
-    });
+    }, expectedUserId);
     if (payload && payload.data && payload.data.claimed){
       emit('chips:tx-complete', payload.data);
     }
