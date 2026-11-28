@@ -13,6 +13,7 @@
   let welcomeBonusInFlight = null;
   let welcomeBonusRequestGeneration = 0;
   let welcomeBonusRefreshQueued = false;
+  let welcomeBonusInFlightGeneration = 0;
   let chipsClientWaitTries = 0;
   let welcomeBonusClientWaitTries = 0;
   const AuthState = { UNKNOWN: 0, SIGNED_OUT: 1, SIGNED_IN: 2 };
@@ -463,10 +464,13 @@
     }
     welcomeBonusClientWaitTries = 0;
     if (welcomeBonusInFlight){
-      if (options && options.force) welcomeBonusRefreshQueued = true;
+      if ((options && options.force) || welcomeBonusInFlightGeneration !== welcomeBonusRequestGeneration){
+        welcomeBonusRefreshQueued = true;
+      }
       return welcomeBonusInFlight;
     }
     const requestGeneration = welcomeBonusRequestGeneration;
+    welcomeBonusInFlightGeneration = requestGeneration;
     welcomeBonusInFlight = (async function(){
       try {
         const status = await window.ChipsClient.fetchWelcomeBonusStatus();
@@ -474,8 +478,9 @@
         const canClaim = !!(status && status.eligible && !status.alreadyClaimed);
         setWelcomeBonusBadgeVisible(canClaim, status && status.amount);
       } catch (err){
+        if (requestGeneration !== welcomeBonusRequestGeneration) return;
         hideWelcomeBonusBadge();
-        if (err && err.code === 'not_authenticated' && requestGeneration === welcomeBonusRequestGeneration){
+        if (err && err.code === 'not_authenticated'){
           if (window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
             try {
               const user = await window.SupabaseAuth.getCurrentUser();
@@ -601,7 +606,10 @@
         }
       } catch (err){
         if (timeoutId){ clearTimeout(timeoutId); timeoutId = null; }
-        if (hasSnapshot && requestGeneration === chipRequestGeneration){
+        if (requestGeneration !== chipRequestGeneration) return;
+        if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
+
+        if (hasSnapshot){
           renderPokerBadge(null);
         }
         if (err && err.code === 'timeout'){
@@ -613,10 +621,8 @@
           return;
         }
         if (err && err.code === 'not_authenticated'){
-          if (requestGeneration !== chipRequestGeneration) return;
-          if (uiContext && ui && typeof ui.isCurrent === 'function' && !ui.isCurrent(uiContext.userId, uiContext.generation)) return;
           if (!retainCachedChipBadge()) hideChipBadge();
-          if (requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation)) && window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
+          if (window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
             try {
               const user = await window.SupabaseAuth.getCurrentUser();
               if (!user && requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation))){

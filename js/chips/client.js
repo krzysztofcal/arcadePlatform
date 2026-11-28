@@ -239,8 +239,8 @@
     throw err;
   }
 
-  async function authedFetchWithRetry(url, options){
-    var expectedUserId = getActiveContextUserId();
+  async function authedFetchWithRetry(url, options, expectedUserIdParam){
+    var expectedUserId = expectedUserIdParam !== undefined ? expectedUserIdParam : getActiveContextUserId();
     try {
       var res = await authedFetch(url, options, expectedUserId);
       return await parseResponse(res);
@@ -417,8 +417,8 @@
     return null;
   }
 
-  async function fetchWelcomeBonusStatus(campaigns){
-    campaigns = campaigns || await fetchBonusCampaigns();
+  async function fetchWelcomeBonusStatus(campaigns, expectedUserId){
+    campaigns = campaigns || await fetchBonusCampaigns(null, expectedUserId);
     var welcome = findWelcomeCampaign(campaigns);
     if (!welcome){
       return { eligible: false, alreadyClaimed: false, amount: null, reason: 'not_available', code: null };
@@ -426,23 +426,29 @@
     return welcome;
   }
 
-  async function claimWelcomeBonus(){
-    var status = await fetchWelcomeBonusStatus();
+  async function claimWelcomeBonus(expectedUserIdParam){
+    var expectedUserId = expectedUserIdParam !== undefined ? expectedUserIdParam : getActiveContextUserId();
+    var status = await fetchWelcomeBonusStatus(null, expectedUserId);
     if (!status || !status.code) return status;
-    return claimBonusCampaign(status.code);
+    if (expectedUserId && getActiveContextUserId() !== expectedUserId){
+      var err = new Error('not_authenticated');
+      err.code = 'not_authenticated';
+      throw err;
+    }
+    return claimBonusCampaign(status.code, expectedUserId);
   }
 
-  async function fetchBonusCampaigns(options){
+  async function fetchBonusCampaigns(options, expectedUserId){
     var url = BONUS_CAMPAIGNS_URL + (options && options.includeDailyStatus ? '?includeDailyStatus=1' : '');
-    var payload = await authedFetchWithRetry(url, { method: 'GET' });
+    var payload = await authedFetchWithRetry(url, { method: 'GET' }, expectedUserId);
     return payload.data;
   }
 
-  async function claimBonusCampaign(code){
+  async function claimBonusCampaign(code, expectedUserId){
     var payload = await authedFetchWithRetry(BONUS_CAMPAIGNS_URL, {
       method: 'POST',
       body: JSON.stringify({ code: code }),
-    });
+    }, expectedUserId);
     if (payload && payload.data && payload.data.claimed){
       emit('chips:tx-complete', payload.data);
     }

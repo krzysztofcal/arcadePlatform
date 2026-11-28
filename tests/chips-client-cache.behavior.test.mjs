@@ -384,4 +384,34 @@ function createClient(fetchImpl, options){
   assert.equal(resI.balance, 555);
 }
 
+{
+  // (k) claimWelcomeBonus with an account switch between status and POST → no POST, not_authenticated
+  let fetchCallsK = 0;
+  const stateK = createClient(async (url, options) => {
+    fetchCallsK++;
+    if (options.method === 'POST') {
+      return jsonResponse({ claimed: true, code: 'welcome-2026', amount: 500 });
+    }
+    // Account switch happens right after the status read finishes
+    stateK.setContext({ userId: 'account-2', generation: 2 });
+    stateK.setToken(fakeJwt('account-2'));
+    return jsonResponse({
+      items: [
+        { code: 'welcome-2026', campaignType: 'welcome', amount: 500, eligible: true, alreadyClaimed: false },
+      ],
+    });
+  });
+
+  stateK.setContext({ userId: 'account-1', generation: 1 });
+  stateK.setToken(fakeJwt('account-1'));
+
+  await assert.rejects(
+    async () => {
+      await stateK.client.claimWelcomeBonus();
+    },
+    (err) => err.code === 'not_authenticated'
+  );
+  assert.equal(fetchCallsK, 1, 'account switch between status and POST must not issue any POST request');
+}
+
 console.log('chips client cache behavior tests passed');

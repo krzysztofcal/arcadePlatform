@@ -1252,3 +1252,122 @@ test('topbar: (j) a stale not_authenticated (generation changed) does not hide t
   assert.equal(harness.elements['chipBadgeAmount'].textContent, '500', 'stale not_authenticated must not clear CH badge amount');
   assert.equal(harness.doc.documentElement.dataset.auth, 'in', 'top bar must remain signed in');
 });
+
+test('topbar: (l) stale chip read failure does not clear the Poker badge', async () => {
+  let snapshotCalls = 0;
+  let rejectPending;
+  const pendingPromise = new Promise((_, reject) => { rejectPending = reject; });
+  let currentGen = 1;
+  const errFailed = new Error('network_failure');
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: async () => {
+        snapshotCalls++;
+        if (snapshotCalls === 1) {
+          return { balance: 500, poker: { inPoker: true, tables: [{ stack: 200 }] } };
+        }
+        return pendingPromise;
+      },
+      fetchBalance: async () => ({ balance: 500 }),
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    profileClient: {
+      getMe: async () => ({ displayName: 'Player' }),
+    },
+    user: { id: 'user-l' },
+    userUiState: {
+      getActiveContext: () => ({ userId: 'user-l', generation: currentGen }),
+      isCurrent: (uid, gen) => uid === 'user-l' && gen === currentGen,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => null,
+    },
+  });
+
+  // Wait for initial render to complete with visible Poker badge
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (snapshotCalls >= 1 && !harness.elements['chipBadgePoker']?.hidden) break;
+  }
+
+  assert.equal(harness.elements['chipBadgePoker'].hidden, false, 'Poker badge must start visible');
+  assert.equal(harness.elements['chipBadgePoker'].textContent, ' · Poker: 200 CH');
+
+  // Trigger a second chip read that stays pending
+  harness.doc.dispatchEvent('ui:visible');
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (snapshotCalls >= 2) break;
+  }
+  assert.equal(snapshotCalls, 2, 'second snapshot read must be in flight');
+
+  // Now advance generation so the in-flight read becomes stale
+  currentGen = 2;
+
+  // Reject the pending read
+  rejectPending(errFailed);
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+  }
+
+  // Stale failure must not clear Poker badge
+  assert.equal(harness.elements['chipBadgePoker'].hidden, false, 'stale chip read failure must not hide Poker badge');
+  assert.equal(harness.elements['chipBadgePoker'].textContent, ' · Poker: 200 CH', 'stale chip read failure must not clear Poker badge content');
+});
+
+test('topbar: (m) welcome-bonus read in flight for A, switch to B -> B read runs after A settles and stale A failure does not hide B badge', async () => {
+  let bonusCalls = 0;
+  let rejectA;
+  const pendingA = new Promise((_, reject) => { rejectA = reject; });
+  let currentUser = { id: 'user-a' };
+  let currentGen = 1;
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => ({ balance: 100 }),
+      fetchWelcomeBonusStatus: async () => {
+        bonusCalls++;
+        if (bonusCalls === 1) {
+          return pendingA;
+        }
+        return { eligible: true, amount: 500 };
+      },
+    },
+    user: () => currentUser,
+    profileClient: null,
+    userUiState: {
+      getActiveContext: () => ({ userId: currentUser.id, generation: currentGen }),
+      isCurrent: (uid, gen) => uid === currentUser.id && gen === currentGen,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => null,
+    },
+  });
+
+  // Wait for user A's welcome bonus read to be in flight
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (bonusCalls >= 1) break;
+  }
+  assert.equal(bonusCalls, 1, 'user A welcome bonus read must be in flight');
+
+  // Switch to user B via onAuthChange callback
+  currentUser = { id: 'user-b' };
+  currentGen = 2;
+  harness.win.authCb('SIGNED_IN', currentUser, { user: currentUser });
+
+  // A's read is still in flight, so refreshWelcomeBonusBadge queued B's refresh
+  // Now A's read rejects with an error
+  rejectA(new Error('stale_user_a_error'));
+
+  // Wait for A to settle and B's read to run and settle
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (bonusCalls >= 2 && !harness.elements['welcomeBonusTopbarBadge']?.hidden) break;
+  }
+
+  assert.equal(bonusCalls, 2, "user B's read must run after A settles");
+  assert.equal(harness.elements['welcomeBonusTopbarBadge'].hidden, false, "user B's welcome bonus badge must be visible");
+  assert.equal(harness.elements['welcomeBonusTopbarBadge'].textContent, '+500', "user B's welcome bonus badge amount must be +500");
+});
