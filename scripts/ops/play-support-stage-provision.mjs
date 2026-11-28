@@ -1,6 +1,6 @@
 import { createHash, createHmac, pbkdf2Sync, randomBytes, X509Certificate } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, unlinkSync, rmdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, unlinkSync, rmdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface as lines } from 'node:readline';
@@ -97,6 +97,7 @@ export async function provision({ apply = false, ca, env, state, checkTarget, ac
     report('ACTIVATION_UNCONFIRMED_CHECK_ROLE_STATE');
     throw new Error('activation_unconfirmed');
   }
+  report('WRITER_LOGIN_ACTIVATED_PROOF_PENDING');
   await verify(connection);
   report('WRITER_LOGIN_VERIFIED_NETLIFY_PLACEMENT_ONLY');
 }
@@ -115,6 +116,8 @@ const EFFECTIVE = `has_schema_privilege(r.oid,'arcade_play_api','USAGE')
   and not has_schema_privilege(r.oid,'private','USAGE,CREATE')
   and not has_schema_privilege(r.oid,'auth','USAGE,CREATE')
   and (select count(*) from pg_proc p where p.oid in (${FUNCTIONS}) and has_function_privilege(r.oid,p.oid,'EXECUTE'))=9
+  and (select count(*) from pg_proc p where p.pronamespace='arcade_play_api'::regnamespace
+    and has_function_privilege(r.oid,p.oid,'EXECUTE'))=9
   and not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
     where n.nspname='private' and c.relname like 'play_support_%' and c.relkind='r'
       and (has_any_column_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,REFERENCES')
@@ -158,7 +161,7 @@ function psql(connection, caPath) {
   const child = spawn('psql', ['-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1', '-f', '-'], {
     env: { PATH: process.env.PATH, PGHOST: connection.host, PGPORT: String(connection.port),
       PGUSER: connection.username, PGPASSWORD: connection.password, PGDATABASE: 'postgres',
-      PGSSLMODE: 'verify-full', PGSSLROOTCERT: caPath, PGCONNECT_TIMEOUT: '8' },
+      PGSSLMODE: 'verify-full', PGSSLROOTCERT: caPath, PGGSSENCMODE: 'disable', PGCONNECT_TIMEOUT: '8' },
     stdio: ['pipe', 'pipe', 'ignore']
   });
   child.stdin.on('error', () => {});
@@ -307,11 +310,11 @@ select json_build_object('ok',true);`);
   } finally {
     admin?.close();
     try { unlinkSync(caPath); } catch { /* no private CA copy to remove */ }
-    rmdirSync(dir);
+    try { rmdirSync(dir); } catch { process.stderr.write('CA_TEMP_CLEANUP_UNCONFIRMED\n'); }
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url) {
   main().catch(error => {
     const code = /^[a-z0-9_]{3,60}$/.test(error?.message ?? '') ? error.message : 'operation_refused';
     process.stderr.write(`Stopped (${code}). Read the recovery notes before retrying.\n`);
