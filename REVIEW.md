@@ -33,7 +33,7 @@ The reviewer's severity is a proposal. Before accepting a finding, the coordinat
 
 These areas are the `AGENTS.md` High-Risk Areas: WS reconnect, poker state transitions, table lifecycle, UI ↔ WS sync and global CSS. This file adds the chips ledger and balances, and migrations. A race in any of them is at least P2, and P1 when it can affect money or game state.
 
-"Chips ledger and balances" means stored state: ledger entries, balances and transactions, and the requests that write them. It does not cover how a balance is displayed. A display-only race, such as a top-bar badge briefly hidden or stale for the acting user until the next refresh, does not get this category's P2 floor and is rated by §2 (normally P3). This exception covers only the chips ledger and balances category: a display race that also falls in another high-risk area (for example UI ↔ WS sync) keeps that area's floor. The same race showing one account's balance to another account is P1.
+"Chips ledger and balances" means stored state (ledger entries, balances and transactions) and the requests that read or write it. It does not cover how a correctly read balance is displayed. A display-only race, where the read returned correct data and only the presentation lags, such as a top-bar badge briefly hidden or stale for the acting user until the next refresh, does not get this category's P2 floor and is rated by §2 (normally P3). This exception covers only the chips ledger and balances category: a display race that also falls in another high-risk area (for example UI ↔ WS sync) keeps that area's floor. The same race showing one account's balance to another account is P1.
 
 ## 4. Accepted trade-offs are out of scope within their bounds
 
