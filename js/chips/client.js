@@ -427,6 +427,12 @@
     if (expectedUserId === undefined){
       expectedUserId = getActiveContextUserId();
     }
+    // A claim writes CH: never start it without knowing which account it is for.
+    if (!expectedUserId){
+      var noUserErr = new Error('not_authenticated');
+      noUserErr.code = 'not_authenticated';
+      throw noUserErr;
+    }
     var status = await fetchWelcomeBonusStatus(null, expectedUserId);
     if (!status || !status.code) return status;
     return claimBonusCampaign(status.code, expectedUserId);
