@@ -399,8 +399,13 @@
     if (!contextMatches || !hydrateChipBadge()) setChipBadge('', { loading: true });
   }
 
-  function setAuthState(next){
-    if (authState === next) return;
+  function setAuthState(next, expectedUserId){
+    if (authState === next){
+      if (next === AuthState.SIGNED_IN && expectedUserId){
+        prepareChipIdentity(expectedUserId);
+      }
+      return;
+    }
     authState = next;
     setAuthDataset(next === AuthState.SIGNED_IN ? 'in' : 'out');
     const badge = doc.getElementById('chipBadge');
@@ -421,7 +426,7 @@
       return;
     }
     if (badge){ badge.hidden = false; }
-    prepareChipIdentity();
+    prepareChipIdentity(expectedUserId);
     refreshChipBadge();
     refreshWelcomeBonusBadge();
   }
@@ -429,12 +434,12 @@
   function resolveInitialAuth(){
     if (!window || !window.SupabaseAuth || typeof window.SupabaseAuth.getCurrentUser !== 'function') return;
     window.SupabaseAuth.getCurrentUser().then(function(user){
-      setAuthState(user ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
+      const userId = user && user.id ? String(user.id) : null;
+      setAuthState(user ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT, userId);
       if (!isAuthed()){
         hideChipBadge();
         return;
       }
-      prepareChipIdentity(user && user.id ? String(user.id) : null);
       refreshXpBadge();
       refreshChipBadge();
       refreshWelcomeBonusBadge();
@@ -482,12 +487,11 @@
         hideWelcomeBonusBadge();
         if (err && err.code === 'not_authenticated'){
           if (window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
-            try {
-              const user = await window.SupabaseAuth.getCurrentUser();
+            window.SupabaseAuth.getCurrentUser().then(function(user){
               if (!user && requestGeneration === welcomeBonusRequestGeneration){
                 setAuthState(AuthState.SIGNED_OUT);
               }
-            } catch (_authErr){}
+            }).catch(function(){});
           }
         }
       } finally {
@@ -622,13 +626,24 @@
         }
         if (err && err.code === 'not_authenticated'){
           if (!retainCachedChipBadge()) hideChipBadge();
+          const isCurrent = function(){
+            return requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation));
+          };
           if (window && window.SupabaseAuth && typeof window.SupabaseAuth.getCurrentUser === 'function'){
             try {
               const user = await window.SupabaseAuth.getCurrentUser();
-              if (!user && requestGeneration === chipRequestGeneration && (!uiContext || !ui || typeof ui.isCurrent !== 'function' || ui.isCurrent(uiContext.userId, uiContext.generation))){
+              if (!user && isCurrent()){
                 setAuthState(AuthState.SIGNED_OUT);
               }
-            } catch (_authErr){}
+            } catch (_authErr){
+              if (isCurrent()){
+                hideChipBadge();
+              }
+            }
+          } else {
+            if (isCurrent()){
+              hideChipBadge();
+            }
           }
           return;
         }
@@ -652,13 +667,13 @@
       return;
     }
     if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION' || event === 'USER_UPDATED'){
-      setAuthState(hasUser ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT);
+      const userId = user && user.id ? String(user.id) : (session && session.user && session.user.id ? String(session.user.id) : null);
+      setAuthState(hasUser ? AuthState.SIGNED_IN : AuthState.SIGNED_OUT, userId);
       if (!isAuthed()){
         hideChipBadge();
         hideWelcomeBonusBadge();
         return;
       }
-      prepareChipIdentity(user && user.id ? String(user.id) : (session && session.user && session.user.id ? String(session.user.id) : null));
       refreshXpBadge();
       refreshChipBadge();
       refreshWelcomeBonusBadge();

@@ -1371,3 +1371,169 @@ test('topbar: (m) welcome-bonus read in flight for A, switch to B -> B read runs
   assert.equal(harness.elements['welcomeBonusTopbarBadge'].hidden, false, "user B's welcome bonus badge must be visible");
   assert.equal(harness.elements['welcomeBonusTopbarBadge'].textContent, '+500', "user B's welcome bonus badge amount must be +500");
 });
+
+test('topbar: (n) first SIGNED_IN at startup issues exactly one welcome-bonus read; a real switch A->B issues one more', async () => {
+  let bonusCalls = 0;
+  let currentUser = { id: 'user-a' };
+  let currentGen = 1;
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => ({ balance: 100 }),
+      fetchWelcomeBonusStatus: async () => {
+        bonusCalls++;
+        return { eligible: true, amount: 500 };
+      },
+    },
+    user: () => currentUser,
+    profileClient: null,
+    userUiState: {
+      getActiveContext: () => ({ userId: currentUser.id, generation: currentGen }),
+      isCurrent: (uid, gen) => uid === currentUser.id && gen === currentGen,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => null,
+    },
+  });
+
+  // Wait for initial startup reads to complete
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (bonusCalls > 0) break;
+  }
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+  }
+
+  assert.equal(bonusCalls, 1, 'startup SIGNED_IN must issue exactly one welcome-bonus read');
+
+  // Real switch A -> B
+  currentUser = { id: 'user-b' };
+  currentGen = 2;
+  harness.win.authCb('SIGNED_IN', currentUser, { user: currentUser });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (bonusCalls >= 2) break;
+  }
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+  }
+
+  assert.equal(bonusCalls, 2, 'switch A -> B must issue exactly one more welcome-bonus read');
+});
+
+test('topbar: (o) a pending getCurrentUser confirmation for A does not block B queued welcome-bonus read', async () => {
+  let bonusCalls = 0;
+  let releaseHoldAUser;
+  const holdAUser = new Promise((resolve) => { releaseHoldAUser = resolve; });
+  let currentUser = { id: 'user-a' };
+  let currentGen = 1;
+  let userCalls = 0;
+
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => ({ balance: 100 }),
+      fetchWelcomeBonusStatus: async () => {
+        bonusCalls++;
+        if (bonusCalls === 1) {
+          // User A read fails with not_authenticated
+          throw notAuthErr;
+        }
+        // User B read succeeds
+        return { eligible: true, amount: 500 };
+      },
+    },
+    user: async () => {
+      userCalls++;
+      if (userCalls === 1) {
+        // Startup getMe returns user A
+        return currentUser;
+      }
+      if (userCalls === 2) {
+        // Confirmation for user A's failure is held pending
+        await holdAUser;
+        return null;
+      }
+      return currentUser;
+    },
+    profileClient: null,
+    userUiState: {
+      getActiveContext: () => ({ userId: currentUser.id, generation: currentGen }),
+      isCurrent: (uid, gen) => uid === currentUser.id && gen === currentGen,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: () => null,
+    },
+  });
+
+  // Wait for user A read to fail and trigger confirmation
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (bonusCalls === 1 && userCalls >= 2) break;
+  }
+  assert.equal(bonusCalls, 1, 'user A read must have run');
+  assert.equal(userCalls, 2, 'user A confirmation getCurrentUser must be in flight and held');
+
+  // Switch to user B while user A confirmation is STILL pending
+  currentUser = { id: 'user-b' };
+  currentGen = 2;
+  harness.win.authCb('SIGNED_IN', currentUser, { user: currentUser });
+
+  // User B's read must run without waiting for holdAUser
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (bonusCalls >= 2) break;
+  }
+
+  assert.equal(bonusCalls, 2, "user B's welcome bonus read must run while user A's confirmation is still held");
+
+  releaseHoldAUser();
+  await new Promise((r) => setImmediate(r));
+});
+
+test('topbar: (p) not_authenticated + getCurrentUser throws -> CH hidden, auth state unchanged', async () => {
+  let balanceCalls = 0;
+  let userCalls = 0;
+  const notAuthErr = new Error('not_authenticated');
+  notAuthErr.code = 'not_authenticated';
+
+  const harness = await setupTopbarHarness({
+    chipsClient: {
+      fetchTopbarSnapshot: null,
+      fetchBalance: async () => {
+        balanceCalls++;
+        throw notAuthErr;
+      },
+      fetchWelcomeBonusStatus: async () => ({ eligible: false }),
+    },
+    user: async () => {
+      userCalls++;
+      if (userCalls === 1) {
+        return { id: 'user-p' };
+      }
+      throw new Error('supabase_auth_network_failure');
+    },
+    profileClient: null,
+    userUiState: {
+      getActiveContext: () => ({ userId: 'user-p', generation: 1 }),
+      isCurrent: () => true,
+      markActiveSliceApplied: () => {},
+      readActiveSlice: (slice) => (slice === 'chips' ? { balance: 500 } : null),
+    },
+  });
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+    if (balanceCalls > 0 && userCalls >= 2) break;
+  }
+
+  assert.ok(balanceCalls >= 1, 'fetchBalance must be called');
+  assert.ok(userCalls >= 2, 'getCurrentUser confirmation must have been called and thrown');
+  assert.equal(harness.elements['chipBadge'].hidden, true, 'CH badge must be hidden when getCurrentUser throws');
+  assert.equal(harness.elements['chipBadgeAmount'].textContent, '', 'CH badge amount must be cleared');
+  assert.equal(harness.doc.documentElement.dataset.auth, 'in', 'auth state must remain signed in');
+});
