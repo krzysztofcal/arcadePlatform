@@ -23,3 +23,7 @@ in conversation, use only `ghx`/`arcade-code-agent[bot]` to dispatch Candidate o
 verify all receipts/current metadata, then return the ready immutable permalink with PASS/STOP evidence. Only the separately audited and enabled agent
 Environment runs without manual Candidate approval. No merge/CI auto-trigger,
 OWNER credentials, duplicate/ambiguous candidate, retry or guessed URL. Publish and its approval stay OWNER-only.
+
+## Antigravity delegation
+
+Follow the single `ANTIGRAVITY_DELEGATION` switch and rules in `AGENTS.md` (Core Rules); it governs Antigravity delegation for both Claude Code and Codex, so do not keep a separate switch here. While it is enabled there is no use-count cap. Claude Code records its own attempts as `AGENTS.md` requires: in `docs/antigravity-evaluation.md` when the task allows repository writes, otherwise in the report to the OWNER; include verified results, overhead and available token usage (unavailable usage is `unknown`, not zero). Later OWNER stop or disable instructions take effect immediately.
