@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rootCertificates } from 'node:tls';
-import { provision } from '../scripts/ops/play-support-stage-provision.mjs';
+import { netlify, provision } from '../scripts/ops/play-support-stage-provision.mjs';
 
 const branch = 'codex/1285-play-support-rtdn-entry';
 function fixture({ login = false, ambiguous = false, wrongScope = false } = {}) {
@@ -13,9 +13,9 @@ function fixture({ login = false, ambiguous = false, wrongScope = false } = {}) 
       saved = { ...creation, scopes: wrongScope ? ['builds'] : ['functions'],
         values: [{ ...creation.values[0], id: 'fixture-value', value: 'redacted' }] };
       if (ambiguous) throw Error('network');
-      return [saved];
+      return { status: 201, data: [saved] };
     }
-    return site && saved ? [saved] : [];
+    return { status: 200, data: site && saved ? [saved] : [] };
   };
   const state = async () => ({ pid: 54, login, safe: true, stage: true, authorized: true, locked: true });
   const options = {
@@ -56,4 +56,37 @@ test('refuses existing login, and leaves it disabled on ambiguous or wrong-scope
     await assert.rejects(provision({ ...f.options, apply: true }), expected);
     assert.deepEqual(f.calls, calls);
   }
+});
+
+test('POST follows Netlify createEnvVars contract and reports only stage and HTTP status on failure', async () => {
+  const f = fixture();
+  const lines = [];
+  const api = netlify('synthetic-token', async (url, request) => {
+    assert.equal(url, 'https://api.netlify.com/api/v1/accounts/fixture/env?site_id=fixture');
+    assert.equal(request.method, 'POST');
+    const [entry] = JSON.parse(request.body);
+    assert.equal(entry.key, 'PLAY_SUPPORT_DB_URL');
+    assert.equal(entry.is_secret, true);
+    assert.deepEqual(entry.scopes, ['functions']);
+    assert.equal(entry.values[0].context, 'branch');
+    assert.equal(entry.values[0].context_parameter, branch);
+    return new Response('private error body and token', { status: 403 });
+  });
+  const env = async (site, payload) => payload ? api('/accounts/fixture/env?site_id=fixture', payload) :
+    { status: 200, data: [] };
+  await assert.rejects(provision({ ...f.options, apply: true, env, report: line => lines.push(line) }),
+    /netlify_write_unconfirmed/);
+  assert.deepEqual(lines, ['NETLIFY_DIAGNOSTIC stage=create_post http=403 reason=http']);
+  assert.deepEqual(f.calls, []);
+});
+
+test('metadata refusal includes stage and successful HTTP status without echoing a body', async () => {
+  const f = fixture({ wrongScope: true });
+  const lines = [];
+  await assert.rejects(provision({ ...f.options, apply: true, report: line => lines.push(line) }),
+    /netlify_write_unconfirmed/);
+  assert.deepEqual(lines, [
+    'NETLIFY_DIAGNOSTIC stage=create_metadata http=201 reason=metadata',
+    'NETLIFY_DIAGNOSTIC stage=candidate_readback http=200 reason=metadata'
+  ]);
 });

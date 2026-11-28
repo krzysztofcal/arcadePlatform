@@ -51,7 +51,7 @@ function entries(list) {
 
 export async function provision({ apply = false, ca, env, state, checkTarget, activate, verify, report }) {
   const checkAbsent = async () => {
-    requireState(!entries(await env(false)).length && !entries(await env(true)).length, 'existing_netlify_key');
+    requireState(!entries((await env(false)).data).length && !entries((await env(true)).data).length, 'existing_netlify_key');
   };
   const first = await state();
   requireState(first.stage && first.authorized && first.safe, 'stage_role_preflight_failed');
@@ -72,20 +72,37 @@ export async function provision({ apply = false, ca, env, state, checkTarget, ac
   const beforeCreate = await state();
   requireState(beforeCreate.stage && beforeCreate.safe && beforeCreate.authorized && beforeCreate.locked &&
     beforeCreate.pid === first.pid && beforeCreate.login === false, 'stage_role_preflight_failed');
+  let stage = 'create_post';
+  let httpStatus;
   try {
-    const created = entries(await env(true, payload));
+    const createdResponse = await env(true, payload);
+    httpStatus = createdResponse.status;
+    stage = 'create_metadata';
+    const created = entries(createdResponse.data);
     requireState(created.length === 1, 'netlify_create_invalid');
     id = valueId(created[0]);
     report(`NETLIFY_VALUE_ID ${id}`);
-    const saved = entries(await env(true));
-    requireState(saved.length === 1 && valueId(saved[0]) === id &&
-      !entries(await env(false)).length, 'netlify_readback_mismatch');
-  } catch {
+    stage = 'site_readback';
+    httpStatus = undefined;
+    const site = await env(true);
+    httpStatus = site.status;
+    const saved = entries(site.data);
+    requireState(saved.length === 1 && valueId(saved[0]) === id, 'netlify_readback_mismatch');
+    stage = 'team_readback';
+    httpStatus = undefined;
+    const team = await env(false);
+    httpStatus = team.status;
+    requireState(!entries(team.data).length, 'netlify_readback_mismatch');
+  } catch (error) {
+    report(netlifyDiagnostic(stage, error, httpStatus));
+    let candidateStatus;
     try {
-      const found = entries(await env(true));
+      const candidate = await env(true);
+      candidateStatus = candidate.status;
+      const found = entries(candidate.data);
       if (found.length === 1) report(`NETLIFY_CANDIDATE_VALUE_ID ${valueId(found[0])}`);
-    } catch {
-      // Metadata may be unavailable. Never act on an ambiguous Netlify write.
+    } catch (error) {
+      report(netlifyDiagnostic('candidate_readback', error, candidateStatus));
     }
     throw new Error('netlify_write_unconfirmed');
   }
@@ -192,12 +209,42 @@ async function http(url, options = {}) {
   return response;
 }
 
-function netlify(token) {
+class NetlifyError extends Error {
+  constructor(kind, status) {
+    super('netlify_request_unconfirmed');
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+function netlifyDiagnostic(stage, error, fallbackStatus) {
+  const status = error instanceof NetlifyError ? error.status : fallbackStatus;
+  const kind = error instanceof NetlifyError ? error.kind : 'metadata';
+  const safeStatus = Number.isInteger(status) && status >= 100 && status <= 599 ? status : 'none';
+  return `NETLIFY_DIAGNOSTIC stage=${stage} http=${safeStatus} reason=${kind}`;
+}
+
+export function netlify(token, fetchApi = fetch) {
   const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
   const host = 'https://api.netlify.com/api/v1';
-  return async (path, payload) => (await http(host + path, {
-    headers, ...(payload ? { method: 'POST', body: JSON.stringify([payload]) } : {})
-  })).json();
+  return async (path, payload) => {
+    let response;
+    const timeout = AbortSignal.timeout(12_000);
+    try {
+      response = await fetchApi(host + path, {
+        headers, redirect: 'error', signal: timeout,
+        ...(payload ? { method: 'POST', body: JSON.stringify([payload]) } : {})
+      });
+    } catch {
+      throw new NetlifyError(timeout.aborted ? 'timeout' : 'transport');
+    }
+    if (!response.ok || (payload && response.status !== 201)) throw new NetlifyError('http', response.status);
+    try {
+      return { status: response.status, data: await response.json() };
+    } catch {
+      throw new NetlifyError('response_json', response.status);
+    }
+  };
 }
 
 async function input(question, hidden = false) {
@@ -232,7 +279,7 @@ async function main() {
   requireState(password && /^[\x21-\x7e]+$/.test(token), 'credentials_required');
   const api = netlify(token);
   const checkTarget = async () => {
-    const [site, pr] = await Promise.all([
+    const [{ data: site }, pr] = await Promise.all([
       api('/sites/' + SITE),
       http('https://api.github.com/repos/' + REPO + '/pulls/1354').then(r => r.json())
     ]);
