@@ -12,7 +12,7 @@ Agents MUST use this to locate logic quickly.
 Use the single `ANTIGRAVITY_DELEGATION` switch and bounded-work rules in
 [AGENTS.md](AGENTS.md). When the switch is enabled, there is no call-count limit.
 Log every attempt, including failures, in
-[docs/antigravity-evaluation.md](docs/antigravity-evaluation.md); distinguish
+[docs/antigravity-evaluation.md](docs/antigravity-evaluation.md) (in read-only tasks, report it to the OWNER instead); distinguish
 verified quality, elapsed time, coordinator overhead and measured/estimated token
 savings. Reporting batches are not limits. Do not create a second switch here.
 
